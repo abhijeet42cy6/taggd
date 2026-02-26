@@ -1,0 +1,25 @@
+# Frontend Dockerfile
+# Stage 1: Build
+FROM node:20-slim as build-stage
+
+WORKDIR /app
+
+COPY frontend/package*.json ./
+RUN npm install
+
+COPY frontend/ ./
+
+# Set the production API URL (This will be replaced by the VM's IP or Domain)
+# For now, we use a relative path /api so Nginx can proxy it.
+RUN npm run build
+
+# Stage 2: Serve with Nginx
+FROM nginx:stable-alpine
+
+COPY --from=build-stage /app/dist /usr/share/nginx/html
+# We will provide the nginx config via a volume or another COPY
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

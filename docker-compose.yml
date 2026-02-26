@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    volumes:
+      - sqlite_data:/app/db_data
+    environment:
+      - GEMINI_API_KEY=AIzaSyAFTKtEL5QL2xp1wrP63z8m7BvgmQ4Ci0c
+      - DATABASE_URL=sqlite:////app/db_data/revenue_generator.db
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  sqlite_data:
