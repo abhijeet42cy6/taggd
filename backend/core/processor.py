@@ -4,6 +4,11 @@ from ..db.database import Project, Record
 import datetime
 import json
 import math
+import hashlib
+
+# Add standard library logging
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _is_na(val) -> bool:
@@ -33,6 +38,27 @@ def _safe_float(val) -> float:
         return 0.0
 
 
+def _safe_date(val):
+    """Robustly parse strings and objects into datetime or None."""
+    if _is_na(val) or str(val).strip().lower() in ['nan', 'nat', '-', '', 'none']:
+        return None
+    
+    # 1. If it's already a date object
+    if isinstance(val, (datetime.datetime, datetime.date)):
+        if isinstance(val, pd.Timestamp):
+            return val.to_pydatetime()
+        return val
+        
+    # 2. If it's a string, try parsing it
+    try:
+        dt = pd.to_datetime(str(val), errors='coerce')
+        if _is_na(dt):
+            return None
+        return dt.to_pydatetime()
+    except Exception:
+        return None
+
+
 def _sanitize_value(v):
     """Recursively make a value safe to store in SQLite JSON."""
     if _is_na(v):
@@ -50,83 +76,214 @@ def _sanitize_value(v):
     return v
 
 
+def _derive_global_status(results: dict) -> str:
+    """
+    Decodes the financial signals from the logic generator into a 1:1 sync with central monitoring.
+    Rules:
+    - closing_fee > 0 -> CLOSED
+    - opening_fee > 0 and closing_fee == 0 -> ACTIVE
+    - revenue == 0 + common keyword in status msg -> PIPELINE or ON HOLD
+    """
+    if not isinstance(results, dict):
+        return "UNPROCESSED"
+        
+    closing = float(results.get('closing_fee') or 0)
+    opening = float(results.get('opening_fee') or 0)
+    rev = float(results.get('revenue') or 0)
+    status_msg = str(results.get('status') or "").lower()
+
+    # 0. VOID / Ineligible Check (Negative Confirmation)
+    if "no logic match" in status_msg or "ineligible" in status_msg or "not matched" in status_msg:
+        return "VOID"
+
+    # 1. Successful Hire (Closing Fee realized)
+    if closing > 0:
+        return "CLOSED"
+        
+    # 2. Position is active/open but not yet closed (Opening Fee realized)
+    if opening > 0:
+        return "ACTIVE"
+        
+    # 3. No revenue yet - check status message for pipeline vs hold
+    if "offer" in status_msg or "interview" in status_msg or "sourcing" in status_msg or "in progress" in status_msg:
+        return "PIPELINE"
+        
+    if "hold" in status_msg or "cancel" in status_msg or "void" in status_msg:
+        return "ON HOLD"
+        
+    # 4. Fallback if revenue > 0 but buckets were empty (flat fee logic)
+    if rev > 0 or "joined" in status_msg or "hired" in status_msg:
+        return "CLOSED"
+        
+    return "UNPROCESSED"
+
+
 class ExcelProcessor:
     def __init__(self, db: Session):
         self.db = db
 
-    def process_file_into_db(self, project_id: int, filepath: str, sheet_name: str, mapping: dict, logic_func):
+    def _generate_fingerprint(self, project_id, name, pos_id, title, ctc, location, date_val):
+        """Creates a unique multi-anchor hash to identify this specific record semantically."""
+        # Normalize fields for stable hashing
+        name_str = str(name or "_NA_").strip().lower()
+        id_str = str(pos_id or "_NA_").strip().lower()
+        title_str = str(title or "_NA_").strip().lower()
+        ctc_str = str(ctc or "0.0").strip()
+        loc_str = str(location or "_NA_").strip().lower()
+        date_str = date_val.isoformat() if date_val and hasattr(date_val, 'isoformat') else "_NA_"
+        
+        # We exclude row_index to support sorting - Identity is now based on semantic data
+        # PID|NAME|ID|TITLE|CTC|LOC|DATE
+        raw_key = f"PID:{project_id}|NAME:{name_str}|ID:{id_str}|TITLE:{title_str}|CTC:{ctc_str}|LOC:{loc_str}|DATE:{date_str}"
+        return hashlib.sha256(raw_key.encode()).hexdigest()
+
+    def process_file_into_db(self, project_id: int, filepath: str, sheet_name, mapping: dict, logic_func):
         """
-        Reads the excel, applies mapping to universal keys,
-        stores everything else in JSON, and runs the generated logic.
+        Intelligent Delta-Sync: Updates existing records or inserts new ones based on multi-anchor fingerprint.
         """
-        df = pd.read_excel(filepath, sheet_name=sheet_name)
+        if isinstance(sheet_name, str):
+            target_sheets = [sheet_name]
+        else:
+            target_sheets = sheet_name
 
-        for _, row in df.iterrows():
-            row_dict = row.to_dict()
+        # --- 1. Map Existing State into Memory for Fast Comparison ---
+        existing_records = self.db.query(Record).filter(Record.project_id == project_id).all()
+        state_map = {r.fingerprint: r for r in existing_records if r.fingerprint}
+        processed_fingerprints = set()
 
-            # --- 1. Map to Universal Keys ---
-            universal_data = {}
-            for u_key, excel_header in mapping.items():
-                val = row_dict.get(excel_header)
+        # Get project specific ID column name for fingerprinting
+        project_ref = self.db.query(Project).filter(Project.id == project_id).first()
+        pos_id_col_name = project_ref.pos_id_column if project_ref else None
 
-                # Safe NaN / NaT / filler detection
-                if _is_na(val) or str(val).strip().lower() in ['nan', 'nat', '-', '']:
-                    val = None
-
-                if isinstance(val, pd.Timestamp):
-                    val = val.to_pydatetime()
-
-                universal_data[u_key] = val
-
-            # --- 2. Robust Skip Logic ---
-            # Skip only if both name AND position are completely absent
-            name = str(universal_data.get("candidate_name") or "").strip()
-            title = str(universal_data.get("position_title") or "").strip()
-
-            is_name_empty = not name or name.lower() in ['-', '.', 'nan', 'unknown', 'none', '']
-            is_title_empty = not title or title.lower() in ['-', '.', 'nan', 'unknown', 'none', '']
-
-            if is_name_empty and is_title_empty:
+        for s_idx, s_name in enumerate(target_sheets):
+            print(f"⌛ Analyzing Delta for sheet: {s_name}...")
+            try:
+                df = pd.read_excel(filepath, sheet_name=s_name)
+            except Exception as e:
+                print(f"❌ Error reading sheet {s_name}: {e}")
                 continue
 
-            # --- 3. Collect remaining columns into additional_attributes ---
-            mapped_headers = set(mapping.values())
-            additional_attr = {
-                k: _sanitize_value(v)
-                for k, v in row_dict.items()
-                if k not in mapped_headers
-            }
+            for r_idx, row in df.iterrows():
+                row_dict = row.to_dict()
+                excel_pos = r_idx + 1 # 1-indexed for clarity
 
-            # --- 4. Apply Generated Revenue Logic ---
-            try:
-                calc_results = logic_func(row_dict)
-                # Sanitize any floats the logic might produce (inf / nan)
-                if isinstance(calc_results, dict):
-                    calc_results = {k: _sanitize_value(v) for k, v in calc_results.items()}
-            except Exception as e:
-                calc_results = {"revenue": 0, "status": f"Error: {str(e)}", "opening_fee": 0, "closing_fee": 0}
+                # --- 1. Map to Universal Keys ---
+                universal_data = {}
+                for u_key, excel_header in mapping.items():
+                    val = row_dict.get(excel_header)
+                    universal_data[u_key] = val
 
-            # --- 5. Create Record ---
-            new_record = Record(
-                project_id=project_id,
-                candidate_name=name or "Unknown",
-                position_title=str(universal_data.get("position_title") or ""),
-                status=str(universal_data.get("status") or ""),
-                hiring_manager=str(universal_data.get("hiring_manager") or ""),
-                offered_ctc=_safe_float(universal_data.get("offered_ctc")),
-                joining_date=universal_data.get("joining_date") if isinstance(
-                    universal_data.get("joining_date"), datetime.datetime
-                ) else None,
-                location=str(universal_data.get("location") or ""),
-                department=str(universal_data.get("department") or ""),
-                additional_attributes=additional_attr,
-                revenue_results=calc_results,
-            )
-            self.db.add(new_record)
+                # Date normalization
+                universal_data["joining_date"] = _safe_date(universal_data.get("joining_date"))
+                universal_data["creation_date"] = _safe_date(universal_data.get("creation_date"))
 
-        # Batch commit
+                # --- 2. Robust Sieve (Skip logic) ---
+                row_text = str(list(row_dict.values())).lower()
+                if any(k in row_text for k in ['total', 'grand total', 'subtotal', 'sum of', 'balance']):
+                    continue
+                non_empty_count = sum(1 for v in row_dict.values() if not _is_na(v) and str(v).strip() != "")
+                if non_empty_count < (len(row_dict) * 0.15):
+                    continue
+
+                name = str(universal_data.get("candidate_name") or "").strip()
+                title = str(universal_data.get("position_title") or "").strip()
+                
+                # Check for Pos ID value for the specific anchor
+                pos_id_val = str(row_dict.get(pos_id_col_name) or "") if pos_id_col_name else ""
+
+                # Skip genuinely empty rows
+                if not name and not title and not pos_id_val:
+                    continue
+
+                # --- 3. Fingerprinting (Multi-Anchor Identification) ---
+                current_fingerprint = self._generate_fingerprint(
+                    project_id, 
+                    name, 
+                    pos_id_val, 
+                    title, 
+                    universal_data.get("offered_ctc"), 
+                    universal_data.get("location"), 
+                    universal_data.get("creation_date")
+                )
+                
+                # If we've already seen this exact row in THIS file, skip it (spreadsheet deduplication)
+                if current_fingerprint in processed_fingerprints:
+                    continue
+                processed_fingerprints.add(current_fingerprint)
+
+                # --- 4. Apply Calculation Logic ---
+                try:
+                    calc_results = logic_func(row_dict)
+                    if isinstance(calc_results, dict):
+                        # Unit Normalization: Auto-correct Lacs to absolute INR
+                        # If a key like 'revenue' or 'fee' has a value < 1000 and > 0, we treat it as Lacs
+                        money_keys = {'revenue', 'opening_fee', 'closing_fee', 'margin', 'cost'}
+                        for k, v in calc_results.items():
+                            if k.lower() in money_keys and isinstance(v, (int, float)):
+                                if 0 < v < 1000:
+                                    calc_results[k] = v * 100000
+                        
+                        calc_results = {k: _sanitize_value(v) for k, v in calc_results.items()}
+                except Exception as e:
+                    calc_results = {"revenue": 0, "status": f"Calc Error: {str(e)}", "opening_fee": 0, "closing_fee": 0}
+
+                g_status = _derive_global_status(calc_results)
+                if g_status == "VOID": g_status = "UNPROCESSED"
+
+                # Identity Coalescing
+                final_name = name
+                if (not final_name or final_name.lower() in ["unknown", "nan", "none", ""]) and pos_id_val:
+                    final_name = f"REQ://{pos_id_val}"
+
+                # --- 5. Delta Phase: Match with Database ---
+                existing_record = state_map.get(current_fingerprint)
+                
+                if existing_record:
+                    # UPDATING existing record ONLY if something has changed
+                    # (Candidate Name, Status, or logic results might have evolved)
+                    existing_record.candidate_name = final_name or "Unknown"
+                    existing_record.status = str(universal_data.get("status") or "")
+                    existing_record.global_status = g_status
+                    existing_record.revenue_results = calc_results
+                    existing_record.joining_date = universal_data.get("joining_date")
+                    existing_record.excel_row_index = excel_pos # Update position if shifted
+                    existing_record.excel_provided_id = pos_id_val # Update if ID column metadata changed
+                    # Additional metadata in JSON
+                    existing_record.additional_attributes = {
+                        k: _sanitize_value(v)
+                        for k, v in row_dict.items()
+                        if k not in set(mapping.values())
+                    }
+                else:
+                    # NEW Record creation
+                    new_record = Record(
+                        project_id=project_id,
+                        candidate_name=final_name or "Unknown",
+                        position_title=title,
+                        status=str(universal_data.get("status") or ""),
+                        hiring_manager=str(universal_data.get("hiring_manager") or ""),
+                        offered_ctc=_safe_float(universal_data.get("offered_ctc")),
+                        joining_date=universal_data.get("joining_date"),
+                        creation_date=universal_data.get("creation_date"),
+                        location=str(universal_data.get("location") or ""),
+                        department=str(universal_data.get("department") or ""),
+                        additional_attributes={
+                            k: _sanitize_value(v)
+                            for k, v in row_dict.items()
+                            if k not in set(mapping.values())
+                        },
+                        revenue_results=calc_results,
+                        global_status=g_status,
+                        fingerprint=current_fingerprint,
+                        excel_row_index=excel_pos,
+                        excel_provided_id=pos_id_val
+                    )
+                    self.db.add(new_record)
+
+        # Batch commit all additions and updates
         try:
             self.db.commit()
+            print(f"✅ Delta Sync Complete: Synchronized {len(processed_fingerprints)} records.")
         except Exception as e:
             self.db.rollback()
-            print(f"❌ Batch commit failed: {e}")
+            print(f"❌ Batch sync failed: {e}")

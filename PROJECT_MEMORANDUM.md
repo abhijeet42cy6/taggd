@@ -30,7 +30,7 @@ Recruitment trackers (Excel) vary wildly between clients and time periods.
 ### Step 3: Calculation Logic Synthesis
 - **Input**: 
     1. Entire **Contractual Sheet** contents.
-    2. Column **Headers** of the Position Tracker.
+    2. Column **Headers** of the Position Tracker along with some sample random rows.
 - **Agent Action**: The agent acts as a "Financial Architect." It reads the contract terms (e.g., "15% of CTC for Band 4") and writes a **Python function** `calculate_revenue(row)` tailored specifically for that file.
 - **Safety**: The generated code is validated for syntax before execution.
 

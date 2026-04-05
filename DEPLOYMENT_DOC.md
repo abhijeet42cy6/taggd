@@ -1,101 +1,176 @@
-# Revenue Generator: Deployment & Infrastructure Report
-**Date**: February 24, 2026
-**Deployment Status**: Production Live 🚀
+# Revenue Generator: Deployment & Infrastructure
+
+**Last updated:** March 30, 2026  
+**GCP project:** `taggd-491107`  
+**Deployment status:** Production (Compute Engine VM + Docker Compose + optional Cloudflare quick tunnel)
 
 ---
 
-## 1. Infrastructure Overview
+## 1. What runs in production
 
-The application is deployed on **Google Cloud Platform (GCP)** using a single-instance containerized architecture designed for speed and stateful persistence.
+| Layer | Technology | Notes |
+|-------|------------|--------|
+| Edge (public HTTPS) | **Cloudflare Quick Tunnel** (`cloudflared` in Docker on the VM) | Proxies to `http://127.0.0.1:80`. Hostname is assigned at tunnel start (`*.trycloudflare.com`); **changes if the tunnel container is recreated**. |
+| Frontend | **Nginx** in container | Serves Vite build; SPA fallback; proxies `/api/` → backend. |
+| Backend | **FastAPI** (`uvicorn`) | Agents, uploads, auth, APIs. |
+| Database | **SQLite** file | Path in container: `/app/db_data/revenue_generator.db` via Docker volume `sqlite_data`. Persists across image rebuilds. |
 
-- **Instance Name**: `revenue-gen-vm`
-- **Zone**: `asia-south1-a` (Mumbai, India)
-- **Machine Type**: `e2-standard-2` (2 vCPUs, 8 GB RAM)
-- **Networking**: `taggd-vpc` (Subnet: `taggd-subnet`)
-- **External IP**: [34.47.171.168](http://34.47.171.168)
-- **OS**: Debian 12 (Bookworm)
+**VM (Google Compute Engine)**
 
----
+- **Project ID:** `taggd-491107`
+- **Instance:** `revenue-gen-prod`
+- **Zone:** `asia-south1-a`
+- **Typical machine type:** `n2-standard-2` (confirm in console; subject to change)
+- **Networking:** `taggd-vpc` / `taggd-subnet` (see historical notes in §3)
+- **App directory on VM:** `~/tgddata_C1` (created by `scripts/deploy-gcp.sh`)
 
-## 2. Deployment Strategy
+**Repository artifacts used for build**
 
-We utilized a **Docker Compose** orchestration to manage three core layers of the stack on a single machine:
-
-### **A. Nginx (Front Door)**
-- Acts as a Reverse Proxy and Static File Server.
-- Serves the production-built React assets (Vite) on port 80.
-- Routes all `/api/*` requests to the Backend container.
-- **Key Config**: `nginx.conf` handles the bridge between the frontend and the internal backend service.
-
-### **B. Backend (FastAPI)**
-- Runs the agentic pipeline (Gemini Flask + Instructor).
-- Processes uploaded Excel files using Pandas.
-- Dynamically executes synthesized Python logic for revenue calculations.
-
-### **C. Persistence (SQLite)**
-- Data is stored in `revenue_generator.db`.
-- **Docker Volume**: `sqlite_data` is mounted to `/app/db_data` inside the container to ensure data survives container restarts and image updates.
+- `Dockerfile.backend`, `Dockerfile.frontend`, `docker-compose.yml`, `nginx.conf`, `requirements.txt`
+- Source: `backend/`, `frontend/` (built inside Docker; `node_modules` not shipped in tarball)
 
 ---
 
-## 3. Issues Faced & Technical Resolutions
+## 2. Deployment strategy (Docker Compose)
 
-During the migration from local development to GCloud, we solved several production-grade challenges:
+### A. Nginx (port 80)
 
-### **Issue 1: SSH/SCP Network Timeouts**
-- **Problem**: Direct SSH attempts to the VM IP timed out despite correct firewall rules.
-- **Fix**: Leveraged **Google Identity-Aware Proxy (IAP) Tunneling**. Used the `--tunnel-through-iap` flag with `gcloud compute scp` and `ssh` to bypass public networking restrictions safely.
+- Serves static assets from the frontend image.
+- `location /api/` → reverse proxy to the `backend` service (FastAPI on port 8000 inside the network).
+- `client_max_body_size 50M`; proxy timeouts **300s** for long agent/upload work (`nginx.conf`).
 
-### **Issue 2: Localhost URL Hardcoding**
-- **Problem**: The React frontend was hardcoded to call `localhost:8000`, which failed in the user's browser once deployed.
-- **Fix**: 
-    1. Refactored all frontend components to use relative paths (`/api/...`).
-    2. Configured the Vite dev server with a proxy for local development.
-    3. Configured Nginx to proxy `/api/` to the backend container in production.
-    - **Result**: "Code Once, Run Anywhere" (Local & Cloud).
+### B. Backend (FastAPI)
 
-### **Issue 3: 413 Request Entity Too Large**
-- **Problem**: Uploading large Excel files (like Honeywell Trackers) failed with a 413 error.
-- **Fix**: Increased Nginx's `client_max_body_size` to `50M` in `nginx.conf`.
+- Image built from `Dockerfile.backend` (`pip install -r requirements.txt`).
+- Environment from **`.env`** next to `docker-compose.yml` on the VM (not baked into the image).
 
-### **Issue 4: 504 Gateway Timeout**
-- **Problem**: AI-driven processing of 17,000+ rows took longer than 60 seconds, causing Nginx to drop the connection.
-- **Fix**: Increased `proxy_read_timeout` and `proxy_send_timeout` to `300s` (5 minutes) to accommodate heavy agentic reasoning and batch processing.
+### C. SQLite
 
-### **Issue 5: Corporate Firewall / Access Restrictions**
-- **Problem**: Users on specific corporate networks could access `taggd-prod` but were blocked from accessing the new `revenue-gen-vm` on the default network.
-- **Fix**: 
-    1. Migrated the VM from the `default` VPC to the **`taggd-vpc`** (the same private virtual network hosting production services).
-    2. Aligned Network Tags (`http-server`, `https-server`) with existing production firewall rules.
-- **Context**: `taggd-vpc` is a custom-configured Virtual Private Cloud with optimized routing and security policies that are pre-validated for corporate office access.
+- Compose sets `DATABASE_URL=sqlite:////app/db_data/revenue_generator.db`.
+- Volume **`sqlite_data`** → `/app/db_data` so the DB survives container recreation.
 
 ---
 
-## 4. How to Update the Deployment
+## 3. Historical issues & fixes (reference)
 
-To push new changes to the production VM:
+<details>
+<summary>SSH/IAP, localhost URLs, 413/504, VPC, Zscaler, Cloudflare — collapsed for brevity</summary>
 
-1. **Pack Assets**:
-   ```bash
-   tar -czf deploy.tar.gz backend/ frontend/ Dockerfile.backend Dockerfile.frontend docker-compose.yml nginx.conf .env
-   ```
-
-2. **Upload to VM**:
-   ```bash
-   gcloud compute scp deploy.tar.gz arjun@revenue-gen-vm:~/ --zone=asia-south1-a --tunnel-through-iap
-   ```
-
-3. **Rebuild & Restart**:
-   ```bash
-   gcloud compute ssh arjun@revenue-gen-vm --zone=asia-south1-a --tunnel-through-iap --command="tar -xzf deploy.tar.gz && sudo docker compose up -d --build"
-   ```
+- **SSH/SCP timeouts:** use `--tunnel-through-iap` with `gcloud compute scp` / `ssh` when direct access fails.
+- **Frontend URLs:** app uses relative `/api/...`; Vite dev proxies `/api` locally; nginx proxies in prod.
+- **413 / 504:** nginx body size **50M**, proxy read/send timeouts **300s**.
+- **Corporate / Zscaler:** moved VM to `taggd-vpc`; optional **Cloudflare Tunnel** for HTTPS hostname with better reputation than raw IP.
+</details>
 
 ---
 
-## 5. Security Notes
-- **API Keys**: Stored in a `.env` file within the container, never exposed to the frontend.
-- **IAP**: SSH access is restricted to authenticated GCloud users via IAP tunneling.
-- **Firewall**: Only port 80 (HTTP) is open to the public web.
+## 4. Prerequisites (before any deploy or update)
+
+1. **Google Cloud CLI** installed; authenticated: `gcloud auth login`
+2. **Project set:** `gcloud config set project taggd-491107`
+3. **Permissions:** ability to SSH/SCP to `revenue-gen-prod` (IAP tunnel if required).
+4. **Local `.env` (recommended):** copy from `.env.example` and set at least:
+   - `GEMINI_API_KEY`
+   - `JWT_SECRET` (use a long random string in production; keep stable or all sessions invalidate)
+   - Optional first admin (empty DB only): `AUTH_BOOTSTRAP_EMAIL`, `AUTH_BOOTSTRAP_PASSWORD`
+5. **bcrypt / passlib:** `requirements.txt` pins **`bcrypt` 4.0.x** (`<4.1`) so **passlib** password hashing works. Do not upgrade bcrypt to 5.x without validating passlib compatibility.
 
 ---
-**Report generated by Antigravity AI.**
+
+## 5. Updating code on the cloud (standard workflow)
+
+This is the path to use **every time** you want production to match your local repo.
+
+### Option A — recommended: one command
+
+From the **repository root** on your machine:
+
+```bash
+gcloud config set project taggd-491107
+./scripts/deploy-gcp.sh
+```
+
+**What the script does**
+
+1. Sets `gcloud` project to `taggd-491107`.
+2. Builds `deploy.tar.gz` (excludes `node_modules`, `.git`, local `.db` files, etc.).
+3. Uploads the tarball to `revenue-gen-prod` via `gcloud compute scp` (**`--tunnel-through-iap`**).
+4. If **`./.env`** exists locally, uploads it to the VM as `~/tgddata.env` and moves it to **`~/tgddata_C1/.env`** after extract.
+5. On the VM: removes old **`deploy_frontend_1` / `deploy_backend_1`** containers if present (frees host **port 80** from legacy stacks).
+6. Extracts into **`~/tgddata_C1`**, then runs **`docker-compose up -d --build`** (prefers `docker-compose` v1; falls back to `docker compose` if available).
+
+**Overrides (optional)**
+
+```bash
+GCP_PROJECT=taggd-491107 GCP_INSTANCE=revenue-gen-prod GCP_ZONE=asia-south1-a ./scripts/deploy-gcp.sh
+```
+
+### Option B — manual (same outcome as the script)
+
+1. Create the tarball (same file list as in `scripts/deploy-gcp.sh`).
+2. `gcloud compute scp … deploy.tar.gz arjun@revenue-gen-prod:~/deploy.tar.gz --project=taggd-491107 --zone=asia-south1-a --tunnel-through-iap`
+3. SSH and extract, ensure **`.env`** exists under `~/tgddata_C1/`, then:
+
+```bash
+cd ~/tgddata_C1 && docker-compose up -d --build
+```
+
+(On this VM, use **`docker-compose`**, not **`docker compose`**, unless the Compose V2 plugin is installed.)
+
+### After every update — quick verification
+
+**On the VM (SSH):**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/
+curl -s http://127.0.0.1/api/
+docker ps
+```
+
+**Public URL (Cloudflare):** find the current hostname:
+
+```bash
+docker logs cloudflare_tunnel 2>&1 | grep -E 'trycloudflare\.com'
+```
+
+Then open `https://<hostname>/` in a browser.
+
+---
+
+## 6. Authentication & first admin
+
+- **Bootstrap:** If the **`users`** table is **empty** and **`AUTH_BOOTSTRAP_EMAIL` / `AUTH_BOOTSTRAP_PASSWORD`** are set in the environment, **`bootstrap_default_admin()`** creates that user as **`admin`** on backend startup (see `backend/auth/bootstrap.py`).
+- **Production:** ensure **`~/tgddata_C1/.env`** on the VM includes those variables when you need a guaranteed first user on a fresh DB.
+- **Known issue resolved:** bcrypt **5.x** breaks passlib **1.7.x** hashing; **`requirements.txt`** pins **`bcrypt>=4.0.1,<4.1.0`**. If login fails with empty users despite bootstrap env, check backend logs for passlib/bcrypt errors and confirm the pin is installed in the image.
+
+---
+
+## 7. Troubleshooting
+
+| Symptom | Likely cause | What to do |
+|--------|----------------|------------|
+| `Bind for 0.0.0.0:80 failed: port is already allocated` | Old compose stack (e.g. **`deploy_frontend_1`**) still bound to 80 | `docker rm -f deploy_frontend_1 deploy_backend_1` (or run **`./scripts/deploy-gcp.sh`**, which removes them before `up`). |
+| Cannot SSH/SCP | Network / firewall | Add **`--tunnel-through-iap`** to `gcloud compute scp` / `ssh`. |
+| Login fails, 0 users | Bootstrap not run or bcrypt/passlib error | Fix bcrypt pin; restart backend; or run `bootstrap_default_admin()` once inside the backend container (see §6). |
+| Cloudflare URL unknown | Quick tunnel hostname not logged | `docker logs cloudflare_tunnel 2>&1 \| grep trycloudflare.com` |
+
+---
+
+## 8. Security notes
+
+- **Secrets:** Keep **`GEMINI_API_KEY`**, **`JWT_SECRET`**, and passwords in **`.env`** on the VM or a secret manager — not in git, Dockerfiles, or `docker-compose.yml` committed to the repo.
+- **IAP:** Prefer IAP tunneling for SSH/SCP where direct access is blocked.
+- **Firewall:** VM firewall / tags control HTTP(S); the app behind Cloudflare is still served from nginx on **80** inside the VM.
+
+---
+
+## 9. Local development (no Docker)
+
+1. Copy **`.env.example`** → **`.env`** and fill keys.
+2. Backend: `pip install -r requirements.txt` then from repo root:  
+   `uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000`
+3. Frontend: `cd frontend && npm ci && npm run dev` — Vite proxies **`/api`** to **`localhost:8000`**.
+
+---
+
+*Earlier narrative sections (February 2026) were consolidated into this document; IAP, VPC, and Cloudflare rationales remain valid operational context.*

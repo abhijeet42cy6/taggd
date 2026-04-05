@@ -1,36 +1,20 @@
-# Backend Dockerfile
+# Backend Dockerfile — secrets via docker-compose environment / .env (never bake keys into the image)
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements or install directly for simplicity since we have the list
-RUN pip install --no-cache-dir \
-    fastapi \
-    uvicorn \
-    sqlalchemy \
-    pandas \
-    openpyxl \
-    python-dotenv \
-    google-generativeai \
-    instructor \
-    python-multipart \
-    pydantic-settings
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy the backend code
 COPY ./backend /app/backend
-COPY .env /app/.env
 
-# Create data directory for SQLite and Excel uploads
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/db_data
 
-# Set Environment Variables
 ENV PYTHONPATH=/app
-ENV GEMINI_API_KEY=AIzaSyAFTKtEL5QL2xp1wrP63z8m7BvgmQ4Ci0c
 
 EXPOSE 8000
 

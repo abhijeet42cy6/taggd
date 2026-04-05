@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class SheetClassification(BaseModel):
-    tracker_sheet: str = Field(..., description="The name of the sheet likely containing position/hiring tracking data.")
+    tracker_sheet: str = Field(..., description="The primary data sheet name (backward compatibility).")
+    data_sheets: List[str] = Field(..., description="List of all sheets containing position/hiring tracking data.")
     contract_sheet: str = Field(..., description="The name of the sheet likely containing commercial terms, fees, or contracts.")
     reasoning: str = Field(..., description="Explanation of why these sheets were chosen.")
     confidence: float = Field(..., description="Confidence score between 0 and 1.")
@@ -29,16 +30,18 @@ class SheetIdentifierAgent:
         {sheet_names}
         
         Identify:
-        1. The 'Position Tracker' sheet (contains candidate lists, statuses, CTCs).
+        1. ALL 'Position Tracker' or 'Data' sheets (can be multiple, e.g., 'Open Positions', 'Closed Positions'). 
+           List these in 'data_sheets'. Pick the most prominent one for 'tracker_sheet'.
         2. The 'Contractual' sheet (contains percentage fees, band-wise fees, commercial terms).
         
-        If there are multiple trackers, choose the most 'active' or 'final' one.
-        If a sheet is named 'Contract' or 'Contractual', it is highly likely the contract sheet.
+        Requirements:
+        - If a sheet contains keywords like 'Open', 'Closed', 'Hired', 'Tracker', 'Data', 'Recruitment', it's a data sheet.
+        - If a sheet contains keywords like 'Contract', 'Commercial', 'Annexure', 'Fees', 'Logic', it's a logic sheet.
         """
         
         return self.client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are an expert recruitment data analyst."},
+                {"role": "system", "content": "You are an expert recruitment data analyst. You identify the structure of recruitment trackers."},
                 {"role": "user", "content": prompt}
             ],
             response_model=SheetClassification,

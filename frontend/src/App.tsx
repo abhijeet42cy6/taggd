@@ -1,63 +1,255 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Sidebar } from './components/Sidebar';
-import { Dashboard } from './pages/Dashboard';
-import { Projects } from './pages/Projects';
-import { Upload } from './pages/Upload';
-import { ProjectDetail } from './pages/ProjectDetail';
-import { Search, Bell, HelpCircle } from 'lucide-react';
+import React from "react";
+import {
+  BrowserRouter as Router,
+  NavLink,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { PersonaProvider, usePersona } from "@/lib/persona";
+import { AuthProvider, navAllowedForRole, useAuth } from "@/lib/auth";
+import { ClientsHub } from "./pages/ClientsHub";
+import { ClientDetail } from "./pages/ClientDetail";
+import { Agent } from "./pages/Agent";
+import { Dashboard } from "./pages/Dashboard";
+import { DataOperations } from "./pages/DataOperations";
+import { FiscalPerformance } from "./pages/FiscalPerformance";
+import { ActivityLog } from "./pages/ActivityLog";
+import { IngestionCenter } from "./pages/IngestionCenter";
+import { PortfolioIntelligence } from "./pages/PortfolioIntelligence";
+import { Requisitions } from "./pages/Requisitions";
+import { SLAPerformance } from "./pages/SLAPerformance";
+import { WorkforceManagement } from "./pages/WorkforceManagement";
+import { Login } from "./pages/Login";
+import { AdminUsers } from "./pages/AdminUsers";
+import taggdLogo from "@/assets/taggd-logo.png";
+import "./styles/platform.css";
 
-const App = () => {
+type NavItem = { label: string; path: string };
+type NavGroup = { title: string; items: NavItem[] };
+
+const ALL_NAV_GROUPS: NavGroup[] = [
+  {
+    title: "Overview",
+    items: [
+      { label: "Executive Overview", path: "/" },
+      { label: "Portfolio Intel", path: "/portfolio" },
+    ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { label: "Clients", path: "/clients" },
+      { label: "Requisitions", path: "/requisitions" },
+    ],
+  },
+  {
+    title: "Analytics",
+    items: [
+      { label: "Finance Command", path: "/finance" },
+      { label: "SLA Performance", path: "/sla-performance" },
+      { label: "Workforce Mgmt", path: "/wfm" },
+    ],
+  },
+  {
+    title: "Platform",
+    items: [
+      { label: "Data Operations", path: "/data-operations" },
+      { label: "Ingestion Center", path: "/ingestion" },
+      { label: "Activity log", path: "/activity" },
+      /* Agent: route kept below; hidden from nav for all roles */
+      { label: "Users & access", path: "/admin/users" },
+    ],
+  },
+];
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { token, loading } = useAuth();
+  const loc = useLocation();
+
+  if (loading) {
+    return (
+      <div className="platform-app" style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <div style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", fontSize: 12 }}>Loading…</div>
+      </div>
+    );
+  }
+  if (!token) {
+    return <Navigate to="/login" state={{ from: loc }} replace />;
+  }
+  return <>{children}</>;
+}
+
+/** Remount persona when the logged-in user changes so UI prefs don’t leak across accounts. */
+function AuthenticatedApp() {
+  const { user } = useAuth();
   return (
-    <Router>
-      <div className="flex min-h-screen bg-[#121212] text-foreground font-sans selection:bg-primary/30">
-        <Sidebar />
+    <PersonaProvider key={user?.id ?? "user"}>
+      <AppShell />
+    </PersonaProvider>
+  );
+}
 
-        <main className="flex-1 ml-56 min-h-screen flex flex-col">
-          {/* Main Topbar */}
-          <nav className="h-12 border-b border-[#2e2e2e] flex items-center justify-between px-6 sticky top-0 bg-[#121212]/90 backdrop-blur-xl z-40">
-            <div className="flex items-center gap-4 flex-1">
-              <div className="relative max-w-xs w-full group">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" size={12} />
-                <input
-                  type="text"
-                  placeholder="Global search..."
-                  className="w-full bg-[#1c1c1c] border border-[#2e2e2e] rounded-md py-1 pl-8 pr-4 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 transition-all font-medium"
-                />
-              </div>
-            </div>
+function AppShell() {
+  const { user, logout } = useAuth();
+  const { persona } = usePersona();
+  const navigate = useNavigate();
 
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1 border-r border-[#2e2e2e] pr-4 mr-2">
-                <button className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-md hover:bg-[#1f1f1f]">
-                  <Bell size={14} />
-                </button>
-                <button className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-md hover:bg-[#1f1f1f]">
-                  <HelpCircle size={14} />
-                </button>
-              </div>
-              <div className="w-6 h-6 rounded-full bg-zinc-800 border border-[#2e2e2e] flex items-center justify-center text-[10px] font-bold text-zinc-400">
-                AD
-              </div>
-            </div>
-          </nav>
+  const role = user?.role;
+  const filteredGroups: NavGroup[] = ALL_NAV_GROUPS.map((g) => ({
+    ...g,
+    items: g.items.filter((item) => (role ? navAllowedForRole(item.path, role) : false)),
+  })).filter((g) => g.items.length > 0);
 
-          {/* Core Layout Container */}
-          <div className="flex-1 p-6 overflow-y-auto">
-            <div className="max-w-6xl mx-auto">
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/projects" element={<Projects />} />
-                <Route path="/projects/:id" element={<ProjectDetail />} />
-                <Route path="/upload" element={<Upload />} />
-                <Route path="/audit" element={<div className="p-20 text-center text-muted-foreground font-mono text-xs">Waiting for audit stream...</div>} />
-              </Routes>
-            </div>
+  const email = user?.email ?? "";
+  const initials =
+    email.length >= 2
+      ? email
+          .split("@")[0]
+          .slice(0, 2)
+          .toUpperCase()
+      : "?";
+
+  return (
+    <div className="platform-app">
+      <div className="platform-layout">
+        <aside className="platform-sidebar">
+          <div className="platform-logo">
+            <img src={taggdLogo} alt="Taggd" className="platform-logo-img" />
+            <div className="platform-logo-tagline">Intelligence Platform</div>
           </div>
+
+          <div style={{ flex: 1, overflow: "auto" }}>
+            {filteredGroups.map((g) => (
+              <div key={g.title} className="nav-section">
+                <div className="platform-nav-group-title">{g.title}</div>
+                {g.items.map((item) => (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    end={item.path === "/"}
+                    className={({ isActive }) => `platform-nav-item${isActive ? " active" : ""}`}
+                  >
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              borderTop: "1px solid var(--border)",
+              padding: "10px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: "50%",
+                flexShrink: 0,
+                background: `linear-gradient(135deg, ${persona.accentColor}, var(--accent2))`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 10,
+                fontWeight: 700,
+                color: "#fff",
+              }}
+            >
+              {initials}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {email || "—"}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--accent)", fontFamily: "'DM Mono',monospace" }}>
+                {user?.role ?? ""}
+              </div>
+            </div>
+            <button
+              type="button"
+              title="Log out"
+              onClick={() => {
+                logout();
+                navigate("/login", { replace: true });
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              Out
+            </button>
+          </div>
+        </aside>
+
+        <main className="platform-main">
+          <header className="platform-topbar">
+            <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "'Syne',sans-serif" }}>Control Center</div>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
+              / FY2024-25
+            </span>
+            <div style={{ flex: 1 }} />
+            <input className="platform-search" placeholder="⌕  Search..." />
+          </header>
+
+          <section className="platform-content">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/portfolio" element={<PortfolioIntelligence />} />
+              <Route path="/clients" element={<ClientsHub />} />
+              <Route path="/clients/:clientId" element={<ClientDetail />} />
+              <Route path="/requisitions" element={<Requisitions />} />
+              <Route path="/finance" element={<FiscalPerformance />} />
+              <Route path="/sla-performance" element={<SLAPerformance />} />
+              <Route path="/wfm" element={<WorkforceManagement />} />
+              <Route path="/data-operations" element={<DataOperations />} />
+              <Route path="/ingestion" element={<IngestionCenter />} />
+              <Route path="/activity" element={<ActivityLog />} />
+              <Route path="/agent" element={<Agent />} />
+              <Route path="/admin/users" element={<AdminUsers />} />
+            </Routes>
+          </section>
         </main>
       </div>
-    </Router>
+    </div>
   );
-};
+}
+
+const App = () => (
+  <AuthProvider>
+    <Router>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/*"
+          element={
+            <RequireAuth>
+              <AuthenticatedApp />
+            </RequireAuth>
+          }
+        />
+      </Routes>
+    </Router>
+  </AuthProvider>
+);
 
 export default App;

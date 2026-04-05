@@ -25,7 +25,7 @@ class ColumnMapperAgent:
     def map_columns(self, headers: List[str], sample_rows: List[Dict]) -> ColumnMap:
         universal_keys = [
             "candidate_name", "position_title", "status", 
-            "hiring_manager", "offered_ctc", "joining_date", 
+            "hiring_manager", "offered_ctc", "joining_date", "creation_date",
             "location", "department"
         ]
         
@@ -36,9 +36,12 @@ class ColumnMapperAgent:
         Map the headers to these Universal Keys: {universal_keys}
         
         Requirements:
-        1. Identify which header corresponds to which key.
-        2. If a key doesn't have a clear match, leave it out of the mapping.
-        3. List all other headers in 'unmapped_columns'.
+        1. Identify which header corresponds to which key. 
+           Hint: 'creation_date' may be 'Req Date', 'Opened Date', 'Requisition Created', etc.
+        2. SYNONYMS: If you see two headers that represent the same concept in different sheets (e.g. 'Reference ID' and 'Job ID'), map the most common one but note the variance in reasoning.
+        3. IDENTITY COALESCING: If a file contains a 'Requisition ID' or 'Reference ID' but frequently has empty 'Candidate Name' columns (common in open positions), ensure the ID header is clearly identified so it can be used as an identity fallback in the processing engine.
+        4. If a key doesn't have a clear match, leave it out of the mapping.
+        5. List all other headers in 'unmapped_columns'.
         """
         
         return self.client.chat.completions.create(

@@ -1,1 +1,18 @@
-*.db
+.env
+.env.local
+
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+.DS_Store
+*.log
+
+# Local SQLite (optional; remove this line if you intentionally track a seed DB)
+revenue_generator.db

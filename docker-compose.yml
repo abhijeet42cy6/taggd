@@ -1,4 +1,5 @@
-version: '3.8'
+# Local + GCP VM: copy .env.example to .env and set values.
+# Compose loads `.env` from this directory for ${...} substitution and passes vars into containers.
 
 services:
   backend:
@@ -8,8 +9,12 @@ services:
     volumes:
       - sqlite_data:/app/db_data
     environment:
-      - GEMINI_API_KEY=AIzaSyAFTKtEL5QL2xp1wrP63z8m7BvgmQ4Ci0c
-      - DATABASE_URL=sqlite:////app/db_data/revenue_generator.db
+      DATABASE_URL: sqlite:////app/db_data/revenue_generator.db
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-long-random-string}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
+      AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-}
+      AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD:-}
     restart: always
 
   frontend:
