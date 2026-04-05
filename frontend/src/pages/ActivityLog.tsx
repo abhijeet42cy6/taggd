@@ -17,6 +17,8 @@ const RESOURCE_TYPE_LABEL: Record<string, string> = {
   forecast: "Forecast",
   budget_forecast_upload: "Budget/forecast upload",
   budget_forecast_recalculate: "Budget/forecast recalc",
+  revenue_forecast_weekly: "Weekly revenue forecast",
+  revenue_visibility_snapshot: "Revenue visibility",
   ingestion_express: "Express ingest",
   ingestion_pro_inspect: "Pro · inspect",
   ingestion_pro_confirm: "Pro · run",

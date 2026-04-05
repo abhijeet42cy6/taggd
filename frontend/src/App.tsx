@@ -16,6 +16,7 @@ import { Agent } from "./pages/Agent";
 import { Dashboard } from "./pages/Dashboard";
 import { DataOperations } from "./pages/DataOperations";
 import { FiscalPerformance } from "./pages/FiscalPerformance";
+import { RevenueTrackers } from "./pages/RevenueTrackers";
 import { ActivityLog } from "./pages/ActivityLog";
 import { IngestionCenter } from "./pages/IngestionCenter";
 import { PortfolioIntelligence } from "./pages/PortfolioIntelligence";
@@ -49,6 +50,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     title: "Analytics",
     items: [
       { label: "Finance Command", path: "/finance" },
+      { label: "Revenue trackers", path: "/revenue-trackers" },
       { label: "SLA Performance", path: "/sla-performance" },
       { label: "Workforce Mgmt", path: "/wfm" },
     ],
@@ -219,6 +221,7 @@ function AppShell() {
               <Route path="/clients/:clientId" element={<ClientDetail />} />
               <Route path="/requisitions" element={<Requisitions />} />
               <Route path="/finance" element={<FiscalPerformance />} />
+              <Route path="/revenue-trackers" element={<RevenueTrackers />} />
               <Route path="/sla-performance" element={<SLAPerformance />} />
               <Route path="/wfm" element={<WorkforceManagement />} />
               <Route path="/data-operations" element={<DataOperations />} />

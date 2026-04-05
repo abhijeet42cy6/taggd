@@ -78,6 +78,95 @@ export type ActivityLogItem = {
   meta: Record<string, unknown>;
 };
 
+/** Weekly revenue forecast row (`GET /revenue-trackers/forecast-weekly`); amounts in INR. */
+export type RevenueForecastWeeklyRow = {
+  id: number;
+  project_id: number;
+  account_name: string;
+  week_start_date: string | null;
+  week_label: string | null;
+  month_anchor: string | null;
+  update_date: string | null;
+  revenue_forecast_inr: number;
+  adjustment_inr: number;
+  penalty_inr: number;
+  bad_debts_inr: number;
+  mmf_inr: number;
+  open_fee_inr: number;
+  joiner_fee_inr: number;
+  to_be_offer_fee_inr: number;
+  net_revenue_inr: number;
+  open_req: number;
+  joiner_count: number;
+  to_be_offer_count: number;
+  achievement_pct: number | null;
+  remarks: string | null;
+  entered_by_user_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type RevenueVisibilitySnapshotRow = {
+  id: number;
+  project_id: number;
+  account_name: string;
+  as_of_date: string | null;
+  practice_head: string | null;
+  mmf_inr: number;
+  open_req: number;
+  opening_fee_inr: number;
+  joiners_as_on_date: number;
+  joining_fee_inr: number;
+  yet_to_join: number;
+  ytj_fee_inr: number;
+  conversion_rate_pct: number | null;
+  revenue_realised_pct: number | null;
+  gap_to_mmf_inr: number;
+  status: string | null;
+  entered_by_user_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type RevenueForecastWeeklyUpsert = {
+  project_id: number;
+  week_start_date: string;
+  week_label?: string | null;
+  month_anchor: string;
+  update_date?: string | null;
+  revenue_forecast_lakhs?: number;
+  adjustment_lakhs?: number;
+  penalty_lakhs?: number;
+  bad_debts_lakhs?: number;
+  mmf_lakhs?: number;
+  open_fee_lakhs?: number;
+  joiner_fee_lakhs?: number;
+  to_be_offer_fee_lakhs?: number;
+  net_revenue_lakhs?: number;
+  open_req?: number;
+  joiner_count?: number;
+  to_be_offer_count?: number;
+  achievement_pct?: number | null;
+  remarks?: string | null;
+};
+
+export type RevenueVisibilityUpsert = {
+  project_id: number;
+  as_of_date: string;
+  practice_head?: string | null;
+  mmf_inr?: number;
+  open_req?: number;
+  opening_fee_inr?: number;
+  joiners_as_on_date?: number;
+  joining_fee_inr?: number;
+  yet_to_join?: number;
+  ytj_fee_inr?: number;
+  conversion_rate_pct?: number | null;
+  revenue_realised_pct?: number | null;
+  gap_to_mmf_inr?: number;
+  status?: string | null;
+};
+
 export type GlobalMonitor = {
   total_positions: number;
   status_breakdown: Record<string, number>;
@@ -484,6 +573,66 @@ export const queries = {
       )
       .then((r) => r.data);
   },
+
+  revenueForecastWeekly: (params: { project_id?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return cachedGet<{ items: RevenueForecastWeeklyRow[] }>(
+      `revenue-trackers/forecast-weekly?${q || "all"}`,
+      () =>
+        api
+          .get<{ items: RevenueForecastWeeklyRow[] }>(
+            `/revenue-trackers/forecast-weekly${q ? `?${q}` : ""}`
+          )
+          .then((r) => r.data)
+    );
+  },
+
+  revenueVisibilitySnapshots: (params: { project_id?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return cachedGet<{ items: RevenueVisibilitySnapshotRow[] }>(
+      `revenue-trackers/visibility?${q || "all"}`,
+      () =>
+        api
+          .get<{ items: RevenueVisibilitySnapshotRow[] }>(
+            `/revenue-trackers/visibility${q ? `?${q}` : ""}`
+          )
+          .then((r) => r.data)
+    );
+  },
+
+  upsertRevenueForecastWeekly: (body: RevenueForecastWeeklyUpsert) =>
+    api.post<RevenueForecastWeeklyRow>("/revenue-trackers/forecast-weekly", body).then((r) => {
+      invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  upsertRevenueVisibility: (body: RevenueVisibilityUpsert) =>
+    api.post<RevenueVisibilitySnapshotRow>("/revenue-trackers/visibility", body).then((r) => {
+      invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  deleteRevenueForecastWeekly: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/revenue-trackers/forecast-weekly/${id}`).then((r) => {
+      invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  deleteRevenueVisibility: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/revenue-trackers/visibility/${id}`).then((r) => {
+      invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
 
   financeData: () =>
     cachedGet("finance/data", () => api.get("/finance/data").then((r) => r.data)),

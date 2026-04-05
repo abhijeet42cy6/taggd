@@ -131,6 +131,12 @@ class Project(Base, AuditMixin):
     finance_ledger = relationship("FinanceMonthlyLedger", back_populates="project")
     finance_cashflow = relationship("FinanceCashFlow", back_populates="project")
     finance_kpis = relationship("FinanceEfficiencyKPI", back_populates="project")
+    revenue_forecast_weekly = relationship(
+        "RevenueForecastWeekly", back_populates="project", cascade="all, delete-orphan"
+    )
+    revenue_visibility_snapshots = relationship(
+        "RevenueVisibilitySnapshot", back_populates="project", cascade="all, delete-orphan"
+    )
 
 class ProjectBudget(Base, AuditMixin):
     __tablename__ = "project_budgets"
@@ -298,6 +304,77 @@ class FinanceEfficiencyKPI(Base, AuditMixin):
     
     project = relationship("Project", back_populates="finance_kpis")
 
+
+class RevenueForecastWeekly(Base):
+    """TAGGD-style weekly revenue forecast row; amounts stored in INR (API accepts Lakhs)."""
+
+    __tablename__ = "revenue_forecast_weekly"
+    __table_args__ = (UniqueConstraint("project_id", "week_start_date", name="uq_rev_fcst_week"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    week_start_date = Column(DateTime, nullable=False, index=True)
+    week_label = Column(String, nullable=True)
+    month_anchor = Column(DateTime, nullable=False)
+    update_date = Column(DateTime, nullable=False)
+
+    revenue_forecast_inr = Column(Float, default=0.0)
+    adjustment_inr = Column(Float, default=0.0)
+    penalty_inr = Column(Float, default=0.0)
+    bad_debts_inr = Column(Float, default=0.0)
+    mmf_inr = Column(Float, default=0.0)
+    open_fee_inr = Column(Float, default=0.0)
+    joiner_fee_inr = Column(Float, default=0.0)
+    to_be_offer_fee_inr = Column(Float, default=0.0)
+    net_revenue_inr = Column(Float, default=0.0)
+
+    open_req = Column(Integer, default=0)
+    joiner_count = Column(Integer, default=0)
+    to_be_offer_count = Column(Integer, default=0)
+    achievement_pct = Column(Float, nullable=True)
+
+    remarks = Column(Text, nullable=True)
+    entered_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    project = relationship("Project", back_populates="revenue_forecast_weekly")
+    entered_by = relationship("User", foreign_keys=[entered_by_user_id])
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class RevenueVisibilitySnapshot(Base):
+    """RPO pipeline / revenue visibility snapshot; money columns in INR."""
+
+    __tablename__ = "revenue_visibility_snapshot"
+    __table_args__ = (UniqueConstraint("project_id", "as_of_date", name="uq_rev_vis_asof"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    as_of_date = Column(DateTime, nullable=False, index=True)
+
+    practice_head = Column(String, nullable=True)
+    mmf_inr = Column(Float, default=0.0)
+    open_req = Column(Integer, default=0)
+    opening_fee_inr = Column(Float, default=0.0)
+    joiners_as_on_date = Column(Integer, default=0)
+    joining_fee_inr = Column(Float, default=0.0)
+    yet_to_join = Column(Integer, default=0)
+    ytj_fee_inr = Column(Float, default=0.0)
+    conversion_rate_pct = Column(Float, nullable=True)
+    revenue_realised_pct = Column(Float, nullable=True)
+    gap_to_mmf_inr = Column(Float, default=0.0)
+    status = Column(String, nullable=True)
+
+    entered_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    project = relationship("Project", back_populates="revenue_visibility_snapshots")
+    entered_by = relationship("User", foreign_keys=[entered_by_user_id])
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
 def _ensure_finance_unique_indexes():
     """Prevent duplicate ledger / cashflow rows after ingest flush fixes."""
     from sqlalchemy import text
@@ -321,6 +398,31 @@ def _ensure_finance_unique_indexes():
         import logging
 
         logging.warning("finance unique indexes: %s", e)
+
+
+def _ensure_revenue_tracker_indexes():
+    """SQLite: unique indexes for revenue tracker tables (idempotent)."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_rev_fcst_week "
+                    "ON revenue_forecast_weekly (project_id, week_start_date)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_rev_vis_asof "
+                    "ON revenue_visibility_snapshot (project_id, as_of_date)"
+                )
+            )
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("revenue tracker unique indexes: %s", e)
 
 
 def _ensure_project_enterprise_columns():
@@ -467,6 +569,7 @@ def init_db():
     finally:
         db.close()
     _ensure_finance_unique_indexes()
+    _ensure_revenue_tracker_indexes()
     try:
         from backend.auth.bootstrap import bootstrap_default_admin
 
