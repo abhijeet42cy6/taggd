@@ -1,0 +1,17 @@
+# Backend (FastAPI) — install with: pip install -r requirements.txt
+# Used by Dockerfile.backend and local development.
+
+fastapi>=0.115.0,<0.136.0
+uvicorn[standard]>=0.30.0,<0.36.0
+sqlalchemy>=2.0.30,<3.0.0
+pandas>=2.2.0,<3.0.0
+openpyxl>=3.1.2,<4.0.0
+python-dotenv>=1.0.1,<2.0.0
+google-generativeai>=0.8.0,<1.0.0
+instructor>=1.6.0,<2.0.0
+python-multipart>=0.0.9,<0.1.0
+pydantic-settings>=2.4.0,<3.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+# bcrypt 4.1+ breaks passlib 1.7.x (hash_password / login); keep 4.0.x until passlib catches up
+bcrypt>=4.0.1,<4.1.0
+python-jose[cryptography]>=3.3.0,<4.0.0

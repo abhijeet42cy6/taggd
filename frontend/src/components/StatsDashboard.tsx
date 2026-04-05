@@ -1,6 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency } from '@/lib/utils';
+import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
 
 interface StatsDashboardProps {
     data: any[];
@@ -9,44 +15,49 @@ interface StatsDashboardProps {
 
 export const StatsDashboard: React.FC<StatsDashboardProps> = ({ data, title }) => {
     return (
-        <div className="glass p-6 rounded-2xl border-border/40 h-full">
-            <h3 className="text-lg font-semibold mb-6">{title}</h3>
-            <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data} layout="vertical" margin={{ left: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" horizontal={false} />
-                        <XAxis type="number" hide />
-                        <YAxis
-                            dataKey="name"
-                            type="category"
-                            stroke="#888"
-                            fontSize={11}
-                            tickLine={false}
-                            axisLine={false}
-                            width={100}
-                        />
-                        <Tooltip
-                            cursor={{ fill: '#ffffff05' }}
-                            content={({ active, payload }) => {
-                                if (active && payload && payload.length) {
-                                    return (
-                                        <div className="glass p-3 rounded-lg border-border/50 text-xs">
-                                            <p className="font-bold mb-1">{payload[0].payload.name}</p>
-                                            <p className="text-primary">{formatCurrency(payload[0].value as number)}</p>
-                                        </div>
-                                    );
-                                }
-                                return null;
-                            }}
-                        />
-                        <Bar dataKey="revenue" radius={[0, 4, 4, 0]} barSize={20}>
-                            {data.map((_, index) => (
-                                <Cell key={`cell-${index}`} fill={`hsl(263, 70%, ${60 - index * 4}%)`} />
-                            ))}
-                        </Bar>
-                    </BarChart>
-                </ResponsiveContainer>
-            </div>
-        </div>
+        <Card className="bg-muted/30 border-border/50 h-full">
+            <CardHeader className="pb-4">
+                <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">{title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <div className="h-[250px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={data} layout="vertical" margin={{ left: 0, right: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" horizontal={false} />
+                            <XAxis type="number" hide />
+                            <YAxis
+                                dataKey="name"
+                                type="category"
+                                stroke="#888"
+                                fontSize={9}
+                                tickLine={false}
+                                axisLine={false}
+                                width={80}
+                                className="font-medium uppercase tracking-tighter"
+                            />
+                            <Tooltip
+                                cursor={{ fill: '#ffffff02' }}
+                                content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                        return (
+                                            <div className="bg-background/95 backdrop-blur-sm p-2 border border-border/50 rounded shadow-xl text-[10px]">
+                                                <p className="font-bold mb-1 opacity-70 uppercase tracking-widest">{payload[0].payload.name}</p>
+                                                <p className="text-primary font-mono">{formatCurrency(payload[0].value as number)}</p>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                }}
+                            />
+                            <Bar dataKey="revenue" radius={[0, 2, 2, 0]} barSize={12}>
+                                {data.map((_, index) => (
+                                    <Cell key={`cell-${index}`} fill={`hsl(var(--primary) / ${0.9 - (index * 0.1)})`} />
+                                ))}
+                            </Bar>
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            </CardContent>
+        </Card>
     );
 };

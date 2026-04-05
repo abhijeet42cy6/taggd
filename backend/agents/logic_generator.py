@@ -39,9 +39,12 @@ class LogicGeneratorAgent:
         Constraints:
         1. Always return a dict: {{'revenue': float, 'opening_fee': float, 'closing_fee': float, 'status': str}}
         2. Handle strings like '10,00,000' by converting them to floats safely.
-        3. Use the exact header names from the tracker to access data.
-        4. PERFORMANCE: When checking statuses or bands, always use `.strip().lower()` (e.g., `row.get('Status').strip().lower() == 'joined'`) to handle trailing spaces or case differences in Excel.
-        5. If logic cannot be applied to a row (e.g. status not 'Joined'), return revenue=0 and a status message.
+        3. RESILIENCE: If critical data (like 'Status', 'Hired Count', or 'Salary') appears under different header names in different samples or sheets, use coalescing patterns: `val = row.get('Header A') or row.get('Header B')`.
+        4. LOGIC GUARD: If revenue is calculated as 0.0 because the position is 'Cancelled', 'On Hold', or 'Void', you MUST also set `opening_fee` and `closing_fee` to 0.0 to prevent global status mistagging.
+        5. PERFORMANCE: When checking statuses or bands, always use `.strip().lower()` (e.g., `row.get('Status').strip().lower() == 'joined'`) to handle trailing spaces or case differences in Excel.
+        6. If revenue is 0.0 because the position is still open or in progress, return a status representing the current recruiting stage (e.g., 'Offer Stage', 'Interview', 'Sourcing', 'In Progress').
+        7. Always return a 'status' string. If the position is on hold or canceled, return status: 'On Hold' or 'Cancelled'.
+        8. If an opening fee is applicable (even if no one is hired yet), ensure opening_fee is returned so the position is marked as 'ACTIVE' in the system.
         """
         
         return self.client.chat.completions.create(

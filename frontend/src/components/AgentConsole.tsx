@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal, Cpu, Database, Code, ChevronDown, ChevronUp } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn } from '@/lib/utils';
+import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 interface AgentConsoleProps {
     logs: string[];
@@ -14,34 +22,34 @@ export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, expla
     const [showLogic, setShowLogic] = useState(false);
 
     return (
-        <div className="sb-bg-dark rounded-lg overflow-hidden sb-border font-mono text-[11px]">
-            <div className="bg-[#1c1c1c] px-3 py-1.5 flex items-center justify-between border-b border-[#2e2e2e]">
+        <Card className="bg-muted/30 border-border/50 font-mono text-[11px] overflow-hidden">
+            <CardHeader className="bg-muted/50 px-4 py-2 flex flex-row items-center justify-between border-b border-border/50">
                 <div className="flex items-center gap-2">
                     <Terminal size={14} className="text-primary" />
-                    <span className="font-medium text-muted-foreground uppercase tracking-widest">Agent Reasoning</span>
+                    <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80">Agent Reasoning Console</CardTitle>
                 </div>
-                <div className="flex gap-1">
-                    <div className="w-2 h-2 rounded-full bg-red-500/20" />
-                    <div className="w-2 h-2 rounded-full bg-yellow-500/20" />
-                    <div className="w-2 h-2 rounded-full bg-green-500/20" />
+                <div className="flex gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-destructive/30" />
+                    <div className="w-2 h-2 rounded-full bg-yellow-500/30" />
+                    <div className="w-2 h-2 rounded-full bg-green-500/30" />
                 </div>
-            </div>
+            </CardHeader>
 
-            <div className="p-3 max-h-[400px] overflow-y-auto space-y-1.5 bg-black/40">
-                <AnimatePresence>
+            <CardContent className="p-4 max-h-[400px] overflow-y-auto space-y-2 bg-black/20">
+                <AnimatePresence initial={false}>
                     {logs.map((log, i) => (
                         <motion.div
                             key={i}
                             initial={{ opacity: 0, x: -5 }}
                             animate={{ opacity: 1, x: 0 }}
-                            className="flex gap-2 leading-relaxed"
+                            className="flex gap-3 leading-relaxed border-l border-border/10 pl-3 ml-1"
                         >
-                            <span className="text-muted-foreground shrink-0 opacity-50">{i + 1}</span>
+                            <span className="text-muted-foreground/30 shrink-0 font-bold w-4 text-right select-none">{i + 1}</span>
                             <span className={cn(
-                                "break-all",
+                                "break-all tracking-tight",
                                 log.startsWith('✅') ? 'text-primary' :
-                                    log.startsWith('❌') ? 'text-red-400' : 'text-zinc-400'
-                            )}>
+                                    log.startsWith('❌') ? 'text-destructive/80' : 'text-foreground/70'
+                             )}>
                                 {log}
                             </span>
                         </motion.div>
@@ -52,17 +60,20 @@ export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, expla
                     <motion.div
                         initial={{ opacity: 0, y: 5 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="mt-4 pt-3 border-t border-[#2e2e2e] space-y-2"
+                        className="mt-6 pt-4 border-t border-border/20 space-y-3"
                     >
-                        <div className="flex items-center gap-2 text-primary/80">
-                            <Database size={12} />
-                            <span className="uppercase font-bold tracking-tighter">Column Synchronization</span>
+                        <div className="flex items-center gap-2">
+                            <Database size={12} className="text-primary/60" />
+                            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/60">Schema Synchronization Matrix</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-zinc-500">
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
                             {Object.entries(mapping).map(([uKey, target]) => (
-                                <div key={uKey} className="flex justify-between border-b border-[#2e2e2e]/50 pb-0.5">
-                                    <span className="text-zinc-400">{uKey}</span>
-                                    <span className="text-primary/60 italic">{target}</span>
+                                <div key={uKey} className="flex justify-between items-center group">
+                                    <span className="text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">{uKey}</span>
+                                    <div className="h-[1px] flex-1 mx-2 bg-border/20" />
+                                    <Badge variant="outline" className="text-[9px] font-mono border-primary/20 bg-primary/5 text-primary/80 px-1.5 py-0 h-4">
+                                        {target}
+                                    </Badge>
                                 </div>
                             ))}
                         </div>
@@ -70,17 +81,19 @@ export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, expla
                 )}
 
                 {explanation && (
-                    <div className="mt-4 pt-3 border-t border-[#2e2e2e] space-y-2">
-                        <button
+                    <div className="mt-6 pt-4 border-t border-border/20 space-y-3">
+                        <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => setShowLogic(!showLogic)}
-                            className="flex items-center justify-between w-full text-primary/80 hover:text-primary transition-colors"
+                            className="h-7 w-full flex items-center justify-between text-primary/80 hover:text-primary hover:bg-primary/5 px-2 transition-all"
                         >
                             <div className="flex items-center gap-2">
                                 <Cpu size={12} />
-                                <span className="uppercase font-bold tracking-tighter">Derived Revenue Logic</span>
+                                <span className="text-[9px] font-black uppercase tracking-widest">Revenue Logic Engine</span>
                             </div>
                             {showLogic ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                        </button>
+                        </Button>
 
                         <AnimatePresence>
                             {showLogic && (
@@ -88,17 +101,19 @@ export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, expla
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
                                     exit={{ height: 0, opacity: 0 }}
-                                    className="overflow-hidden"
+                                    className="overflow-hidden space-y-3"
                                 >
-                                    <p className="text-zinc-500 leading-normal italic mb-3 pr-2">
-                                        "{explanation}"
-                                    </p>
+                                    <div className="bg-muted/20 rounded p-3 border border-border/10">
+                                        <p className="text-muted-foreground leading-relaxed italic text-[11px]">
+                                            "{explanation}"
+                                        </p>
+                                    </div>
                                     {pythonCode && (
-                                        <div className="bg-black/60 rounded border border-[#2e2e2e] p-2 relative">
-                                            <div className="absolute top-0 right-0 p-1">
-                                                <Code size={10} className="text-zinc-600" />
+                                        <div className="bg-black/40 rounded border border-border/20 p-3 relative group">
+                                            <div className="absolute top-2 right-2">
+                                                <Code size={11} className="text-muted-foreground/30 group-hover:text-primary/40 transition-colors" />
                                             </div>
-                                            <pre className="text-[10px] text-zinc-400 overflow-x-auto whitespace-pre-wrap">
+                                            <pre className="text-[10px] text-zinc-400 overflow-x-auto whitespace-pre-wrap font-mono leading-tight">
                                                 {pythonCode}
                                             </pre>
                                         </div>
@@ -108,7 +123,7 @@ export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, expla
                         </AnimatePresence>
                     </div>
                 )}
-            </div>
-        </div>
+            </CardContent>
+        </Card>
     );
 };

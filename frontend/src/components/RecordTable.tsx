@@ -1,12 +1,35 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
     Search, X, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
     Calendar, MapPin, Tag, SlidersHorizontal, Filter,
-    ChevronLeft, ChevronRight
+    ChevronLeft, ChevronRight, Info
 } from 'lucide-react';
-import { formatCurrency } from '../lib/utils';
-import { cn } from '../lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
+import { formatCurrency, cn } from '@/lib/utils';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 
 interface RecordTableProps {
     records: any[];
@@ -16,8 +39,10 @@ const STATUS_OPTIONS = ['All', 'Joined', 'Offered', 'In Progress', 'Hold', 'Reje
 
 /* ─────────────────────────────────────────────
    Row Detail Modal
-───────────────────────────────────────────── */
-function RecordDetailModal({ record, onClose }: { record: any; onClose: () => void }) {
+ ───────────────────────────────────────────── */
+function RecordDetailModal({ record, open, onOpenChange }: { record: any; open: boolean; onOpenChange: (open: boolean) => void }) {
+    if (!record) return null;
+
     const universalFields: Record<string, any> = {
         'Candidate Name': record.candidate_name,
         'Position Title': record.position_title,
@@ -33,67 +58,49 @@ function RecordDetailModal({ record, onClose }: { record: any; onClose: () => vo
     const additionalFields = record.additional_attributes || {};
 
     return (
-        <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
-            onClick={onClose}
-        >
-            <motion.div
-                initial={{ scale: 0.96, opacity: 0, y: 12 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.96, opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-                className="bg-[#171717] border border-[#2e2e2e] rounded-xl w-full max-w-2xl max-h-[82vh] overflow-hidden shadow-2xl flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#2e2e2e] shrink-0">
-                    <div>
-                        <h3 className="font-bold text-sm text-zinc-100 leading-tight">
-                            {record.candidate_name || record.position_title || 'Row Details'}
-                        </h3>
-                        <p className="text-[9px] text-zinc-600 font-mono mt-0.5">record #{record.id}</p>
-                    </div>
-                    <button onClick={onClose} className="p-1.5 hover:bg-[#2a2a2a] rounded-md text-zinc-500 hover:text-zinc-200 transition-colors">
-                        <X size={15} />
-                    </button>
-                </div>
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-2xl bg-background border-border shadow-2xl overflow-hidden p-0 gap-0">
+                <DialogHeader className="px-6 py-4 border-b border-border/50 bg-muted/20">
+                    <DialogTitle className="text-sm font-bold uppercase tracking-widest flex items-center gap-2">
+                        <Info size={14} className="text-primary" />
+                        Record Intelligence
+                    </DialogTitle>
+                    <DialogDescription className="text-[10px] font-mono opacity-60">ID: {record.id}</DialogDescription>
+                </DialogHeader>
 
-                <div className="overflow-y-auto flex-1">
+                <div className="max-h-[70vh] overflow-y-auto">
                     {/* Revenue Banner */}
                     {revenueFields.revenue !== undefined && (
-                        <div className="px-5 py-4 border-b border-[#2e2e2e] bg-primary/5 flex flex-wrap gap-6">
-                            <div>
-                                <p className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Attributed Revenue</p>
-                                <p className="text-2xl font-bold text-primary mt-0.5">{formatCurrency(revenueFields.revenue || 0)}</p>
+                        <div className="px-6 py-6 border-b border-border/30 bg-primary/5 grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="space-y-1">
+                                <p className="text-[9px] uppercase tracking-widest font-black text-muted-foreground/60">Attributed Yield</p>
+                                <p className="text-2xl font-bold text-primary tracking-tight">{formatCurrency(revenueFields.revenue || 0)}</p>
                             </div>
                             {revenueFields.opening_fee != null && (
-                                <div>
-                                    <p className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Opening Fee</p>
-                                    <p className="text-base font-bold text-zinc-300 mt-0.5">{formatCurrency(revenueFields.opening_fee)}</p>
+                                <div className="space-y-1">
+                                    <p className="text-[9px] uppercase tracking-widest font-black text-muted-foreground/60">Opening Fee</p>
+                                    <p className="text-lg font-bold text-foreground/80">{formatCurrency(revenueFields.opening_fee)}</p>
                                 </div>
                             )}
                             {revenueFields.closing_fee != null && (
-                                <div>
-                                    <p className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Closing Fee</p>
-                                    <p className="text-base font-bold text-zinc-300 mt-0.5">{formatCurrency(revenueFields.closing_fee)}</p>
+                                <div className="space-y-1">
+                                    <p className="text-[9px] uppercase tracking-widest font-black text-muted-foreground/60">Closing Fee</p>
+                                    <p className="text-lg font-bold text-foreground/80">{formatCurrency(revenueFields.closing_fee)}</p>
                                 </div>
                             )}
                         </div>
                     )}
 
                     {/* Universal Fields */}
-                    <div className="px-5 py-4 border-b border-[#2e2e2e]">
-                        <p className="text-[9px] uppercase tracking-widest font-bold text-zinc-600 mb-3">Core Fields</p>
-                        <div className="grid grid-cols-2 gap-y-3 gap-x-10">
+                    <div className="px-6 py-5 border-b border-border/20">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40 mb-4">Core Attributes</h4>
+                        <div className="grid grid-cols-2 gap-y-5 gap-x-12">
                             {Object.entries(universalFields)
                                 .filter(([, v]) => v != null)
                                 .map(([label, value]) => (
-                                    <div key={label}>
-                                        <span className="text-[9px] text-zinc-600 uppercase tracking-wider font-bold">{label}</span>
-                                        <div className="text-[11px] text-zinc-300 font-medium mt-0.5">{String(value)}</div>
+                                    <div key={label} className="space-y-1">
+                                        <span className="text-[9px] text-muted-foreground/60 uppercase tracking-widest font-bold block">{label}</span>
+                                        <div className="text-[11px] text-foreground font-semibold tracking-tight">{String(value)}</div>
                                     </div>
                                 ))}
                         </div>
@@ -101,97 +108,29 @@ function RecordDetailModal({ record, onClose }: { record: any; onClose: () => vo
 
                     {/* Additional Attributes */}
                     {Object.keys(additionalFields).length > 0 && (
-                        <div className="px-5 py-4">
-                            <p className="text-[9px] uppercase tracking-widest font-bold text-zinc-600 mb-3">Extended Fields</p>
-                            <div className="grid grid-cols-2 gap-y-3 gap-x-10">
+                        <div className="px-6 py-5 border-b border-border/20">
+                            <h4 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40 mb-4">Extended Metadata</h4>
+                            <div className="grid grid-cols-2 gap-y-5 gap-x-12">
                                 {Object.entries(additionalFields)
                                     .filter(([, v]) => v != null && String(v).trim() !== '' && String(v).toLowerCase() !== 'nan')
                                     .map(([key, value]) => (
-                                        <div key={key}>
-                                            <span className="text-[9px] text-zinc-600 uppercase tracking-wider font-bold truncate block">{key}</span>
-                                            <div className="text-[11px] text-zinc-400 mt-0.5 truncate">{String(value)}</div>
+                                        <div key={key} className="space-y-1">
+                                            <span className="text-[9px] text-muted-foreground/60 uppercase tracking-widest font-bold truncate block">{key}</span>
+                                            <div className="text-[11px] text-muted-foreground font-medium truncate">{String(value)}</div>
                                         </div>
                                     ))}
                             </div>
                         </div>
                     )}
                 </div>
-            </motion.div>
-        </motion.div>
-    );
-}
-
-/* ─────────────────────────────────────────────
-   Filter Panel
-───────────────────────────────────────────── */
-function Dropdown({
-    label, icon: Icon, value, options, onChange,
-}: {
-    label: string;
-    icon: React.ElementType;
-    value: string;
-    options: string[];
-    onChange: (v: string) => void;
-}) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    const isActive = value !== 'All';
-
-    return (
-        <div className="relative" ref={ref}>
-            <button
-                onClick={() => setOpen(o => !o)}
-                className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded border text-[11px] font-bold transition-all',
-                    isActive
-                        ? 'bg-primary/10 border-primary/30 text-primary'
-                        : 'bg-[#1a1a1a] border-[#2e2e2e] text-zinc-400 hover:border-[#444] hover:text-zinc-200'
-                )}
-            >
-                <Icon size={11} />
-                <span>{label}: {value}</span>
-                <ChevronDown size={10} className={cn('transition-transform', open && 'rotate-180')} />
-            </button>
-
-            <AnimatePresence>
-                {open && (
-                    <motion.div
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        className="absolute top-full mt-1.5 left-0 bg-[#1c1c1c] border border-[#333] rounded-lg shadow-xl z-50 py-1 min-w-[160px] max-h-52 overflow-y-auto"
-                    >
-                        {options.map(opt => (
-                            <button
-                                key={opt}
-                                onClick={() => { onChange(opt); setOpen(false); }}
-                                className={cn(
-                                    'w-full text-left px-3 py-1.5 text-[11px] transition-colors hover:bg-[#242424]',
-                                    value === opt ? 'text-primary font-bold' : 'text-zinc-400'
-                                )}
-                            >
-                                {opt}
-                            </button>
-                        ))}
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
+            </DialogContent>
+        </Dialog>
     );
 }
 
 /* ─────────────────────────────────────────────
    Main Component
-───────────────────────────────────────────── */
+ ───────────────────────────────────────────── */
 export const RecordTable: React.FC<RecordTableProps> = ({ records }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
@@ -246,7 +185,6 @@ export const RecordTable: React.FC<RecordTableProps> = ({ records }) => {
         return result;
     }, [records, searchTerm, statusFilter, locationFilter, dateFrom, dateTo, sortField, sortDir]);
 
-    // Reset pagination when filters or sorting change
     useEffect(() => {
         setCurrentPage(1);
     }, [searchTerm, statusFilter, locationFilter, dateFrom, dateTo, sortField, sortDir]);
@@ -273,7 +211,7 @@ export const RecordTable: React.FC<RecordTableProps> = ({ records }) => {
     };
 
     const SortIcon = ({ field }: { field: string }) => {
-        if (sortField !== field) return <ArrowUpDown size={9} className="text-zinc-700 group-hover:text-zinc-500 transition-colors" />;
+        if (sortField !== field) return <ArrowUpDown size={9} className="text-muted-foreground opacity-30 group-hover:opacity-100 transition-opacity" />;
         return sortDir === 'asc'
             ? <ArrowUp size={9} className="text-primary" />
             : <ArrowDown size={9} className="text-primary" />;
@@ -293,205 +231,224 @@ export const RecordTable: React.FC<RecordTableProps> = ({ records }) => {
     ];
 
     return (
-        <>
+        <div className="space-y-4">
             {/* ── Filter Panel ── */}
-            <div className="bg-[#171717] border border-[#2e2e2e] rounded-lg p-4 mb-3 space-y-3">
-                <div className="flex items-center gap-2 mb-1">
-                    <SlidersHorizontal size={13} className="text-zinc-500" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Filters</span>
+            <div className="bg-muted/30 border border-border/50 rounded-lg p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <SlidersHorizontal size={13} className="text-muted-foreground/60" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">Ledger Filters</span>
+                    </div>
                     {hasActiveFilters && (
-                        <button
+                        <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={clearAll}
-                            className="ml-auto flex items-center gap-1 text-[10px] text-zinc-500 hover:text-primary transition-colors"
+                            className="h-6 px-2 text-[10px] font-bold text-muted-foreground hover:text-primary transition-colors uppercase tracking-widest"
                         >
-                            <X size={9} /> Clear all
-                        </button>
+                            Reset System
+                        </Button>
                     )}
                 </div>
 
-                {/* Row 1: Search + Dropdown Filters */}
-                <div className="flex flex-wrap gap-2 items-center">
-                    <div className="relative flex-1 min-w-[200px]">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" size={11} />
+                <div className="flex flex-wrap gap-3 items-center">
+                    <div className="relative flex-1 min-w-[280px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/40" size={13} />
                         <input
                             type="text"
-                            placeholder="Search candidate, position, manager, dept..."
-                            className="w-full bg-[#1a1a1a] border border-[#2e2e2e] rounded py-1.5 pl-8 pr-3 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 font-medium"
+                            placeholder="Search by intelligence fields..."
+                            className="w-full bg-background border border-border/50 rounded h-9 pl-9 pr-3 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 text-foreground font-medium placeholder:text-muted-foreground/30"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
-                        {searchTerm && (
-                            <button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300">
-                                <X size={10} />
-                            </button>
-                        )}
                     </div>
 
-                    <Dropdown label="Status" icon={Tag} value={statusFilter} options={STATUS_OPTIONS} onChange={setStatusFilter} />
-                    <Dropdown label="Location" icon={MapPin} value={locationFilter} options={uniqueLocations} onChange={setLocationFilter} />
+                    <div className="flex gap-2">
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-[140px] h-9 text-[11px] font-bold uppercase tracking-wider bg-background border-border/50">
+                                <Tag size={12} className="mr-2 text-muted-foreground opacity-50" />
+                                <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {STATUS_OPTIONS.map(opt => (
+                                    <SelectItem key={opt} value={opt} className="text-[11px] font-medium uppercase tracking-wider">{opt}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={locationFilter} onValueChange={setLocationFilter}>
+                            <SelectTrigger className="w-[160px] h-9 text-[11px] font-bold uppercase tracking-wider bg-background border-border/50">
+                                <MapPin size={12} className="mr-2 text-muted-foreground opacity-50" />
+                                <SelectValue placeholder="Location" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {uniqueLocations.map(opt => (
+                                    <SelectItem key={opt} value={opt} className="text-[11px] font-medium uppercase tracking-wider">{opt}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
                 </div>
 
-                {/* Row 2: Date Range */}
-                <div className="flex flex-wrap gap-2 items-center">
-                    <div className="flex items-center gap-2">
-                        <Calendar size={12} className={cn("shrink-0", (dateFrom || dateTo) ? 'text-primary' : 'text-zinc-600')} />
-                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap">Join Date Range:</span>
+                <Separator className="opacity-30" />
+
+                <div className="flex flex-wrap gap-4 items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <Calendar size={13} className={cn("shrink-0", (dateFrom || dateTo) ? 'text-primary' : 'text-muted-foreground/40')} />
+                            <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest whitespace-nowrap">Join Date Bridge:</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="date"
+                                value={dateFrom}
+                                onChange={(e) => setDateFrom(e.target.value)}
+                                className={cn(
+                                    "bg-background border rounded h-7 px-2 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors uppercase font-bold",
+                                    dateFrom ? 'border-primary/40' : 'border-border/50'
+                                )}
+                            />
+                            <span className="text-[9px] font-black text-muted-foreground opacity-30 mx-1">TO</span>
+                            <input
+                                type="date"
+                                value={dateTo}
+                                onChange={(e) => setDateTo(e.target.value)}
+                                className={cn(
+                                    "bg-background border rounded h-7 px-2 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors uppercase font-bold",
+                                    dateTo ? 'border-primary/40' : 'border-border/50'
+                                )}
+                            />
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <label className="text-[10px] text-zinc-600">From</label>
-                        <input
-                            type="date"
-                            value={dateFrom}
-                            onChange={(e) => setDateFrom(e.target.value)}
-                            className={cn(
-                                "bg-[#1a1a1a] border rounded px-2 py-1 text-[11px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors",
-                                dateFrom ? 'border-primary/40' : 'border-[#2e2e2e]'
-                            )}
-                        />
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <label className="text-[10px] text-zinc-600">To</label>
-                        <input
-                            type="date"
-                            value={dateTo}
-                            onChange={(e) => setDateTo(e.target.value)}
-                            className={cn(
-                                "bg-[#1a1a1a] border rounded px-2 py-1 text-[11px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors",
-                                dateTo ? 'border-primary/40' : 'border-[#2e2e2e]'
-                            )}
-                        />
-                    </div>
-                    {(dateFrom || dateTo) && (
-                        <button
-                            onClick={() => { setDateFrom(''); setDateTo(''); }}
-                            className="text-[10px] text-zinc-600 hover:text-primary flex items-center gap-1 transition-colors"
-                        >
-                            <X size={9} /> Clear dates
-                        </button>
-                    )}
-                    <span className="ml-auto text-[10px] font-mono text-zinc-600 italic">
-                        {filtered.length} / {records.length} entries
+                    <span className="text-[10px] font-mono text-muted-foreground/40 italic">
+                        SYSTEM_FILTER: {filtered.length} / {records.length} VALID_RECORDS
                     </span>
                 </div>
             </div>
 
             {/* ── Table ── */}
-            <div className="bg-[#171717] border border-[#2e2e2e] rounded-lg overflow-hidden">
-                <div className="overflow-auto" style={{ maxHeight: '620px' }}>
-                    <table className="w-full text-[11px] whitespace-nowrap">
-                        <thead className="sticky top-0 bg-[#1c1c1c] border-b border-[#2e2e2e] z-10">
-                            <tr>
+            <div className="bg-muted/30 border border-border/50 rounded-lg overflow-hidden shadow-sm">
+                <div className="overflow-auto max-h-[600px]">
+                    <Table className="whitespace-nowrap">
+                        <TableHeader className="sticky top-0 bg-muted/90 backdrop-blur-sm z-10 border-b border-border shadow-sm">
+                            <TableRow className="hover:bg-transparent">
                                 {columns.map(col => (
-                                    <th
+                                    <TableHead
                                         key={col.key}
                                         onClick={() => col.sortable && handleSort(col.key)}
                                         className={cn(
-                                            'px-3 py-2 text-left font-bold uppercase tracking-tighter text-zinc-500 select-none group',
-                                            col.sortable && 'cursor-pointer hover:text-zinc-300 hover:bg-[#222]'
+                                            'h-10 px-4 text-[10px] font-black uppercase tracking-tighter text-muted-foreground/70 select-none group border-r border-border/10 last:border-0',
+                                            col.sortable && 'cursor-pointer hover:text-foreground transition-colors'
                                         )}
                                     >
-                                        <div className="flex items-center gap-1">
+                                        <div className="flex items-center gap-2">
                                             {col.label}
                                             {col.sortable && <SortIcon field={col.key} />}
                                         </div>
-                                    </th>
+                                    </TableHead>
                                 ))}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#242424]">
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
                             {paginatedRecords.map((record, i) => {
                                 const globalIndex = (currentPage - 1) * ROWS_PER_PAGE + i + 1;
                                 return (
-                                    <tr
+                                    <TableRow
                                         key={record.id || i}
-                                        className="hover:bg-[#1f1f1f] cursor-pointer group transition-colors"
+                                        className="hover:bg-muted/50 cursor-pointer group transition-colors border-b border-border/50"
                                         onClick={() => setSelectedRecord(record)}
                                     >
-                                        <td className="px-3 py-1.5 text-zinc-700 font-mono text-[9px]">{globalIndex}</td>
-                                        <td className="px-3 py-1.5">
-                                            <div className="font-bold text-zinc-300 group-hover:text-primary transition-colors">
-                                                {record.candidate_name || <span className="italic text-zinc-700">Unnamed</span>}
+                                        <TableCell className="px-4 py-2 text-muted-foreground/30 font-mono text-[9px] border-r border-border/5">{globalIndex}</TableCell>
+                                        <TableCell className="px-4 py-2">
+                                            <div className="font-bold text-foreground text-[11px] group-hover:text-primary transition-colors tracking-tight">
+                                                {record.candidate_name || <span className="italic opacity-20">UNNAMED</span>}
                                             </div>
-                                        </td>
-                                        <td className="px-3 py-1.5 text-zinc-500 max-w-[170px]">
-                                            <div className="truncate">{record.position_title || '—'}</div>
-                                        </td>
-                                        <td className="px-3 py-1.5 text-zinc-600">{record.department || '—'}</td>
-                                        <td className="px-3 py-1.5 text-zinc-600">{record.location || '—'}</td>
-                                        <td className="px-3 py-1.5 text-zinc-500 max-w-[130px]">
-                                            <div className="truncate">{record.hiring_manager || '—'}</div>
-                                        </td>
-                                        <td className="px-3 py-1.5 text-zinc-400 font-mono">
+                                        </TableCell>
+                                        <TableCell className="px-4 py-2 text-[11px] text-muted-foreground/70 font-medium">
+                                            <div className="truncate max-w-[200px]">{record.position_title || '—'}</div>
+                                        </TableCell>
+                                        <TableCell className="px-4 py-2 text-[10px] text-muted-foreground/50 font-bold uppercase tracking-tight">{record.department || '—'}</TableCell>
+                                        <TableCell className="px-4 py-2 text-[10px] text-muted-foreground/50 font-bold uppercase tracking-tight">{record.location || '—'}</TableCell>
+                                        <TableCell className="px-4 py-2 text-[11px] text-muted-foreground/70 font-medium">
+                                            <div className="truncate max-w-[150px]">{record.hiring_manager || '—'}</div>
+                                        </TableCell>
+                                        <TableCell className="px-4 py-2 text-[11px] text-foreground font-mono font-bold">
                                             {record.offered_ctc ? `₹${Number(record.offered_ctc).toLocaleString('en-IN')}` : '—'}
-                                        </td>
-                                        <td className="px-3 py-1.5 text-zinc-500 font-mono">
+                                        </TableCell>
+                                        <TableCell className="px-4 py-2 text-[10px] text-muted-foreground font-mono font-bold uppercase">
                                             {record.joining_date
                                                 ? new Date(record.joining_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
                                                 : '—'}
-                                        </td>
-                                        <td className="px-3 py-1.5">
-                                            <span className={cn(
-                                                'px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter',
+                                        </TableCell>
+                                        <TableCell className="px-4 py-2">
+                                            <Badge variant="outline" className={cn(
+                                                'text-[8px] font-black uppercase tracking-tighter h-5 px-2 border-0',
                                                 (record.status || '').toLowerCase().includes('joined')
-                                                    ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                                    ? 'bg-green-500/10 text-green-500'
                                                     : (record.status || '').toLowerCase().includes('offered')
-                                                        ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                                        ? 'bg-blue-500/10 text-blue-500'
                                                         : (record.status || '').toLowerCase().includes('hold')
-                                                            ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
-                                                            : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                                                            ? 'bg-yellow-500/10 text-yellow-500'
+                                                            : 'bg-muted text-muted-foreground/60'
                                             )}>
                                                 {record.status || '—'}
-                                            </span>
-                                        </td>
-                                        <td className="px-3 py-1.5 text-right font-mono text-primary font-bold">
-                                            {formatCurrency(record.revenue_results?.revenue || 0)}
-                                        </td>
-                                    </tr>
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="px-4 py-2 text-right">
+                                            <div className="text-[11px] text-primary font-black tracking-tight">
+                                                {formatCurrency(record.revenue_results?.revenue || 0)}
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
                                 )
                             })}
-                        </tbody>
-                    </table>
+                        </TableBody>
+                    </Table>
                     {filtered.length === 0 && (
-                        <div className="py-20 text-center text-zinc-600 text-[11px] font-mono italic">
-                            No matching entries for the selected filters.
+                        <div className="py-24 text-center text-muted-foreground/40 text-[10px] font-mono tracking-widest uppercase italic">
+                            No ledger matches for active neural filters
                         </div>
                     )}
                 </div>
 
                 {/* Pagination Footer */}
                 {totalPages > 1 && (
-                    <div className="bg-[#1c1c1c] border-t border-[#2e2e2e] px-4 py-2.5 flex items-center justify-between">
-                        <span className="text-[10px] text-zinc-500 font-mono">
-                            Showing {(currentPage - 1) * ROWS_PER_PAGE + 1} to {Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} of {filtered.length} entries
+                    <div className="bg-muted/50 border-t border-border/50 px-6 py-3 flex items-center justify-between">
+                        <span className="text-[9px] text-muted-foreground/50 font-mono font-bold uppercase tracking-widest">
+                            INDEX: {(currentPage - 1) * ROWS_PER_PAGE + 1} TO {Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} / {filtered.length} RECORDS
                         </span>
-                        <div className="flex items-center gap-1.5">
-                            <button
+                        <div className="flex items-center gap-4">
+                            <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                                 disabled={currentPage === 1}
-                                className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground disabled:opacity-20"
                             >
-                                <ChevronLeft size={14} />
-                            </button>
-                            <span className="text-[10px] text-zinc-400 font-bold px-2">
-                                Page {currentPage} of {totalPages}
+                                <ChevronLeft size={16} />
+                            </Button>
+                            <span className="text-[10px] text-foreground font-bold font-mono tracking-widest">
+                                PAGE {currentPage} / {totalPages}
                             </span>
-                            <button
+                            <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                                 disabled={currentPage === totalPages}
-                                className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-[#2a2a2a] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground disabled:opacity-20"
                             >
-                                <ChevronRight size={14} />
-                            </button>
+                                <ChevronRight size={16} />
+                            </Button>
                         </div>
                     </div>
                 )}
             </div>
 
-            <AnimatePresence>
-                {selectedRecord && (
-                    <RecordDetailModal record={selectedRecord} onClose={() => setSelectedRecord(null)} />
-                )}
-            </AnimatePresence>
-        </>
+            <RecordDetailModal
+                record={selectedRecord}
+                open={!!selectedRecord}
+                onOpenChange={(open) => !open && setSelectedRecord(null)}
+            />
+        </div>
     );
 };
