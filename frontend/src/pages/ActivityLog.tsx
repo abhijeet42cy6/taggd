@@ -25,6 +25,7 @@ const RESOURCE_TYPE_LABEL: Record<string, string> = {
   ingestion_sla_upload: "SLA ingest",
   ingestion_wfm_upload: "WFM ingest",
   ingestion_finance_upload: "Finance ingest",
+  candidate: "Candidate",
 };
 
 function actionAccent(action: string): string {

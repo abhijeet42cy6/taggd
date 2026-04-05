@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Info } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
-import { queries, type RecordRow, type RecordsPage, type Project } from "@/lib/api";
+import { queries, columnMappingEntryCount, type RecordRow, type RecordsPage, type Project } from "@/lib/api";
 import { clientsVm } from "@/lib/view-models/clients";
 import { cn, formatCurrency, formatNumber, formatPercent } from "@/lib/utils";
 import {
@@ -19,6 +19,7 @@ import { RequisitionCreateDrawer } from "@/components/platform/RequisitionCreate
 import { SkeletonKpiRow, SkeletonTable, Skeleton } from "@/components/platform/Skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReqStatusStackedBar, AgeingBars, LevelDonutChart } from "@/components/platform/Charts";
+import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
 
 const PER_PAGE = 50;
 
@@ -1384,12 +1385,20 @@ export function ClientDetail() {
                   <KvRow label="Contract Sheet" value={p.contract_sheet || "—"} />
                   <KvRow label="Region" value={p.region || "—"} />
                   <KvRow label="Vertical" value={p.vertical || "—"} />
-                  {p.column_mapping && (
-                    <KvRow label="Column Mapping" value={
-                      <span style={{ color: "var(--accent)", fontSize: 10, fontFamily: "'DM Mono',monospace" }}>
-                        {Object.keys(p.column_mapping).length} fields mapped
-                      </span>
-                    } />
+                  {p.column_mapping && columnMappingEntryCount(p.column_mapping) > 0 && (
+                    <details style={{ marginTop: 10 }}>
+                      <summary style={{
+                        cursor: "pointer",
+                        fontSize: 10,
+                        fontFamily: "'DM Mono',monospace",
+                        color: "var(--accent)",
+                      }}>
+                        Column mapping ({columnMappingEntryCount(p.column_mapping)} links)
+                      </summary>
+                      <div style={{ marginTop: 10, padding: "10px 8px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                        <ColumnMappingDisplay mapping={p.column_mapping} variant="card" scrollMaxClass="max-h-[320px]" />
+                      </div>
+                    </details>
                   )}
                 </div>
               ))}

@@ -39,9 +39,21 @@ from .agents.matchmaker import MatchmakerAgent
 from .core.processor import ExcelProcessor
 from .core.ingestion_audit import log_ingestion_event, list_ingestion_events_for_user
 from .core.activity_log import activity_log_to_dict, list_activity_for_user, log_activity
+from .core.column_mapping_normalize import build_column_mapping_v2
+from .core.record_field_synonyms import merge_llm_and_heuristic_record_fields
 
 # Initialize DB
 init_db()
+
+
+def finalize_ingest_column_mapping(mapping_result, headers: list) -> dict:
+    """Universal + RPO `record_fields`, merged LLM + heuristic; persisted as column_mapping v2."""
+    rf = merge_llm_and_heuristic_record_fields(
+        mapping_result.record_field_mapping,
+        headers,
+        mapping_result.mapping,
+    )
+    return build_column_mapping_v2(mapping_result.mapping, rf)
 
 app = FastAPI(title="Agentic Revenue Generator API")
 
@@ -65,11 +77,13 @@ from .routers.sla_metrics import router as sla_metrics_write_router
 from .routers.finance_ledger import router as finance_ledger_router
 from .routers.wfm_benchmark import router as wfm_benchmark_router
 from .routers.revenue_trackers import router as revenue_trackers_router
+from .routers.candidates import router as candidates_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
 app.include_router(wfm_benchmark_router)
 app.include_router(revenue_trackers_router)
+app.include_router(candidates_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import apply_project_scope, assert_project_access, account_accessible, scoped_clause_record
@@ -146,6 +160,103 @@ def _parse_optional_datetime(val: Optional[str]) -> Optional[datetime.datetime]:
         raise HTTPException(status_code=400, detail=f"Invalid date or datetime: {val!r}")
 
 
+class RecordRpoPatch(BaseModel):
+    """Partial update for RPO Requisition Tracker fields on `records`."""
+
+    client_req_id: Optional[str] = None
+    rpo_client_name: Optional[str] = None
+    positions_open: Optional[int] = None
+    rpo_priority: Optional[str] = None
+    rpo_job_type: Optional[str] = None
+    experience_years_required: Optional[str] = None
+    ctc_budget_lpa: Optional[float] = None
+    rpo_source_of_hire: Optional[str] = None
+    rpo_sub_source: Optional[str] = None
+    profiles_sourced: Optional[int] = None
+    profiles_submitted: Optional[int] = None
+    interviews_scheduled: Optional[int] = None
+    offers_released: Optional[int] = None
+    offers_accepted: Optional[int] = None
+    assigned_recruiter_rpo: Optional[str] = None
+    rpo_mandate_status: Optional[str] = None
+    rpo_vertical: Optional[str] = None
+    rpo_division: Optional[str] = None
+    rpo_bu_sbu: Optional[str] = None
+    rpo_zone: Optional[str] = None
+    rpo_grade_band: Optional[str] = None
+    rpo_business_hrbp: Optional[str] = None
+    rpo_sourcer: Optional[str] = None
+    rpo_taggd_pm: Optional[str] = None
+    rpo_hiring_agency: Optional[str] = None
+    rpo_ijp_referral: Optional[str] = None
+    mandate_received_date: Optional[str] = None
+    intake_date: Optional[str] = None
+    first_cv_share_date: Optional[str] = None
+    selection_date_req: Optional[str] = None
+    loi_date_req: Optional[str] = None
+    closure_date_req: Optional[str] = None
+    rpo_stage: Optional[str] = None
+    ageing_days: Optional[int] = None
+    ageing_bracket: Optional[str] = None
+    dead_days: Optional[int] = None
+    tto_days: Optional[int] = None
+    ttf_days: Optional[int] = None
+    taggd_fees_amount: Optional[float] = None
+    billing_month: Optional[str] = None
+    fy_label: Optional[str] = None
+    requisition_extras: Optional[Dict[str, Any]] = None
+
+
+_RECORD_RPO_DATE_FIELDS = frozenset(
+    {
+        "mandate_received_date",
+        "intake_date",
+        "first_cv_share_date",
+        "selection_date_req",
+        "loi_date_req",
+        "closure_date_req",
+    }
+)
+_RECORD_RPO_INT_FIELDS = frozenset(
+    {
+        "positions_open",
+        "profiles_sourced",
+        "profiles_submitted",
+        "interviews_scheduled",
+        "offers_released",
+        "offers_accepted",
+        "ageing_days",
+        "dead_days",
+        "tto_days",
+        "ttf_days",
+    }
+)
+_RECORD_RPO_FLOAT_FIELDS = frozenset({"ctc_budget_lpa", "taggd_fees_amount"})
+
+
+def _apply_record_rpo_patch(r: Record, rpo: RecordRpoPatch) -> None:
+    data = rpo.model_dump(exclude_unset=True)
+    ext = data.pop("requisition_extras", None)
+    for k, v in data.items():
+        if v is None:
+            continue
+        if k in _RECORD_RPO_DATE_FIELDS:
+            setattr(r, k, _parse_optional_datetime(str(v)))
+        elif k in _RECORD_RPO_INT_FIELDS:
+            setattr(r, k, int(v))
+        elif k in _RECORD_RPO_FLOAT_FIELDS:
+            setattr(r, k, float(v))
+        elif isinstance(v, str):
+            setattr(r, k, v.strip() or None)
+        else:
+            setattr(r, k, v)
+    if ext is not None:
+        if not isinstance(ext, dict):
+            raise HTTPException(status_code=400, detail="requisition_extras must be an object")
+        base = dict(r.requisition_extras) if isinstance(r.requisition_extras, dict) else {}
+        r.requisition_extras = {**base, **ext}
+
+
 class RecordPatch(BaseModel):
     status: Optional[str] = None
     global_status: Optional[str] = None
@@ -158,6 +269,7 @@ class RecordPatch(BaseModel):
     creation_date: Optional[str] = None
     joining_date: Optional[str] = None
     additional_attributes: Optional[Dict[str, Any]] = None
+    rpo: Optional[RecordRpoPatch] = None
 
 
 class RecordCreate(BaseModel):
@@ -176,6 +288,8 @@ class RecordCreate(BaseModel):
     creation_date: Optional[str] = None
     joining_date: Optional[str] = None
     additional_attributes: Optional[Dict[str, Any]] = None
+    client_req_id: Optional[str] = None
+    rpo: Optional[RecordRpoPatch] = None
 
 
 class ProConfirmRequest(BaseModel):
@@ -298,8 +412,9 @@ async def upload_file(
         
         mapper_agent = ColumnMapperAgent()
         mapping_result = mapper_agent.map_columns(headers, sample_rows)
-        project.column_mapping = mapping_result.mapping
-        
+        column_mapping_payload = finalize_ingest_column_mapping(mapping_result, headers)
+        project.column_mapping = column_mapping_payload
+
         # Identify the pos_id_column (e.g. Req ID, Job ID, etc.) for deduplication
         pos_id_col = None
         id_keywords = ['req', 'job id', 'job code', 'position id', 'id', 'sl no']
@@ -342,11 +457,11 @@ async def upload_file(
         processor = ExcelProcessor(db)
         
         processor.process_file_into_db(
-            project.id, 
-            file_path, 
-            classification.tracker_sheet, 
-            mapping_result.mapping, 
-            calc_func
+            project.id,
+            file_path,
+            classification.tracker_sheet,
+            column_mapping_payload,
+            calc_func,
         )
 
         log_ingestion_event(
@@ -362,7 +477,7 @@ async def upload_file(
             "status": "success",
             "project_id": project.id,
             "sheets": {"tracker": classification.tracker_sheet, "contract": classification.contract_sheet},
-            "mapping": mapping_result.mapping,
+            "mapping": column_mapping_payload,
             "logic_explanation": logic_explanation,
             "python_code": logic_code,
             "headers_found": headers
@@ -519,8 +634,9 @@ async def pro_confirm_upload(
 
         mapper_agent = ColumnMapperAgent()
         mapping_result = mapper_agent.map_columns(all_headers, all_samples)
-        project.column_mapping = mapping_result.mapping
-        
+        column_mapping_payload = finalize_ingest_column_mapping(mapping_result, all_headers)
+        project.column_mapping = column_mapping_payload
+
         # Identity Keyword search for pos_id (Unified for all sheets)
         pos_id_col = None
         id_keywords = ['req', 'job id', 'job code', 'position id', 'id', 'sl no', 'reference']
@@ -559,7 +675,7 @@ async def pro_confirm_upload(
         calc_func = loc['calculate']
         
         processor = ExcelProcessor(db)
-        processor.process_file_into_db(project.id, file_path, data_sheets, mapping_result.mapping, calc_func)
+        processor.process_file_into_db(project.id, file_path, data_sheets, column_mapping_payload, calc_func)
 
         log_ingestion_event(
             db,
@@ -575,7 +691,7 @@ async def pro_confirm_upload(
             "project_id": project.id,
             "data_sheets": data_sheets,
             "logic_explanation": logic_explanation,
-            "mapping": mapping_result.mapping
+            "mapping": column_mapping_payload
         }
 
     except HTTPException:
@@ -1091,6 +1207,9 @@ def patch_record(
             raise HTTPException(status_code=400, detail="additional_attributes must be an object")
         r.additional_attributes = {**base, **incoming}
 
+    if body.rpo is not None:
+        _apply_record_rpo_patch(r, body.rpo)
+
     db.commit()
     db.refresh(r)
     log_activity(
@@ -1181,7 +1300,10 @@ def create_record(
         fingerprint=fp,
         excel_provided_id=pc or None,
         excel_row_index=-1,
+        client_req_id=(body.client_req_id or "").strip() or None,
     )
+    if body.rpo is not None:
+        _apply_record_rpo_patch(r, body.rpo)
     db.add(r)
     db.commit()
     db.refresh(r)

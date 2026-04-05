@@ -1,6 +1,8 @@
 import pandas as pd
 from sqlalchemy.orm import Session
 from ..db.database import Project, Record
+from .column_mapping_normalize import all_mapped_excel_headers, split_column_mapping
+from .record_field_synonyms import INGESTABLE_RECORD_COLUMNS, field_coercion_kind
 import datetime
 import json
 import math
@@ -74,6 +76,67 @@ def _sanitize_value(v):
     if isinstance(v, (list, tuple)):
         return [_sanitize_value(item) for item in v]
     return v
+
+
+def _safe_optional_int(val):
+    if val is None or _is_na(val):
+        return None
+    s = str(val).strip().lower()
+    if s in ("", "-", "nan", "none", "nat"):
+        return None
+    try:
+        return int(float(str(val).replace(",", "")))
+    except Exception:
+        return None
+
+
+def _safe_optional_float(val):
+    if val is None or _is_na(val):
+        return None
+    s = str(val).strip().lower()
+    if s in ("", "-", "nan", "none", "nat"):
+        return None
+    try:
+        f = float(str(val).replace(",", ""))
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return f
+    except Exception:
+        return None
+
+
+def _apply_record_field_columns(record: Record, row_dict: dict, record_fields: dict) -> None:
+    """Set RPO / requisition columns from mapped Excel headers; skip empty cells."""
+    for field, header in record_fields.items():
+        if field not in INGESTABLE_RECORD_COLUMNS or not header:
+            continue
+        raw = row_dict.get(header)
+        if raw is None or _is_na(raw):
+            continue
+        if isinstance(raw, str) and not str(raw).strip():
+            continue
+        kind = field_coercion_kind(field)
+        if kind == "date":
+            setattr(record, field, _safe_date(raw))
+        elif kind == "int":
+            v = _safe_optional_int(raw)
+            if v is not None:
+                setattr(record, field, v)
+        elif kind == "float":
+            v = _safe_optional_float(raw)
+            if v is not None:
+                setattr(record, field, v)
+        else:
+            s = str(raw).strip() if raw is not None else ""
+            setattr(record, field, s or None)
+
+
+def _additional_attributes(row_dict: dict, mapped_headers: frozenset) -> dict:
+    return {
+        k: _sanitize_value(v)
+        for k, v in row_dict.items()
+        if k not in mapped_headers
+    }
 
 
 def _derive_global_status(results: dict) -> str:
@@ -155,6 +218,10 @@ class ExcelProcessor:
         project_ref = self.db.query(Project).filter(Project.id == project_id).first()
         pos_id_col_name = project_ref.pos_id_column if project_ref else None
 
+        universal_map, record_fields_map = split_column_mapping(mapping)
+        # Per-sheet mapped headers: universal + record_fields apply to all sheets; unmapped columns vary by sheet
+        base_mapped = all_mapped_excel_headers(universal_map, record_fields_map)
+
         for s_idx, s_name in enumerate(target_sheets):
             print(f"⌛ Analyzing Delta for sheet: {s_name}...")
             try:
@@ -169,7 +236,7 @@ class ExcelProcessor:
 
                 # --- 1. Map to Universal Keys ---
                 universal_data = {}
-                for u_key, excel_header in mapping.items():
+                for u_key, excel_header in universal_map.items():
                     val = row_dict.get(excel_header)
                     universal_data[u_key] = val
 
@@ -242,18 +309,20 @@ class ExcelProcessor:
                     # UPDATING existing record ONLY if something has changed
                     # (Candidate Name, Status, or logic results might have evolved)
                     existing_record.candidate_name = final_name or "Unknown"
+                    existing_record.position_title = title
                     existing_record.status = str(universal_data.get("status") or "")
+                    existing_record.hiring_manager = str(universal_data.get("hiring_manager") or "").strip() or None
+                    existing_record.offered_ctc = _safe_float(universal_data.get("offered_ctc"))
+                    existing_record.creation_date = universal_data.get("creation_date")
+                    existing_record.location = str(universal_data.get("location") or "").strip() or None
+                    existing_record.department = str(universal_data.get("department") or "").strip() or None
                     existing_record.global_status = g_status
                     existing_record.revenue_results = calc_results
                     existing_record.joining_date = universal_data.get("joining_date")
                     existing_record.excel_row_index = excel_pos # Update position if shifted
                     existing_record.excel_provided_id = pos_id_val # Update if ID column metadata changed
-                    # Additional metadata in JSON
-                    existing_record.additional_attributes = {
-                        k: _sanitize_value(v)
-                        for k, v in row_dict.items()
-                        if k not in set(mapping.values())
-                    }
+                    _apply_record_field_columns(existing_record, row_dict, record_fields_map)
+                    existing_record.additional_attributes = _additional_attributes(row_dict, base_mapped)
                 else:
                     # NEW Record creation
                     new_record = Record(
@@ -261,23 +330,20 @@ class ExcelProcessor:
                         candidate_name=final_name or "Unknown",
                         position_title=title,
                         status=str(universal_data.get("status") or ""),
-                        hiring_manager=str(universal_data.get("hiring_manager") or ""),
+                        hiring_manager=(str(universal_data.get("hiring_manager") or "").strip() or None),
                         offered_ctc=_safe_float(universal_data.get("offered_ctc")),
                         joining_date=universal_data.get("joining_date"),
                         creation_date=universal_data.get("creation_date"),
-                        location=str(universal_data.get("location") or ""),
-                        department=str(universal_data.get("department") or ""),
-                        additional_attributes={
-                            k: _sanitize_value(v)
-                            for k, v in row_dict.items()
-                            if k not in set(mapping.values())
-                        },
+                        location=str(universal_data.get("location") or "").strip() or None,
+                        department=str(universal_data.get("department") or "").strip() or None,
+                        additional_attributes=_additional_attributes(row_dict, base_mapped),
                         revenue_results=calc_results,
                         global_status=g_status,
                         fingerprint=current_fingerprint,
                         excel_row_index=excel_pos,
-                        excel_provided_id=pos_id_val
+                        excel_provided_id=pos_id_val,
                     )
+                    _apply_record_field_columns(new_record, row_dict, record_fields_map)
                     self.db.add(new_record)
 
         # Batch commit all additions and updates

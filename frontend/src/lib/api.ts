@@ -197,6 +197,23 @@ export type RequisitionKpis = {
   total_records: number;
 };
 
+/** Count mapped columns for legacy flat `column_mapping` or v2 `{ universal, record_fields }`. */
+export function columnMappingEntryCount(
+  cm: Record<string, unknown> | Record<string, string> | null | undefined
+): number {
+  if (!cm || typeof cm !== "object") return 0;
+  const o = cm as Record<string, unknown>;
+  const u = o.universal;
+  const r = o.record_fields;
+  if (u && typeof u === "object") {
+    return (
+      Object.keys(u as object).length +
+      (r && typeof r === "object" ? Object.keys(r as object).length : 0)
+    );
+  }
+  return Object.keys(cm).length;
+}
+
 export type Project = {
   id: number;
   filename: string;
@@ -221,7 +238,8 @@ export type Project = {
   /** Account type (e.g. RPO) */
   practice?: string;
   pos_id_column?: string;
-  column_mapping?: Record<string, string> | null;
+  /** Legacy: flat universal map. v2: `{ version, universal, record_fields }`. */
+  column_mapping?: Record<string, unknown> | Record<string, string> | null;
   revenue_logic_code?: string | null;
   logic_explanation?: string | null;
 };
@@ -243,6 +261,52 @@ export const adminApi = {
   setUserProjects: (userId: number, project_ids: number[]) =>
     api.put(`/admin/users/${userId}/projects`, { project_ids }).then((r) => r.data),
   listProjectsForAdmin: () => api.get<Project[]>("/projects").then((r) => r.data),
+};
+
+/** Matches backend `RecordRpoPatch` — use on create/patch nested `rpo` and as optional fields on row responses. */
+export type RecordRpoPatch = {
+  client_req_id?: string;
+  rpo_client_name?: string;
+  positions_open?: number;
+  rpo_priority?: string;
+  rpo_job_type?: string;
+  experience_years_required?: string;
+  ctc_budget_lpa?: number;
+  rpo_source_of_hire?: string;
+  rpo_sub_source?: string;
+  profiles_sourced?: number;
+  profiles_submitted?: number;
+  interviews_scheduled?: number;
+  offers_released?: number;
+  offers_accepted?: number;
+  assigned_recruiter_rpo?: string;
+  rpo_mandate_status?: string;
+  rpo_vertical?: string;
+  rpo_division?: string;
+  rpo_bu_sbu?: string;
+  rpo_zone?: string;
+  rpo_grade_band?: string;
+  rpo_business_hrbp?: string;
+  rpo_sourcer?: string;
+  rpo_taggd_pm?: string;
+  rpo_hiring_agency?: string;
+  rpo_ijp_referral?: string;
+  mandate_received_date?: string;
+  intake_date?: string;
+  first_cv_share_date?: string;
+  selection_date_req?: string;
+  loi_date_req?: string;
+  closure_date_req?: string;
+  rpo_stage?: string;
+  ageing_days?: number;
+  ageing_bracket?: string;
+  dead_days?: number;
+  tto_days?: number;
+  ttf_days?: number;
+  taggd_fees_amount?: number;
+  billing_month?: string;
+  fy_label?: string;
+  requisition_extras?: Record<string, unknown>;
 };
 
 export type RecordRow = {
@@ -267,7 +331,7 @@ export type RecordRow = {
     status?: string;
   };
   additional_attributes?: Record<string, unknown>;
-};
+} & Partial<RecordRpoPatch>;
 
 /** PATCH /records/{id} — partial update; null clears optional fields where supported */
 export type RecordPatch = {
@@ -282,6 +346,7 @@ export type RecordPatch = {
   creation_date?: string | null;
   joining_date?: string | null;
   additional_attributes?: Record<string, unknown>;
+  rpo?: RecordRpoPatch;
 };
 
 /** POST /records — manual create */
@@ -299,7 +364,88 @@ export type RecordCreate = {
   creation_date?: string | null;
   joining_date?: string | null;
   additional_attributes?: Record<string, unknown>;
+  client_req_id?: string | null;
+  rpo?: RecordRpoPatch;
 };
+
+/** Row shape from `GET /candidates` / `GET /candidates/{id}` (mirrors ORM + audit mixin). */
+export type CandidateRow = {
+  id: number;
+  project_id: number;
+  record_id: number;
+  client_candidate_id: string;
+  full_name?: string | null;
+  contact_no?: string | null;
+  email_id?: string | null;
+  gender?: string | null;
+  current_location?: string | null;
+  qualification?: string | null;
+  specialization?: string | null;
+  total_experience_yrs?: number | null;
+  current_organization?: string | null;
+  current_designation?: string | null;
+  notice_period_days?: number | null;
+  alternate_contact_no?: string | null;
+  source_of_hire?: string | null;
+  sub_source?: string | null;
+  current_ctc_lpa?: number | null;
+  expected_ctc_lpa?: number | null;
+  resume_screening?: string | null;
+  assigned_recruiter?: string | null;
+  hiring_manager?: string | null;
+  current_stage?: string | null;
+  offer_ctc_lpa?: number | null;
+  offer_release_date?: string | null;
+  offer_acceptance?: string | null;
+  expected_doj?: string | null;
+  actual_doj?: string | null;
+  selection_date?: string | null;
+  loi_issue_date?: string | null;
+  cb_closure_date?: string | null;
+  fingerprint?: string | null;
+  excel_row_index?: number | null;
+  revenue_results?: Record<string, unknown> | null;
+  global_status?: string | null;
+  candidate_extras?: Record<string, unknown> | null;
+  offer_date?: string | null;
+  offer_accepted_flag?: string | null;
+  decline_reason?: string | null;
+  joining_status?: string | null;
+  checkin_30_day?: string | null;
+  checkin_60_day?: string | null;
+  checkin_90_day?: string | null;
+  early_exit_risk?: string | null;
+  offered_gross_ctc?: number | null;
+  offered_stvs?: number | null;
+  hike_pct_offered?: number | null;
+  bgv_date?: string | null;
+  bgv_status?: string | null;
+  medical_initiation_date?: string | null;
+  candidate_staff_no?: string | null;
+  msil_staff_no?: string | null;
+  sourcer_name?: string | null;
+  taggd_pm?: string | null;
+  offer_onboarding_extras?: Record<string, unknown> | null;
+  system_created_at?: string | null;
+  system_updated_at?: string | null;
+  source_filename?: string | null;
+  uploaded_by?: string | null;
+};
+
+/** POST /candidates */
+export type CandidateCreate = {
+  project_id: number;
+  record_id: number;
+  client_candidate_id: string;
+} & Partial<
+  Omit<CandidateRow, "id" | "project_id" | "record_id" | "client_candidate_id">
+>;
+
+/** PATCH /candidates/{id} */
+export type CandidatePatch = Partial<
+  Pick<CandidateRow, "record_id"> &
+    Omit<CandidateRow, "id" | "project_id" | "record_id" | "client_candidate_id">
+>;
 
 export type RecordsPage = {
   records: RecordRow[];
@@ -348,6 +494,7 @@ const TTL_MS: Record<string, number> = {
   "stats/requisitions": 15_000,
   "projects":       30_000,
   "records/all":    10_000,
+  candidates:       15_000,
   "finance/stats":  20_000,
   "finance/data":   20_000,
   "sla/stats":      20_000,
@@ -513,9 +660,53 @@ export const queries = {
     api.delete<{ status: string; id: number }>(`/records/${id}`).then((r) => {
       invalidateCache("records/all");
       invalidateCache("project-records/");
+      invalidateCache("candidates");
       invalidateCache("stats/requisitions");
       invalidateCache("stats/monitor");
       invalidateCache("stats/global");
+      return r.data;
+    }),
+
+  /** Paginated RPO candidates (`GET /candidates`). Scoped by role like records. */
+  candidatesList: (params: {
+    project_id?: number;
+    record_id?: number;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.record_id != null) qs.set("record_id", String(params.record_id));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    const key = `candidates?${q || "all"}`;
+    return cachedGet<{ items: CandidateRow[]; total: number; limit: number; offset: number }>(key, () =>
+      api
+        .get<{ items: CandidateRow[]; total: number; limit: number; offset: number }>(
+          `/candidates${q ? `?${q}` : ""}`
+        )
+        .then((r) => r.data)
+    );
+  },
+
+  candidate: (id: number) => api.get<CandidateRow>(`/candidates/${id}`).then((r) => r.data),
+
+  createCandidate: (body: CandidateCreate) =>
+    api.post<CandidateRow>("/candidates", body).then((r) => {
+      invalidateCache("candidates");
+      return r.data;
+    }),
+
+  patchCandidate: (id: number, body: CandidatePatch) =>
+    api.patch<CandidateRow>(`/candidates/${id}`, body).then((r) => {
+      invalidateCache("candidates");
+      return r.data;
+    }),
+
+  deleteCandidate: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/candidates/${id}`).then((r) => {
+      invalidateCache("candidates");
       return r.data;
     }),
 

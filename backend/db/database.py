@@ -137,6 +137,7 @@ class Project(Base, AuditMixin):
     revenue_visibility_snapshots = relationship(
         "RevenueVisibilitySnapshot", back_populates="project", cascade="all, delete-orphan"
     )
+    candidates = relationship("Candidate", back_populates="project", cascade="all, delete-orphan")
 
 class ProjectBudget(Base, AuditMixin):
     __tablename__ = "project_budgets"
@@ -164,6 +165,8 @@ class ProjectForecast(Base, AuditMixin):
     project = relationship("Project", back_populates="forecasts")
 
 class Record(Base, AuditMixin):
+    """Tracker row / requisition mandate. Legacy columns remain for ingest + revenue; RPO fields extend for Req. ID grain."""
+
     __tablename__ = "records"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -194,8 +197,121 @@ class Record(Base, AuditMixin):
     fingerprint = Column(String, index=True) # Unique Hash for row identity over time
     excel_provided_id = Column(String, index=True) # The ID found in the Excel (Req ID, Sl No, etc.)
     excel_row_index = Column(Integer) # Spatial context from original excel
+
+    # --- RPO Requisition Tracker (first-class + requisition_extras JSON) ---
+    client_req_id = Column(String, nullable=True, index=True)  # Req. ID from client template
+    rpo_client_name = Column(String, nullable=True)  # Client Name column (may mirror project.account_name)
+    positions_open = Column(Integer, nullable=True)
+    rpo_priority = Column(String, nullable=True)
+    rpo_job_type = Column(String, nullable=True)
+    experience_years_required = Column(String, nullable=True)
+    ctc_budget_lpa = Column(Float, nullable=True)
+    rpo_source_of_hire = Column(String, nullable=True)
+    rpo_sub_source = Column(String, nullable=True)
+    profiles_sourced = Column(Integer, nullable=True)
+    profiles_submitted = Column(Integer, nullable=True)
+    interviews_scheduled = Column(Integer, nullable=True)
+    offers_released = Column(Integer, nullable=True)
+    offers_accepted = Column(Integer, nullable=True)
+    assigned_recruiter_rpo = Column(String, nullable=True)
+    rpo_mandate_status = Column(String, nullable=True)
+    rpo_vertical = Column(String, nullable=True)
+    rpo_division = Column(String, nullable=True)
+    rpo_bu_sbu = Column(String, nullable=True)
+    rpo_zone = Column(String, nullable=True)
+    rpo_grade_band = Column(String, nullable=True)
+    rpo_business_hrbp = Column(String, nullable=True)
+    rpo_sourcer = Column(String, nullable=True)
+    rpo_taggd_pm = Column(String, nullable=True)
+    rpo_hiring_agency = Column(String, nullable=True)
+    rpo_ijp_referral = Column(String, nullable=True)
+    mandate_received_date = Column(DateTime, nullable=True)
+    intake_date = Column(DateTime, nullable=True)
+    first_cv_share_date = Column(DateTime, nullable=True)
+    selection_date_req = Column(DateTime, nullable=True)
+    loi_date_req = Column(DateTime, nullable=True)
+    closure_date_req = Column(DateTime, nullable=True)
+    rpo_stage = Column(String, nullable=True)
+    ageing_days = Column(Integer, nullable=True)
+    ageing_bracket = Column(String, nullable=True)
+    dead_days = Column(Integer, nullable=True)
+    tto_days = Column(Integer, nullable=True)
+    ttf_days = Column(Integer, nullable=True)
+    taggd_fees_amount = Column(Float, nullable=True)
+    billing_month = Column(String, nullable=True)
+    fy_label = Column(String, nullable=True)
+    requisition_extras = Column(JSON, nullable=True)
     
     project = relationship("Project", back_populates="records")
+    candidates = relationship("Candidate", back_populates="requisition", cascade="all, delete-orphan")
+
+
+class Candidate(Base, AuditMixin):
+    """Candidate pipeline + offer/onboarding; links to requisition (`records`) and project."""
+
+    __tablename__ = "candidates"
+    __table_args__ = (UniqueConstraint("project_id", "client_candidate_id", name="uq_candidate_project_client_id"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    record_id = Column(Integer, ForeignKey("records.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    client_candidate_id = Column(String, nullable=False, index=True)
+    full_name = Column(String, nullable=True, index=True)
+    contact_no = Column(String, nullable=True)
+    email_id = Column(String, nullable=True)
+    gender = Column(String, nullable=True)
+    current_location = Column(String, nullable=True)
+    qualification = Column(String, nullable=True)
+    specialization = Column(String, nullable=True)
+    total_experience_yrs = Column(Float, nullable=True)
+    current_organization = Column(String, nullable=True)
+    current_designation = Column(String, nullable=True)
+    notice_period_days = Column(Integer, nullable=True)
+    alternate_contact_no = Column(String, nullable=True)
+    source_of_hire = Column(String, nullable=True)
+    sub_source = Column(String, nullable=True)
+    current_ctc_lpa = Column(Float, nullable=True)
+    expected_ctc_lpa = Column(Float, nullable=True)
+    resume_screening = Column(String, nullable=True)
+    assigned_recruiter = Column(String, nullable=True)
+    hiring_manager = Column(String, nullable=True)
+    current_stage = Column(String, nullable=True, index=True)
+    offer_ctc_lpa = Column(Float, nullable=True)
+    offer_release_date = Column(DateTime, nullable=True)
+    offer_acceptance = Column(String, nullable=True)
+    expected_doj = Column(DateTime, nullable=True)
+    actual_doj = Column(DateTime, nullable=True)
+    selection_date = Column(DateTime, nullable=True)
+    loi_issue_date = Column(DateTime, nullable=True)
+    cb_closure_date = Column(DateTime, nullable=True)
+    fingerprint = Column(String, nullable=True, index=True)
+    excel_row_index = Column(Integer, nullable=True)
+    revenue_results = Column(JSON, nullable=True)
+    global_status = Column(String, nullable=True, index=True)
+    candidate_extras = Column(JSON, nullable=True)
+    offer_date = Column(DateTime, nullable=True)
+    offer_accepted_flag = Column(String, nullable=True)
+    decline_reason = Column(String, nullable=True)
+    joining_status = Column(String, nullable=True)
+    checkin_30_day = Column(String, nullable=True)
+    checkin_60_day = Column(String, nullable=True)
+    checkin_90_day = Column(String, nullable=True)
+    early_exit_risk = Column(String, nullable=True)
+    offered_gross_ctc = Column(Float, nullable=True)
+    offered_stvs = Column(Float, nullable=True)
+    hike_pct_offered = Column(Float, nullable=True)
+    bgv_date = Column(DateTime, nullable=True)
+    bgv_status = Column(String, nullable=True)
+    medical_initiation_date = Column(DateTime, nullable=True)
+    candidate_staff_no = Column(String, nullable=True)
+    msil_staff_no = Column(String, nullable=True)
+    sourcer_name = Column(String, nullable=True)
+    taggd_pm = Column(String, nullable=True)
+    offer_onboarding_extras = Column(JSON, nullable=True)
+
+    project = relationship("Project", back_populates="candidates")
+    requisition = relationship("Record", back_populates="candidates")
 
 class MetricDefinition(Base, AuditMixin):
     __tablename__ = "metric_definitions"
@@ -517,6 +633,70 @@ def _ensure_finance_efficiency_taggd_joiners_column():
         logging.warning("finance_efficiency_kpis taggd_joiners migration: %s", e)
 
 
+def _ensure_records_rpo_columns():
+    """SQLite: add RPO requisition tracker columns on records if missing."""
+    from sqlalchemy import text
+
+    alters: list[tuple[str, str]] = [
+        ("client_req_id", "VARCHAR"),
+        ("rpo_client_name", "VARCHAR"),
+        ("positions_open", "INTEGER"),
+        ("rpo_priority", "VARCHAR"),
+        ("rpo_job_type", "VARCHAR"),
+        ("experience_years_required", "VARCHAR"),
+        ("ctc_budget_lpa", "REAL"),
+        ("rpo_source_of_hire", "VARCHAR"),
+        ("rpo_sub_source", "VARCHAR"),
+        ("profiles_sourced", "INTEGER"),
+        ("profiles_submitted", "INTEGER"),
+        ("interviews_scheduled", "INTEGER"),
+        ("offers_released", "INTEGER"),
+        ("offers_accepted", "INTEGER"),
+        ("assigned_recruiter_rpo", "VARCHAR"),
+        ("rpo_mandate_status", "VARCHAR"),
+        ("rpo_vertical", "VARCHAR"),
+        ("rpo_division", "VARCHAR"),
+        ("rpo_bu_sbu", "VARCHAR"),
+        ("rpo_zone", "VARCHAR"),
+        ("rpo_grade_band", "VARCHAR"),
+        ("rpo_business_hrbp", "VARCHAR"),
+        ("rpo_sourcer", "VARCHAR"),
+        ("rpo_taggd_pm", "VARCHAR"),
+        ("rpo_hiring_agency", "VARCHAR"),
+        ("rpo_ijp_referral", "VARCHAR"),
+        ("mandate_received_date", "DATETIME"),
+        ("intake_date", "DATETIME"),
+        ("first_cv_share_date", "DATETIME"),
+        ("selection_date_req", "DATETIME"),
+        ("loi_date_req", "DATETIME"),
+        ("closure_date_req", "DATETIME"),
+        ("rpo_stage", "VARCHAR"),
+        ("ageing_days", "INTEGER"),
+        ("ageing_bracket", "VARCHAR"),
+        ("dead_days", "INTEGER"),
+        ("tto_days", "INTEGER"),
+        ("ttf_days", "INTEGER"),
+        ("taggd_fees_amount", "REAL"),
+        ("billing_month", "VARCHAR"),
+        ("fy_label", "VARCHAR"),
+        ("requisition_extras", "TEXT"),
+    ]
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(records)")).fetchall()
+            cols = {r[1] for r in rows}
+            if not cols:
+                return
+            for col, ddl in alters:
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE records ADD COLUMN {col} {ddl}"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("records RPO columns migration: %s", e)
+
+
 def backfill_sla_period_starts(db: Session):
     """Populate period_start + canonical reporting_month (YYYY-MM) from legacy labels."""
     from backend.core.sla_period import canonical_month_label, parse_sla_month_label
@@ -546,6 +726,7 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _ensure_records_rpo_columns()
     _ensure_project_enterprise_columns()
     _ensure_sla_period_start_column()
     _ensure_finance_efficiency_wl1_column()

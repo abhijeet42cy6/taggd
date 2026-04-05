@@ -75,8 +75,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUpload, status }) => {
                     </h3>
                     <div className="flex flex-col items-center">
                          <p className="text-muted-foreground text-[11px] font-medium max-w-[240px] leading-relaxed">
-                            {status === 'success' 
-                                ? 'Neural mapping established successfully. Results projected below.' 
+                            {status === 'success'
+                                ? "Scroll the Agent console below: full column mapping (core schema + requisition/RPO fields) is listed with Excel headers."
                                 : 'Drag and drop standard XLSM/XLSX position inventory for autonomous processing.'}
                         </p>
                         {status === 'idle' && (
