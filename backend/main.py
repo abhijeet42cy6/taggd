@@ -77,12 +77,14 @@ from .routers.sla_metrics import router as sla_metrics_write_router
 from .routers.finance_ledger import router as finance_ledger_router
 from .routers.wfm_benchmark import router as wfm_benchmark_router
 from .routers.revenue_trackers import router as revenue_trackers_router
+from .routers.revenue_billing import router as revenue_billing_router
 from .routers.candidates import router as candidates_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
 app.include_router(wfm_benchmark_router)
 app.include_router(revenue_trackers_router)
+app.include_router(revenue_billing_router)
 app.include_router(candidates_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project

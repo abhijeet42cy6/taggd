@@ -167,6 +167,82 @@ export type RevenueVisibilityUpsert = {
   status?: string | null;
 };
 
+/** TAGGD-style revenue / billing tracker (`GET /revenue-billing`); amounts in INR. */
+export type RevenueBillingRow = {
+  id: number;
+  project_id: number;
+  account_name: string;
+  update_date: string | null;
+  fiscal_year_label: string | null;
+  project_manager: string | null;
+  revenue_booked_inr: number | null;
+  mmf_inr: number | null;
+  opening_req: number | null;
+  opening_fee_inr: number | null;
+  total_joiners: number | null;
+  taggd_joiner: number | null;
+  taggd_joiner_fee_inr: number | null;
+  er_ijp_other_count: number | null;
+  er_ijp_other_fee_inr: number | null;
+  campus_count: number | null;
+  campus_fee_inr: number | null;
+  total_joining_fee_inr: number | null;
+  adjustment_reason: string | null;
+  adjustment_amt_inr: number | null;
+  net_revenue_inr: number | null;
+  rph_inr: number | null;
+  pct_of_target: number | null;
+  attachment_ref: string | null;
+  approver_name: string | null;
+  invoice_number: string | null;
+  invoice_amount_inr: number | null;
+  invoice_raised_date: string | null;
+  payment_due_date: string | null;
+  actual_payment_received_date: string | null;
+  collection_received_inr: number | null;
+  notes: string | null;
+  entered_by_user_id: number | null;
+  system_created_at: string | null;
+  system_updated_at: string | null;
+  source_filename: string | null;
+  uploaded_by: string | null;
+};
+
+export type RevenueBillingCreate = {
+  project_id: number;
+  update_date?: string | null;
+  fiscal_year_label?: string | null;
+  project_manager?: string | null;
+  revenue_booked_inr?: number | null;
+  mmf_inr?: number | null;
+  opening_req?: number | null;
+  opening_fee_inr?: number | null;
+  total_joiners?: number | null;
+  taggd_joiner?: number | null;
+  taggd_joiner_fee_inr?: number | null;
+  er_ijp_other_count?: number | null;
+  er_ijp_other_fee_inr?: number | null;
+  campus_count?: number | null;
+  campus_fee_inr?: number | null;
+  total_joining_fee_inr?: number | null;
+  adjustment_reason?: string | null;
+  adjustment_amt_inr?: number | null;
+  net_revenue_inr?: number | null;
+  rph_inr?: number | null;
+  pct_of_target?: number | null;
+  attachment_ref?: string | null;
+  approver_name?: string | null;
+  invoice_number?: string | null;
+  invoice_amount_inr?: number | null;
+  invoice_raised_date?: string | null;
+  payment_due_date?: string | null;
+  actual_payment_received_date?: string | null;
+  collection_received_inr?: number | null;
+  notes?: string | null;
+};
+
+export type RevenueBillingPatch = Partial<Omit<RevenueBillingCreate, "project_id">>;
+
 export type GlobalMonitor = {
   total_positions: number;
   status_breakdown: Record<string, number>;
@@ -495,6 +571,7 @@ const TTL_MS: Record<string, number> = {
   "projects":       30_000,
   "records/all":    10_000,
   candidates:       15_000,
+  "revenue-billing": 15_000,
   "finance/stats":  20_000,
   "finance/data":   20_000,
   "sla/stats":      20_000,
@@ -821,6 +898,50 @@ export const queries = {
   deleteRevenueVisibility: (id: number) =>
     api.delete<{ status: string; id: number }>(`/revenue-trackers/visibility/${id}`).then((r) => {
       invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  revenueBillingList: (params: {
+    project_id?: number;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return cachedGet<{ items: RevenueBillingRow[]; total: number; limit: number; offset: number }>(
+      `revenue-billing?${q || "all"}`,
+      () =>
+        api
+          .get<{ items: RevenueBillingRow[]; total: number; limit: number; offset: number }>(
+            `/revenue-billing${q ? `?${q}` : ""}`
+          )
+          .then((r) => r.data)
+    );
+  },
+
+  revenueBilling: (id: number) => api.get<RevenueBillingRow>(`/revenue-billing/${id}`).then((r) => r.data),
+
+  createRevenueBilling: (body: RevenueBillingCreate) =>
+    api.post<RevenueBillingRow>("/revenue-billing", body).then((r) => {
+      invalidateCache("revenue-billing");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  patchRevenueBilling: (id: number, body: RevenueBillingPatch) =>
+    api.patch<RevenueBillingRow>(`/revenue-billing/${id}`, body).then((r) => {
+      invalidateCache("revenue-billing");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  deleteRevenueBilling: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/revenue-billing/${id}`).then((r) => {
+      invalidateCache("revenue-billing");
       invalidateCache("activity/log");
       return r.data;
     }),

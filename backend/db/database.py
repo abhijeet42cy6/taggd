@@ -137,6 +137,9 @@ class Project(Base, AuditMixin):
     revenue_visibility_snapshots = relationship(
         "RevenueVisibilitySnapshot", back_populates="project", cascade="all, delete-orphan"
     )
+    taggd_revenue_billing_rows = relationship(
+        "TaggdRevenueBilling", back_populates="project", cascade="all, delete-orphan"
+    )
     candidates = relationship("Candidate", back_populates="project", cascade="all, delete-orphan")
 
 class ProjectBudget(Base, AuditMixin):
@@ -489,6 +492,56 @@ class RevenueVisibilitySnapshot(Base):
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class TaggdRevenueBilling(Base, AuditMixin):
+    """
+    TAGGD Revenue Tracker (e.g. FY) — billing / recognition row per project.
+    Only project_id is required; other columns are populated over time (manual, ingest, or sync).
+    Amounts in INR unless noted in API docs.
+    """
+
+    __tablename__ = "taggd_revenue_billing"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    update_date = Column(DateTime, nullable=True, index=True)
+    fiscal_year_label = Column(String, nullable=True, index=True)
+    project_manager = Column(String, nullable=True)
+
+    revenue_booked_inr = Column(Float, nullable=True)
+    mmf_inr = Column(Float, nullable=True)
+    opening_req = Column(Integer, nullable=True)
+    opening_fee_inr = Column(Float, nullable=True)
+    total_joiners = Column(Integer, nullable=True)
+    taggd_joiner = Column(Integer, nullable=True)
+    taggd_joiner_fee_inr = Column(Float, nullable=True)
+    er_ijp_other_count = Column(Integer, nullable=True)
+    er_ijp_other_fee_inr = Column(Float, nullable=True)
+    campus_count = Column(Integer, nullable=True)
+    campus_fee_inr = Column(Float, nullable=True)
+    total_joining_fee_inr = Column(Float, nullable=True)
+    adjustment_reason = Column(Text, nullable=True)
+    adjustment_amt_inr = Column(Float, nullable=True)
+    net_revenue_inr = Column(Float, nullable=True)
+    rph_inr = Column(Float, nullable=True)
+    pct_of_target = Column(Float, nullable=True)
+
+    attachment_ref = Column(String, nullable=True)
+    approver_name = Column(String, nullable=True)
+    invoice_number = Column(String, nullable=True)
+    invoice_amount_inr = Column(Float, nullable=True)
+    invoice_raised_date = Column(DateTime, nullable=True)
+    payment_due_date = Column(DateTime, nullable=True)
+    actual_payment_received_date = Column(DateTime, nullable=True)
+    collection_received_inr = Column(Float, nullable=True)
+
+    notes = Column(Text, nullable=True)
+    entered_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    project = relationship("Project", back_populates="taggd_revenue_billing_rows")
+    entered_by = relationship("User", foreign_keys=[entered_by_user_id])
 
 
 def _ensure_finance_unique_indexes():
