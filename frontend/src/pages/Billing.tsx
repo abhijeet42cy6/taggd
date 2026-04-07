@@ -21,7 +21,47 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Plus, PencilLine, Trash2 } from "lucide-react";
+import { RefreshCw, Plus, PencilLine, Trash2, Search, FilterX } from "lucide-react";
+
+const PM_NONE = "__pm_none__";
+const FY_NONE = "__fy_none__";
+
+function rowMatchesBillingTableFilters(
+  r: RevenueBillingRow,
+  f: { search: string; fy: string; pm: string; invoice: "all" | "has" | "none" }
+): boolean {
+  if (f.fy !== "all") {
+    const label = (r.fiscal_year_label || "").trim();
+    if (f.fy === FY_NONE) {
+      if (label) return false;
+    } else if (label !== f.fy) return false;
+  }
+  if (f.pm !== "all") {
+    const pm = (r.project_manager || "").trim();
+    if (f.pm === PM_NONE) {
+      if (pm) return false;
+    } else if (pm !== f.pm) return false;
+  }
+  if (f.invoice === "has" && !(r.invoice_number && r.invoice_number.trim())) return false;
+  if (f.invoice === "none" && r.invoice_number && r.invoice_number.trim()) return false;
+  const q = f.search.trim().toLowerCase();
+  if (q) {
+    const hay = [
+      String(r.id),
+      r.account_name,
+      r.project_manager,
+      r.invoice_number,
+      r.fiscal_year_label,
+      `prj-${r.project_id}`,
+      String(r.project_id),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
 import { cn } from "@/lib/utils";
 
 type Draft = Record<string, string>;
@@ -380,6 +420,12 @@ export function Billing() {
   const [draft, setDraft] = useState<Draft>(() => emptyDraft(0));
   const [baselineDraft, setBaselineDraft] = useState<Draft | null>(null);
 
+  /** Client-side filters for the loaded table (API still uses project + limit). */
+  const [tableSearch, setTableSearch] = useState("");
+  const [tableFy, setTableFy] = useState<string>("all");
+  const [tablePm, setTablePm] = useState<string>("all");
+  const [tableInvoice, setTableInvoice] = useState<"all" | "has" | "none">("all");
+
   const pid = projectFilter === "all" ? undefined : Number(projectFilter);
 
   const reload = useCallback(async () => {
@@ -414,6 +460,50 @@ export function Billing() {
     if (projectFilter !== "all") return Number(projectFilter);
     return projects[0]?.id ?? 0;
   }, [projectFilter, projects]);
+
+  const distinctFiscalYears = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of rows) {
+      const v = (r.fiscal_year_label || "").trim();
+      if (v) s.add(v);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const distinctPMs = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of rows) {
+      const v = (r.project_manager || "").trim();
+      if (v) s.add(v);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const hasEmptyFy = useMemo(() => rows.some((r) => !(r.fiscal_year_label || "").trim()), [rows]);
+  const hasEmptyPm = useMemo(() => rows.some((r) => !(r.project_manager || "").trim()), [rows]);
+
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((r) =>
+        rowMatchesBillingTableFilters(r, {
+          search: tableSearch,
+          fy: tableFy,
+          pm: tablePm,
+          invoice: tableInvoice,
+        })
+      ),
+    [rows, tableSearch, tableFy, tablePm, tableInvoice]
+  );
+
+  const tableFiltersActive =
+    tableSearch.trim() !== "" || tableFy !== "all" || tablePm !== "all" || tableInvoice !== "all";
+
+  function clearTableFilters() {
+    setTableSearch("");
+    setTableFy("all");
+    setTablePm("all");
+    setTableInvoice("all");
+  }
 
   function openCreate() {
     const id = defaultProjectId || projects[0]?.id || 0;
@@ -528,6 +618,109 @@ export function Billing() {
             )}
           </div>
         ) : (
+          <>
+            <div className="mb-4 flex flex-col gap-3 rounded-lg border border-border/50 bg-muted/20 p-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="space-y-1 min-w-[180px] flex-1 sm:max-w-[280px]">
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono flex items-center gap-1.5">
+                  <Search className="h-3 w-3 opacity-70" />
+                  Search
+                </span>
+                <Input
+                  value={tableSearch}
+                  onChange={(e) => setTableSearch(e.target.value)}
+                  placeholder="ID, account, PM, invoice, FY…"
+                  className="h-9 text-xs font-mono"
+                />
+              </div>
+              <div className="space-y-1 min-w-[140px]">
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Fiscal year</span>
+                <Select value={tableFy} onValueChange={setTableFy}>
+                  <SelectTrigger className="h-9 text-xs w-full sm:w-[160px]">
+                    <SelectValue placeholder="All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">
+                      All years
+                    </SelectItem>
+                    {hasEmptyFy && (
+                      <SelectItem value={FY_NONE} className="text-xs text-muted-foreground">
+                        No FY set
+                      </SelectItem>
+                    )}
+                    {distinctFiscalYears.map((y) => (
+                      <SelectItem key={y} value={y} className="text-xs font-mono">
+                        {y}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 min-w-[140px]">
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">PM</span>
+                <Select value={tablePm} onValueChange={setTablePm}>
+                  <SelectTrigger className="h-9 text-xs w-full sm:w-[180px]">
+                    <SelectValue placeholder="All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">
+                      All PMs
+                    </SelectItem>
+                    {hasEmptyPm && (
+                      <SelectItem value={PM_NONE} className="text-xs text-muted-foreground">
+                        No PM set
+                      </SelectItem>
+                    )}
+                    {distinctPMs.map((name) => (
+                      <SelectItem key={name} value={name} className="text-xs">
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 min-w-[140px]">
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Invoice</span>
+                <Select value={tableInvoice} onValueChange={(v) => setTableInvoice(v as "all" | "has" | "none")}>
+                  <SelectTrigger className="h-9 text-xs w-full sm:w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">
+                      All
+                    </SelectItem>
+                    <SelectItem value="has" className="text-xs">
+                      Has invoice #
+                    </SelectItem>
+                    <SelectItem value="none" className="text-xs">
+                      No invoice
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                <span className="text-[10px] text-muted-foreground font-mono whitespace-nowrap">
+                  {tableFiltersActive
+                    ? `${filteredRows.length} of ${rows.length} shown`
+                    : `${rows.length} loaded`}
+                  {total > rows.length ? ` · ${total} total` : ""}
+                </span>
+                {tableFiltersActive && (
+                  <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearTableFilters}>
+                    <FilterX className="h-3.5 w-3.5" />
+                    Clear table filters
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {filteredRows.length === 0 ? (
+              <div className="text-sm text-muted-foreground py-8 text-center rounded-lg border border-dashed border-border/60 bg-muted/10">
+                No rows match these filters.{" "}
+                <button type="button" className="text-primary underline-offset-2 hover:underline font-mono text-xs" onClick={clearTableFilters}>
+                  Clear table filters
+                </button>
+              </div>
+            ) : (
           <div className="overflow-x-auto rounded-lg border border-border/50">
             <table className="w-full text-left text-[11px]">
               <thead>
@@ -544,7 +737,7 @@ export function Billing() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {filteredRows.map((r) => (
                   <tr key={r.id} className="border-b border-border/40 hover:bg-muted/10">
                     <td className="px-3 py-2 font-mono text-primary">{r.id}</td>
                     <td className="px-3 py-2 max-w-[180px] truncate" title={r.account_name}>
@@ -585,6 +778,8 @@ export function Billing() {
               </tbody>
             </table>
           </div>
+            )}
+          </>
         )}
       </PlatformSection>
 
