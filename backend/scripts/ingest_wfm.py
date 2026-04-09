@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 # Add project root to path so we can import from backend
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from backend.db.database import SessionLocal, Project, WFMHRBenchmark, WFMResourceGap, init_db
+from backend.db.database import (
+    SessionLocal,
+    Project,
+    WFMHRBenchmark,
+    WFMResourceGap,
+    init_db,
+    ensure_project_client,
+)
 
 def ingest_wfm_master(file_path):
     """
@@ -85,7 +92,10 @@ def ingest_wfm_master(file_path):
                 )
                 db.add(project)
                 db.flush()
-            
+                ensure_project_client(db, project)
+            elif project.client_id is None:
+                ensure_project_client(db, project)
+
             # Update Meta
             project.vertical = vertical
             project.practice_head = ph_head

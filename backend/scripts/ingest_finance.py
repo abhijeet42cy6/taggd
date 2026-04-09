@@ -15,6 +15,7 @@ from backend.db.database import (
     FinanceCashFlow,
     FinanceEfficiencyKPI,
     init_db,
+    ensure_project_client,
 )
 from backend.db.finance_dedupe import dedupe_finance_tables
 
@@ -85,6 +86,9 @@ def ingest_finance_master(file_path):
                 project = Project(account_name=canon, filename=source_fn, source_filename=source_fn)
                 db.add(project)
                 db.flush()
+                ensure_project_client(db, project)
+            elif project.client_id is None:
+                ensure_project_client(db, project)
             return project
 
         # 2. Ingest Revenue & CM (Budget, Actual, Forecast)
@@ -226,14 +230,13 @@ def ingest_finance_master(file_path):
         # 4. Ingest Efficiency KPIs
         print("Processing Efficiency Strategy...")
         # Sheets: Target_Rev_Productivity, Approved_Headcount, Actual_Headcount Overall, Actual Headcount WL1,
-        # Taggd_Source_Joiner, Actual_PPC
+        # Taggd_Source_Joiner. (No Actual_PPC — PPC actual is always ledger Actual Cost ÷ overall HC in /finance/data.)
         kpi_sheets = {
             'Target_Rev_Productivity': 'target_revenue_per_recruiter',
             'Approved_Headcount': 'approved_headcount',
             'Actual_Headcount Overall': 'actual_headcount_finance',
             'Actual Headcount WL1': 'actual_headcount_wl1',
             'Taggd_Source_Joiner': 'taggd_joiners',
-            'Actual_PPC': 'actual_ppc'
         }
         
         for sheet_name, db_field in kpi_sheets.items():

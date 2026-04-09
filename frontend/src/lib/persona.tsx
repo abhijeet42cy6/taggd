@@ -22,7 +22,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--accent)",
     landingPath: "/",
     avatarInitials: "AR",
-    scopedNav: ["/", "/portfolio", "/clients", "/requisitions", "/finance", "/sla-performance", "/wfm", "/data-operations", "/ingestion"],
+    scopedNav: ["/", "/portfolio", "/clients", "/client-contracts", "/requisitions", "/finance", "/sla-performance", "/wfm", "/data-operations", "/ingestion"],
   },
   {
     id: "finance",
@@ -32,7 +32,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--amber)",
     landingPath: "/finance",
     avatarInitials: "FH",
-    scopedNav: ["/finance", "/portfolio", "/clients", "/data-operations", "/ingestion"],
+    scopedNav: ["/finance", "/portfolio", "/clients", "/client-contracts", "/data-operations", "/ingestion"],
   },
   {
     id: "wfm",
@@ -42,7 +42,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--accent2)",
     landingPath: "/wfm",
     avatarInitials: "WH",
-    scopedNav: ["/wfm", "/requisitions", "/clients", "/data-operations", "/ingestion"],
+    scopedNav: ["/wfm", "/requisitions", "/clients", "/client-contracts", "/data-operations", "/ingestion"],
   },
   {
     id: "client_manager",
@@ -52,7 +52,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--green)",
     landingPath: "/clients",
     avatarInitials: "CM",
-    scopedNav: ["/clients", "/requisitions", "/finance", "/sla-performance", "/ingestion"],
+    scopedNav: ["/clients", "/client-contracts", "/requisitions", "/finance", "/sla-performance", "/ingestion"],
   },
   {
     id: "ops",
@@ -62,7 +62,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--text-subtle)",
     landingPath: "/ingestion",
     avatarInitials: "PO",
-    scopedNav: ["/data-operations", "/ingestion", "/", "/portfolio", "/clients", "/requisitions", "/finance", "/sla-performance", "/wfm"],
+    scopedNav: ["/data-operations", "/ingestion", "/", "/portfolio", "/clients", "/client-contracts", "/requisitions", "/finance", "/sla-performance", "/wfm"],
   },
 ];
 

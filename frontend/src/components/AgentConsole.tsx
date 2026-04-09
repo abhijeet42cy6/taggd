@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Terminal, Cpu, Database, Code, ChevronDown, ChevronUp } from 'lucide-react';
+import { Terminal, Cpu, Code, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
     Card,
@@ -10,23 +10,32 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
+import { columnMappingEntryCount } from "@/lib/api";
 
 interface AgentConsoleProps {
     logs: string[];
-    mapping?: Record<string, string>;
+    /** Express/Pro upload `mapping` (v2 or legacy). */
+    mapping?: Record<string, unknown> | Record<string, string> | null;
     explanation?: string;
     pythonCode?: string;
 }
 
 export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, explanation, pythonCode }) => {
+    const mapCount = columnMappingEntryCount(mapping ?? undefined);
     const [showLogic, setShowLogic] = useState(false);
 
     return (
         <Card className="bg-muted/30 border-border/50 font-mono text-[11px] overflow-hidden">
             <CardHeader className="bg-muted/50 px-4 py-2 flex flex-row items-center justify-between border-b border-border/50">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     <Terminal size={14} className="text-primary" />
                     <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80">Agent Reasoning Console</CardTitle>
+                    {mapCount > 0 && (
+                        <Badge variant="secondary" className="h-5 text-[8px] font-mono">
+                            {mapCount} column links
+                        </Badge>
+                    )}
                 </div>
                 <div className="flex gap-1.5">
                     <div className="w-2 h-2 rounded-full bg-destructive/30" />
@@ -35,7 +44,7 @@ export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, expla
                 </div>
             </CardHeader>
 
-            <CardContent className="p-4 max-h-[400px] overflow-y-auto space-y-2 bg-black/20">
+            <CardContent className="p-4 max-h-[min(85vh,720px)] overflow-y-auto space-y-2 bg-black/20">
                 <AnimatePresence initial={false}>
                     {logs.map((log, i) => (
                         <motion.div
@@ -56,27 +65,13 @@ export const AgentConsole: React.FC<AgentConsoleProps> = ({ logs, mapping, expla
                     ))}
                 </AnimatePresence>
 
-                {mapping && Object.keys(mapping).length > 0 && (
+                {mapCount > 0 && (
                     <motion.div
                         initial={{ opacity: 0, y: 5 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="mt-6 pt-4 border-t border-border/20 space-y-3"
+                        className="mt-6 pt-4 border-t border-border/20"
                     >
-                        <div className="flex items-center gap-2">
-                            <Database size={12} className="text-primary/60" />
-                            <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/60">Schema Synchronization Matrix</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                            {Object.entries(mapping).map(([uKey, target]) => (
-                                <div key={uKey} className="flex justify-between items-center group">
-                                    <span className="text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">{uKey}</span>
-                                    <div className="h-[1px] flex-1 mx-2 bg-border/20" />
-                                    <Badge variant="outline" className="text-[9px] font-mono border-primary/20 bg-primary/5 text-primary/80 px-1.5 py-0 h-4">
-                                        {target}
-                                    </Badge>
-                                </div>
-                            ))}
-                        </div>
+                        <ColumnMappingDisplay mapping={mapping} variant="card" scrollMaxClass="max-h-[380px]" />
                     </motion.div>
                 )}
 

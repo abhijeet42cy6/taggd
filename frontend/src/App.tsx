@@ -12,11 +12,13 @@ import { PersonaProvider, usePersona } from "@/lib/persona";
 import { AuthProvider, navAllowedForRole, useAuth } from "@/lib/auth";
 import { ClientsHub } from "./pages/ClientsHub";
 import { ClientDetail } from "./pages/ClientDetail";
+import { ClientContracts } from "./pages/ClientContracts";
 import { Agent } from "./pages/Agent";
 import { Dashboard } from "./pages/Dashboard";
 import { DataOperations } from "./pages/DataOperations";
 import { FiscalPerformance } from "./pages/FiscalPerformance";
 import { RevenueTrackers } from "./pages/RevenueTrackers";
+import { Billing } from "./pages/Billing";
 import { ActivityLog } from "./pages/ActivityLog";
 import { IngestionCenter } from "./pages/IngestionCenter";
 import { PortfolioIntelligence } from "./pages/PortfolioIntelligence";
@@ -43,6 +45,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     title: "Operations",
     items: [
       { label: "Clients", path: "/clients" },
+      { label: "Contracts", path: "/client-contracts" },
       { label: "Requisitions", path: "/requisitions" },
     ],
   },
@@ -51,6 +54,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Finance Command", path: "/finance" },
       { label: "Revenue trackers", path: "/revenue-trackers" },
+      { label: "Billing", path: "/billing" },
       { label: "SLA Performance", path: "/sla-performance" },
       { label: "Workforce Mgmt", path: "/wfm" },
     ],
@@ -219,9 +223,11 @@ function AppShell() {
               <Route path="/portfolio" element={<PortfolioIntelligence />} />
               <Route path="/clients" element={<ClientsHub />} />
               <Route path="/clients/:clientId" element={<ClientDetail />} />
+              <Route path="/client-contracts" element={<ClientContracts />} />
               <Route path="/requisitions" element={<Requisitions />} />
               <Route path="/finance" element={<FiscalPerformance />} />
               <Route path="/revenue-trackers" element={<RevenueTrackers />} />
+              <Route path="/billing" element={<Billing />} />
               <Route path="/sla-performance" element={<SLAPerformance />} />
               <Route path="/wfm" element={<WorkforceManagement />} />
               <Route path="/data-operations" element={<DataOperations />} />

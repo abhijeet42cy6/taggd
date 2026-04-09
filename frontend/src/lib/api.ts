@@ -167,6 +167,82 @@ export type RevenueVisibilityUpsert = {
   status?: string | null;
 };
 
+/** TAGGD-style revenue / billing tracker (`GET /revenue-billing`); amounts in INR. */
+export type RevenueBillingRow = {
+  id: number;
+  project_id: number;
+  account_name: string;
+  update_date: string | null;
+  fiscal_year_label: string | null;
+  project_manager: string | null;
+  revenue_booked_inr: number | null;
+  mmf_inr: number | null;
+  opening_req: number | null;
+  opening_fee_inr: number | null;
+  total_joiners: number | null;
+  taggd_joiner: number | null;
+  taggd_joiner_fee_inr: number | null;
+  er_ijp_other_count: number | null;
+  er_ijp_other_fee_inr: number | null;
+  campus_count: number | null;
+  campus_fee_inr: number | null;
+  total_joining_fee_inr: number | null;
+  adjustment_reason: string | null;
+  adjustment_amt_inr: number | null;
+  net_revenue_inr: number | null;
+  rph_inr: number | null;
+  pct_of_target: number | null;
+  attachment_ref: string | null;
+  approver_name: string | null;
+  invoice_number: string | null;
+  invoice_amount_inr: number | null;
+  invoice_raised_date: string | null;
+  payment_due_date: string | null;
+  actual_payment_received_date: string | null;
+  collection_received_inr: number | null;
+  notes: string | null;
+  entered_by_user_id: number | null;
+  system_created_at: string | null;
+  system_updated_at: string | null;
+  source_filename: string | null;
+  uploaded_by: string | null;
+};
+
+export type RevenueBillingCreate = {
+  project_id: number;
+  update_date?: string | null;
+  fiscal_year_label?: string | null;
+  project_manager?: string | null;
+  revenue_booked_inr?: number | null;
+  mmf_inr?: number | null;
+  opening_req?: number | null;
+  opening_fee_inr?: number | null;
+  total_joiners?: number | null;
+  taggd_joiner?: number | null;
+  taggd_joiner_fee_inr?: number | null;
+  er_ijp_other_count?: number | null;
+  er_ijp_other_fee_inr?: number | null;
+  campus_count?: number | null;
+  campus_fee_inr?: number | null;
+  total_joining_fee_inr?: number | null;
+  adjustment_reason?: string | null;
+  adjustment_amt_inr?: number | null;
+  net_revenue_inr?: number | null;
+  rph_inr?: number | null;
+  pct_of_target?: number | null;
+  attachment_ref?: string | null;
+  approver_name?: string | null;
+  invoice_number?: string | null;
+  invoice_amount_inr?: number | null;
+  invoice_raised_date?: string | null;
+  payment_due_date?: string | null;
+  actual_payment_received_date?: string | null;
+  collection_received_inr?: number | null;
+  notes?: string | null;
+};
+
+export type RevenueBillingPatch = Partial<Omit<RevenueBillingCreate, "project_id">>;
+
 export type GlobalMonitor = {
   total_positions: number;
   status_breakdown: Record<string, number>;
@@ -197,9 +273,32 @@ export type RequisitionKpis = {
   total_records: number;
 };
 
+/** Count mapped columns for legacy flat `column_mapping` or v2 `{ universal, record_fields }`. */
+export function columnMappingEntryCount(
+  cm: Record<string, unknown> | Record<string, string> | null | undefined
+): number {
+  if (!cm || typeof cm !== "object") return 0;
+  const o = cm as Record<string, unknown>;
+  const u = o.universal;
+  const r = o.record_fields;
+  if (u && typeof u === "object") {
+    return (
+      Object.keys(u as object).length +
+      (r && typeof r === "object" ? Object.keys(r as object).length : 0)
+    );
+  }
+  return Object.keys(cm).length;
+}
+
 export type Project = {
   id: number;
   filename: string;
+  /** FK to clients.id — parent legal client for rollups */
+  client_id?: number | null;
+  /** SBU / engagement label (e.g. TATA Motors) */
+  engagement_name?: string | null;
+  /** Joined from Client.official_name in list/detail APIs */
+  client_official_name?: string | null;
   account_name?: string;
   /** Client / charge identifier from directory (e.g. TRP0001T00NM1GIA) */
   charge_code?: string;
@@ -217,13 +316,67 @@ export type Project = {
   system_created_at?: string;
   source_filename?: string;
   practice_head?: string;
+  /** RPO scorecard / directory — may align with practice_head */
+  project_head?: string | null;
   be_spoc?: string;
   /** Account type (e.g. RPO) */
   practice?: string;
   pos_id_column?: string;
-  column_mapping?: Record<string, string> | null;
+  /** Legacy: flat universal map. v2: `{ version, universal, record_fields }`. */
+  column_mapping?: Record<string, unknown> | Record<string, string> | null;
   revenue_logic_code?: string | null;
   logic_explanation?: string | null;
+};
+
+/** Parent account (legal client) with scoped projects from GET /clients. */
+export type ClientGroup = {
+  id: number;
+  official_name: string;
+  short_code: string | null;
+  projects: Project[];
+};
+
+/** `project_contracts` row — commercial signup / renewal snapshot (see GET /contracts/...). */
+export type ProjectContractRow = {
+  id: number;
+  project_id: number;
+  client_id: number | null;
+  customer_name: string | null;
+  account_type: string | null;
+  contract_start_date: string | null;
+  contract_end_date: string | null;
+  renewal_reminder_date: string | null;
+  duration_months: number | null;
+  signed_acv_inr: number | null;
+  contract_status: string | null;
+  signed_cm_pct: number | null;
+  headcount_contracted: number | null;
+  hiring_volume: number | null;
+  taggd_source_mix: string | null;
+  other_source_mix: string | null;
+  overall_rph: number | null;
+  mmf_applicable: boolean | null;
+  opening_fee_applicable: boolean | null;
+  payment_terms: string | null;
+  pricing_model: string | null;
+  contract_detail: string | null;
+  remarks: string | null;
+  agreed_rate_fee_inr: number | null;
+  est_annual_value_inr: number | null;
+  sow_msa_reference: string | null;
+  sla_terms_summary: string | null;
+  positions_contracted: number | null;
+  positions_filled: number | null;
+  renewal_status: string | null;
+  reason_for_lapse: string | null;
+  client_signoff_authority: string | null;
+  internal_signoff: string | null;
+  revenue_run_rate_inr: number | null;
+  practice_head_snapshot: string | null;
+  system_created_at?: string | null;
+  system_updated_at?: string | null;
+  source_filename?: string | null;
+  uploaded_by?: string | null;
 };
 
 export type AdminUserRow = {
@@ -243,6 +396,52 @@ export const adminApi = {
   setUserProjects: (userId: number, project_ids: number[]) =>
     api.put(`/admin/users/${userId}/projects`, { project_ids }).then((r) => r.data),
   listProjectsForAdmin: () => api.get<Project[]>("/projects").then((r) => r.data),
+};
+
+/** Matches backend `RecordRpoPatch` — use on create/patch nested `rpo` and as optional fields on row responses. */
+export type RecordRpoPatch = {
+  client_req_id?: string;
+  rpo_client_name?: string;
+  positions_open?: number;
+  rpo_priority?: string;
+  rpo_job_type?: string;
+  experience_years_required?: string;
+  ctc_budget_lpa?: number;
+  rpo_source_of_hire?: string;
+  rpo_sub_source?: string;
+  profiles_sourced?: number;
+  profiles_submitted?: number;
+  interviews_scheduled?: number;
+  offers_released?: number;
+  offers_accepted?: number;
+  assigned_recruiter_rpo?: string;
+  rpo_mandate_status?: string;
+  rpo_vertical?: string;
+  rpo_division?: string;
+  rpo_bu_sbu?: string;
+  rpo_zone?: string;
+  rpo_grade_band?: string;
+  rpo_business_hrbp?: string;
+  rpo_sourcer?: string;
+  rpo_taggd_pm?: string;
+  rpo_hiring_agency?: string;
+  rpo_ijp_referral?: string;
+  mandate_received_date?: string;
+  intake_date?: string;
+  first_cv_share_date?: string;
+  selection_date_req?: string;
+  loi_date_req?: string;
+  closure_date_req?: string;
+  rpo_stage?: string;
+  ageing_days?: number;
+  ageing_bracket?: string;
+  dead_days?: number;
+  tto_days?: number;
+  ttf_days?: number;
+  taggd_fees_amount?: number;
+  billing_month?: string;
+  fy_label?: string;
+  requisition_extras?: Record<string, unknown>;
 };
 
 export type RecordRow = {
@@ -267,7 +466,7 @@ export type RecordRow = {
     status?: string;
   };
   additional_attributes?: Record<string, unknown>;
-};
+} & Partial<RecordRpoPatch>;
 
 /** PATCH /records/{id} — partial update; null clears optional fields where supported */
 export type RecordPatch = {
@@ -282,6 +481,7 @@ export type RecordPatch = {
   creation_date?: string | null;
   joining_date?: string | null;
   additional_attributes?: Record<string, unknown>;
+  rpo?: RecordRpoPatch;
 };
 
 /** POST /records — manual create */
@@ -299,7 +499,88 @@ export type RecordCreate = {
   creation_date?: string | null;
   joining_date?: string | null;
   additional_attributes?: Record<string, unknown>;
+  client_req_id?: string | null;
+  rpo?: RecordRpoPatch;
 };
+
+/** Row shape from `GET /candidates` / `GET /candidates/{id}` (mirrors ORM + audit mixin). */
+export type CandidateRow = {
+  id: number;
+  project_id: number;
+  record_id: number;
+  client_candidate_id: string;
+  full_name?: string | null;
+  contact_no?: string | null;
+  email_id?: string | null;
+  gender?: string | null;
+  current_location?: string | null;
+  qualification?: string | null;
+  specialization?: string | null;
+  total_experience_yrs?: number | null;
+  current_organization?: string | null;
+  current_designation?: string | null;
+  notice_period_days?: number | null;
+  alternate_contact_no?: string | null;
+  source_of_hire?: string | null;
+  sub_source?: string | null;
+  current_ctc_lpa?: number | null;
+  expected_ctc_lpa?: number | null;
+  resume_screening?: string | null;
+  assigned_recruiter?: string | null;
+  hiring_manager?: string | null;
+  current_stage?: string | null;
+  offer_ctc_lpa?: number | null;
+  offer_release_date?: string | null;
+  offer_acceptance?: string | null;
+  expected_doj?: string | null;
+  actual_doj?: string | null;
+  selection_date?: string | null;
+  loi_issue_date?: string | null;
+  cb_closure_date?: string | null;
+  fingerprint?: string | null;
+  excel_row_index?: number | null;
+  revenue_results?: Record<string, unknown> | null;
+  global_status?: string | null;
+  candidate_extras?: Record<string, unknown> | null;
+  offer_date?: string | null;
+  offer_accepted_flag?: string | null;
+  decline_reason?: string | null;
+  joining_status?: string | null;
+  checkin_30_day?: string | null;
+  checkin_60_day?: string | null;
+  checkin_90_day?: string | null;
+  early_exit_risk?: string | null;
+  offered_gross_ctc?: number | null;
+  offered_stvs?: number | null;
+  hike_pct_offered?: number | null;
+  bgv_date?: string | null;
+  bgv_status?: string | null;
+  medical_initiation_date?: string | null;
+  candidate_staff_no?: string | null;
+  msil_staff_no?: string | null;
+  sourcer_name?: string | null;
+  taggd_pm?: string | null;
+  offer_onboarding_extras?: Record<string, unknown> | null;
+  system_created_at?: string | null;
+  system_updated_at?: string | null;
+  source_filename?: string | null;
+  uploaded_by?: string | null;
+};
+
+/** POST /candidates */
+export type CandidateCreate = {
+  project_id: number;
+  record_id: number;
+  client_candidate_id: string;
+} & Partial<
+  Omit<CandidateRow, "id" | "project_id" | "record_id" | "client_candidate_id">
+>;
+
+/** PATCH /candidates/{id} */
+export type CandidatePatch = Partial<
+  Pick<CandidateRow, "record_id"> &
+    Omit<CandidateRow, "id" | "project_id" | "record_id" | "client_candidate_id">
+>;
 
 export type RecordsPage = {
   records: RecordRow[];
@@ -348,6 +629,8 @@ const TTL_MS: Record<string, number> = {
   "stats/requisitions": 15_000,
   "projects":       30_000,
   "records/all":    10_000,
+  candidates:       15_000,
+  "revenue-billing": 15_000,
   "finance/stats":  20_000,
   "finance/data":   20_000,
   "sla/stats":      20_000,
@@ -458,13 +741,95 @@ export const queries = {
         | "function_head"
         | "regional_head"
         | "practice_head"
+        | "project_head"
         | "be_spoc"
         | "category"
         | "vertical"
         | "practice"
+        | "client_id"
+        | "engagement_name"
       >
     >
-  ) => api.patch<Project>(`/projects/${project_id}`, body).then((r) => r.data),
+  ) =>
+    api.patch<Project>(`/projects/${project_id}`, body).then((r) => {
+      invalidateCache("projects");
+      invalidateCache("clients");
+      invalidateCache("client/");
+      return r.data;
+    }),
+
+  contractsByProject: (projectId: number) =>
+    api.get<ProjectContractRow[]>(`/contracts/by-project/${projectId}`).then((r) => r.data),
+
+  contractsList: () =>
+    api.get<ProjectContractRow[]>(`/contracts`).then((r) => r.data),
+
+  uploadContractsWorkbook: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api
+      .post<{ created: number; skipped: number; missing_customer_no_project?: string[]; file: string }>(
+        `/contracts/upload`,
+        fd,
+      )
+      .then((r) => {
+        invalidateCache("contracts");
+        return r.data;
+      });
+  },
+
+  contract: (id: number) =>
+    api.get<ProjectContractRow>(`/contracts/${id}`).then((r) => r.data),
+
+  createContract: (body: Record<string, unknown>) =>
+    api.post<ProjectContractRow>(`/contracts`, body).then((r) => {
+      invalidateCache("contracts");
+      return r.data;
+    }),
+
+  patchContract: (id: number, body: Record<string, unknown>) =>
+    api.patch<ProjectContractRow>(`/contracts/${id}`, body).then((r) => {
+      invalidateCache("contracts");
+      return r.data;
+    }),
+
+  deleteContract: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/contracts/${id}`).then((r) => {
+      invalidateCache("contracts");
+      return r.data;
+    }),
+
+  /** Grouped legal clients + SBU projects (scoped). */
+  clients: () =>
+    cachedGet<ClientGroup[]>("clients", () =>
+      api.get<ClientGroup[]>("/clients").then((r) => r.data)
+    ),
+
+  clientDetail: (clientId: number) =>
+    cachedGet<ClientGroup>(`client/${clientId}`, () =>
+      api.get<ClientGroup>(`/clients/${clientId}`).then((r) => r.data)
+    ),
+
+  createClient: (body: { official_name: string; short_code?: string | null }) =>
+    api
+      .post<{ id: number; official_name: string; short_code: string | null }>("/clients", body)
+      .then((r) => {
+        invalidateCache("clients");
+        return r.data;
+      }),
+
+  patchClient: (clientId: number, body: { official_name?: string; short_code?: string | null }) =>
+    api
+      .patch<{ id: number; official_name: string; short_code: string | null }>(
+        `/clients/${clientId}`,
+        body
+      )
+      .then((r) => {
+        invalidateCache("clients");
+        invalidateCache(`client/${clientId}`);
+        invalidateCache("projects");
+        return r.data;
+      }),
 
   /**
    * NEW: single-request paginated records endpoint.
@@ -513,9 +878,53 @@ export const queries = {
     api.delete<{ status: string; id: number }>(`/records/${id}`).then((r) => {
       invalidateCache("records/all");
       invalidateCache("project-records/");
+      invalidateCache("candidates");
       invalidateCache("stats/requisitions");
       invalidateCache("stats/monitor");
       invalidateCache("stats/global");
+      return r.data;
+    }),
+
+  /** Paginated RPO candidates (`GET /candidates`). Scoped by role like records. */
+  candidatesList: (params: {
+    project_id?: number;
+    record_id?: number;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.record_id != null) qs.set("record_id", String(params.record_id));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    const key = `candidates?${q || "all"}`;
+    return cachedGet<{ items: CandidateRow[]; total: number; limit: number; offset: number }>(key, () =>
+      api
+        .get<{ items: CandidateRow[]; total: number; limit: number; offset: number }>(
+          `/candidates${q ? `?${q}` : ""}`
+        )
+        .then((r) => r.data)
+    );
+  },
+
+  candidate: (id: number) => api.get<CandidateRow>(`/candidates/${id}`).then((r) => r.data),
+
+  createCandidate: (body: CandidateCreate) =>
+    api.post<CandidateRow>("/candidates", body).then((r) => {
+      invalidateCache("candidates");
+      return r.data;
+    }),
+
+  patchCandidate: (id: number, body: CandidatePatch) =>
+    api.patch<CandidateRow>(`/candidates/${id}`, body).then((r) => {
+      invalidateCache("candidates");
+      return r.data;
+    }),
+
+  deleteCandidate: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/candidates/${id}`).then((r) => {
+      invalidateCache("candidates");
       return r.data;
     }),
 
@@ -630,6 +1039,50 @@ export const queries = {
   deleteRevenueVisibility: (id: number) =>
     api.delete<{ status: string; id: number }>(`/revenue-trackers/visibility/${id}`).then((r) => {
       invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  revenueBillingList: (params: {
+    project_id?: number;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return cachedGet<{ items: RevenueBillingRow[]; total: number; limit: number; offset: number }>(
+      `revenue-billing?${q || "all"}`,
+      () =>
+        api
+          .get<{ items: RevenueBillingRow[]; total: number; limit: number; offset: number }>(
+            `/revenue-billing${q ? `?${q}` : ""}`
+          )
+          .then((r) => r.data)
+    );
+  },
+
+  revenueBilling: (id: number) => api.get<RevenueBillingRow>(`/revenue-billing/${id}`).then((r) => r.data),
+
+  createRevenueBilling: (body: RevenueBillingCreate) =>
+    api.post<RevenueBillingRow>("/revenue-billing", body).then((r) => {
+      invalidateCache("revenue-billing");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  patchRevenueBilling: (id: number, body: RevenueBillingPatch) =>
+    api.patch<RevenueBillingRow>(`/revenue-billing/${id}`, body).then((r) => {
+      invalidateCache("revenue-billing");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  deleteRevenueBilling: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/revenue-billing/${id}`).then((r) => {
+      invalidateCache("revenue-billing");
       invalidateCache("activity/log");
       return r.data;
     }),
@@ -882,6 +1335,12 @@ export type FinanceLedgerUpsertPayload = {
   adjustments: number;
   /** WL1 HC (same semantics as Excel sheet Actual Headcount WL1). */
   actual_headcount_wl1: number;
+  /** Overall HC — omit to leave unchanged on upsert. */
+  actual_headcount_finance?: number | null;
+  taggd_joiners?: number | null;
+  target_revenue_per_recruiter?: number | null;
+  /** Target PPC (INR per overall HC). Actual PPC is always cost ÷ overall HC in API. */
+  target_ppc_inr?: number | null;
 };
 
 export const financeLedgerApi = {

@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { financeLedgerApi, queries, type Project } from "@/lib/api";
+import { financeLedgerApi, queries, type FinanceLedgerUpsertPayload, type Project } from "@/lib/api";
 import type { FinanceRowVm } from "@/lib/view-models/finance";
 import { SearchableProjectPicker, SearchableStringPicker } from "@/components/platform/searchable-pickers";
 
@@ -44,6 +44,10 @@ const emptyAmounts = {
   revActual: "",
   cmActual: "",
   actualHeadcountWl1: "",
+  overallHc: "",
+  taggdJoiners: "",
+  targetRevPerRecruiter: "",
+  targetPpcInr: "",
   unbilled: "",
   collectionTarget: "",
   collected: "",
@@ -102,6 +106,10 @@ export function FinanceLedgerFormDialog({ open, onOpenChange, ledgerRows, onSave
       revActual: String(r.rev_actual_inr ?? 0),
       cmActual: String(r.cm_actual_inr ?? 0),
       actualHeadcountWl1: String(r.actual_headcount_wl1 ?? 0),
+      overallHc: r.actual_headcount_overall != null ? String(r.actual_headcount_overall) : "",
+      taggdJoiners: r.taggd_joiners != null ? String(r.taggd_joiners) : "",
+      targetRevPerRecruiter: r.target_revenue_per_recruiter != null ? String(r.target_revenue_per_recruiter) : "",
+      targetPpcInr: r.target_ppc_inr != null ? String(r.target_ppc_inr) : "",
       unbilled: String(r.unbilled_inr ?? 0),
       collectionTarget: String(r.collection_target_inr ?? 0),
       collected: String(r.collected_inr ?? 0),
@@ -161,7 +169,7 @@ export function FinanceLedgerFormDialog({ open, onOpenChange, ledgerRows, onSave
     }
     setSaving(true);
     try {
-      await financeLedgerApi.upsert({
+      const base = {
         project_id: pid,
         reporting_month: reportingMonth.slice(0, 7),
         rev_budget: parseNum(form.revBudget),
@@ -174,7 +182,13 @@ export function FinanceLedgerFormDialog({ open, onOpenChange, ledgerRows, onSave
         bad_debt: parseNum(form.badDebt),
         adjustments: parseNum(form.adjustments),
         actual_headcount_wl1: parseNum(form.actualHeadcountWl1),
-      });
+      };
+      const extra: Partial<FinanceLedgerUpsertPayload> = {};
+      if (form.overallHc.trim() !== "") extra.actual_headcount_finance = Math.round(parseNum(form.overallHc));
+      if (form.taggdJoiners.trim() !== "") extra.taggd_joiners = parseNum(form.taggdJoiners);
+      if (form.targetRevPerRecruiter.trim() !== "") extra.target_revenue_per_recruiter = parseNum(form.targetRevPerRecruiter);
+      if (form.targetPpcInr.trim() !== "") extra.target_ppc_inr = parseNum(form.targetPpcInr);
+      await financeLedgerApi.upsert({ ...base, ...extra });
       onSaved();
       onOpenChange(false);
     } catch (err: unknown) {
@@ -199,8 +213,9 @@ export function FinanceLedgerFormDialog({ open, onOpenChange, ledgerRows, onSave
           <DialogTitle className="platform-dialog__title">Add or update finance data</DialogTitle>
           <DialogDescription className="platform-dialog__desc">
             Writes one client-month row: revenue (ledger), contribution margin (ledger), cashflow (unbilled,
-            collections, bad debt), and WL1 headcount (same field as the Actual Headcount WL1 sheet).
-            Currency amounts are full INR (same units as the finance upload and table); WL1 HC is a headcount, not INR.
+            collections, bad debt), headcount and KPI targets (WL1, overall HC, Tag joiners, target rev productivity,
+            target PPC). Actual PPC is always computed as ledger cost ÷ overall HC when you save overall HC and cost
+            exists. Saving records who updated metrics and when on the efficiency KPI row for that month.
           </DialogDescription>
         </DialogHeader>
 
@@ -371,8 +386,8 @@ export function FinanceLedgerFormDialog({ open, onOpenChange, ledgerRows, onSave
               </div>
             </div>
 
-            <div className="platform-dialog__section-label">Headcount (finance)</div>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="platform-dialog__section-label">Headcount &amp; KPI targets (finance)</div>
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-1">
                 <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                   Actual WL1 HC
@@ -384,8 +399,55 @@ export function FinanceLedgerFormDialog({ open, onOpenChange, ledgerRows, onSave
                   onChange={(e) => setField("actualHeadcountWl1", e.target.value)}
                 />
                 <p className="text-muted-foreground text-[10px]">
-                  Work level 1 headcount (may include decimals). Stored with ledger month; same as ingest sheet Actual
-                  Headcount WL1.
+                  Rev productivity = revenue actual ÷ WL1 HC. Tag productivity = Tag joiners ÷ WL1 HC.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Overall HC (optional)
+                </label>
+                <input
+                  className="platform-search w-full max-w-none font-mono text-xs"
+                  inputMode="numeric"
+                  value={form.overallHc}
+                  onChange={(e) => setField("overallHc", e.target.value)}
+                  placeholder="For PPC = cost ÷ overall HC"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Taggd joiners (optional)
+                </label>
+                <input
+                  className="platform-search w-full max-w-none font-mono text-xs"
+                  inputMode="decimal"
+                  value={form.taggdJoiners}
+                  onChange={(e) => setField("taggdJoiners", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Target rev productivity (INR, optional)
+                </label>
+                <input
+                  className="platform-search w-full max-w-none font-mono text-xs"
+                  inputMode="decimal"
+                  value={form.targetRevPerRecruiter}
+                  onChange={(e) => setField("targetRevPerRecruiter", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Target PPC (INR per HC, optional)
+                </label>
+                <input
+                  className="platform-search w-full max-w-none font-mono text-xs"
+                  inputMode="decimal"
+                  value={form.targetPpcInr}
+                  onChange={(e) => setField("targetPpcInr", e.target.value)}
+                />
+                <p className="text-muted-foreground text-[10px]">
+                  Actual PPC is always from ledger cost ÷ overall HC — not from Excel Actual_PPC.
                 </p>
               </div>
             </div>

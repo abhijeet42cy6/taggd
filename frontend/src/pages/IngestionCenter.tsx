@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, queries, type IngestionEventRow } from "@/lib/api";
+import { api, queries, columnMappingEntryCount, type IngestionEventRow } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { PlatformSection, PageHeader, Tabs } from "@/components/platform/PlatformBlocks";
+import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -167,8 +168,8 @@ function AgentOutputCard({
   onReject?: () => void;
 }) {
   const sheets = result?.sheets || {};
-  const mapping = result?.mapping || {};
-  const mappedCount = Object.keys(mapping).length;
+  const mapping = result?.mapping;
+  const mappedCount = columnMappingEntryCount(mapping);
 
   return (
     <div className="platform-card" style={{ marginTop: 14 }}>
@@ -194,6 +195,14 @@ function AgentOutputCard({
                 <span className="platform-badge blue">{String(v)}</span>
               </div>
             ))}
+            {Object.keys(sheets).length === 0 && Array.isArray(result.data_sheets) && result.data_sheets.length > 0 && (
+              <div style={{ padding: "6px 8px", background: "var(--bg2)", borderRadius: 5, fontSize: 11 }}>
+                <span style={{ color: "var(--text-muted)", fontSize: 9, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Data sheets</span>
+                {result.data_sheets.map((s: string) => (
+                  <div key={s} style={{ fontFamily: "'DM Mono',monospace", marginBottom: 2 }}>{s}</div>
+                ))}
+              </div>
+            )}
             {result.all_sheets && result.all_sheets.map((s: string) => (
               <div key={s} style={{ display: "flex", justifyContent: "space-between", padding: "5px 8px", background: "var(--bg2)", borderRadius: 5, fontSize: 11.5 }}>
                 <span>{s}</span>
@@ -203,21 +212,15 @@ function AgentOutputCard({
           </div>
         </div>
 
-        {/* MAPPING PREVIEW */}
+        {/* SUMMARY + LOGIC SNIPPET (mapping moved below full-width) */}
         <div>
           <div style={{ fontSize: 9, textTransform: "uppercase", color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginBottom: 8, letterSpacing: ".1em" }}>
-            Column Mapping ({mappedCount} fields)
+            Ingest summary
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {Object.entries(mapping).slice(0, 6).map(([field, col]) => (
-              <div key={field} style={{ display: "flex", gap: 6, fontSize: 10.5, padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", flex: 1 }}>{field}</span>
-                <span style={{ color: "var(--accent2)" }}>{String(col)}</span>
-              </div>
-            ))}
-            {Object.keys(mapping).length > 6 && (
-              <div style={{ fontSize: 10, color: "var(--text-muted)" }}>+{Object.keys(mapping).length - 6} more fields</div>
-            )}
+          <div style={{ fontSize: 10.5, color: "var(--text-subtle)", lineHeight: 1.5, marginBottom: 8 }}>
+            <strong style={{ color: "var(--accent)" }}>{mappedCount}</strong> column links
+            (core + requisition fields when schema v2).
+          </div>
             {result.logic_explanation && (
               <div style={{ marginTop: 8, padding: "6px 8px", background: "rgba(79,143,255,0.07)", borderRadius: 5, color: "var(--text-subtle)", fontSize: 10, lineHeight: 1.5 }}>
                 <span style={{ color: "var(--accent)" }}>Logic:</span> {result.logic_explanation?.slice(0, 120)}…
@@ -228,7 +231,6 @@ function AgentOutputCard({
                 <span style={{ color: "var(--green)" }}>AI Reasoning:</span> {result.suggested?.reasoning?.slice(0, 120)}…
               </div>
             )}
-          </div>
         </div>
 
         {/* PRE-COMMIT SUMMARY */}
@@ -272,6 +274,12 @@ function AgentOutputCard({
           )}
         </div>
       </div>
+
+      {mappedCount > 0 && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+          <ColumnMappingDisplay mapping={mapping} variant="card" scrollMaxClass="max-h-[min(50vh,480px)]" />
+        </div>
+      )}
     </div>
   );
 }
@@ -625,7 +633,7 @@ export function IngestionCenter() {
         }
       );
       setExpressResult(result);
-      express.appendLog(`[${tsNow()}] ✓ Done — Project ${result.project_id}, ${Object.keys(result.mapping || {}).length} fields mapped`, "success");
+      express.appendLog(`[${tsNow()}] ✓ Done — Project ${result.project_id}, ${columnMappingEntryCount(result.mapping)} column links mapped`, "success");
     } catch (err: any) {
       express.appendLog(`[${tsNow()}] ✗ Error: ${err?.response?.data?.detail || err.message}`, "error");
     } finally {

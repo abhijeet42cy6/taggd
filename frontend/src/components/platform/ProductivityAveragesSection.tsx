@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { FinanceRowVm } from "@/lib/view-models/finance";
 
 export const PRODUCTIVITY_AVG_INFO =
-  "Arithmetic mean of Tag prod. (joiners ÷ WL1 HC), PPC (total cost ÷ overall HC), and Rev / WL1 (revenue ÷ WL1 HC). Each average uses only rows where that metric is defined; filters narrow client-month rows first.";
+  "Arithmetic mean of Tag prod. (Taggd source productivity = joiners ÷ WL1 HC), PPC (actual cost ÷ overall HC, formula only), and Rev / WL1 (revenue actual ÷ WL1 HC). Each average uses only rows where that metric is defined; filters narrow client-month rows first.";
 
 export const PRODUCTIVITY_AVG_INFO_DASHBOARD =
   "Same metrics as Finance Command. Rows are those that match the dashboard filter bar (period, month, region, sub-region, account, vertical, etc.). Each average uses only rows where that metric is defined.";
@@ -91,7 +91,10 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
   }, [rows, externalFilters, avgFilterClient, avgFilterMonth]);
 
   const productivityAvgs = useMemo(() => {
-    const tag = averageDefined(rowsForProductivityAvg, (r) => r.taggd_joiner_productivity);
+    const tag = averageDefined(
+      rowsForProductivityAvg,
+      (r) => r.taggd_joiner_productivity ?? r.taggd_source_productivity,
+    );
     const ppc = averageDefined(rowsForProductivityAvg, (r) => r.ppc_inr);
     const rev = averageDefined(rowsForProductivityAvg, (r) => r.revenue_productivity_inr);
     return { tag, ppc, rev };
@@ -180,13 +183,13 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
           <PlatformKpi
-            label="Avg Tag prod."
+            label="Avg Taggd source prod."
             value={fmtFinRatio(productivityAvgs.tag.mean)}
             accent="teal"
             subtext={
               productivityAvgs.tag.count
                 ? `Mean of ${productivityAvgs.tag.count} values`
-                : "No Tag prod. values in scope"
+                : "No Taggd source prod. values in scope"
             }
           />
           <PlatformKpi
