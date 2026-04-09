@@ -293,6 +293,12 @@ export function columnMappingEntryCount(
 export type Project = {
   id: number;
   filename: string;
+  /** FK to clients.id — parent legal client for rollups */
+  client_id?: number | null;
+  /** SBU / engagement label (e.g. TATA Motors) */
+  engagement_name?: string | null;
+  /** Joined from Client.official_name in list/detail APIs */
+  client_official_name?: string | null;
   account_name?: string;
   /** Client / charge identifier from directory (e.g. TRP0001T00NM1GIA) */
   charge_code?: string;
@@ -310,6 +316,8 @@ export type Project = {
   system_created_at?: string;
   source_filename?: string;
   practice_head?: string;
+  /** RPO scorecard / directory — may align with practice_head */
+  project_head?: string | null;
   be_spoc?: string;
   /** Account type (e.g. RPO) */
   practice?: string;
@@ -318,6 +326,57 @@ export type Project = {
   column_mapping?: Record<string, unknown> | Record<string, string> | null;
   revenue_logic_code?: string | null;
   logic_explanation?: string | null;
+};
+
+/** Parent account (legal client) with scoped projects from GET /clients. */
+export type ClientGroup = {
+  id: number;
+  official_name: string;
+  short_code: string | null;
+  projects: Project[];
+};
+
+/** `project_contracts` row — commercial signup / renewal snapshot (see GET /contracts/...). */
+export type ProjectContractRow = {
+  id: number;
+  project_id: number;
+  client_id: number | null;
+  customer_name: string | null;
+  account_type: string | null;
+  contract_start_date: string | null;
+  contract_end_date: string | null;
+  renewal_reminder_date: string | null;
+  duration_months: number | null;
+  signed_acv_inr: number | null;
+  contract_status: string | null;
+  signed_cm_pct: number | null;
+  headcount_contracted: number | null;
+  hiring_volume: number | null;
+  taggd_source_mix: string | null;
+  other_source_mix: string | null;
+  overall_rph: number | null;
+  mmf_applicable: boolean | null;
+  opening_fee_applicable: boolean | null;
+  payment_terms: string | null;
+  pricing_model: string | null;
+  contract_detail: string | null;
+  remarks: string | null;
+  agreed_rate_fee_inr: number | null;
+  est_annual_value_inr: number | null;
+  sow_msa_reference: string | null;
+  sla_terms_summary: string | null;
+  positions_contracted: number | null;
+  positions_filled: number | null;
+  renewal_status: string | null;
+  reason_for_lapse: string | null;
+  client_signoff_authority: string | null;
+  internal_signoff: string | null;
+  revenue_run_rate_inr: number | null;
+  practice_head_snapshot: string | null;
+  system_created_at?: string | null;
+  system_updated_at?: string | null;
+  source_filename?: string | null;
+  uploaded_by?: string | null;
 };
 
 export type AdminUserRow = {
@@ -682,13 +741,71 @@ export const queries = {
         | "function_head"
         | "regional_head"
         | "practice_head"
+        | "project_head"
         | "be_spoc"
         | "category"
         | "vertical"
         | "practice"
+        | "client_id"
+        | "engagement_name"
       >
     >
-  ) => api.patch<Project>(`/projects/${project_id}`, body).then((r) => r.data),
+  ) =>
+    api.patch<Project>(`/projects/${project_id}`, body).then((r) => {
+      invalidateCache("projects");
+      invalidateCache("clients");
+      invalidateCache("client/");
+      return r.data;
+    }),
+
+  contractsByProject: (projectId: number) =>
+    api.get<ProjectContractRow[]>(`/contracts/by-project/${projectId}`).then((r) => r.data),
+
+  contractsList: () =>
+    api.get<ProjectContractRow[]>(`/contracts`).then((r) => r.data),
+
+  uploadContractsWorkbook: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api
+      .post<{ created: number; skipped: number; missing_customer_no_project?: string[]; file: string }>(
+        `/contracts/upload`,
+        fd,
+      )
+      .then((r) => r.data);
+  },
+
+  /** Grouped legal clients + SBU projects (scoped). */
+  clients: () =>
+    cachedGet<ClientGroup[]>("clients", () =>
+      api.get<ClientGroup[]>("/clients").then((r) => r.data)
+    ),
+
+  clientDetail: (clientId: number) =>
+    cachedGet<ClientGroup>(`client/${clientId}`, () =>
+      api.get<ClientGroup>(`/clients/${clientId}`).then((r) => r.data)
+    ),
+
+  createClient: (body: { official_name: string; short_code?: string | null }) =>
+    api
+      .post<{ id: number; official_name: string; short_code: string | null }>("/clients", body)
+      .then((r) => {
+        invalidateCache("clients");
+        return r.data;
+      }),
+
+  patchClient: (clientId: number, body: { official_name?: string; short_code?: string | null }) =>
+    api
+      .patch<{ id: number; official_name: string; short_code: string | null }>(
+        `/clients/${clientId}`,
+        body
+      )
+      .then((r) => {
+        invalidateCache("clients");
+        invalidateCache(`client/${clientId}`);
+        invalidateCache("projects");
+        return r.data;
+      }),
 
   /**
    * NEW: single-request paginated records endpoint.
@@ -1194,6 +1311,12 @@ export type FinanceLedgerUpsertPayload = {
   adjustments: number;
   /** WL1 HC (same semantics as Excel sheet Actual Headcount WL1). */
   actual_headcount_wl1: number;
+  /** Overall HC — omit to leave unchanged on upsert. */
+  actual_headcount_finance?: number | null;
+  taggd_joiners?: number | null;
+  target_revenue_per_recruiter?: number | null;
+  /** Target PPC (INR per overall HC). Actual PPC is always cost ÷ overall HC in API. */
+  target_ppc_inr?: number | null;
 };
 
 export const financeLedgerApi = {

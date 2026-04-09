@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { queries, type Project } from "@/lib/api";
+import { queries } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { usePersona } from "@/lib/persona";
 import { PlatformSection, PageHeader, MiniStatRow, Tabs, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
-import { clientsVm, type ClientVm } from "@/lib/view-models/clients";
+import { clientGroupsToVm, clientsVm, type ClientVm } from "@/lib/view-models/clients";
 import { formatCurrency } from "@/lib/utils";
 
 // Real composite from projectStats — same formula as ClientDetail & PortfolioIntelligence
@@ -43,15 +43,15 @@ function scoreColor(s: number) {
   return "var(--red)";
 }
 
-function goToClient(name: string, navigate: ReturnType<typeof useNavigate>) {
-  navigate(`/clients/${encodeURIComponent(name)}`);
+function goToClient(id: number, navigate: ReturnType<typeof useNavigate>) {
+  navigate(`/clients/${id}`);
 }
 
 // projectId → per-project stats from the monitor endpoint
 type ProjectStat = { positions: number; revenue: number; closed?: number; active?: number; on_hold?: number };
 
 export function ClientsHub() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [clientsList, setClientsList] = useState<ClientVm[]>([]);
   const [projectStats, setProjectStats] = useState<Map<number, ProjectStat>>(new Map());
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("Overview");
@@ -60,39 +60,47 @@ export function ClientsHub() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    Promise.all([queries.projects(), queries.globalMonitor()]).then(([ps, monitor]) => {
-      setProjects(ps);
-      const map = new Map<number, ProjectStat>();
-      for (const s of monitor.project_stats ?? []) {
-        map.set(s.id, {
-          positions: s.positions,
-          revenue:   s.revenue,
-          closed:    s.closed,
-          active:    s.active,
-          on_hold:   s.on_hold,
+    Promise.all([queries.clients(), queries.globalMonitor()])
+      .then(([groups, monitor]) => {
+        setClientsList(clientGroupsToVm(groups));
+        const map = new Map<number, ProjectStat>();
+        for (const s of monitor.project_stats ?? []) {
+          map.set(s.id, {
+            positions: s.positions,
+            revenue: s.revenue,
+            closed: s.closed,
+            active: s.active,
+            on_hold: s.on_hold,
+          });
+        }
+        setProjectStats(map);
+        setLoading(false);
+      })
+      .catch(() => {
+        queries.projects().then((ps) => {
+          setClientsList(clientsVm(ps));
+          setLoading(false);
         });
-      }
-      setProjectStats(map);
-      setLoading(false);
-    }).catch(() => {
-      // globalMonitor may fail independently; still show projects
-      queries.projects().then((ps) => { setProjects(ps); setLoading(false); });
-    });
+      });
   }, []);
 
   const clients = useMemo<ClientVm[]>(() => {
-    const all = clientsVm(projects);
+    const all = clientsList;
     if (persona.id === "client_manager" && scopedClients?.length) {
-      return all.filter((c) => scopedClients.includes(c.client));
+      return all.filter((c) => scopedClients.includes(c.officialName) || scopedClients.includes(c.client));
     }
     return all;
-  }, [projects, persona, scopedClients]);
+  }, [clientsList, persona, scopedClients]);
 
   const filteredClients = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return clients;
     return clients.filter((c) => {
-      if (c.client.toLowerCase().includes(q)) return true;
+      if (c.officialName.toLowerCase().includes(q) || c.client.toLowerCase().includes(q)) return true;
+      for (const p of c.projects) {
+        const sbu = (p.engagement_name || p.account_name || "").toLowerCase();
+        if (sbu.includes(q)) return true;
+      }
       for (const id of c.projectIds) {
         if (String(id).includes(q)) return true;
         if (`p${id}`.includes(q) || `p${String(id).padStart(2, "0")}`.toLowerCase().includes(q)) return true;
@@ -108,11 +116,12 @@ export function ClientsHub() {
         subtitle="Unified client intelligence across Finance · SLA · Hiring · Workforce"
       />
 
-      {/* SPLIT IDENTITY WARNING */}
-      {clients.some((c) => c.split) && (
+      {/* Legacy-only: inferred merge from duplicate account_name */}
+      {clients.some((c) => c.split && c.id < 0) && (
         <div className="alert-banner amber">
-          ⚠ One or more clients appear across multiple Project IDs due to upload mismatch. Data unified at client layer.
-          <span style={{ textDecoration: "underline", cursor: "pointer", marginLeft: 8 }}>Reconcile →</span>
+          ⚠ Some accounts were inferred from project names only. Use{" "}
+          <strong>POST /clients</strong> and <strong>PATCH /projects/:id</strong> with{" "}
+          <code style={{ fontSize: 10 }}>client_id</code> to set a single legal client for SBUs.
         </div>
       )}
 
@@ -122,7 +131,7 @@ export function ClientsHub() {
         <input
           className="platform-search"
           type="search"
-          placeholder="Search clients by name or project ID…"
+          placeholder="Search by legal client, SBU, or project ID…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Filter clients"
@@ -184,10 +193,10 @@ export function ClientsHub() {
               : "—";
 
             return (
-              <div key={c.client} className="platform-card" onClick={() => goToClient(c.client, navigate)}
+              <div key={c.id} className="platform-card" onClick={() => goToClient(c.id, navigate)}
                 style={{
                   cursor: "pointer", transition: "border-color .2s, transform .15s",
-                  borderColor: c.split ? "rgba(255,79,107,.25)" : undefined,
+                  borderColor: c.split && c.id < 0 ? "rgba(255,79,107,.25)" : undefined,
                 }}
                 onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
                 onMouseLeave={(e) => (e.currentTarget.style.transform = "")}
@@ -202,9 +211,9 @@ export function ClientsHub() {
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
                     }}
-                    title={c.client}
+                    title={c.officialName}
                   >
-                    {c.client}
+                    {c.officialName}
                   </div>
                   <StatusTag status={status} />
                 </div>
@@ -218,7 +227,7 @@ export function ClientsHub() {
                   }}
                 >
                   {c.projectIds.map((id) => `P${String(id).padStart(2, "0")}`).join(" · ")}
-                  {c.split ? " · Merged" : ""}
+                  {c.split ? (c.id >= 0 ? " · Multi-SBU" : " · Merged") : ""}
                 </div>
                 <MiniStatRow stats={[
                   { label: "Reqs",    value: reqsDisplay },
@@ -249,14 +258,20 @@ export function ClientsHub() {
                 {filteredClients.map((c) => {
                   const score = compositeScore(c.projectIds, projectStats);
                   return (
-                    <tr key={c.client} style={{ cursor: "pointer" }} onClick={() => goToClient(c.client, navigate)}>
-                      <td style={{ fontWeight: 600 }}>{c.client}</td>
+                    <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => goToClient(c.id, navigate)}>
+                      <td style={{ fontWeight: 600 }}>{c.officialName}</td>
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>
                         {c.projectIds.join(", ")}
                       </td>
                       <td style={{ color: scoreColor(score) }}>{score}/100</td>
                       <td><StatusTag status={scoreStatus(score)} /></td>
-                      <td>{c.split ? <span className="platform-badge amber">Split</span> : <span className="platform-badge green">Unified</span>}</td>
+                      <td>
+                        {c.split
+                          ? c.id >= 0
+                            ? <span className="platform-badge green">Multi-SBU</span>
+                            : <span className="platform-badge amber">Inferred</span>
+                          : <span className="platform-badge green">Single</span>}
+                      </td>
                     </tr>
                   );
                 })}

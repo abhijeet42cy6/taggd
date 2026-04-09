@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .db.database import (
     SessionLocal,
+    Client,
     Project,
     Record,
     ProjectBudget,
@@ -28,6 +29,7 @@ from .db.database import (
     UserProjectAssignment,
     init_db,
     get_db,
+    ensure_project_client,
 )
 from .scripts.ingest_sla import ingest_sla
 from .scripts.ingest_wfm import ingest_wfm_master
@@ -79,6 +81,7 @@ from .routers.wfm_benchmark import router as wfm_benchmark_router
 from .routers.revenue_trackers import router as revenue_trackers_router
 from .routers.revenue_billing import router as revenue_billing_router
 from .routers.candidates import router as candidates_router
+from .routers.project_contracts import router as project_contracts_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
@@ -86,9 +89,16 @@ app.include_router(wfm_benchmark_router)
 app.include_router(revenue_trackers_router)
 app.include_router(revenue_billing_router)
 app.include_router(candidates_router)
+app.include_router(project_contracts_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
-from .auth.scope import apply_project_scope, assert_project_access, account_accessible, scoped_clause_record
+from .auth.scope import (
+    apply_project_scope,
+    assert_project_access,
+    assert_client_access,
+    account_accessible,
+    scoped_clause_record,
+)
 
 # Dependency to get DB session — re-exported from database.get_db
 class LogicRegenerateBody(BaseModel):
@@ -108,16 +118,29 @@ class ProjectMetadataPatch(BaseModel):
     """Partial update for enterprise fields on projects (directory / charge code sheet)."""
     charge_code: Optional[str] = None
     account_name: Optional[str] = None
+    client_id: Optional[int] = None
+    engagement_name: Optional[str] = None
     account_status: Optional[str] = None
     region: Optional[str] = None
     sub_region: Optional[str] = None
     function_head: Optional[str] = None
     regional_head: Optional[str] = None
     practice_head: Optional[str] = None
+    project_head: Optional[str] = None
     be_spoc: Optional[str] = None
     category: Optional[str] = None
     vertical: Optional[str] = None
     practice: Optional[str] = None
+
+
+class ClientCreateBody(BaseModel):
+    official_name: str
+    short_code: Optional[str] = None
+
+
+class ClientPatchBody(BaseModel):
+    official_name: Optional[str] = None
+    short_code: Optional[str] = None
 
 
 def _serialize_record_row(r: Record, today: datetime.datetime) -> dict:
@@ -384,6 +407,8 @@ async def upload_file(
             if suggested_match.matches:
                 project.account_name = suggested_match.matches[0].excel_name # Placeholder for name
             db.add(project)
+            db.flush()
+            ensure_project_client(db, project)
             db.commit()
             db.refresh(project)
         else:
@@ -544,6 +569,8 @@ async def pro_inspect_file(
                 raise HTTPException(status_code=403, detail="Cannot create a new project; contact an administrator.")
             project = Project(filename=safe_name)
             db.add(project)
+            db.flush()
+            ensure_project_client(db, project)
             db.commit()
             db.refresh(project)
 
@@ -979,6 +1006,10 @@ def patch_project_metadata(
         data = body.model_dump(exclude_unset=True)
     except AttributeError:  # Pydantic v1
         data = body.dict(exclude_unset=True)
+    if data.get("client_id") is not None:
+        c = db.query(Client).filter(Client.id == data["client_id"]).first()
+        if not c:
+            raise HTTPException(status_code=400, detail="client_id does not exist")
     for key, val in data.items():
         if hasattr(project, key):
             setattr(project, key, val)
@@ -1027,8 +1058,12 @@ def list_projects(
 ):
     from fastapi.responses import JSONResponse
     import math
+    from sqlalchemy.orm import joinedload
 
-    projects = apply_project_scope(db.query(Project), user, db, Project).all()
+    projects = (
+        apply_project_scope(db.query(Project).options(joinedload(Project.client)), user, db, Project)
+        .all()
+    )
 
     def clean(v):
         if isinstance(v, (datetime.datetime, datetime.date)):
@@ -1037,9 +1072,21 @@ def list_projects(
             return None
         return v
 
+    dirty = False
+    for p in projects:
+        if p.client_id is None:
+            ensure_project_client(db, p)
+            dirty = True
+    if dirty:
+        db.commit()
+
     res = []
     for p in projects:
         d = {c.name: clean(getattr(p, c.name)) for c in p.__table__.columns}
+        if p.client_id and p.client:
+            d["client_official_name"] = p.client.official_name
+        else:
+            d["client_official_name"] = None
         res.append(d)
 
     return JSONResponse(
@@ -1047,17 +1094,196 @@ def list_projects(
         headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
     )
 
+
+@app.post("/clients")
+def create_client(
+    body: ClientCreateBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a parent client row (e.g. TATA) to attach SBU projects via PATCH /projects/{id}."""
+    name = (body.official_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="official_name is required")
+    c = Client(official_name=name[:500], short_code=(body.short_code or "").strip() or None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    log_activity(
+        db,
+        user=user,
+        action="create",
+        resource_type="client",
+        summary=f"Client created: {c.official_name}",
+        project_id=None,
+        resource_id=str(c.id),
+        meta={"official_name": c.official_name},
+    )
+    return {"id": c.id, "official_name": c.official_name, "short_code": c.short_code}
+
+
+@app.get("/clients")
+def list_clients_grouped(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Clients the user can see, with scoped project rows under each."""
+    from sqlalchemy.orm import joinedload
+    import math
+
+    projects = (
+        apply_project_scope(db.query(Project).options(joinedload(Project.client)), user, db, Project)
+        .order_by(Project.id)
+        .all()
+    )
+
+    def clean(v):
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            return v.isoformat()
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+
+    dirty = False
+    for p in projects:
+        if p.client_id is None:
+            ensure_project_client(db, p)
+            dirty = True
+    if dirty:
+        db.commit()
+
+    by_c: Dict[int, Dict[str, Any]] = {}
+    for p in projects:
+        cid = p.client_id
+        if cid is None:
+            continue
+        if cid not in by_c:
+            cl = p.client
+            by_c[cid] = {
+                "id": cid,
+                "official_name": cl.official_name if cl else "",
+                "short_code": cl.short_code if cl else None,
+                "projects": [],
+            }
+        d = {c.name: clean(getattr(p, c.name)) for c in p.__table__.columns}
+        if p.client:
+            d["client_official_name"] = p.client.official_name
+        else:
+            d["client_official_name"] = None
+        by_c[cid]["projects"].append(d)
+    rows = sorted(by_c.values(), key=lambda x: (x["official_name"] or "").lower())
+    return rows
+
+
+@app.get("/clients/{client_id}")
+def get_client_detail(
+    client_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    assert_client_access(user, db, client_id)
+    from sqlalchemy.orm import joinedload
+    import math
+
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    def clean(v):
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            return v.isoformat()
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+
+    projects = (
+        apply_project_scope(
+            db.query(Project).options(joinedload(Project.client)).filter(Project.client_id == client_id),
+            user,
+            db,
+            Project,
+        )
+        .order_by(Project.id)
+        .all()
+    )
+    plist = []
+    for p in projects:
+        d = {col.name: clean(getattr(p, col.name)) for col in p.__table__.columns}
+        d["client_official_name"] = c.official_name
+        plist.append(d)
+    return {
+        "id": c.id,
+        "official_name": c.official_name,
+        "short_code": c.short_code,
+        "projects": plist,
+    }
+
+
+@app.patch("/clients/{client_id}")
+def patch_client(
+    client_id: int,
+    body: ClientPatchBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    assert_client_access(user, db, client_id)
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Client not found")
+    try:
+        data = body.model_dump(exclude_unset=True)
+    except AttributeError:
+        data = body.dict(exclude_unset=True)
+    if "official_name" in data and data["official_name"] is not None:
+        on = str(data["official_name"]).strip()
+        if not on:
+            raise HTTPException(status_code=400, detail="official_name cannot be empty")
+        c.official_name = on[:500]
+    if "short_code" in data:
+        c.short_code = (str(data["short_code"]).strip() if data["short_code"] else None) or None
+    db.commit()
+    db.refresh(c)
+    log_activity(
+        db,
+        user=user,
+        action="update",
+        resource_type="client",
+        summary=f"Client updated (CLI-{client_id})",
+        project_id=None,
+        resource_id=str(client_id),
+        meta={"fields": list(data.keys())},
+    )
+    return {"id": c.id, "official_name": c.official_name, "short_code": c.short_code}
+
 @app.get("/projects/{project_id}")
 def get_project(
     project_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    import math
+    from sqlalchemy.orm import joinedload
+
     assert_project_access(user, db, project_id)
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = (
+        db.query(Project).options(joinedload(Project.client)).filter(Project.id == project_id).first()
+    )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return project
+
+    def clean(v):
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            return v.isoformat()
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+
+    d = {c.name: clean(getattr(project, c.name)) for c in project.__table__.columns}
+    if project.client_id and project.client:
+        d["client_official_name"] = project.client.official_name
+    else:
+        d["client_official_name"] = None
+    return d
 
 @app.get("/projects/{project_id}/records")
 def get_records(
@@ -3076,30 +3302,38 @@ async def get_finance_data(
         v = float(r.actual_value or 0)
         cm_map[k] = max(cm_map.get(k, 0.0), v)
 
-    kpi_rows = (
-        apply_project_scope(
-            db.query(
-                FinanceEfficiencyKPI.project_id,
-                FinanceEfficiencyKPI.reporting_month,
-                FinanceEfficiencyKPI.actual_headcount_wl1,
-                FinanceEfficiencyKPI.actual_headcount_finance,
-                FinanceEfficiencyKPI.taggd_joiners,
-            ),
-            user,
-            db,
-            FinanceEfficiencyKPI,
-        )
+    kpi_objs = (
+        apply_project_scope(db.query(FinanceEfficiencyKPI), user, db, FinanceEfficiencyKPI)
+        .order_by(FinanceEfficiencyKPI.id)
         .all()
     )
     kpi_map: dict = {}
-    for r in kpi_rows:
+    for r in kpi_objs:
         k = (r.project_id, r.reporting_month)
-        if k not in kpi_map:
-            kpi_map[k] = {"wl1": 0.0, "overall_hc": 0.0, "taggd_joiners": 0.0}
-        m = kpi_map[k]
+        m = kpi_map.setdefault(
+            k,
+            {
+                "wl1": 0.0,
+                "overall_hc": 0.0,
+                "taggd_joiners": 0.0,
+                "target_ppc_inr": None,
+                "target_revenue_per_recruiter": None,
+                "metrics_updated_at": None,
+                "metrics_updated_by_user_id": None,
+            },
+        )
         m["wl1"] = max(m["wl1"], float(r.actual_headcount_wl1 or 0))
         m["overall_hc"] = max(m["overall_hc"], float(r.actual_headcount_finance or 0))
         m["taggd_joiners"] = max(m["taggd_joiners"], float(r.taggd_joiners or 0))
+        if r.target_ppc_inr is not None:
+            m["target_ppc_inr"] = float(r.target_ppc_inr)
+        if r.target_revenue_per_recruiter is not None:
+            m["target_revenue_per_recruiter"] = float(r.target_revenue_per_recruiter)
+        if r.metrics_updated_at is not None:
+            prev = m["metrics_updated_at"]
+            if prev is None or r.metrics_updated_at >= prev:
+                m["metrics_updated_at"] = r.metrics_updated_at
+                m["metrics_updated_by_user_id"] = r.metrics_updated_by_user_id
 
     cost_rows = (
         apply_project_scope(
@@ -3154,25 +3388,54 @@ async def get_finance_data(
         coll = float(cash_row["collected"]) if cash_row else 0.0
         ct = float(cash_row["collection_target"]) if cash_row else 0.0
         bd = float(cash_row["bad_debt"]) if cash_row else 0.0
-        km = kpi_map.get(key, {"wl1": 0.0, "overall_hc": 0.0, "taggd_joiners": 0.0})
+        km = kpi_map.get(
+            key,
+            {
+                "wl1": 0.0,
+                "overall_hc": 0.0,
+                "taggd_joiners": 0.0,
+                "target_ppc_inr": None,
+                "target_revenue_per_recruiter": None,
+                "metrics_updated_at": None,
+                "metrics_updated_by_user_id": None,
+            },
+        )
         wl1_hc = float(km["wl1"] or 0.0)
         overall_hc = float(km["overall_hc"] or 0.0)
         taggd_j = float(km["taggd_joiners"] or 0.0)
         total_cost = float(cost_map.get(key, 0.0) or 0.0)
+        # Taggd source productivity = Taggd joiners ÷ WL1 HC
         taggd_joiner_productivity = _safe_ratio(taggd_j, wl1_hc)
+        # PPC (INR per HC) = Actual cost ÷ Overall headcount — formula only, not sheet Actual_PPC
         ppc = _safe_ratio(total_cost, overall_hc)
+        # Revenue productivity = Actual revenue ÷ WL1 HC
         revenue_productivity = _safe_ratio(ra, wl1_hc)
+        # CM % = Actual CM ÷ Actual revenue
+        cm_pct = round((cm_val / ra) * 100, 2) if ra and float(ra) != 0 else None
+        tgt_ppc = km.get("target_ppc_inr")
+        ppc_ach_pct = None
+        if tgt_ppc is not None and float(tgt_ppc) > 0 and ppc is not None:
+            ppc_ach_pct = round((float(ppc) / float(tgt_ppc)) * 100, 2)
+        trpr = km.get("target_revenue_per_recruiter")
+        rev_prod_ach_pct = None
+        if trpr is not None and float(trpr) > 0 and revenue_productivity is not None:
+            rev_prod_ach_pct = round((float(revenue_productivity) / float(trpr)) * 100, 2)
+        mu_at = km.get("metrics_updated_at")
+        mu_uid = km.get("metrics_updated_by_user_id")
         res.append({
             "id": row["id"],
             "project_id": row["project_id"],
             "account_name": project.account_name if project else "Unknown",
             "vertical": project.vertical if project else "N/A",
+            "project_head": (project.project_head or None) if project else None,
+            "practice_head": (project.practice_head or None) if project else None,
             "month": row["reporting_month"].strftime("%b-%y") if row["reporting_month"] else "N/A",
             "month_sort": row["reporting_month"].isoformat() if row["reporting_month"] else "",
             "rev_budget": rb,
             "rev_actual": ra,
             "rev_forecast": rf,
             "cm_actual": cm_val,
+            "cm_pct": cm_pct,
             "unbilled": cash_row["unbilled"] if cash_row else 0.0,
             "collected": coll,
             "bad_debt": bd,
@@ -3184,9 +3447,25 @@ async def get_finance_data(
             "taggd_joiners": taggd_j,
             "total_cost_inr": total_cost,
             "taggd_joiner_productivity": taggd_joiner_productivity,
+            "taggd_source_productivity": taggd_joiner_productivity,
             "ppc_inr": ppc,
+            "target_ppc_inr": tgt_ppc,
+            "ppc_ach_pct": ppc_ach_pct,
+            "target_revenue_per_recruiter": km.get("target_revenue_per_recruiter"),
             "revenue_productivity_inr": revenue_productivity,
+            "rev_prod_ach_pct": rev_prod_ach_pct,
+            "metrics_updated_at": mu_at.isoformat() if mu_at else None,
+            "metrics_updated_by_user_id": mu_uid,
+            "metrics_updated_by_email": None,
         })
+
+    uids = {r["metrics_updated_by_user_id"] for r in res if r.get("metrics_updated_by_user_id")}
+    if uids:
+        email_map = {u.id: u.email for u in db.query(User).filter(User.id.in_(uids)).all()}
+        for r in res:
+            uid = r.get("metrics_updated_by_user_id")
+            if uid:
+                r["metrics_updated_by_email"] = email_map.get(uid)
 
     return JSONResponse(
         content=res,

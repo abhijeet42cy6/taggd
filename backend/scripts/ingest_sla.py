@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session
 # Add project root to path so we can import from backend
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from backend.db.database import SessionLocal, Project, MetricDefinition, SLAPerformance, init_db, backfill_sla_period_starts
+from backend.db.database import (
+    SessionLocal,
+    Project,
+    MetricDefinition,
+    SLAPerformance,
+    init_db,
+    backfill_sla_period_starts,
+    ensure_project_client,
+)
 from backend.core.sla_period import canonical_month_label, parse_sla_score_column_name
 
 def ingest_sla(file_path, db=None):
@@ -84,8 +92,11 @@ def ingest_sla(file_path, db=None):
                 )
                 db.add(project)
                 db.flush() # Ensure ID is available
+                ensure_project_client(db, project)
                 projects_created += 1
-            
+            elif project.client_id is None:
+                ensure_project_client(db, project)
+
             project.source_filename = os.path.basename(file_path)
             project.region = str(row.get('Region', ''))
             project.practice_head = str(row.get('Practice Head', ''))

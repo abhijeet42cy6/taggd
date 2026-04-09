@@ -84,7 +84,7 @@ export function FiscalPerformance() {
         const q = search.trim().toLowerCase();
         const textOk =
           !q ||
-          `${r.account_name} ${r.vertical} ${r.month} ${r.month_sort ?? ""} ${r.actual_headcount_wl1 ?? ""}`
+          `${r.account_name} ${r.vertical} ${r.project_head ?? ""} ${r.practice_head ?? ""} ${r.month} ${r.month_sort ?? ""} ${r.actual_headcount_wl1 ?? ""}`
             .toLowerCase()
             .includes(q);
         const clientOk = ledgerClient === "all" || r.account_name === ledgerClient;
@@ -388,32 +388,41 @@ export function FiscalPerformance() {
             </span>
           </div>
           <div className="platform-table-wrap">
-            {loading ? <SkeletonTable rows={6} cols={17} /> : null}
+            {loading ? <SkeletonTable rows={6} cols={26} /> : null}
             <table className="platform-table" style={{ display: loading ? "none" : undefined }}>
               <thead>
                 <tr>
                   <th>Month</th>
                   <th>Client</th>
+                  <th title="projects.project_head">Proj. head</th>
                   <th>Vertical</th>
                   <th>Budget</th>
                   <th>Forecast</th>
                   <th>Actual</th>
                   <th>CM</th>
+                  <th title="Actual CM ÷ actual revenue">CM %</th>
                   <th>WL1 HC</th>
-                  <th title="Taggd joiners ÷ WL1 HC">Tag prod.</th>
-                  <th title="Total cost ÷ overall HC (INR per HC)">PPC</th>
-                  <th title="Revenue actual ÷ WL1 HC (INR per WL1 HC)">Rev / WL1</th>
+                  <th title="Overall headcount (finance)">Ovl HC</th>
+                  <th title="Taggd joiners ÷ WL1 HC">Taggd src</th>
+                  <th title="Actual cost ÷ overall HC (INR per HC)">PPC</th>
+                  <th title="Target PPC (INR per HC)">Tgt PPC</th>
+                  <th title="Actual PPC ÷ target PPC × 100">PPC %</th>
+                  <th title="Revenue actual ÷ WL1 HC">Rev / WL1</th>
+                  <th title="Target rev productivity (INR)">Tgt rev prod</th>
+                  <th title="Actual ÷ target × 100">Rev prod %</th>
                   <th>Unbilled</th>
                   <th>Bad debt</th>
                   <th>Coll. pending</th>
                   <th>Collected</th>
                   <th>Δ%</th>
+                  <th>Metrics by</th>
+                  <th>Updated</th>
                   <th>Flag</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={17} style={{ color: "var(--text-muted)", textAlign: "center" }}>No finance rows yet — upload a Finance Excel file.</td></tr>
+                  <tr><td colSpan={26} style={{ color: "var(--text-muted)", textAlign: "center" }}>No finance rows yet — upload a Finance Excel file.</td></tr>
                 )}
                 {filtered.map((r) => {
                   const delta = r.rev_budget_inr ? ((r.rev_actual_inr - r.rev_budget_inr) / r.rev_budget_inr) * 100 : 0;
@@ -423,30 +432,57 @@ export function FiscalPerformance() {
                     <tr key={rowKey}>
                       <td>{r.month}</td>
                       <td>{r.account_name}</td>
+                      <td style={{ fontSize: 10, maxWidth: 100 }} className="truncate" title={r.project_head || ""}>
+                        {r.project_head || "—"}
+                      </td>
                       <td>{r.vertical}</td>
                       <td>{formatCurrency(r.rev_budget_inr)}</td>
                       <td>{formatCurrency(r.rev_forecast_inr)}</td>
                       <td style={{ color: deltaColor }}>{formatCurrency(r.rev_actual_inr)}</td>
                       <td>{formatCurrency(r.cm_actual_inr)}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }} title="CM ÷ revenue">
+                        {r.cm_pct != null && Number.isFinite(r.cm_pct) ? `${r.cm_pct.toFixed(1)}%` : "—"}
+                      </td>
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>
                         {Number(r.actual_headcount_wl1 ?? 0).toLocaleString(undefined, {
                           maximumFractionDigits: 2,
                         })}
                       </td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }} title="Taggd joiners ÷ WL1 HC">
-                        {fmtFinRatio(r.taggd_joiner_productivity ?? null)}
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }} title="Overall HC">
+                        {r.actual_headcount_overall != null && Number.isFinite(r.actual_headcount_overall)
+                          ? Math.round(r.actual_headcount_overall).toLocaleString()
+                          : "—"}
                       </td>
-                      <td style={{ fontSize: 11 }} title="Total cost ÷ overall HC">
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }} title="Taggd joiners ÷ WL1 HC">
+                        {fmtFinRatio(r.taggd_source_productivity ?? r.taggd_joiner_productivity ?? null)}
+                      </td>
+                      <td style={{ fontSize: 11 }} title="Ledger cost ÷ overall HC">
                         {fmtFinInrMetric(r.ppc_inr ?? null)}
+                      </td>
+                      <td style={{ fontSize: 11 }}>{fmtFinInrMetric(r.target_ppc_inr ?? null)}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>
+                        {r.ppc_ach_pct != null && Number.isFinite(r.ppc_ach_pct) ? `${r.ppc_ach_pct.toFixed(1)}%` : "—"}
                       </td>
                       <td style={{ fontSize: 11 }} title="Revenue actual ÷ WL1 HC">
                         {fmtFinInrMetric(r.revenue_productivity_inr ?? null)}
+                      </td>
+                      <td style={{ fontSize: 11 }} title="Target rev productivity">
+                        {fmtFinInrMetric(r.target_revenue_per_recruiter ?? null)}
+                      </td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>
+                        {r.rev_prod_ach_pct != null && Number.isFinite(r.rev_prod_ach_pct) ? `${r.rev_prod_ach_pct.toFixed(1)}%` : "—"}
                       </td>
                       <td>{formatCurrency(r.unbilled_inr)}</td>
                       <td>{formatCurrency(r.bad_debt_inr)}</td>
                       <td>{formatCurrency(r.collection_pending_inr)}</td>
                       <td>{formatCurrency(r.collected_inr ?? 0)}</td>
                       <td style={{ color: deltaColor }}>{delta >= 0 ? "+" : ""}{delta.toFixed(1)}%</td>
+                      <td style={{ fontSize: 10, color: "var(--text-muted)", maxWidth: 120 }} className="truncate" title={r.metrics_updated_by_email || ""}>
+                        {r.metrics_updated_by_email || (r.metrics_updated_by_user_id != null ? `User #${r.metrics_updated_by_user_id}` : "—")}
+                      </td>
+                      <td style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", color: "var(--text-muted)" }}>
+                        {r.metrics_updated_at ? new Date(r.metrics_updated_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : "—"}
+                      </td>
                       <td>{r.unbilled_inr > 2_000_000 ? <span className="platform-badge red">⚠ High</span> : null}</td>
                     </tr>
                   );

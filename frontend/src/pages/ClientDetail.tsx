@@ -1,8 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Info } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
-import { queries, columnMappingEntryCount, type RecordRow, type RecordsPage, type Project } from "@/lib/api";
-import { clientsVm } from "@/lib/view-models/clients";
+import {
+  queries,
+  columnMappingEntryCount,
+  type RecordRow,
+  type RecordsPage,
+  type Project,
+  type ProjectContractRow,
+} from "@/lib/api";
+import { clientsVm, type ClientVm } from "@/lib/view-models/clients";
 import { cn, formatCurrency, formatNumber, formatPercent } from "@/lib/utils";
 import {
   PlatformKpi, PlatformSection, PageHeader, Tabs, StatusTag, KvRow,
@@ -643,11 +650,14 @@ function aggregateLatestWfm(rows: WfmBenchRow[], projectIds: number[]) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
 export function ClientDetail() {
-  const { clientId } = useParams<{ clientId: string }>();
+  const { clientId: clientIdParam } = useParams<{ clientId: string }>();
   const navigate = useNavigate();
+  const rawParam = clientIdParam ?? "";
+  const legacyDecoded = decodeURIComponent(rawParam);
+  const numericClientId = /^\d+$/.test(rawParam) ? parseInt(rawParam, 10) : null;
 
-  // meta
-  const [projects, setProjects] = useState<any[]>([]);
+  // meta — unified client cockpit (legal client + SBU projects)
+  const [clientVm, setClientVm] = useState<ClientVm | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
 
   // all records (source of truth — used for both table and charts)
@@ -673,19 +683,50 @@ export function ClientDetail() {
   const [wfmRows, setWfmRows] = useState<WfmBenchRow[]>([]);
   const [loadingOps, setLoadingOps] = useState(true);
 
-  // Resolve client from URL
-  const decodedClient = decodeURIComponent(clientId ?? "");
+  const [contractsByProject, setContractsByProject] = useState<Map<number, ProjectContractRow[]>>(new Map());
+  const [loadingContracts, setLoadingContracts] = useState(false);
 
-  // Load projects
+  const displayClientName = clientVm?.officialName ?? legacyDecoded;
+
   useEffect(() => {
-    queries.projects().then((ps) => { setProjects(ps); setLoadingMeta(false); });
-  }, []);
-
-  // Resolve project IDs for this client
-  const clientVm = useMemo(() => {
-    if (!projects.length) return null;
-    return clientsVm(projects).find((c) => c.client === decodedClient) ?? null;
-  }, [projects, decodedClient]);
+    let cancelled = false;
+    setLoadingMeta(true);
+    if (numericClientId != null && numericClientId > 0) {
+      queries
+        .clientDetail(numericClientId)
+        .then((g) => {
+          if (cancelled) return;
+          setClientVm({
+            id: g.id,
+            officialName: g.official_name,
+            shortCode: g.short_code,
+            client: g.official_name,
+            projects: g.projects,
+            projectIds: g.projects.map((p) => p.id),
+            split: g.projects.length > 1,
+          });
+          setLoadingMeta(false);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setClientVm(null);
+            setLoadingMeta(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    queries.projects().then((ps) => {
+      if (cancelled) return;
+      const vm = clientsVm(ps).find((c) => c.client === legacyDecoded) ?? null;
+      setClientVm(vm);
+      setLoadingMeta(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawParam, numericClientId, legacyDecoded]);
 
   const projectIds = clientVm?.projectIds ?? [];
 
@@ -695,17 +736,36 @@ export function ClientDetail() {
     return projs.map((p) => {
       const fn = p.filename || "Project";
       const shortFn = fn.length > 40 ? `${fn.slice(0, 37)}…` : fn;
-      const clientName = (p.account_name && String(p.account_name).trim()) || decodedClient;
+      const clientName =
+        (p.engagement_name && String(p.engagement_name).trim()) ||
+        (p.account_name && String(p.account_name).trim()) ||
+        displayClientName;
       const base = `${clientName} · PRJ-${p.id}`;
       return {
         id: p.id,
         label: multi ? `${base} · ${shortFn}` : base,
       };
     });
-  }, [clientVm?.projects, decodedClient]);
+  }, [clientVm?.projects, displayClientName]);
 
   function refreshProjects() {
-    return queries.projects().then((ps) => { setProjects(ps); });
+    if (numericClientId != null && numericClientId > 0) {
+      return queries.clientDetail(numericClientId).then((g) => {
+        setClientVm({
+          id: g.id,
+          officialName: g.official_name,
+          shortCode: g.short_code,
+          client: g.official_name,
+          projects: g.projects,
+          projectIds: g.projects.map((p) => p.id),
+          split: g.projects.length > 1,
+        });
+      });
+    }
+    return queries.projects().then((ps) => {
+      const vm = clientsVm(ps).find((c) => c.client === legacyDecoded) ?? null;
+      setClientVm(vm);
+    });
   }
 
   function refreshRecords() {
@@ -744,7 +804,34 @@ export function ClientDetail() {
       setLoadingOps(false);
     });
     return () => { mounted = false; };
-  }, [clientVm, decodedClient]);
+  }, [clientVm, displayClientName]);
+
+  useEffect(() => {
+    if (!projectIds.length) {
+      setContractsByProject(new Map());
+      return;
+    }
+    let cancelled = false;
+    setLoadingContracts(true);
+    Promise.all(
+      projectIds.map((pid) =>
+        queries.contractsByProject(pid).then((rows) => [pid, rows] as const),
+      ),
+    )
+      .then((pairs) => {
+        if (cancelled) return;
+        setContractsByProject(new Map(pairs));
+      })
+      .catch(() => {
+        if (!cancelled) setContractsByProject(new Map());
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingContracts(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectIds.join(",")]);
 
   const accountNamesForSla = useMemo(
     () => Array.from(new Set((clientVm?.projects ?? []).map((p) => (p.account_name || "").trim()).filter(Boolean))),
@@ -752,8 +839,12 @@ export function ClientDetail() {
   );
 
   const slaSnapshot = useMemo(
-    () => pickLatestSlaMetPct(slaTimeseries, accountNamesForSla.length ? accountNamesForSla : [decodedClient]),
-    [slaTimeseries, accountNamesForSla, decodedClient],
+    () =>
+      pickLatestSlaMetPct(
+        slaTimeseries,
+        accountNamesForSla.length ? accountNamesForSla : [displayClientName],
+      ),
+    [slaTimeseries, accountNamesForSla, displayClientName],
   );
 
   const wfmSnapshot = useMemo(
@@ -900,9 +991,14 @@ export function ClientDetail() {
         <span style={{ color: "var(--text-muted)" }}>/</span>
         {loadingMeta
           ? <Skeleton height={14} width={160} />
-          : <span style={{ fontSize: 13, fontWeight: 700 }}>{decodedClient}</span>
+          : <span style={{ fontSize: 13, fontWeight: 700 }}>{displayClientName}</span>
         }
-        {clientVm?.split && <span className="platform-badge amber" style={{ marginLeft: 4 }}>Split Identity</span>}
+        {clientVm?.split && clientVm.id < 0 && (
+          <span className="platform-badge amber" style={{ marginLeft: 4 }}>Inferred merge</span>
+        )}
+        {clientVm?.split && clientVm.id >= 0 && (
+          <span className="platform-badge green" style={{ marginLeft: 4 }}>Multi-SBU</span>
+        )}
       </div>
 
       {/* PAGE HEADER */}
@@ -912,8 +1008,8 @@ export function ClientDetail() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 260px", minWidth: 0 }}>
               <PageHeader
-                title={decodedClient}
-                subtitle={`${clientVm?.projects[0]?.region ?? ""} · ${clientVm?.projects[0]?.vertical ?? ""} · ${projectIds.length} project${projectIds.length > 1 ? "s" : ""} · Composite: ${compositeScore}/100`}
+                title={displayClientName}
+                subtitle={`${clientVm?.projects[0]?.region ?? ""} · ${clientVm?.projects[0]?.vertical ?? ""} · ${projectIds.length} SBU${projectIds.length > 1 ? "s" : ""} · Composite: ${compositeScore}/100`}
               />
             </div>
             {clientVm && projectIds.length > 0 && (
@@ -931,9 +1027,10 @@ export function ClientDetail() {
       }
 
       {/* SPLIT WARNING */}
-      {clientVm?.split && (
+      {clientVm?.split && clientVm.id < 0 && (
         <div className="alert-banner amber">
-          ⚠ This client spans {projectIds.length} Project IDs: {projectIds.map((id) => `P${String(id).padStart(2, "0")}`).join(", ")}. Data is unified at display layer.
+          ⚠ This view was inferred from duplicate account names. Create a legal client via API and set{" "}
+          <code style={{ fontSize: 10 }}>client_id</code> on each SBU project for a stable rollup.
         </div>
       )}
 
@@ -1343,7 +1440,10 @@ export function ClientDetail() {
                 ? <SkeletonTable rows={5} cols={2} />
                 : (
                   <div>
-                    <KvRow label="Client Name" value={decodedClient} />
+                    <KvRow label="Legal client" value={displayClientName} />
+                    {clientVm && clientVm.id >= 0 && (
+                      <KvRow label="Client ID" value={`CLI-${clientVm.id}`} />
+                    )}
                     <KvRow label="Charge code" value={clientVm?.projects[0]?.charge_code ?? "—"} />
                     <KvRow label="Account status" value={clientVm?.projects[0]?.account_status ?? "—"} />
                     <KvRow label="Region" value={clientVm?.projects[0]?.region ?? "—"} />
@@ -1354,19 +1454,30 @@ export function ClientDetail() {
                     <KvRow label="Function head" value={clientVm?.projects[0]?.function_head ?? "—"} />
                     <KvRow label="Regional head" value={clientVm?.projects[0]?.regional_head ?? "—"} />
                     <KvRow label="Practice Head" value={clientVm?.projects[0]?.practice_head ?? "—"} />
+                    <KvRow label="Project Head" value={clientVm?.projects[0]?.project_head ?? "—"} />
                     <KvRow label="BE SPOC" value={clientVm?.projects[0]?.be_spoc ?? "—"} />
                     <KvRow label="Tracker Sheet" value={clientVm?.projects[0]?.tracker_sheet ?? "—"} />
                     <KvRow label="Req ID Column" value={clientVm?.projects[0]?.pos_id_column ?? "—"} />
-                    <KvRow label="Identity" value={clientVm?.split
-                      ? <span className="platform-badge amber">Split · {projectIds.length} Project IDs</span>
-                      : <span className="platform-badge green">Unified</span>}
+                    <KvRow
+                      label="Structure"
+                      value={
+                        !clientVm
+                          ? "—"
+                          : clientVm.id >= 0 && clientVm.split
+                            ? <span className="platform-badge green">Legal client · {projectIds.length} SBUs</span>
+                            : clientVm.id >= 0
+                              ? <span className="platform-badge green">Single SBU</span>
+                              : clientVm.split
+                                ? <span className="platform-badge amber">Inferred · {projectIds.length} project IDs</span>
+                                : <span className="platform-badge green">Single project</span>
+                      }
                     />
                   </div>
                 )
               }
             </PlatformSection>
 
-            <PlatformSection title="Linked Projects">
+            <PlatformSection title="SBU / linked projects">
               {(clientVm?.projects ?? []).map((p) => (
                 <div key={p.id} style={{
                   padding: "10px 12px", background: "var(--bg2)", borderRadius: 8,
@@ -1375,6 +1486,9 @@ export function ClientDetail() {
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                     <span style={{ fontFamily: "'DM Mono',monospace", color: "var(--accent)", fontSize: 10.5 }}>
                       PRJ-{p.id}
+                      {(p.engagement_name || "").trim()
+                        ? ` · ${(p.engagement_name || "").trim()}`
+                        : ""}
                     </span>
                     <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
                       {p.system_created_at ? new Date(p.system_created_at).toLocaleDateString("en-IN") : "—"}
@@ -1414,6 +1528,58 @@ export function ClientDetail() {
               onRecordsRefresh={refreshRecords}
             />
           ))}
+
+          <PlatformSection title="Commercial contracts">
+            {loadingContracts ? (
+              <div style={{ color: "var(--text-muted)", fontSize: 11 }}>Loading contract rows…</div>
+            ) : (
+              <div style={{ display: "grid", gap: 12 }}>
+                {(clientVm?.projects ?? []).map((p) => {
+                  const rows = contractsByProject.get(p.id) ?? [];
+                  return (
+                    <div key={p.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+                      <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)", marginBottom: 8 }}>
+                        PRJ-{p.id}
+                        {(p.engagement_name || p.account_name) ? ` · ${p.engagement_name || p.account_name}` : ""}
+                      </div>
+                      {rows.length === 0 ? (
+                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No contract record — ingest workbook or POST /contracts.</div>
+                      ) : (
+                        <div className="platform-table-wrap">
+                          <table className="platform-table">
+                            <thead>
+                              <tr>
+                                <th>Customer</th>
+                                <th>Status</th>
+                                <th>Start</th>
+                                <th>End</th>
+                                <th>ACV (INR)</th>
+                                <th>CM%</th>
+                                <th>HC</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((c) => (
+                                <tr key={c.id}>
+                                  <td>{c.customer_name ?? "—"}</td>
+                                  <td>{c.contract_status ?? "—"}</td>
+                                  <td style={{ fontSize: 10, fontFamily: "'DM Mono',monospace" }}>{c.contract_start_date?.slice(0, 10) ?? "—"}</td>
+                                  <td style={{ fontSize: 10, fontFamily: "'DM Mono',monospace" }}>{c.contract_end_date?.slice(0, 10) ?? "—"}</td>
+                                  <td>{c.signed_acv_inr != null ? formatCurrency(c.signed_acv_inr) : "—"}</td>
+                                  <td>{c.signed_cm_pct != null ? `${Math.round(c.signed_cm_pct * 10000) / 100}%` : "—"}</td>
+                                  <td>{c.headcount_contracted != null ? String(c.headcount_contracted) : "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </PlatformSection>
         </div>
       )}
 

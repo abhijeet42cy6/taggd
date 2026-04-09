@@ -93,6 +93,19 @@ class AuditMixin:
     source_filename = Column(String)
     uploaded_by = Column(String, default="System")
 
+
+class Client(Base, AuditMixin):
+    """Legal / rollup account (e.g. TATA). Projects under the same client are SBUs / engagements."""
+
+    __tablename__ = "clients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    official_name = Column(String, nullable=False, index=True)
+    short_code = Column(String, nullable=True, index=True)
+
+    projects = relationship("Project", back_populates="client")
+
+
 class Project(Base, AuditMixin):
     __tablename__ = "projects"
 
@@ -100,6 +113,11 @@ class Project(Base, AuditMixin):
     filename = Column(String, index=True) # Removed unique=True to allow multiple accounts from one manifest file
     tracker_sheet = Column(String)
     contract_sheet = Column(String)
+
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # SBU / engagement label (e.g. TATA Motors); finance rows often key off account_name — keep both aligned in ingest
+    engagement_name = Column(String, nullable=True, index=True)
+    client = relationship("Client", back_populates="projects")
     
     # Enhanced Enterprise Metadata
     account_name = Column(String, index=True)
@@ -108,6 +126,8 @@ class Project(Base, AuditMixin):
     region = Column(String)
     sub_region = Column(String)  # e.g. West 1 (distinct from category / TARA bucket)
     practice_head = Column(String)
+    # RPO / scorecard: accountable project head (may match practice_head or differ by org)
+    project_head = Column(String, nullable=True)
     regional_head = Column(String)  # e.g. Baljeet Singh
     function_head = Column(String)  # e.g. Kamakshi
     be_spoc = Column(String)
@@ -141,6 +161,61 @@ class Project(Base, AuditMixin):
         "TaggdRevenueBilling", back_populates="project", cascade="all, delete-orphan"
     )
     candidates = relationship("Candidate", back_populates="project", cascade="all, delete-orphan")
+    contracts = relationship(
+        "ProjectContract",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+
+
+class ProjectContract(Base, AuditMixin):
+    """Commercial contract / signup snapshot per project (SBU), sourced from contract workbook or platform edits."""
+
+    __tablename__ = "project_contracts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    customer_name = Column(String, nullable=True, index=True)
+    account_type = Column(String, nullable=True)
+    contract_start_date = Column(Date, nullable=True)
+    contract_end_date = Column(Date, nullable=True)
+    renewal_reminder_date = Column(Date, nullable=True)
+    duration_months = Column(Integer, nullable=True)
+
+    signed_acv_inr = Column(Float, nullable=True)
+    contract_status = Column(String, nullable=True, index=True)
+    signed_cm_pct = Column(Float, nullable=True)
+    headcount_contracted = Column(Float, nullable=True)
+    hiring_volume = Column(Float, nullable=True)
+    taggd_source_mix = Column(String, nullable=True)
+    other_source_mix = Column(String, nullable=True)
+    overall_rph = Column(Float, nullable=True)
+
+    mmf_applicable = Column(Boolean, nullable=True)
+    opening_fee_applicable = Column(Boolean, nullable=True)
+    payment_terms = Column(Text, nullable=True)
+    pricing_model = Column(String, nullable=True)
+    contract_detail = Column(Text, nullable=True)
+    remarks = Column(Text, nullable=True)
+
+    agreed_rate_fee_inr = Column(Float, nullable=True)
+    est_annual_value_inr = Column(Float, nullable=True)
+    sow_msa_reference = Column(String, nullable=True)
+    sla_terms_summary = Column(Text, nullable=True)
+    positions_contracted = Column(Integer, nullable=True)
+    positions_filled = Column(Integer, nullable=True)
+    renewal_status = Column(String, nullable=True)
+    reason_for_lapse = Column(Text, nullable=True)
+    client_signoff_authority = Column(String, nullable=True)
+    internal_signoff = Column(String, nullable=True)
+    revenue_run_rate_inr = Column(Float, nullable=True)
+    practice_head_snapshot = Column(String, nullable=True)
+
+    project = relationship("Project", back_populates="contracts")
+    client = relationship("Client", backref="project_contracts")
+
 
 class ProjectBudget(Base, AuditMixin):
     __tablename__ = "project_budgets"
@@ -389,8 +464,12 @@ class FinanceMonthlyLedger(Base, AuditMixin):
     forecast_value = Column(Float, default=0.0)
     actual_value = Column(Float, default=0.0)
     actual_cost = Column(Float, default=0.0)
+
+    metrics_last_updated_at = Column(DateTime, nullable=True)
+    metrics_last_updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     
     project = relationship("Project", back_populates="finance_ledger")
+    metrics_last_updated_by = relationship("User", foreign_keys=[metrics_last_updated_by_user_id])
 
 class FinanceCashFlow(Base, AuditMixin):
     __tablename__ = "finance_cash_flow"
@@ -403,8 +482,12 @@ class FinanceCashFlow(Base, AuditMixin):
     actual_collected = Column(Float, default=0.0)
     bad_debt = Column(Float, default=0.0)
     adjustments = Column(Float, default=0.0)
+
+    metrics_last_updated_at = Column(DateTime, nullable=True)
+    metrics_last_updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     
     project = relationship("Project", back_populates="finance_cashflow")
+    metrics_last_updated_by = relationship("User", foreign_keys=[metrics_last_updated_by_user_id])
 
 class FinanceEfficiencyKPI(Base, AuditMixin):
     __tablename__ = "finance_efficiency_kpis"
@@ -419,9 +502,13 @@ class FinanceEfficiencyKPI(Base, AuditMixin):
     actual_headcount_wl1 = Column(Float, default=0.0)
     # Monthly Taggd-sourced joiner count (sheet Taggd_Source_Joiner)
     taggd_joiners = Column(Float, default=0.0)
-    actual_ppc = Column(Float, default=0.0) # Actual Personnel Cost
-    
+    # Target PPC (INR per overall HC). Actual PPC is always ledger Actual Cost ÷ overall HC (see /finance/data).
+    target_ppc_inr = Column(Float, nullable=True)
+    metrics_updated_at = Column(DateTime, nullable=True)
+    metrics_updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
     project = relationship("Project", back_populates="finance_kpis")
+    metrics_updated_by = relationship("User", foreign_keys=[metrics_updated_by_user_id])
 
 
 class RevenueForecastWeekly(Base):
@@ -686,6 +773,72 @@ def _ensure_finance_efficiency_taggd_joiners_column():
         logging.warning("finance_efficiency_kpis taggd_joiners migration: %s", e)
 
 
+def _ensure_projects_project_head_column():
+    """SQLite: add project_head for RPO scorecard / directory."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(projects)")).fetchall()
+            cols = {r[1] for r in rows}
+            if cols and "project_head" not in cols:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN project_head VARCHAR"))
+                conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("projects project_head migration: %s", e)
+
+
+def _ensure_finance_ledger_cash_metrics_audit_columns():
+    """SQLite: who/when for platform edits on ledger + cashflow rows."""
+    from sqlalchemy import text
+
+    for table in ("finance_monthly_ledger", "finance_cash_flow"):
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+                cols = {r[1] for r in rows}
+                if not cols:
+                    continue
+                if "metrics_last_updated_at" not in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN metrics_last_updated_at DATETIME"))
+                if "metrics_last_updated_by_user_id" not in cols:
+                    conn.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN metrics_last_updated_by_user_id INTEGER")
+                    )
+                conn.commit()
+        except Exception as e:
+            import logging
+
+            logging.warning("%s metrics audit columns migration: %s", table, e)
+
+
+def _ensure_finance_efficiency_scorecard_columns():
+    """SQLite: target PPC + monthly metrics audit on finance_efficiency_kpis."""
+    from sqlalchemy import text
+
+    alters = [
+        ("target_ppc_inr", "REAL"),
+        ("metrics_updated_at", "DATETIME"),
+        ("metrics_updated_by_user_id", "INTEGER"),
+    ]
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(finance_efficiency_kpis)")).fetchall()
+            cols = {r[1] for r in rows}
+            if not cols:
+                return
+            for col, ddl in alters:
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE finance_efficiency_kpis ADD COLUMN {col} {ddl}"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("finance_efficiency_kpis scorecard columns migration: %s", e)
+
+
 def _ensure_records_rpo_columns():
     """SQLite: add RPO requisition tracker columns on records if missing."""
     from sqlalchemy import text
@@ -750,6 +903,69 @@ def _ensure_records_rpo_columns():
         logging.warning("records RPO columns migration: %s", e)
 
 
+def ensure_project_client(db: Session, project: Project) -> Client:
+    """Attach a Client row to project if missing (one-to-one bootstrap or new upload)."""
+    if project.client_id is not None:
+        c = db.query(Client).filter(Client.id == project.client_id).first()
+        if c:
+            return c
+    label = (project.account_name or "").strip()
+    if not label:
+        fn = (project.filename or "").strip()
+        label = os.path.basename(fn) if fn else f"Project {project.id}"
+    label = (label or f"Project {project.id}")[:500]
+    c = Client(official_name=label)
+    db.add(c)
+    db.flush()
+    project.client_id = c.id
+    if not (project.engagement_name or "").strip():
+        project.engagement_name = (project.account_name or "").strip() or None
+    return c
+
+
+def backfill_client_project_links(db: Session) -> int:
+    """Legacy DB: each project without client_id gets its own Client (merge under one client via PATCH later)."""
+    n = 0
+    for p in db.query(Project).filter(Project.client_id.is_(None)).all():
+        label = (p.account_name or "").strip()
+        if not label:
+            fn = (p.filename or "").strip()
+            label = os.path.basename(fn) if fn else f"Project {p.id}"
+        label = (label or f"Project {p.id}")[:500]
+        c = Client(official_name=label)
+        db.add(c)
+        db.flush()
+        p.client_id = c.id
+        if not (p.engagement_name or "").strip():
+            p.engagement_name = (p.account_name or "").strip() or None
+        n += 1
+    if n:
+        db.flush()
+    return n
+
+
+def _ensure_clients_and_project_client_columns():
+    """SQLite: clients table via metadata; add client_id + engagement_name on projects if missing."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(projects)")).fetchall()
+            cols = {r[1] for r in rows}
+            if cols:
+                if "client_id" not in cols:
+                    conn.execute(text("ALTER TABLE projects ADD COLUMN client_id INTEGER"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_projects_client_id ON projects (client_id)"))
+                if "engagement_name" not in cols:
+                    conn.execute(text("ALTER TABLE projects ADD COLUMN engagement_name VARCHAR"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_projects_engagement_name ON projects (engagement_name)"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("clients/project client_id migration: %s", e)
+
+
 def backfill_sla_period_starts(db: Session):
     """Populate period_start + canonical reporting_month (YYYY-MM) from legacy labels."""
     from backend.core.sla_period import canonical_month_label, parse_sla_month_label
@@ -779,7 +995,11 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _ensure_clients_and_project_client_columns()
     _ensure_records_rpo_columns()
+    _ensure_projects_project_head_column()
+    _ensure_finance_ledger_cash_metrics_audit_columns()
+    _ensure_finance_efficiency_scorecard_columns()
     _ensure_project_enterprise_columns()
     _ensure_sla_period_start_column()
     _ensure_finance_efficiency_wl1_column()
@@ -794,6 +1014,11 @@ def init_db():
             import logging
 
             logging.info("backfilled sla period_start on %s rows", n)
+        n_c = backfill_client_project_links(db)
+        if n_c:
+            import logging
+
+            logging.info("backfilled client_id on %s projects", n_c)
         db.commit()
     except Exception as e:
         db.rollback()

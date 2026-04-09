@@ -25,7 +25,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-from backend.db.database import SessionLocal, Project, init_db
+from backend.db.database import SessionLocal, Project, Client, init_db, ensure_project_client
 
 
 def _norm_key(s: str) -> str:
@@ -52,7 +52,16 @@ def _build_column_map(columns: list) -> Dict[str, str]:
         "practice type": "practice",
         "practice": "practice",
         "practice head": "practice_head",
+        "project head": "project_head",
+        "projecthead": "project_head",
         "category": "category",
+        "parent client": "parent_client_name",
+        "legal client": "parent_client_name",
+        "client group": "parent_client_name",
+        "rollup client": "parent_client_name",
+        "sbu": "engagement_name",
+        "business unit": "engagement_name",
+        "engagement": "engagement_name",
     }
     out: Dict[str, str] = {}
     for c in columns:
@@ -86,6 +95,21 @@ def _find_project(db: Session, charge_code: Optional[str], account_name: Optiona
     if not name:
         return None
     return db.query(Project).filter(func.lower(Project.account_name) == name.lower()).first()
+
+
+def _find_or_create_client(db: Session, official_name: Optional[str]) -> Optional[Client]:
+    from sqlalchemy import func
+
+    n = (official_name or "").strip()
+    if not n:
+        return None
+    c = db.query(Client).filter(func.lower(Client.official_name) == n.lower()).first()
+    if c:
+        return c
+    c = Client(official_name=n[:500])
+    db.add(c)
+    db.flush()
+    return c
 
 
 def ingest_project_master_file(file_path: str, db: Session | None = None) -> Dict[str, Any]:
@@ -133,11 +157,23 @@ def ingest_project_master_file(file_path: str, db: Session | None = None) -> Dic
                 "regional_head",
                 "practice",
                 "practice_head",
+                "project_head",
                 "category",
             ):
                 val = _cell(row, col_map, field)
                 if val is not None:
                     setattr(proj, field, val)
+
+            parent_client = _cell(row, col_map, "parent_client_name")
+            if parent_client:
+                cl = _find_or_create_client(db, parent_client)
+                if cl:
+                    proj.client_id = cl.id
+            sbu = _cell(row, col_map, "engagement_name")
+            if sbu:
+                proj.engagement_name = sbu[:500]
+            if proj.client_id is None:
+                ensure_project_client(db, proj)
 
             proj.source_filename = os.path.basename(file_path)
             updated += 1

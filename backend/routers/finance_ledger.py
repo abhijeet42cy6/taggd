@@ -32,6 +32,17 @@ class FinanceLedgerUpsertBody(BaseModel):
         0.0,
         description="WL1 headcount (finance master Actual Headcount WL1); may be fractional.",
     )
+    actual_headcount_finance: int | None = Field(
+        None,
+        description="Overall HC (Actual Headcount Overall). Omit to leave unchanged.",
+    )
+    taggd_joiners: float | None = Field(None, description="Monthly Taggd joiners. Omit to leave unchanged.")
+    target_revenue_per_recruiter: float | None = Field(
+        None, description="Target rev productivity (INR per WL1). Omit to leave unchanged."
+    )
+    target_ppc_inr: float | None = Field(
+        None, description="Target PPC INR per overall HC. Omit to leave unchanged; null clears when sent explicitly."
+    )
 
 
 def _parse_month_first_day(s: str) -> datetime.datetime:
@@ -54,6 +65,9 @@ def _upsert_ledger(
     forecast: float,
     actual: float,
     cost: float = 0.0,
+    *,
+    metrics_user_id: int | None = None,
+    metrics_ts: datetime.datetime | None = None,
 ) -> None:
     row = (
         db.query(FinanceMonthlyLedger)
@@ -70,18 +84,21 @@ def _upsert_ledger(
         row.actual_value = actual
         row.actual_cost = cost
     else:
-        db.add(
-            FinanceMonthlyLedger(
-                project_id=project_id,
-                reporting_month=reporting_month,
-                metric_category=category,
-                budget_value=budget,
-                forecast_value=forecast,
-                actual_value=actual,
-                actual_cost=cost,
-                uploaded_by="platform",
-            )
+        row = FinanceMonthlyLedger(
+            project_id=project_id,
+            reporting_month=reporting_month,
+            metric_category=category,
+            budget_value=budget,
+            forecast_value=forecast,
+            actual_value=actual,
+            actual_cost=cost,
+            uploaded_by="platform",
         )
+        db.add(row)
+        db.flush()
+    if metrics_user_id is not None and metrics_ts is not None:
+        row.metrics_last_updated_at = metrics_ts
+        row.metrics_last_updated_by_user_id = metrics_user_id
 
 
 def _upsert_cashflow(
@@ -93,6 +110,9 @@ def _upsert_cashflow(
     collected: float,
     bad_debt: float,
     adjustments: float,
+    *,
+    metrics_user_id: int | None = None,
+    metrics_ts: datetime.datetime | None = None,
 ) -> None:
     row = (
         db.query(FinanceCashFlow)
@@ -109,25 +129,33 @@ def _upsert_cashflow(
         row.bad_debt = bad_debt
         row.adjustments = adjustments
     else:
-        db.add(
-            FinanceCashFlow(
-                project_id=project_id,
-                reporting_month=reporting_month,
-                unbilled_amount=unbilled,
-                collection_target=collection_target,
-                actual_collected=collected,
-                bad_debt=bad_debt,
-                adjustments=adjustments,
-                uploaded_by="platform",
-            )
+        row = FinanceCashFlow(
+            project_id=project_id,
+            reporting_month=reporting_month,
+            unbilled_amount=unbilled,
+            collection_target=collection_target,
+            actual_collected=collected,
+            bad_debt=bad_debt,
+            adjustments=adjustments,
+            uploaded_by="platform",
         )
+        db.add(row)
+        db.flush()
+    if metrics_user_id is not None and metrics_ts is not None:
+        row.metrics_last_updated_at = metrics_ts
+        row.metrics_last_updated_by_user_id = metrics_user_id
 
 
-def _upsert_efficiency_wl1(
+def _fields_set(body: FinanceLedgerUpsertBody) -> set:
+    return getattr(body, "model_fields_set", None) or getattr(body, "__fields_set__", set())
+
+
+def _upsert_efficiency_kpi(
     db: Session,
     project_id: int,
     reporting_month: datetime.datetime,
-    actual_headcount_wl1: float,
+    body: FinanceLedgerUpsertBody,
+    user: User,
 ) -> None:
     row = (
         db.query(FinanceEfficiencyKPI)
@@ -137,19 +165,32 @@ def _upsert_efficiency_wl1(
         )
         .first()
     )
-    if row:
-        row.actual_headcount_wl1 = actual_headcount_wl1
-        row.uploaded_by = "platform"
-    else:
-        db.add(
-            FinanceEfficiencyKPI(
-                project_id=project_id,
-                reporting_month=reporting_month,
-                actual_headcount_wl1=actual_headcount_wl1,
-                uploaded_by="platform",
-                source_filename="platform",
-            )
+    fs = _fields_set(body)
+    if not row:
+        row = FinanceEfficiencyKPI(
+            project_id=project_id,
+            reporting_month=reporting_month,
+            actual_headcount_wl1=body.actual_headcount_wl1,
+            uploaded_by="platform",
+            source_filename="platform",
         )
+        db.add(row)
+        db.flush()
+    else:
+        row.actual_headcount_wl1 = body.actual_headcount_wl1
+        row.uploaded_by = "platform"
+
+    if "actual_headcount_finance" in fs:
+        row.actual_headcount_finance = int(body.actual_headcount_finance or 0)
+    if "taggd_joiners" in fs:
+        row.taggd_joiners = float(body.taggd_joiners or 0)
+    if "target_revenue_per_recruiter" in fs:
+        row.target_revenue_per_recruiter = float(body.target_revenue_per_recruiter or 0)
+    if "target_ppc_inr" in fs:
+        row.target_ppc_inr = body.target_ppc_inr
+
+    row.metrics_updated_at = datetime.datetime.utcnow()
+    row.metrics_updated_by_user_id = user.id
 
 
 @router.post("/ledger-upsert")
@@ -166,6 +207,8 @@ async def finance_ledger_upsert(
     """
     assert_project_access(user, db, body.project_id)
     reporting_month = _parse_month_first_day(body.reporting_month)
+    mu_ts = datetime.datetime.utcnow()
+    mu_uid = user.id
 
     _upsert_ledger(
         db,
@@ -176,6 +219,8 @@ async def finance_ledger_upsert(
         body.rev_forecast,
         body.rev_actual,
         0.0,
+        metrics_user_id=mu_uid,
+        metrics_ts=mu_ts,
     )
     _upsert_ledger(
         db,
@@ -186,6 +231,8 @@ async def finance_ledger_upsert(
         0.0,
         body.cm_actual,
         0.0,
+        metrics_user_id=mu_uid,
+        metrics_ts=mu_ts,
     )
     _upsert_cashflow(
         db,
@@ -196,13 +243,10 @@ async def finance_ledger_upsert(
         body.collected,
         body.bad_debt,
         body.adjustments,
+        metrics_user_id=mu_uid,
+        metrics_ts=mu_ts,
     )
-    _upsert_efficiency_wl1(
-        db,
-        body.project_id,
-        reporting_month,
-        body.actual_headcount_wl1,
-    )
+    _upsert_efficiency_kpi(db, body.project_id, reporting_month, body, user)
 
     db.commit()
     log_activity(
