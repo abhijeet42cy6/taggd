@@ -13,6 +13,7 @@ import { AuthProvider, navAllowedForRole, useAuth } from "@/lib/auth";
 import { ClientsHub } from "./pages/ClientsHub";
 import { ClientDetail } from "./pages/ClientDetail";
 import { ClientContracts } from "./pages/ClientContracts";
+import { Meetings } from "./pages/Meetings";
 import { Agent } from "./pages/Agent";
 import { Dashboard } from "./pages/Dashboard";
 import { DataOperations } from "./pages/DataOperations";
@@ -46,6 +47,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Clients", path: "/clients" },
       { label: "Contracts", path: "/client-contracts" },
+      { label: "Meetings", path: "/meetings" },
       { label: "Requisitions", path: "/requisitions" },
     ],
   },
@@ -224,6 +226,7 @@ function AppShell() {
               <Route path="/clients" element={<ClientsHub />} />
               <Route path="/clients/:clientId" element={<ClientDetail />} />
               <Route path="/client-contracts" element={<ClientContracts />} />
+              <Route path="/meetings" element={<Meetings />} />
               <Route path="/requisitions" element={<Requisitions />} />
               <Route path="/finance" element={<FiscalPerformance />} />
               <Route path="/revenue-trackers" element={<RevenueTrackers />} />

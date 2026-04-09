@@ -17,9 +17,15 @@ from sqlalchemy import func, or_
 
 # DB models imported via backend package
 from backend.db.database import (
-    Project, Record, ProjectBudget, ProjectForecast,
-    MetricDefinition, SLAPerformance, WFMHRBenchmark, WFMResourceGap,
-    FinanceMonthlyLedger, FinanceCashFlow, FinanceEfficiencyKPI,
+    Project,
+    Record,
+    MetricDefinition,
+    SLAPerformance,
+    WFMHRBenchmark,
+    WFMResourceGap,
+    FinanceMonthlyLedger,
+    FinanceCashFlow,
+    FinanceEfficiencyKPI,
 )
 
 _MAX_ROWS = 20   # default cap for detail lists
@@ -584,44 +590,66 @@ def get_finance_ledger(
 # ─────────────────────────────────────────────────────────────────────────────
 def get_budget_forecast(db: Session, project_id: int) -> dict:
     """
-    Return project-level budgets (quarterly) and monthly forecasts.
+    Return project-level budgets (quarterly Revenue ledger) and planning forecast lines
+    (`Revenue_MMF`, `Forecast_Joiners`, etc.) from `finance_monthly_ledger`.
     """
-    budgets = db.query(ProjectBudget).filter(ProjectBudget.project_id == project_id).all()
-    forecasts = (
-        db.query(ProjectForecast)
-        .filter(ProjectForecast.project_id == project_id)
-        .order_by(ProjectForecast.month_year, ProjectForecast.metric_name)
-        .limit(60)
+    from backend.core.finance_planning_categories import PLANNING_FORECAST_CATEGORIES
+
+    rev_rows = (
+        db.query(FinanceMonthlyLedger)
+        .filter(
+            FinanceMonthlyLedger.project_id == project_id,
+            FinanceMonthlyLedger.metric_category == "Revenue",
+        )
+        .order_by(FinanceMonthlyLedger.reporting_month.asc())
+        .all()
+    )
+    fc_rows = (
+        db.query(FinanceMonthlyLedger)
+        .filter(
+            FinanceMonthlyLedger.project_id == project_id,
+            FinanceMonthlyLedger.metric_category.in_(PLANNING_FORECAST_CATEGORIES),
+        )
+        .order_by(FinanceMonthlyLedger.reporting_month.asc(), FinanceMonthlyLedger.metric_category.asc())
+        .limit(120)
         .all()
     )
     total_fc = (
-        db.query(func.count(ProjectForecast.id))
-        .filter(ProjectForecast.project_id == project_id)
-        .scalar() or 0
+        db.query(func.count(FinanceMonthlyLedger.id))
+        .filter(
+            FinanceMonthlyLedger.project_id == project_id,
+            FinanceMonthlyLedger.metric_category.in_(PLANNING_FORECAST_CATEGORIES),
+        )
+        .scalar()
+        or 0
     )
 
     bdata = [
         {
-            "fiscal_year": b.fiscal_year,
-            "q1": b.q1, "q2": b.q2, "q3": b.q3, "q4": b.q4,
-            "total": b.total,
-            "raw_project_name": b.raw_project_name,
+            "reporting_month": _ser(r.reporting_month),
+            "metric_category": r.metric_category,
+            "budget_value": r.budget_value,
+            "forecast_value": r.forecast_value,
+            "actual_value": r.actual_value,
         }
-        for b in budgets
+        for r in rev_rows
     ]
     fdata = [
         {
-            "month": _ser(f.month_year),
-            "metric": f.metric_name,
-            "value": f.value,
+            "month": _ser(f.reporting_month),
+            "metric_category": f.metric_category,
+            "forecast_value": f.forecast_value,
         }
-        for f in forecasts
+        for f in fc_rows
     ]
 
     return {
         "data": {"budgets": bdata, "forecasts": fdata},
-        "meta": _meta(f"project_id={project_id}", len(budgets) + total_fc,
-                      truncated=(total_fc > 60)),
+        "meta": _meta(
+            f"project_id={project_id} ledger",
+            len(rev_rows) + len(fc_rows),
+            truncated=(total_fc > 120),
+        ),
     }
 
 

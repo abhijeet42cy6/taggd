@@ -46,6 +46,334 @@ function normStatus(s: string | null | undefined): string {
   return (s || "").trim().toLowerCase();
 }
 
+function fmtCmPct(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  const p = v > 1 ? v : v * 100;
+  return `${Math.round(p * 100) / 100}%`;
+}
+
+function numOrNull(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function intOrNull(s: string): number | null {
+  const n = numOrNull(s);
+  if (n == null) return null;
+  return Math.round(n);
+}
+
+function cmPctForApi(s: string): number | null {
+  const n = numOrNull(s);
+  if (n == null) return null;
+  if (n > 1) return n / 100;
+  return n;
+}
+
+function triBoolParse(s: string): boolean | null {
+  const t = s.trim().toLowerCase();
+  if (t === "yes" || t === "true" || t === "1") return true;
+  if (t === "no" || t === "false" || t === "0") return false;
+  return null;
+}
+
+function triBoolLabel(v: boolean | null | undefined): string {
+  if (v === true) return "Yes";
+  if (v === false) return "No";
+  return "—";
+}
+
+function contractRowToForm(row: ProjectContractRow): Record<string, string> {
+  const d = (x: string | null | undefined) => (x ? x.slice(0, 10) : "");
+  const n = (x: number | null | undefined) => (x != null ? String(x) : "");
+  const tri = (x: boolean | null | undefined) =>
+    x === true ? "yes" : x === false ? "no" : "";
+  return {
+    customer_name: row.customer_name ?? "",
+    account_type: row.account_type ?? "",
+    contract_start_date: d(row.contract_start_date),
+    contract_end_date: d(row.contract_end_date),
+    renewal_reminder_date: d(row.renewal_reminder_date),
+    duration_months: n(row.duration_months),
+    signed_acv_inr: n(row.signed_acv_inr),
+    contract_status: row.contract_status ?? "",
+    signed_cm_pct: n(row.signed_cm_pct),
+    headcount_contracted: n(row.headcount_contracted),
+    hiring_volume: n(row.hiring_volume),
+    taggd_source_mix: row.taggd_source_mix ?? "",
+    other_source_mix: row.other_source_mix ?? "",
+    overall_rph: n(row.overall_rph),
+    mmf_applicable: tri(row.mmf_applicable),
+    opening_fee_applicable: tri(row.opening_fee_applicable),
+    payment_terms: row.payment_terms ?? "",
+    pricing_model: row.pricing_model ?? "",
+    contract_detail: row.contract_detail ?? "",
+    remarks: row.remarks ?? "",
+    agreed_rate_fee_inr: n(row.agreed_rate_fee_inr),
+    est_annual_value_inr: n(row.est_annual_value_inr),
+    sow_msa_reference: row.sow_msa_reference ?? "",
+    sla_terms_summary: row.sla_terms_summary ?? "",
+    positions_contracted: n(row.positions_contracted),
+    positions_filled: n(row.positions_filled),
+    renewal_status: row.renewal_status ?? "",
+    reason_for_lapse: row.reason_for_lapse ?? "",
+    client_signoff_authority: row.client_signoff_authority ?? "",
+    internal_signoff: row.internal_signoff ?? "",
+    revenue_run_rate_inr: n(row.revenue_run_rate_inr),
+    practice_head_snapshot: row.practice_head_snapshot ?? "",
+  };
+}
+
+function emptyContractForm(): Record<string, string> {
+  return contractRowToForm({
+    id: 0,
+    project_id: 0,
+    client_id: null,
+    customer_name: null,
+    account_type: null,
+    contract_start_date: null,
+    contract_end_date: null,
+    renewal_reminder_date: null,
+    duration_months: null,
+    signed_acv_inr: null,
+    contract_status: null,
+    signed_cm_pct: null,
+    headcount_contracted: null,
+    hiring_volume: null,
+    taggd_source_mix: null,
+    other_source_mix: null,
+    overall_rph: null,
+    mmf_applicable: null,
+    opening_fee_applicable: null,
+    payment_terms: null,
+    pricing_model: null,
+    contract_detail: null,
+    remarks: null,
+    agreed_rate_fee_inr: null,
+    est_annual_value_inr: null,
+    sow_msa_reference: null,
+    sla_terms_summary: null,
+    positions_contracted: null,
+    positions_filled: null,
+    renewal_status: null,
+    reason_for_lapse: null,
+    client_signoff_authority: null,
+    internal_signoff: null,
+    revenue_run_rate_inr: null,
+    practice_head_snapshot: null,
+  });
+}
+
+function formToContractPayload(form: Record<string, string>): Record<string, unknown> {
+  const str = (k: string) => {
+    const v = (form[k] ?? "").trim();
+    return v ? v : null;
+  };
+  return {
+    customer_name: str("customer_name"),
+    account_type: str("account_type"),
+    contract_start_date: str("contract_start_date") || null,
+    contract_end_date: str("contract_end_date") || null,
+    renewal_reminder_date: str("renewal_reminder_date") || null,
+    duration_months: intOrNull(form.duration_months ?? ""),
+    signed_acv_inr: numOrNull(form.signed_acv_inr ?? ""),
+    contract_status: str("contract_status"),
+    signed_cm_pct: cmPctForApi(form.signed_cm_pct ?? ""),
+    headcount_contracted: numOrNull(form.headcount_contracted ?? ""),
+    hiring_volume: numOrNull(form.hiring_volume ?? ""),
+    taggd_source_mix: str("taggd_source_mix"),
+    other_source_mix: str("other_source_mix"),
+    overall_rph: numOrNull(form.overall_rph ?? ""),
+    mmf_applicable: triBoolParse(form.mmf_applicable ?? ""),
+    opening_fee_applicable: triBoolParse(form.opening_fee_applicable ?? ""),
+    payment_terms: str("payment_terms"),
+    pricing_model: str("pricing_model"),
+    contract_detail: str("contract_detail"),
+    remarks: str("remarks"),
+    agreed_rate_fee_inr: numOrNull(form.agreed_rate_fee_inr ?? ""),
+    est_annual_value_inr: numOrNull(form.est_annual_value_inr ?? ""),
+    sow_msa_reference: str("sow_msa_reference"),
+    sla_terms_summary: str("sla_terms_summary"),
+    positions_contracted: intOrNull(form.positions_contracted ?? ""),
+    positions_filled: intOrNull(form.positions_filled ?? ""),
+    renewal_status: str("renewal_status"),
+    reason_for_lapse: str("reason_for_lapse"),
+    client_signoff_authority: str("client_signoff_authority"),
+    internal_signoff: str("internal_signoff"),
+    revenue_run_rate_inr: numOrNull(form.revenue_run_rate_inr ?? ""),
+    practice_head_snapshot: str("practice_head_snapshot"),
+  };
+}
+
+function ContractFormFields({
+  form,
+  onField,
+}: {
+  form: Record<string, string>;
+  onField: (key: string, value: string) => void;
+}) {
+  const triSelect = (key: string, label: string) => (
+    <label key={key} style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
+      <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>{label}</span>
+      <select
+        className="platform-search"
+        value={form[key] ?? ""}
+        onChange={(e) => onField(key, e.target.value)}
+        style={{ width: "100%" }}
+      >
+        <option value="">—</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+    </label>
+  );
+
+  const inp = (key: string, label: string, type: "text" | "date" | "number" = "text", placeholder?: string) => (
+    <label key={key} style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
+      <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>{label}</span>
+      <input
+        className="platform-search"
+        type={type === "number" ? "text" : type}
+        inputMode={type === "number" ? "decimal" : undefined}
+        placeholder={placeholder}
+        value={form[key] ?? ""}
+        onChange={(e) => onField(key, e.target.value)}
+        style={{ width: "100%" }}
+      />
+    </label>
+  );
+
+  const ta = (key: string, label: string, rows = 2) => (
+    <label key={key} style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
+      <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>{label}</span>
+      <textarea
+        className="platform-search"
+        rows={rows}
+        value={form[key] ?? ""}
+        onChange={(e) => onField(key, e.target.value)}
+        style={{ width: "100%", resize: "vertical" }}
+      />
+    </label>
+  );
+
+  return (
+    <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+      <div style={{ gridColumn: "1 / -1", fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+        Identity &amp; classification
+      </div>
+      {inp("customer_name", "Customer name")}
+      {inp("account_type", "Account / contract type (e.g. RPO)")}
+      {inp("practice_head_snapshot", "Practice head")}
+      {inp("contract_status", "Current status")}
+      {inp("renewal_status", "Renewal status")}
+
+      <div style={{ gridColumn: "1 / -1", fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+        Dates
+      </div>
+      {inp("contract_start_date", "Contract start", "date")}
+      {inp("contract_end_date", "Contract end / renewal", "date")}
+      {inp("renewal_reminder_date", "Renewal reminder", "date")}
+      {inp("duration_months", "Duration (months)", "number")}
+
+      <div style={{ gridColumn: "1 / -1", fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+        Commercial (INR)
+      </div>
+      {inp("signed_acv_inr", "Signed ACV (INR)", "number")}
+      {inp("signed_cm_pct", "Signed CM% (e.g. 32 or 0.32)", "number")}
+      {inp("agreed_rate_fee_inr", "Agreed rate / fee (INR)", "number")}
+      {inp("est_annual_value_inr", "Est. annual value (INR)", "number")}
+      {inp("revenue_run_rate_inr", "Revenue run rate / month (INR)", "number")}
+      {inp("pricing_model", "Pricing model")}
+      {ta("payment_terms", "Payment terms", 2)}
+
+      <div style={{ gridColumn: "1 / -1", fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+        Delivery &amp; sources
+      </div>
+      {inp("headcount_contracted", "HC / headcount contracted", "number")}
+      {inp("hiring_volume", "Hiring volume", "number")}
+      {inp("positions_contracted", "Positions contracted", "number")}
+      {inp("positions_filled", "Positions filled", "number")}
+      {inp("taggd_source_mix", "Taggd source mix")}
+      {inp("other_source_mix", "Other source mix")}
+      {inp("overall_rph", "Overall RPH", "number")}
+      {triSelect("mmf_applicable", "MMF applicable")}
+      {triSelect("opening_fee_applicable", "Opening fee applicable")}
+
+      <div style={{ gridColumn: "1 / -1", fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+        Legal &amp; SLA
+      </div>
+      {inp("sow_msa_reference", "SOW / MSA reference")}
+      {ta("sla_terms_summary", "SLA terms summary", 3)}
+      {inp("client_signoff_authority", "Client sign-off authority")}
+      {inp("internal_signoff", "Internal sign-off")}
+      {ta("reason_for_lapse", "Reason for lapse / loss", 3)}
+      {ta("contract_detail", "Detail (SOW / scope notes)", 3)}
+      {ta("remarks", "Remarks", 3)}
+    </div>
+  );
+}
+
+function ReadonlyContractDetails({ row }: { row: EnrichedContract }) {
+  const line = (label: string, children: React.ReactNode) => (
+    <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, fontSize: 12, alignItems: "start" }}>
+      <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{label}</span>
+      <span>{children ?? "—"}</span>
+    </div>
+  );
+  const money = (v: number | null | undefined) => (v != null ? formatCurrency(v) : "—");
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Identity</div>
+      {line("Account / type", row.account_type)}
+      {line("Practice head", row.practice_head_snapshot)}
+      {line("Renewal status", row.renewal_status)}
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>Dates</div>
+      {line(
+        "Term",
+        <>
+          {row.contract_start_date?.slice(0, 10) ?? "—"} → {row.contract_end_date?.slice(0, 10) ?? "—"}
+        </>,
+      )}
+      {line("Reminder", row.renewal_reminder_date?.slice(0, 10))}
+      {line("Duration (mo)", row.duration_months)}
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>Commercial</div>
+      {line("Signed ACV", money(row.signed_acv_inr))}
+      {line("Signed CM%", fmtCmPct(row.signed_cm_pct))}
+      {line("Agreed rate / fee", money(row.agreed_rate_fee_inr))}
+      {line("Est. annual value", money(row.est_annual_value_inr))}
+      {line("Run rate / mo", money(row.revenue_run_rate_inr))}
+      {line("Pricing model", row.pricing_model)}
+      {line("Payment terms", <span style={{ whiteSpace: "pre-wrap" }}>{row.payment_terms}</span>)}
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>Delivery</div>
+      {line("Headcount", row.headcount_contracted)}
+      {line("Hiring volume", row.hiring_volume)}
+      {line("Positions", `${row.positions_filled ?? "—"} / ${row.positions_contracted ?? "—"} filled / contracted`)}
+      {line("Taggd mix", row.taggd_source_mix)}
+      {line("Other mix", row.other_source_mix)}
+      {line("Overall RPH", row.overall_rph)}
+      {line("MMF", triBoolLabel(row.mmf_applicable))}
+      {line("Opening fee", triBoolLabel(row.opening_fee_applicable))}
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>Legal &amp; SLA</div>
+      {line("SOW / MSA", row.sow_msa_reference)}
+      {line("SLA summary", <span style={{ whiteSpace: "pre-wrap" }}>{row.sla_terms_summary}</span>)}
+      {line("Client sign-off", row.client_signoff_authority)}
+      {line("Internal sign-off", row.internal_signoff)}
+      {line("Lapse / loss", <span style={{ whiteSpace: "pre-wrap" }}>{row.reason_for_lapse}</span>)}
+      {line("Detail", <span style={{ whiteSpace: "pre-wrap" }}>{row.contract_detail}</span>)}
+      {line("Remarks", <span style={{ whiteSpace: "pre-wrap" }}>{row.remarks}</span>)}
+      {(row.source_filename || row.uploaded_by) && (
+        <>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>Provenance</div>
+          {line("Source file", row.source_filename)}
+          {line("Uploaded by", row.uploaded_by)}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function ClientContracts() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("Portfolio");
@@ -67,11 +395,7 @@ export function ClientContracts() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createProjectId, setCreateProjectId] = useState<string>("");
-  const [createCustomer, setCreateCustomer] = useState("");
-  const [createStart, setCreateStart] = useState("");
-  const [createEnd, setCreateEnd] = useState("");
-  const [createAcv, setCreateAcv] = useState("");
-  const [createStatus, setCreateStatus] = useState("Active");
+  const [createForm, setCreateForm] = useState<Record<string, string>>(() => emptyContractForm());
   const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(() => {
@@ -180,64 +504,25 @@ export function ClientContracts() {
   function openDetail(row: EnrichedContract) {
     setActiveRow(row);
     setEditMode(false);
-    setForm({
-      customer_name: row.customer_name ?? "",
-      account_type: row.account_type ?? "",
-      contract_start_date: row.contract_start_date?.slice(0, 10) ?? "",
-      contract_end_date: row.contract_end_date?.slice(0, 10) ?? "",
-      renewal_reminder_date: row.renewal_reminder_date?.slice(0, 10) ?? "",
-      signed_acv_inr: row.signed_acv_inr != null ? String(row.signed_acv_inr) : "",
-      contract_status: row.contract_status ?? "",
-      signed_cm_pct: row.signed_cm_pct != null ? String(row.signed_cm_pct) : "",
-      headcount_contracted: row.headcount_contracted != null ? String(row.headcount_contracted) : "",
-      payment_terms: row.payment_terms ?? "",
-      pricing_model: row.pricing_model ?? "",
-      contract_detail: row.contract_detail ?? "",
-      remarks: row.remarks ?? "",
-      renewal_status: row.renewal_status ?? "",
-      reason_for_lapse: row.reason_for_lapse ?? "",
-      sow_msa_reference: row.sow_msa_reference ?? "",
-      est_annual_value_inr: row.est_annual_value_inr != null ? String(row.est_annual_value_inr) : "",
-      revenue_run_rate_inr: row.revenue_run_rate_inr != null ? String(row.revenue_run_rate_inr) : "",
-    });
+    setForm(contractRowToForm(row));
     setDetailOpen(true);
+  }
+
+  function openCreateDialog() {
+    setCreateForm(() => {
+      const f = emptyContractForm();
+      f.contract_status = "Active";
+      return f;
+    });
+    setCreateProjectId("");
+    setCreateOpen(true);
   }
 
   async function savePatch() {
     if (!activeRow) return;
     setSaving(true);
     try {
-      const body: Record<string, unknown> = {};
-      const keys = [
-        "customer_name",
-        "account_type",
-        "contract_start_date",
-        "contract_end_date",
-        "renewal_reminder_date",
-        "contract_status",
-        "payment_terms",
-        "pricing_model",
-        "contract_detail",
-        "remarks",
-        "renewal_status",
-        "reason_for_lapse",
-        "sow_msa_reference",
-      ] as const;
-      for (const k of keys) {
-        const v = form[k]?.trim();
-        body[k] = v || null;
-      }
-      const num = (s: string) => {
-        const t = s.trim();
-        if (!t) return null;
-        const n = Number(t);
-        return Number.isFinite(n) ? n : null;
-      };
-      body.signed_acv_inr = num(form.signed_acv_inr ?? "");
-      body.signed_cm_pct = num(form.signed_cm_pct ?? "");
-      body.headcount_contracted = num(form.headcount_contracted ?? "");
-      body.est_annual_value_inr = num(form.est_annual_value_inr ?? "");
-      body.revenue_run_rate_inr = num(form.revenue_run_rate_inr ?? "");
+      const body = formToContractPayload(form);
 
       const updated = await queries.patchContract(activeRow.id, body);
       setContracts((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
@@ -299,23 +584,11 @@ export function ClientContracts() {
     }
     setCreating(true);
     try {
-      const body: Record<string, unknown> = {
-        project_id: pid,
-        customer_name: createCustomer.trim() || null,
-        contract_start_date: createStart.trim() || null,
-        contract_end_date: createEnd.trim() || null,
-        contract_status: createStatus.trim() || null,
-      };
-      const acv = createAcv.trim();
-      if (acv) body.signed_acv_inr = Number(acv);
-      await queries.createContract(body);
+      const payload = formToContractPayload(createForm);
+      await queries.createContract({ project_id: pid, ...payload });
       setCreateOpen(false);
       setCreateProjectId("");
-      setCreateCustomer("");
-      setCreateStart("");
-      setCreateEnd("");
-      setCreateAcv("");
-      setCreateStatus("Active");
+      setCreateForm(emptyContractForm());
       refresh();
       setTab("Portfolio");
     } catch (e: unknown) {
@@ -344,7 +617,7 @@ export function ClientContracts() {
             type="button"
             className="platform-dialog__btn platform-dialog__btn--primary"
             style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
-            onClick={() => setCreateOpen(true)}
+            onClick={() => openCreateDialog()}
           >
             + New contract
           </button>
@@ -425,8 +698,8 @@ export function ClientContracts() {
               ))}
             </select>
           </div>
-          <div className="platform-table-wrap">
-            <table className="platform-table">
+          <div className="platform-table-wrap" style={{ overflowX: "auto" }}>
+            <table className="platform-table" style={{ minWidth: 1400 }}>
               <thead>
                 <tr>
                   <th>ID</th>
@@ -434,24 +707,32 @@ export function ClientContracts() {
                   <th>SBU / project</th>
                   <th>Legal client</th>
                   <th>Type</th>
+                  <th>Practice head</th>
                   <th>Status</th>
                   <th>Start</th>
                   <th>End</th>
+                  <th>Reminder</th>
+                  <th>Mo</th>
+                  <th>Pos (f/c)</th>
                   <th>ACV</th>
                   <th>CM%</th>
+                  <th>Agreed fee</th>
+                  <th>Est. annual</th>
+                  <th>Run / mo</th>
+                  <th>Pricing</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={10} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
+                    <td colSpan={18} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
                       Loading…
                     </td>
                   </tr>
                 )}
                 {!loading && filteredPortfolio.length === 0 && (
                   <tr>
-                    <td colSpan={10} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
+                    <td colSpan={18} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
                       No contracts yet. Import the workbook or create a row.
                     </td>
                   </tr>
@@ -498,6 +779,9 @@ export function ClientContracts() {
                           )}
                         </td>
                         <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{c.account_type ?? "—"}</td>
+                        <td style={{ fontSize: 10, color: "var(--text-muted)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.practice_head_snapshot ?? ""}>
+                          {c.practice_head_snapshot ?? "—"}
+                        </td>
                         <td>
                           <StatusTag status={c.contract_status || "—"} />
                           {warn === "soon" && (
@@ -513,9 +797,18 @@ export function ClientContracts() {
                         </td>
                         <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{c.contract_start_date?.slice(0, 10) ?? "—"}</td>
                         <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{c.contract_end_date?.slice(0, 10) ?? "—"}</td>
+                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{c.renewal_reminder_date?.slice(0, 10) ?? "—"}</td>
+                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{c.duration_months ?? "—"}</td>
+                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>
+                          {c.positions_filled ?? "—"}/{c.positions_contracted ?? "—"}
+                        </td>
                         <td style={{ fontSize: 11 }}>{c.signed_acv_inr != null ? formatCurrency(c.signed_acv_inr) : "—"}</td>
-                        <td style={{ fontSize: 11 }}>
-                          {c.signed_cm_pct != null ? `${Math.round(c.signed_cm_pct * 10_000) / 100}%` : "—"}
+                        <td style={{ fontSize: 11 }}>{fmtCmPct(c.signed_cm_pct)}</td>
+                        <td style={{ fontSize: 11 }}>{c.agreed_rate_fee_inr != null ? formatCurrency(c.agreed_rate_fee_inr) : "—"}</td>
+                        <td style={{ fontSize: 11 }}>{c.est_annual_value_inr != null ? formatCurrency(c.est_annual_value_inr) : "—"}</td>
+                        <td style={{ fontSize: 11 }}>{c.revenue_run_rate_inr != null ? formatCurrency(c.revenue_run_rate_inr) : "—"}</td>
+                        <td style={{ fontSize: 10, color: "var(--text-muted)", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.pricing_model ?? ""}>
+                          {c.pricing_model ?? "—"}
                         </td>
                       </tr>
                     );
@@ -532,23 +825,26 @@ export function ClientContracts() {
             Sorted by contract end date. Use this for renewal discussions, pricing escalators, and lapse reasons.
             Click a row to edit dates, status, and remarks.
           </p>
-          <div className="platform-table-wrap">
-            <table className="platform-table">
+          <div className="platform-table-wrap" style={{ overflowX: "auto" }}>
+            <table className="platform-table" style={{ minWidth: 900 }}>
               <thead>
                 <tr>
                   <th>Customer</th>
                   <th>SBU</th>
                   <th>End date</th>
+                  <th>Reminder</th>
                   <th>Days</th>
                   <th>Status</th>
+                  <th>Renewal</th>
                   <th>ACV</th>
+                  <th>Est. annual</th>
                   <th>Remarks</th>
                 </tr>
               </thead>
               <tbody>
                 {!loading && renewalsSorted.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
+                    <td colSpan={10} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
                       No end dates on file.
                     </td>
                   </tr>
@@ -560,12 +856,15 @@ export function ClientContracts() {
                       <td style={{ fontWeight: 600 }}>{c.customer_name ?? "—"}</td>
                       <td style={{ fontSize: 11 }}>{c.sbuLabel}</td>
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{c.contract_end_date?.slice(0, 10) ?? "—"}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{c.renewal_reminder_date?.slice(0, 10) ?? "—"}</td>
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: du != null && du < 0 ? "var(--red)" : du != null && du <= 90 ? "var(--amber)" : "var(--text-muted)" }}>
                         {du == null ? "—" : du < 0 ? `${du}d` : `${du}d`}
                       </td>
                       <td><StatusTag status={c.contract_status || "—"} /></td>
+                      <td style={{ fontSize: 10, color: "var(--text-muted)" }}>{c.renewal_status ?? "—"}</td>
                       <td>{c.signed_acv_inr != null ? formatCurrency(c.signed_acv_inr) : "—"}</td>
-                      <td style={{ fontSize: 10, color: "var(--text-muted)", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.remarks ?? ""}>
+                      <td>{c.est_annual_value_inr != null ? formatCurrency(c.est_annual_value_inr) : "—"}</td>
+                      <td style={{ fontSize: 10, color: "var(--text-muted)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.remarks ?? ""}>
                         {c.remarks ?? "—"}
                       </td>
                     </tr>
@@ -632,62 +931,12 @@ export function ClientContracts() {
             </DialogDescription>
           </DialogHeader>
           <div className="platform-dialog__body space-y-3">
-            {!editMode && activeRow && (
-              <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
-                <div><strong>Type:</strong> {activeRow.account_type ?? "—"}</div>
-                <div><strong>Term:</strong> {activeRow.contract_start_date?.slice(0, 10) ?? "—"} → {activeRow.contract_end_date?.slice(0, 10) ?? "—"}</div>
-                <div><strong>ACV:</strong> {activeRow.signed_acv_inr != null ? formatCurrency(activeRow.signed_acv_inr) : "—"}</div>
-                <div><strong>CM%:</strong> {activeRow.signed_cm_pct != null ? `${Math.round(activeRow.signed_cm_pct * 10_000) / 100}%` : "—"}</div>
-                <div><strong>HC:</strong> {activeRow.headcount_contracted ?? "—"}</div>
-                <div><strong>Payment / pricing:</strong> {(activeRow.payment_terms || "—") + " · " + (activeRow.pricing_model || "—")}</div>
-                <div><strong>Detail:</strong> {activeRow.contract_detail ?? "—"}</div>
-                <div><strong>Remarks:</strong> {activeRow.remarks ?? "—"}</div>
-              </div>
-            )}
+            {!editMode && activeRow && <ReadonlyContractDetails row={activeRow} />}
             {editMode && (
-              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
-                {(
-                  [
-                    ["customer_name", "Customer name"],
-                    ["account_type", "Account type"],
-                    ["contract_start_date", "Start (YYYY-MM-DD)"],
-                    ["contract_end_date", "End (YYYY-MM-DD)"],
-                    ["renewal_reminder_date", "Reminder date"],
-                    ["contract_status", "Status"],
-                    ["signed_acv_inr", "Signed ACV (INR)"],
-                    ["signed_cm_pct", "CM (0–1 or decimal)"],
-                    ["headcount_contracted", "Headcount"],
-                    ["est_annual_value_inr", "Est. annual value (INR)"],
-                    ["revenue_run_rate_inr", "Revenue run rate / mo (INR)"],
-                    ["sow_msa_reference", "SOW / MSA ref"],
-                    ["renewal_status", "Renewal status"],
-                    ["payment_terms", "Payment terms"],
-                    ["pricing_model", "Pricing model"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label key={key} style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                    <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>{label}</span>
-                    <input
-                      className="platform-search"
-                      value={form[key] ?? ""}
-                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                      style={{ width: "100%" }}
-                    />
-                  </label>
-                ))}
-                <label style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                  <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Contract detail</span>
-                  <textarea className="platform-search" rows={2} value={form.contract_detail ?? ""} onChange={(e) => setForm((f) => ({ ...f, contract_detail: e.target.value }))} style={{ width: "100%", resize: "vertical" }} />
-                </label>
-                <label style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                  <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Remarks</span>
-                  <textarea className="platform-search" rows={2} value={form.remarks ?? ""} onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))} style={{ width: "100%", resize: "vertical" }} />
-                </label>
-                <label style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                  <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Reason for lapse / loss</span>
-                  <textarea className="platform-search" rows={2} value={form.reason_for_lapse ?? ""} onChange={(e) => setForm((f) => ({ ...f, reason_for_lapse: e.target.value }))} style={{ width: "100%", resize: "vertical" }} />
-                </label>
-              </div>
+              <ContractFormFields
+                form={form}
+                onField={(key, value) => setForm((f) => ({ ...f, [key]: value }))}
+              />
             )}
           </div>
           <DialogFooter className="platform-dialog__footer" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -700,7 +949,17 @@ export function ClientContracts() {
             )}
             {editMode && (
               <>
-                <button type="button" className="platform-dialog__btn" onClick={() => setEditMode(false)} disabled={saving}>Cancel edit</button>
+                <button
+                  type="button"
+                  className="platform-dialog__btn"
+                  onClick={() => {
+                    if (activeRow) setForm(contractRowToForm(activeRow));
+                    setEditMode(false);
+                  }}
+                  disabled={saving}
+                >
+                  Cancel edit
+                </button>
                 <button type="button" className="platform-dialog__btn platform-dialog__btn--primary" onClick={() => void savePatch()} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
               </>
             )}
@@ -708,18 +967,27 @@ export function ClientContracts() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent showCloseButton className="platform-dialog">
+      <Dialog
+        open={createOpen}
+        onOpenChange={(o) => {
+          setCreateOpen(o);
+          if (!o) {
+            setCreateProjectId("");
+            setCreateForm(emptyContractForm());
+          }
+        }}
+      >
+        <DialogContent showCloseButton className={cn("platform-dialog platform-dialog--wide max-h-[92vh] overflow-y-auto")}>
           <DialogHeader className="platform-dialog__header">
             <div className="platform-dialog__eyebrow">New contract</div>
-            <DialogTitle className="platform-dialog__title">Attach to a project (SBU)</DialogTitle>
+            <DialogTitle className="platform-dialog__title">Create contract row</DialogTitle>
             <DialogDescription className="platform-dialog__desc">
-              Choose the operational project this agreement belongs to. You can refine fields after save from the portfolio.
+              Link to an operational project (SBU), then capture commercial terms. All fields are optional except project; you can edit later from the portfolio.
             </DialogDescription>
           </DialogHeader>
-          <div className="platform-dialog__body space-y-3">
+          <div className="platform-dialog__body space-y-4">
             <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Project</span>
+              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Project (required)</span>
               <select
                 className="platform-search"
                 value={createProjectId}
@@ -734,32 +1002,10 @@ export function ClientContracts() {
                 ))}
               </select>
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Customer name (as on contract)</span>
-              <input className="platform-search" value={createCustomer} onChange={(e) => setCreateCustomer(e.target.value)} placeholder="e.g. Siemens Healthineers" />
-            </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Start</span>
-                <input className="platform-search" type="date" value={createStart} onChange={(e) => setCreateStart(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>End</span>
-                <input className="platform-search" type="date" value={createEnd} onChange={(e) => setCreateEnd(e.target.value)} />
-              </label>
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Signed ACV (INR)</span>
-              <input className="platform-search" value={createAcv} onChange={(e) => setCreateAcv(e.target.value)} placeholder="e.g. 12000000" />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Status</span>
-              <select className="platform-search" value={createStatus} onChange={(e) => setCreateStatus(e.target.value)}>
-                <option value="Active">Active</option>
-                <option value="Renewed">Renewed</option>
-                <option value="Expired">Expired</option>
-              </select>
-            </label>
+            <ContractFormFields
+              form={createForm}
+              onField={(key, value) => setCreateForm((f) => ({ ...f, [key]: value }))}
+            />
           </div>
           <DialogFooter className="platform-dialog__footer">
             <button type="button" className="platform-dialog__btn" onClick={() => setCreateOpen(false)} disabled={creating}>Cancel</button>

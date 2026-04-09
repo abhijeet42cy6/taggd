@@ -23,8 +23,6 @@ from backend.db.finance_dedupe import dedupe_finance_tables
 
 FK_TABLES = [
     "records",
-    "project_budgets",
-    "project_forecasts",
     "metric_definitions",
     "sla_performances",
     "wfm_hr_benchmarks",

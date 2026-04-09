@@ -16,8 +16,6 @@ from .db.database import (
     Client,
     Project,
     Record,
-    ProjectBudget,
-    ProjectForecast,
     MetricDefinition,
     SLAPerformance,
     WFMHRBenchmark,
@@ -43,6 +41,15 @@ from .core.ingestion_audit import log_ingestion_event, list_ingestion_events_for
 from .core.activity_log import activity_log_to_dict, list_activity_for_user, log_activity
 from .core.column_mapping_normalize import build_column_mapping_v2
 from .core.record_field_synonyms import merge_llm_and_heuristic_record_fields
+from .core.budget_forecast_ledger import (
+    ingest_budget_forecast_workbook,
+    update_budget_quarters,
+    update_forecast_metrics,
+    recalculate_budget_forecast_links,
+    build_budget_forecast_data_payload,
+    waterfall_from_ledger,
+    comparison_timeline,
+)
 
 # Initialize DB
 init_db()
@@ -82,6 +89,7 @@ from .routers.revenue_trackers import router as revenue_trackers_router
 from .routers.revenue_billing import router as revenue_billing_router
 from .routers.candidates import router as candidates_router
 from .routers.project_contracts import router as project_contracts_router
+from .routers.meetings import router as meetings_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
@@ -90,6 +98,7 @@ app.include_router(revenue_trackers_router)
 app.include_router(revenue_billing_router)
 app.include_router(candidates_router)
 app.include_router(project_contracts_router)
+app.include_router(meetings_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (
@@ -2214,55 +2223,14 @@ async def upload_budget_forecast(
             name_to_id = {k: v for k, v in name_to_id.items() if v in scope_ids}
 
         # Clear existing budget/forecast ONLY for the projects present in this upload
-        if name_to_id:
-            ids_to_clear = list(name_to_id.values())
-            db.query(ProjectBudget).filter(ProjectBudget.project_id.in_(ids_to_clear)).delete(synchronize_session=False)
-            db.query(ProjectForecast).filter(ProjectForecast.project_id.in_(ids_to_clear)).delete(synchronize_session=False)
-
-        # 2. Process Budget Template
-        for _, row in df_budget.iterrows():
-            project_csv_name = str(row["Project"])
-            pid = name_to_id.get(project_csv_name)
-            
-            # Values are in Lakhs, converting to absolute INR
-            lakh = 100000
-            budget = ProjectBudget(
-                project_id=pid,
-                fiscal_year=str(row["FY'26"]),
-                q1=float(row.get("Q1", 0)) * lakh,
-                q2=float(row.get("Q2", 0)) * lakh,
-                q3=float(row.get("Q3", 0)) * lakh,
-                q4=float(row.get("Q4", 0)) * lakh,
-                total=float(row.get("FY'26", 0)) * lakh,
-                raw_project_name=project_csv_name
-            )
-            db.add(budget)
-
-        # 3. Process Forecast Template
         df_forecast = pd.read_excel(file_path, sheet_name="Forecast Template")
-        df_forecast["Project"] = df_forecast["Project"].ffill()
-        
-        month_cols = [c for c in df_forecast.columns if isinstance(c, (datetime.datetime, pd.Timestamp))]
-        
-        for _, row in df_forecast.iterrows():
-            project_csv_name = str(row["Project"])
-            pid = name_to_id.get(project_csv_name)
-            metric = str(row.get("Detail", "Unspecified"))
-            
-            for month_dt in month_cols:
-                val = row[month_dt]
-                if pd.isna(val): val = 0.0
-                
-                fc = ProjectForecast(
-                    project_id=pid,
-                    month_year=month_dt,
-                    metric_name=metric,
-                    value=float(val),
-                    raw_project_name=project_csv_name
-                )
-                db.add(fc)
-        
-        db.commit()
+        ingest_budget_forecast_workbook(
+            db,
+            df_budget=df_budget,
+            df_forecast=df_forecast,
+            name_to_id=name_to_id,
+            safe_filename=safe_name,
+        )
         log_activity(
             db,
             user=user,
@@ -2293,17 +2261,14 @@ def update_budget(
     user: User = Depends(get_current_user),
 ):
     assert_project_access(user, db, project_id)
-    budget = db.query(ProjectBudget).filter(ProjectBudget.project_id == project_id).first()
-    if not budget:
-        budget = ProjectBudget(project_id=project_id, fiscal_year="FY'26")
-        db.add(budget)
-    
-    budget.q1 = update.q1
-    budget.q2 = update.q2
-    budget.q3 = update.q3
-    budget.q4 = update.q4
-    budget.total = update.q1 + update.q2 + update.q3 + update.q4
-    db.commit()
+    update_budget_quarters(
+        db,
+        project_id,
+        update.q1,
+        update.q2,
+        update.q3,
+        update.q4,
+    )
     log_activity(
         db,
         user=user,
@@ -2328,29 +2293,13 @@ def update_forecast(
     user: User = Depends(get_current_user),
 ):
     assert_project_access(user, db, project_id)
-    # Fetch existing forecasts to identify the primary month (or just use a default date like start of year)
-    existing = db.query(ProjectForecast).filter(ProjectForecast.project_id == project_id).first()
-    target_date = existing.month_year if existing else datetime.datetime(2026, 1, 1)
-
-    metrics = {
-        "MMF": update.mmf,
-        "Joiner": update.joiner,
-        "Joining Fee": update.joining_fee
-    }
-
-    for name, val in metrics.items():
-        f = db.query(ProjectForecast).filter(
-            ProjectForecast.project_id == project_id, 
-            ProjectForecast.metric_name == name,
-            ProjectForecast.month_year == target_date
-        ).first()
-        
-        if not f:
-            f = ProjectForecast(project_id=project_id, metric_name=name, month_year=target_date)
-            db.add(f)
-        f.value = val
-    
-    db.commit()
+    update_forecast_metrics(
+        db,
+        project_id,
+        update.mmf,
+        update.joiner,
+        update.joining_fee,
+    )
     log_activity(
         db,
         user=user,
@@ -2368,74 +2317,7 @@ def get_budget_forecast_data(
     user: User = Depends(get_current_user),
 ):
     """Retrieve detailed quarterly budget and monthly forecast data for all uploaded clients."""
-    # Fetch all budgets
-    all_budgets = apply_project_scope(db.query(ProjectBudget), user, db, ProjectBudget).all()
-    all_forecasts = apply_project_scope(db.query(ProjectForecast), user, db, ProjectForecast).all()
-    
-    # Map project IDs to actual names from the 'projects' table for matched ones
-    projects = {
-        p.id: p.filename.replace(" Tracker.xlsx", "")
-        for p in apply_project_scope(db.query(Project), user, db, Project).all()
-    }
-    
-    # Prepare results
-    budget_results = []
-    for b in all_budgets:
-        actual_rev = 0.0
-        if b.project_id:
-            actual_rev = db.query(func.sum(Record.revenue_results["revenue"].as_float())).filter(Record.project_id == b.project_id).scalar() or 0.0
-        
-        budget_results.append({
-            "id": b.id,
-            "project_id": b.project_id,
-            "raw_name": b.raw_project_name,
-            "system_name": projects.get(b.project_id),
-            "is_matched": b.project_id is not None,
-            "q1": b.q1,
-            "q2": b.q2,
-            "q3": b.q3,
-            "q4": b.q4,
-            "total": b.total,
-            "actual": actual_rev,
-            "variance": ((actual_rev / b.total) - 1) * 100 if b.total > 0 else 0
-        })
-
-    # Prepare Forecast results (Month by Month)
-    # Group by raw_name -> month_year -> metric
-    forecast_map = {}
-    for f in all_forecasts:
-        key = f.raw_project_name
-        if key not in forecast_map:
-            forecast_map[key] = {
-                "raw_name": f.raw_project_name,
-                "project_id": f.project_id,
-                "is_matched": f.project_id is not None,
-                "system_name": projects.get(f.project_id),
-                "months": {}
-            }
-        
-        m_str = f.month_year.strftime("%b-%y")
-        if m_str not in forecast_map[key]["months"]:
-            forecast_map[key]["months"][m_str] = {}
-        
-        forecast_map[key]["months"][m_str][f.metric_name] = f.value
-
-    # Flatten forecast_map
-    forecast_results = list(forecast_map.values())
-    
-    # Calculate Summary
-    total_budget = sum(b.total for b in all_budgets)
-    total_actual = sum(b["actual"] for b in budget_results)
-    
-    return {
-        "summary": {
-            "total_budget": total_budget,
-            "total_actual": total_actual,
-            "variance": ((total_actual / total_budget) - 1) * 100 if total_budget > 0 else 0
-        },
-        "budgets": budget_results,
-        "forecasts": forecast_results
-    }
+    return build_budget_forecast_data_payload(db, allowed_project_ids(user, db))
 
 @app.get("/api/budget-forecast/waterfall")
 def get_waterfall_data(
@@ -2456,143 +2338,16 @@ def get_waterfall_data(
     - additions = total - opening
     - closures/leakage = 0 (kept for UI compatibility; proper MoM breakdown can be added later)
     """
-    import datetime
-
-    def _pf(q):
-        return apply_project_scope(q, user, db, ProjectForecast)
-
-    def _rec(q):
-        return apply_project_scope(q, user, db, Record)
-
-    today = datetime.datetime.utcnow()
-    month_start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-    # Find the uploaded MMF forecast window (e.g., FY24-25: Apr -> Mar)
-    mmf_min_max = (
-        _pf(db.query(func.min(ProjectForecast.month_year), func.max(ProjectForecast.month_year)))
-        .filter(ProjectForecast.metric_name == "MMF")
-        .one()
-    )
-    fiscal_start, fiscal_end = mmf_min_max
-
-    if fiscal_start and fiscal_end:
-        opening = (
-            _pf(db.query(func.sum(ProjectForecast.value)))
-            .filter(
-                ProjectForecast.metric_name == "MMF",
-                ProjectForecast.month_year == fiscal_start,
-            )
-            .scalar()
-            or 0.0
-        )
-
-        total_forecast = (
-            _pf(db.query(func.sum(ProjectForecast.value)))
-            .filter(
-                ProjectForecast.metric_name == "MMF",
-                ProjectForecast.month_year >= fiscal_start,
-                ProjectForecast.month_year <= fiscal_end,
-            )
-            .scalar()
-            or 0.0
-        )
-
-        additions = total_forecast - opening
-        closures = 0.0
-        leakage = 0.0
-
-        return {
-            "opening": opening,
-            "additions": additions,
-            "closures": closures,
-            "leakage": leakage,
-            "total": (opening + additions) - (closures + leakage),
-        }
-
-    # Fallback: original behaviour (current calendar month)
-    opening = (
-        _pf(db.query(func.sum(ProjectForecast.value)))
-        .filter(
-            ProjectForecast.metric_name == "MMF",
-            ProjectForecast.month_year == month_start,
-        )
-        .scalar()
-        or 0.0
-    )
-
-    additions = (
-        _rec(db.query(func.sum(Record.revenue_results["revenue"].as_float())))
-        .filter(Record.creation_date >= month_start)
-        .scalar()
-        or 0.0
-    )
-
-    closures = (
-        _rec(db.query(func.sum(Record.revenue_results["revenue"].as_float())))
-        .filter(
-            Record.global_status == "CLOSED",
-            Record.joining_date >= month_start,
-        )
-        .scalar()
-        or 0.0
-    )
-
-    leakage = (
-        _rec(
-            db.query(
-                func.sum(
-                    Record.revenue_results["opening_fee"].as_float()
-                    + Record.revenue_results["closing_fee"].as_float()
-                )
-            )
-        )
-        .filter(
-            Record.creation_date >= month_start,
-            Record.global_status.in_(["ON HOLD", "CANCELLED"]),
-        )
-        .scalar()
-        or 0.0
-    )
-
-    return {
-        "opening": opening,
-        "additions": additions,
-        "closures": closures,
-        "leakage": leakage,
-        "total": (opening + additions) - (closures + leakage),
-    }
+    return waterfall_from_ledger(db, allowed_project_ids(user, db))
 
 @app.post("/api/budget-forecast/recalculate")
 def recalculate_planning(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Triggers a fresh calculation of all project-budget links."""
-    # 1. Clear existing project_id matches if they are stale (optional)
-    # 2. Run a fuzzy match between project.filename and project_budget.raw_project_name
+    """Fuzzy-link budget/forecast ledger rows (bf:* uploads) where project_id was unset."""
     projects = apply_project_scope(db.query(Project), user, db, Project).all()
-    budgets = apply_project_scope(db.query(ProjectBudget), user, db, ProjectBudget).all()
-    forecasts = apply_project_scope(db.query(ProjectForecast), user, db, ProjectForecast).all()
-    
-    matched_count = 0
-    for b in budgets:
-        for p in projects:
-            p_name = p.filename.replace(" Tracker.xlsx", "").replace(".xlsx", "").strip().lower()
-            b_name = b.raw_project_name.strip().lower()
-            if p_name in b_name or b_name in p_name:
-                b.project_id = p.id
-                matched_count += 1
-                break
-    
-    for f in forecasts:
-        for p in projects:
-            p_name = p.filename.replace(" Tracker.xlsx", "").replace(".xlsx", "").strip().lower()
-            f_name = f.raw_project_name.strip().lower()
-            if p_name in f_name or f_name in p_name:
-                f.project_id = p.id
-                break
-                
-    db.commit()
+    matched_count = recalculate_budget_forecast_links(db, projects)
     log_activity(
         db,
         user=user,
@@ -2612,49 +2367,7 @@ def get_project_comparison(
 ):
     """Monthly breakdown of Forecast vs Actual for a specific project."""
     assert_project_access(user, db, project_id)
-    # 1. Get Forecasts
-    forecast_data = db.query(ProjectForecast).filter(ProjectForecast.project_id == project_id).all()
-    
-    # 2. Get Actuals (from records)
-    records = db.query(Record).filter(Record.project_id == project_id).all()
-    
-    # Organize forecast into {month_str: {metric: value}}
-    # month_str format: "YYYY-MM"
-    f_map = {}
-    for f in forecast_data:
-        m_str = f.month_year.strftime("%Y-%m")
-        if m_str not in f_map: f_map[m_str] = {}
-        f_map[m_str][f.metric_name] = f.value
-
-    # Organize actuals into {month_str: {metric: value}}
-    a_map = {}
-    for r in records:
-        if not r.joining_date: continue
-        m_str = r.joining_date.strftime("%Y-%m")
-        if m_str not in a_map:
-            a_map[m_str] = {"Joiner": 0, "Joining Fee": 0.0}
-        
-        # Only count closed/joined as 'Actual' for the forecast comparison
-        if r.global_status == "CLOSED":
-            a_map[m_str]["Joiner"] += 1
-            rev = float((r.revenue_results or {}).get("revenue") or 0)
-            a_map[m_str]["Joining Fee"] += rev
-
-    # Build a combined list of all unique months
-    all_months = sorted(list(set(f_map.keys()) | set(a_map.keys())))
-    
-    timeline = []
-    for m in all_months:
-        timeline.append({
-            "month": m,
-            "forecast": f_map.get(m, {}),
-            "actual": a_map.get(m, {"Joiner": 0, "Joining Fee": 0.0})
-        })
-        
-    return {
-        "project_id": project_id,
-        "timeline": timeline
-    }
+    return comparison_timeline(db, project_id)
 
 @app.get("/sla/timeseries")
 async def get_sla_timeseries(

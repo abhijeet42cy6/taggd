@@ -143,8 +143,6 @@ class Project(Base, AuditMixin):
     pos_id_column = Column(String) # The header used for deduplication (Req ID, etc.)
     
     records = relationship("Record", back_populates="project")
-    budgets = relationship("ProjectBudget", back_populates="project")
-    forecasts = relationship("ProjectForecast", back_populates="project")
     metrics = relationship("MetricDefinition", back_populates="project")
     wfm_benchmarks = relationship("WFMHRBenchmark", back_populates="project")
     wfm_gaps = relationship("WFMResourceGap", back_populates="project")
@@ -163,6 +161,11 @@ class Project(Base, AuditMixin):
     candidates = relationship("Candidate", back_populates="project", cascade="all, delete-orphan")
     contracts = relationship(
         "ProjectContract",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+    meetings = relationship(
+        "Meeting",
         back_populates="project",
         cascade="all, delete-orphan",
     )
@@ -217,30 +220,72 @@ class ProjectContract(Base, AuditMixin):
     client = relationship("Client", backref="project_contracts")
 
 
-class ProjectBudget(Base, AuditMixin):
-    __tablename__ = "project_budgets"
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    fiscal_year = Column(String) # e.g. "FY'26"
-    q1 = Column(Float, default=0.0)
-    q2 = Column(Float, default=0.0)
-    q3 = Column(Float, default=0.0)
-    q4 = Column(Float, default=0.0)
-    total = Column(Float, default=0.0)
-    raw_project_name = Column(String) # The original name from Excel
-    
-    project = relationship("Project", back_populates="budgets")
+class Meeting(Base):
+    """Customer / internal governance meetings captured from the platform UI (MoM-style)."""
 
-class ProjectForecast(Base, AuditMixin):
-    __tablename__ = "project_forecasts"
+    __tablename__ = "platform_meetings"
+
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    month_year = Column(DateTime) # The specific month
-    metric_name = Column(String) # e.g. "MMF", "Joiner", "Opening Fee"
-    value = Column(Float, default=0.0)
-    raw_project_name = Column(String) # The original name from Excel
-    
-    project = relationship("Project", back_populates="forecasts")
+    meeting_title = Column(String(512), nullable=True)
+    meeting_type = Column(String(128), nullable=True, index=True)
+    meeting_date = Column(Date, nullable=True, index=True)
+    start_time = Column(String(32), nullable=True)
+    end_time = Column(String(32), nullable=True)
+
+    organizer_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    organizer_name = Column(String(255), nullable=True)
+
+    attendees_internal = Column(Text, nullable=True)
+    attendees_external = Column(Text, nullable=True)
+    external_attendees_json = Column(JSON, nullable=True)
+
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    account_name_snapshot = Column(String(512), nullable=True, index=True)
+
+    agenda_items = Column(Text, nullable=True)
+    discussion_summary = Column(Text, nullable=True)
+    decisions_taken = Column(Text, nullable=True)
+    key_discussion_points = Column(Text, nullable=True)
+
+    follow_up_date = Column(Date, nullable=True)
+    next_meeting_date = Column(Date, nullable=True)
+
+    meeting_mode = Column(String(64), nullable=True)
+    meeting_status = Column(String(64), nullable=True, index=True)
+
+    attachments_json = Column(JSON, nullable=True)
+    mom_status = Column(String(64), nullable=True, index=True)
+    mom_link_remarks = Column(Text, nullable=True)
+
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_by_email = Column(String(255), nullable=True)
+    system_created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    system_updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    organizer_user = relationship("User", foreign_keys=[organizer_user_id])
+    creator = relationship("User", foreign_keys=[created_by_user_id])
+    project = relationship("Project", back_populates="meetings")
+    action_items = relationship(
+        "MeetingActionItem",
+        back_populates="meeting",
+        cascade="all, delete-orphan",
+        order_by="MeetingActionItem.sort_order",
+    )
+
+
+class MeetingActionItem(Base):
+    __tablename__ = "meeting_action_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    meeting_id = Column(Integer, ForeignKey("platform_meetings.id", ondelete="CASCADE"), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    owner = Column(String(255), nullable=True)
+    due_date = Column(Date, nullable=True)
+    status = Column(String(64), nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+
+    meeting = relationship("Meeting", back_populates="action_items")
+
 
 class Record(Base, AuditMixin):
     """Tracker row / requisition mandate. Legacy columns remain for ingest + revenue; RPO fields extend for Req. ID grain."""
@@ -995,6 +1040,14 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    try:
+        from backend.core.budget_forecast_ledger import migrate_legacy_project_budget_forecast_tables
+
+        migrate_legacy_project_budget_forecast_tables(engine)
+    except Exception as e:
+        import logging
+
+        logging.warning("legacy project_budgets/project_forecasts migration: %s", e)
     _ensure_clients_and_project_client_columns()
     _ensure_records_rpo_columns()
     _ensure_projects_project_head_column()

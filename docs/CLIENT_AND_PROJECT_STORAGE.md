@@ -176,6 +176,8 @@ Separate from the finance ledger: table `**project_contracts**` holds signup / r
 
 **Client detail → Account info** shows a **Commercial contracts** table per linked project.
 
+**Full UI, renewal/“alert” behaviour (derived in-browser only), column inventory, and ingest vs form field gaps** are documented in **`CONTRACT_UPDATES.md`** in this folder (`docs/CONTRACT_UPDATES.md`).
+
 ---
 
 ## 10. Related documentation

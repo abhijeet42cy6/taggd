@@ -379,6 +379,48 @@ export type ProjectContractRow = {
   uploaded_by?: string | null;
 };
 
+/** `platform_meetings` + nested `meeting_action_items` (MoM / governance). */
+export type MeetingActionItemRow = {
+  id: number;
+  description: string | null;
+  owner: string | null;
+  due_date: string | null;
+  status: string | null;
+  sort_order: number;
+};
+
+export type MeetingRow = {
+  id: number;
+  meeting_title: string | null;
+  meeting_type: string | null;
+  meeting_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  organizer_user_id: number | null;
+  organizer_name: string | null;
+  attendees_internal: string | null;
+  attendees_external: string | null;
+  external_attendees_json: Record<string, unknown>[] | null;
+  project_id: number | null;
+  account_name_snapshot: string | null;
+  agenda_items: string | null;
+  discussion_summary: string | null;
+  decisions_taken: string | null;
+  key_discussion_points: string | null;
+  follow_up_date: string | null;
+  next_meeting_date: string | null;
+  meeting_mode: string | null;
+  meeting_status: string | null;
+  attachments_json: unknown[] | null;
+  mom_status: string | null;
+  mom_link_remarks: string | null;
+  created_by_user_id: number | null;
+  created_by_email: string | null;
+  system_created_at: string | null;
+  system_updated_at: string | null;
+  action_items: MeetingActionItemRow[];
+};
+
 export type AdminUserRow = {
   id: number;
   email: string;
@@ -798,6 +840,19 @@ export const queries = {
       invalidateCache("contracts");
       return r.data;
     }),
+
+  meetingsList: () => api.get<MeetingRow[]>(`/meetings`).then((r) => r.data),
+
+  meeting: (id: number) => api.get<MeetingRow>(`/meetings/${id}`).then((r) => r.data),
+
+  createMeeting: (body: Record<string, unknown>) =>
+    api.post<MeetingRow>(`/meetings`, body).then((r) => r.data),
+
+  patchMeeting: (id: number, body: Record<string, unknown>) =>
+    api.patch<MeetingRow>(`/meetings/${id}`, body).then((r) => r.data),
+
+  deleteMeeting: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/meetings/${id}`).then((r) => r.data),
 
   /** Grouped legal clients + SBU projects (scoped). */
   clients: () =>
