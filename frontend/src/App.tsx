@@ -12,6 +12,7 @@ import { PersonaProvider, usePersona } from "@/lib/persona";
 import { AuthProvider, navAllowedForRole, useAuth } from "@/lib/auth";
 import { ClientsHub } from "./pages/ClientsHub";
 import { ClientDetail } from "./pages/ClientDetail";
+import { ClientContracts } from "./pages/ClientContracts";
 import { Agent } from "./pages/Agent";
 import { Dashboard } from "./pages/Dashboard";
 import { DataOperations } from "./pages/DataOperations";
@@ -44,6 +45,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     title: "Operations",
     items: [
       { label: "Clients", path: "/clients" },
+      { label: "Contracts", path: "/client-contracts" },
       { label: "Requisitions", path: "/requisitions" },
     ],
   },
@@ -221,6 +223,7 @@ function AppShell() {
               <Route path="/portfolio" element={<PortfolioIntelligence />} />
               <Route path="/clients" element={<ClientsHub />} />
               <Route path="/clients/:clientId" element={<ClientDetail />} />
+              <Route path="/client-contracts" element={<ClientContracts />} />
               <Route path="/requisitions" element={<Requisitions />} />
               <Route path="/finance" element={<FiscalPerformance />} />
               <Route path="/revenue-trackers" element={<RevenueTrackers />} />

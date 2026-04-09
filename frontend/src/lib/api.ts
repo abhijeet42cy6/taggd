@@ -772,8 +772,32 @@ export const queries = {
         `/contracts/upload`,
         fd,
       )
-      .then((r) => r.data);
+      .then((r) => {
+        invalidateCache("contracts");
+        return r.data;
+      });
   },
+
+  contract: (id: number) =>
+    api.get<ProjectContractRow>(`/contracts/${id}`).then((r) => r.data),
+
+  createContract: (body: Record<string, unknown>) =>
+    api.post<ProjectContractRow>(`/contracts`, body).then((r) => {
+      invalidateCache("contracts");
+      return r.data;
+    }),
+
+  patchContract: (id: number, body: Record<string, unknown>) =>
+    api.patch<ProjectContractRow>(`/contracts/${id}`, body).then((r) => {
+      invalidateCache("contracts");
+      return r.data;
+    }),
+
+  deleteContract: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/contracts/${id}`).then((r) => {
+      invalidateCache("contracts");
+      return r.data;
+    }),
 
   /** Grouped legal clients + SBU projects (scoped). */
   clients: () =>

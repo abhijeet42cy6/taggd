@@ -134,6 +134,7 @@ export const ROLE_NAV_PATHS: Record<AuthRole, string[]> = {
     "/",
     "/portfolio",
     "/clients",
+    "/client-contracts",
     "/requisitions",
     "/finance",
     "/revenue-trackers",
@@ -150,6 +151,7 @@ export const ROLE_NAV_PATHS: Record<AuthRole, string[]> = {
     "/",
     "/portfolio",
     "/clients",
+    "/client-contracts",
     "/requisitions",
     "/finance",
     "/revenue-trackers",
@@ -164,6 +166,7 @@ export const ROLE_NAV_PATHS: Record<AuthRole, string[]> = {
   manager: [
     "/",
     "/clients",
+    "/client-contracts",
     "/requisitions",
     "/finance",
     "/revenue-trackers",

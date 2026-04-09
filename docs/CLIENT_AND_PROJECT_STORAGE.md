@@ -52,7 +52,7 @@ All **transactional data** (records, finance monthly ledger, cashflow, KPIs, can
 
 ### 3.1 SQLite migration
 
-On startup, `**init_db()**` runs `**_ensure_clients_and_project_client_columns()**`, which adds `**client_id**` and `**engagement_name**` to `projects` if they are missing (existing SQLite deployments).
+On startup, `**init_db()`** runs `**_ensure_clients_and_project_client_columns()**`, which adds `**client_id**` and `**engagement_name**` to `projects` if they are missing (existing SQLite deployments).
 
 The `**clients**` table is created via SQLAlchemy `**create_all**` when the `Client` model is present.
 
@@ -72,7 +72,7 @@ After migrations, `**backfill_client_project_links(db)**` runs inside `**init_db
 Used whenever a **new** `Project` is created in code paths that might not run the full `init_db` backfill in the same transaction:
 
 - If `**client_id`** is already set and the client exists → returns that client.
-- Otherwise creates a `**Client**`, assigns `**project.client_id**`, and seeds `**engagement_name**` from `**account_name**` when appropriate.
+- Otherwise creates a `**Client`**, assigns `**project.client_id**`, and seeds `**engagement_name**` from `**account_name**` when appropriate.
 
 **Call sites include:** Express/Pro upload project creation, **corporate finance ingest**, **SLA ingest**, **WFM ingest**, and **project master ingest** when parent client columns do not assign a client.
 
@@ -86,7 +86,7 @@ Used whenever a **new** `Project` is created in code paths that might not run th
 | Method  | Path                   | Purpose                                                                                                                                                                             |
 | ------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST`  | `/clients`             | Create a legal client (`official_name`, optional `short_code`). Logged to activity.                                                                                                 |
-| `GET`   | `/clients`             | **Scoped** list: each item is `{ id, official_name, short_code, projects: [...] }`. Projects are the same shape as `**GET /projects`** rows (including `**client_official_name**`). |
+| `GET`   | `/clients`             | **Scoped** list: each item is `{ id, official_name, short_code, projects: [...] }`. Projects are the same shape as `**GET /projects`** rows (including `**client_official_name`**). |
 | `GET`   | `/clients/{client_id}` | Detail for one client + scoped `**projects**` list.                                                                                                                                 |
 | `PATCH` | `/clients/{client_id}` | Update `**official_name**` / `**short_code**`.                                                                                                                                      |
 
@@ -98,7 +98,7 @@ Used whenever a **new** `Project` is created in code paths that might not run th
 
 | Method  | Path                     | Notes                                                                                                                                              |
 | ------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`   | `/projects`              | Includes `**client_official_name**` when `client_id` is set; may call `**ensure_project_client**` for rows still missing `client_id`, then commit. |
+| `GET`   | `/projects`              | Includes `**client_official_name`** when `client_id` is set; may call `**ensure_project_client**` for rows still missing `client_id`, then commit. |
 | `GET`   | `/projects/{project_id}` | Dict response with column values + `**client_official_name**`.                                                                                     |
 | `PATCH` | `/projects/{project_id}` | Extended with optional `**client_id**` (must exist) and `**engagement_name**`.                                                                     |
 
@@ -107,7 +107,7 @@ Use `**PATCH /projects/{id}**` to **move** an SBU under a shared legal client af
 
 ### 4.3 Auth helpers (`backend/auth/scope.py`)
 
-- `**assert_client_access**` — gate client-level routes.
+- `**assert_client_access`** — gate client-level routes.
 - `**account_accessible**` — for SLA-style checks by name: matches either `**Project.account_name**` **or** `**Client.official_name`** (case-insensitive) against projects the user can access.
 
 ---
@@ -123,7 +123,7 @@ Existing columns still map to project directory fields (charge code, group name 
 
 | Header aliases (case-insensitive)                        | Effect                                                                           |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Parent Client, Legal Client, Client Group, Rollup Client | Find or create `**Client`** by `**official_name**`, set `**project.client_id**`. |
+| Parent Client, Legal Client, Client Group, Rollup Client | Find or create `**Client`** by `**official_name`**, set `**project.client_id**`. |
 | SBU, Business Unit, Engagement                           | Set `**project.engagement_name**`.                                               |
 
 
@@ -131,7 +131,7 @@ If `**client_id**` is still unset after row processing, `**ensure_project_client
 
 ### 5.2 Corporate finance (`ingest_finance.py`)
 
-`**get_project**` still resolves primarily by `**Project.account_name**` (normalized). On **create**, or if `**client_id`** is null, `**ensure_project_client**` runs so finance-created projects are linked to a client row.
+`**get_project**` still resolves primarily by `**Project.account_name**` (normalized). On **create**, or if `**client_id`** is null, `**ensure_project_client`** runs so finance-created projects are linked to a client row.
 
 ### 5.3 SLA / WFM
 
@@ -143,17 +143,17 @@ When a new `**Project**` is created from SLA or WFM rows, `**ensure_project_clie
 
 1. **Create the legal client:** `POST /clients` with `"official_name": "TATA"` (note returned `**id`**).
 2. **Attach each SBU project:** `PATCH /projects/{sbu_project_id}` with `"client_id": <TATA id>` and optionally `"engagement_name": "TATA Motors"` / `"TATA Finance"`.
-3. **Keep finance / trackers consistent:** ensure workbook `**Project` / `Account` / `Client`** columns and `**account_name**` on the project match how finance ingest matches rows (typically the **SBU** or charge code, not only the legal parent name).
+3. **Keep finance / trackers consistent:** ensure workbook `**Project` / `Account` / `Client`** columns and `**account_name`** on the project match how finance ingest matches rows (typically the **SBU** or charge code, not only the legal parent name).
 
-**Wipro-style single engagement:** one client + one project, or rely on backfill (one client per project) and optionally rename `**official_name`** via `**PATCH /clients**`.
+**Wipro-style single engagement:** one client + one project, or rely on backfill (one client per project) and optionally rename `**official_name`** via `**PATCH /clients`**.
 
 ---
 
 ## 7. Frontend
 
-- **Clients hub** loads `**GET /clients`** and navigates to `**/clients/{numericClientId}**`.
+- **Clients hub** loads `**GET /clients`** and navigates to `**/clients/{numericClientId}`**.
 - **Client detail** loads `**GET /clients/{id}`** for numeric IDs.
-- **Legacy URLs** using an encoded **name** (old bookmarks) still work by falling back to `**GET /projects`** and grouping with `**clientsVm**` (inferred grouping; negative synthetic ids in the view-model indicate inferred mode).
+- **Legacy URLs** using an encoded **name** (old bookmarks) still work by falling back to `**GET /projects`** and grouping with `**clientsVm`** (inferred grouping; negative synthetic ids in the view-model indicate inferred mode).
 
 The UI distinguishes **structured multi-SBU** clients (real `**Client.id`**) from **legacy inferred** merges (name-only grouping).
 
@@ -161,18 +161,18 @@ The UI distinguishes **structured multi-SBU** clients (real `**Client.id`**) fro
 
 ## 8. Caching (frontend)
 
-`queries.patchProjectMetadata` invalidates `**projects`**, `**clients**`, and `**client/**` cache prefixes so client rollups refresh after reassigning `**client_id**`.
+`queries.patchProjectMetadata` invalidates `**projects`**, `**clients`**, and `**client/**` cache prefixes so client rollups refresh after reassigning `**client_id**`.
 
 ---
 
 ## 9. Commercial contracts (`project_contracts`)
 
-Separate from the finance ledger: table **`project_contracts`** holds signup / renewal / commercial snapshots per **project (SBU)**.
+Separate from the finance ledger: table `**project_contracts**` holds signup / renewal / commercial snapshots per **project (SBU)**.
 
 - **Keys:** `project_id` → `projects.id` (ON DELETE CASCADE). Optional `client_id` → `clients.id` (ON DELETE SET NULL).
 - **API:** `GET /contracts`, `GET /contracts/by-project/{project_id}`, `GET /contracts/{id}`, `POST /contracts`, `PATCH /contracts/{id}`, `DELETE /contracts/{id}`, `POST /contracts/upload` (multipart `.xlsx`). Non-admin users are scoped by assigned projects.
 - **CLI:** `python backend/scripts/ingest_project_contracts.py "<path>.xlsx"`.
-- **Workbook:** reads sheet **Contract Data**; matches **Customer** to **`projects.account_name`** (case-insensitive). **Signed ACV (₹L)** is stored as **`signed_acv_inr`** (value × 100 000).
+- **Workbook:** reads sheet **Contract Data**; matches **Customer** to `**projects.account_name`** (case-insensitive). **Signed ACV (₹L)** is stored as `**signed_acv_inr`** (value × 100 000).
 
 **Client detail → Account info** shows a **Commercial contracts** table per linked project.
 
@@ -180,7 +180,7 @@ Separate from the finance ledger: table **`project_contracts`** holds signup / r
 
 ## 10. Related documentation
 
-- **`FINANCE_METRICS_AND_UPDATES_REFERENCE.md`** (repo root) — finance KPIs and ledger; amounts there remain ledger-based, not contract ACV.
+- `**FINANCE_METRICS_AND_UPDATES_REFERENCE.md`** (repo root) — finance KPIs and ledger; amounts there remain ledger-based, not contract ACV.
 - This file covers **client vs SBU identity**, **contracts**, and related **API/UI**.
 
 ---
