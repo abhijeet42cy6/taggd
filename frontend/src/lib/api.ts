@@ -421,6 +421,64 @@ export type MeetingRow = {
   action_items: MeetingActionItemRow[];
 };
 
+/** Org-level job board / resume supplier license costs (`resume_supplier_licenses`). */
+export type ResumeSupplierLicenseRow = {
+  id: number;
+  vendor_name: string;
+  login_ids_count: number | null;
+  resume_inventory: string | null;
+  job_postings: number | null;
+  naukri_invites: number | null;
+  utilization: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  contract_duration_months: number | null;
+  cost_inr: number | null;
+  primary_person_name: string | null;
+  primary_person_phone: string | null;
+  primary_person_email: string | null;
+  secondary_person_name: string | null;
+  secondary_person_phone: string | null;
+  secondary_person_email: string | null;
+  remarks: string | null;
+  fiscal_year_label: string | null;
+  sort_order: number;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  system_created_at: string | null;
+  system_updated_at: string | null;
+};
+
+export type TaskAssigneeDto = {
+  user_id: number;
+  email: string;
+  assignee_role: string;
+  assigned_at: string | null;
+};
+
+/** Central platform task (`platform_tasks` + `task_assignees`). */
+export type TaskRow = {
+  id: number;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string | null;
+  task_category: string | null;
+  task_subtype: string | null;
+  linked_resource_type: string | null;
+  linked_resource_id: string | null;
+  project_id: number | null;
+  due_at: string | null;
+  completed_at: string | null;
+  created_by_user_id: number | null;
+  completed_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  meta_json: Record<string, unknown> | null;
+  system_created_at: string | null;
+  system_updated_at: string | null;
+  assignees: TaskAssigneeDto[];
+};
+
 export type AdminUserRow = {
   id: number;
   email: string;
@@ -853,6 +911,45 @@ export const queries = {
 
   deleteMeeting: (id: number) =>
     api.delete<{ status: string; id: number }>(`/meetings/${id}`).then((r) => r.data),
+
+  vendorLicensesList: () =>
+    api.get<ResumeSupplierLicenseRow[]>(`/vendor-licenses`).then((r) => r.data),
+
+  vendorLicense: (id: number) =>
+    api.get<ResumeSupplierLicenseRow>(`/vendor-licenses/${id}`).then((r) => r.data),
+
+  createVendorLicense: (body: Record<string, unknown>) =>
+    api.post<ResumeSupplierLicenseRow>(`/vendor-licenses`, body).then((r) => r.data),
+
+  patchVendorLicense: (id: number, body: Record<string, unknown>) =>
+    api.patch<ResumeSupplierLicenseRow>(`/vendor-licenses/${id}`, body).then((r) => r.data),
+
+  deleteVendorLicense: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/vendor-licenses/${id}`).then((r) => r.data),
+
+  taskAssignableUsers: () =>
+    api.get<{ id: number; email: string; role: string }[]>(`/tasks/meta/assignable-users`).then((r) => r.data),
+
+  tasksList: (params?: { status?: string; project_id?: number; mine?: boolean; overdue?: boolean }) => {
+    const sp = new URLSearchParams();
+    if (params?.status) sp.set("status", params.status);
+    if (params?.project_id != null) sp.set("project_id", String(params.project_id));
+    if (params?.mine) sp.set("mine", "true");
+    if (params?.overdue) sp.set("overdue", "true");
+    const q = sp.toString();
+    return api.get<TaskRow[]>(`/tasks${q ? `?${q}` : ""}`).then((r) => r.data);
+  },
+
+  task: (id: number) => api.get<TaskRow>(`/tasks/${id}`).then((r) => r.data),
+
+  createTask: (body: Record<string, unknown>) =>
+    api.post<TaskRow>(`/tasks`, body).then((r) => r.data),
+
+  patchTask: (id: number, body: Record<string, unknown>) =>
+    api.patch<TaskRow>(`/tasks/${id}`, body).then((r) => r.data),
+
+  deleteTask: (id: number) =>
+    api.delete<{ status: string; id: number }>(`/tasks/${id}`).then((r) => r.data),
 
   /** Grouped legal clients + SBU projects (scoped). */
   clients: () =>

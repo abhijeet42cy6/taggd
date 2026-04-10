@@ -5,14 +5,14 @@ This document describes the application database as defined in SQLAlchemy (`back
 ## Design overview
 
 
-| Theme              | Detail                                                                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **ORM**            | SQLAlchemy declarative `Base`; `init_db()` runs `create_all` plus SQLite-safe migrations for legacy DBs (including one-shot migration from removed planning tables into `finance_monthly_ledger`). |
-| **Spine**          | `**clients`** (legal / rollup account) → `**projects`** (engagement / SBU / tracker container) → `**records`** (requisitions) and `**candidates**` (people on mandates). |
-| **Auth & scope**   | `**users`** + `**user_project_assignments`**; managers (and optionally scoped executives) are limited to assigned `project_id`s at query time (application layer).       |
-| **Audit**          | `**ingestion_events`**, `**activity_log`**; `**AuditMixin**` on most domain tables (`system_created_at`, `system_updated_at`, `source_filename`, `uploaded_by`).         |
+| Theme              | Detail                                                                                                                                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ORM**            | SQLAlchemy declarative `Base`; `init_db()` runs `create_all` plus SQLite-safe migrations for legacy DBs (including one-shot migration from removed planning tables into `finance_monthly_ledger`).                               |
+| **Spine**          | `**clients`** (legal / rollup account) → `**projects`** (engagement / SBU / tracker container) → `**records`** (requisitions) and `**candidates`** (people on mandates).                                                         |
+| **Auth & scope**   | `**users`** + `**user_project_assignments`**; managers (and optionally scoped executives) are limited to assigned `project_id`s at query time (application layer).                                                               |
+| **Audit**          | `**ingestion_events`**, `**activity_log`**; `**AuditMixin**` on most domain tables (`system_created_at`, `system_updated_at`, `source_filename`, `uploaded_by`).                                                                 |
 | **Commercial**     | `**project_contracts`** (signup/renewal snapshot); `**taggd_revenue_billing`** (TAGGD revenue tracker row); finance master + **budget/forecast template** rows in `**finance_monthly_ledger`** (finer `metric_category` values). |
-| **RevOps cadence** | `**revenue_forecast_weekly`**, `**revenue_visibility_snapshot`** (unique per project + week / as-of date).                                                               |
+| **RevOps cadence** | `**revenue_forecast_weekly`**, `**revenue_visibility_snapshot`** (unique per project + week / as-of date).                                                                                                                       |
 
 
 ---
@@ -20,33 +20,33 @@ This document describes the application database as defined in SQLAlchemy (`back
 ## Entity relationship overview (how tables connect)
 
 
-| From                                          | To                   | FK / link                         | `ON DELETE` (where set) | Typical access                                 |
-| --------------------------------------------- | -------------------- | --------------------------------- | ----------------------- | ---------------------------------------------- |
-| `user_project_assignments`                    | `users`              | `user_id`                         | `CASCADE`               | **R/W** assignments                            |
-| `user_project_assignments`                    | `projects`           | `project_id`                      | `CASCADE`               | **R/W**                                        |
-| `ingestion_events`                            | `users`              | `user_id`                         | `SET NULL`              | **W** on ingest, **R** feeds                   |
-| `ingestion_events`                            | `projects`           | `project_id`                      | `SET NULL`              | **W** / **R**                                  |
-| `activity_log`                                | `users`              | `user_id`                         | `SET NULL`              | **W** append-only from app, **R** timeline     |
-| `activity_log`                                | `projects`           | `project_id`                      | `SET NULL`              | **W** / **R**                                  |
-| `projects`                                    | `clients`            | `client_id`                       | `RESTRICT`              | **R/W** project; **R** client roll-up          |
-| `project_contracts`                           | `projects`           | `project_id`                      | `CASCADE`               | **R/W** contract rows                          |
-| `project_contracts`                           | `clients`            | `client_id`                       | `SET NULL`              | **R/W** optional                               |
-| `records`                                     | `projects`           | `project_id`                      | (default)               | **R/W** heavy ingest + UI patch                |
-| `candidates`                                  | `projects`           | `project_id`                      | `CASCADE`               | **R/W**                                        |
-| `candidates`                                  | `records`            | `record_id`                       | `CASCADE`               | **R/W**                                        |
-| `metric_definitions`                          | `projects`           | `project_id`                      | (default)               | **R/W** SLA defs                               |
-| `sla_performances`                            | `metric_definitions` | `definition_id`                   | (default)               | **R/W** performance rows                       |
-| `wfm_hr_benchmarks`, `wfm_resource_gaps`      | `projects`           | `project_id`                      | (default)               | **R/W**                                        |
+| From                                          | To                   | FK / link                         | `ON DELETE` (where set) | Typical access                                                                                                                              |
+| --------------------------------------------- | -------------------- | --------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_project_assignments`                    | `users`              | `user_id`                         | `CASCADE`               | **R/W** assignments                                                                                                                         |
+| `user_project_assignments`                    | `projects`           | `project_id`                      | `CASCADE`               | **R/W**                                                                                                                                     |
+| `ingestion_events`                            | `users`              | `user_id`                         | `SET NULL`              | **W** on ingest, **R** feeds                                                                                                                |
+| `ingestion_events`                            | `projects`           | `project_id`                      | `SET NULL`              | **W** / **R**                                                                                                                               |
+| `activity_log`                                | `users`              | `user_id`                         | `SET NULL`              | **W** append-only from app, **R** timeline                                                                                                  |
+| `activity_log`                                | `projects`           | `project_id`                      | `SET NULL`              | **W** / **R**                                                                                                                               |
+| `projects`                                    | `clients`            | `client_id`                       | `RESTRICT`              | **R/W** project; **R** client roll-up                                                                                                       |
+| `project_contracts`                           | `projects`           | `project_id`                      | `CASCADE`               | **R/W** contract rows                                                                                                                       |
+| `project_contracts`                           | `clients`            | `client_id`                       | `SET NULL`              | **R/W** optional                                                                                                                            |
+| `records`                                     | `projects`           | `project_id`                      | (default)               | **R/W** heavy ingest + UI patch                                                                                                             |
+| `candidates`                                  | `projects`           | `project_id`                      | `CASCADE`               | **R/W**                                                                                                                                     |
+| `candidates`                                  | `records`            | `record_id`                       | `CASCADE`               | **R/W**                                                                                                                                     |
+| `metric_definitions`                          | `projects`           | `project_id`                      | (default)               | **R/W** SLA defs                                                                                                                            |
+| `sla_performances`                            | `metric_definitions` | `definition_id`                   | (default)               | **R/W** performance rows                                                                                                                    |
+| `wfm_hr_benchmarks`, `wfm_resource_gaps`      | `projects`           | `project_id`                      | (default)               | **R/W**                                                                                                                                     |
 | `finance_monthly_ledger`, `finance_cash_flow` | `projects`           | `project_id`                      | (default)               | **R** aggregates; **W** finance master ingest, manual upsert, **budget/forecast workbook** (planning categories + `Revenue` monthly budget) |
-| `finance_monthly_ledger`, `finance_cash_flow` | `users`              | `metrics_last_updated_by_user_id` | `SET NULL`              | **W** audit who edited                         |
-| `finance_efficiency_kpis`                     | `projects`           | `project_id`                      | (default)               | **R/W**                                        |
-| `finance_efficiency_kpis`                     | `users`              | `metrics_updated_by_user_id`      | `SET NULL`              | **W**                                          |
-| `revenue_forecast_weekly`                     | `projects`           | `project_id`                      | `CASCADE`               | **R/W** weekly forecast                        |
-| `revenue_forecast_weekly`                     | `users`              | `entered_by_user_id`              | `SET NULL`              | **W**                                          |
-| `revenue_visibility_snapshot`                 | `projects`           | `project_id`                      | `CASCADE`               | **R/W**                                        |
-| `revenue_visibility_snapshot`                 | `users`              | `entered_by_user_id`              | `SET NULL`              | **W**                                          |
-| `taggd_revenue_billing`                       | `projects`           | `project_id`                      | `CASCADE`               | **R/W** billing grid                           |
-| `taggd_revenue_billing`                       | `users`              | `entered_by_user_id`              | `SET NULL`              | **W**                                          |
+| `finance_monthly_ledger`, `finance_cash_flow` | `users`              | `metrics_last_updated_by_user_id` | `SET NULL`              | **W** audit who edited                                                                                                                      |
+| `finance_efficiency_kpis`                     | `projects`           | `project_id`                      | (default)               | **R/W**                                                                                                                                     |
+| `finance_efficiency_kpis`                     | `users`              | `metrics_updated_by_user_id`      | `SET NULL`              | **W**                                                                                                                                       |
+| `revenue_forecast_weekly`                     | `projects`           | `project_id`                      | `CASCADE`               | **R/W** weekly forecast                                                                                                                     |
+| `revenue_forecast_weekly`                     | `users`              | `entered_by_user_id`              | `SET NULL`              | **W**                                                                                                                                       |
+| `revenue_visibility_snapshot`                 | `projects`           | `project_id`                      | `CASCADE`               | **R/W**                                                                                                                                     |
+| `revenue_visibility_snapshot`                 | `users`              | `entered_by_user_id`              | `SET NULL`              | **W**                                                                                                                                       |
+| `taggd_revenue_billing`                       | `projects`           | `project_id`                      | `CASCADE`               | **R/W** billing grid                                                                                                                        |
+| `taggd_revenue_billing`                       | `users`              | `entered_by_user_id`              | `SET NULL`              | **W**                                                                                                                                       |
 
 
 **Read vs write (workload pattern, not SQL privileges)**
@@ -247,15 +247,17 @@ Commercial snapshot per project (contract workbook / platform). **Audit mixin**.
 
 **Removed:** `project_budgets` and `project_forecasts` are **not** in the ORM anymore. On `init_db()`, if those legacy tables still exist in an older SQLite file, rows are **copied into** `finance_monthly_ledger` and the legacy tables are **dropped** (see `backend/core/budget_forecast_ledger.py`).
 
-**Current storage:** all template data lives in **`finance_monthly_ledger`** under the same natural key as finance master rows: **unique (`project_id`, `reporting_month`, `metric_category`)** — see index `uq_finance_ledger_proj_month_cat`.
+**Current storage:** all template data lives in `**finance_monthly_ledger`** under the same natural key as finance master rows: **unique (`project_id`, `reporting_month`, `metric_category`)** — see index `uq_finance_ledger_proj_month_cat`.
 
-| Source | `metric_category` | Typical fields | Notes |
-| ------ | ----------------- | -------------- | ----- |
-| Finance master / P&L ingest | `Revenue`, `Contribution Margin`, `Cost`, … | `actual_value`, `budget_value`, `forecast_value`, `actual_cost` | Primary dashboards aggregate **exact** `Revenue` (not `Revenue_*` suffix categories). |
-| Budget template (quarters → months) | `Revenue` | `budget_value` per month | Indian FY (Apr–Mar); each quarter spread evenly across three month-starts. |
-| Forecast template (“Detail” lines) | `Revenue_MMF`, `Revenue_JoiningFee`, `Revenue_OpeningFee`, `Revenue_ToBeOfferFee`, `Forecast_Joiners`, `Revenue_PlanningOther` | `forecast_value` | Closed list normalized in `backend/core/finance_planning_categories.py`. `Forecast_Joiners` stores **headcounts**, not INR. |
 
-**Re-upload behavior:** for projects matched in a budget/forecast workbook, **planning** categories above are **deleted** for those `project_id`s, then re-inserted; **`Revenue` rows are not deleted** — monthly `budget_value` for the template FY is **upserted** so corporate `Revenue` actuals/forecasts on the same rows are preserved where not overwritten.
+| Source                              | `metric_category`                                                                                                              | Typical fields                                                  | Notes                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Finance master / P&L ingest         | `Revenue`, `Contribution Margin`, `Cost`, …                                                                                    | `actual_value`, `budget_value`, `forecast_value`, `actual_cost` | Primary dashboards aggregate **exact** `Revenue` (not `Revenue_`* suffix categories).                                       |
+| Budget template (quarters → months) | `Revenue`                                                                                                                      | `budget_value` per month                                        | Indian FY (Apr–Mar); each quarter spread evenly across three month-starts.                                                  |
+| Forecast template (“Detail” lines)  | `Revenue_MMF`, `Revenue_JoiningFee`, `Revenue_OpeningFee`, `Revenue_ToBeOfferFee`, `Forecast_Joiners`, `Revenue_PlanningOther` | `forecast_value`                                                | Closed list normalized in `backend/core/finance_planning_categories.py`. `Forecast_Joiners` stores **headcounts**, not INR. |
+
+
+**Re-upload behavior:** for projects matched in a budget/forecast workbook, **planning** categories above are **deleted** for those `project_id`s, then re-inserted; `**Revenue` rows are not deleted** — monthly `budget_value` for the template FY is **upserted** so corporate `Revenue` actuals/forecasts on the same rows are preserved where not overwritten.
 
 **Traceability:** template rows often set `source_filename` like `budget_forecast:<file>` and `uploaded_by` like `bf:<excel project name>` for fuzzy re-linking when `project_id` was unset.
 
@@ -263,7 +265,7 @@ Commercial snapshot per project (contract workbook / platform). **Audit mixin**.
 
 **Audit mixin.** `project_id` → `projects` (nullable in DB for edge cases; template re-linking targets nulls). `reporting_month`, `metric_category`, `budget_value`, `forecast_value`, `actual_value`, `actual_cost`; `metrics_last_updated_at`, `metrics_last_updated_by_user_id` → `users`.
 
-**`metric_category`:** finance master uses coarse labels (`Revenue`, `Contribution Margin`, …). Budget/forecast template adds **finer** planning labels (table above); they share the ledger unique index and ingest upsert pattern.
+`**metric_category`:** finance master uses coarse labels (`Revenue`, `Contribution Margin`, …). Budget/forecast template adds **finer** planning labels (table above); they share the ledger unique index and ingest upsert pattern.
 
 ### `finance_cash_flow`
 

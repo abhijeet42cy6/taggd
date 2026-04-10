@@ -14,6 +14,8 @@ import { ClientsHub } from "./pages/ClientsHub";
 import { ClientDetail } from "./pages/ClientDetail";
 import { ClientContracts } from "./pages/ClientContracts";
 import { Meetings } from "./pages/Meetings";
+import { VendorLicenses } from "./pages/VendorLicenses";
+import { Tasks } from "./pages/Tasks";
 import { Agent } from "./pages/Agent";
 import { Dashboard } from "./pages/Dashboard";
 import { DataOperations } from "./pages/DataOperations";
@@ -57,6 +59,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { label: "Finance Command", path: "/finance" },
       { label: "Revenue trackers", path: "/revenue-trackers" },
       { label: "Billing", path: "/billing" },
+      { label: "Vendor licenses", path: "/vendor-licenses" },
       { label: "SLA Performance", path: "/sla-performance" },
       { label: "Workforce Mgmt", path: "/wfm" },
     ],
@@ -64,6 +67,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   {
     title: "Platform",
     items: [
+      { label: "Tasks", path: "/tasks" },
       { label: "Data Operations", path: "/data-operations" },
       { label: "Ingestion Center", path: "/ingestion" },
       { label: "Activity log", path: "/activity" },
@@ -231,10 +235,12 @@ function AppShell() {
               <Route path="/finance" element={<FiscalPerformance />} />
               <Route path="/revenue-trackers" element={<RevenueTrackers />} />
               <Route path="/billing" element={<Billing />} />
+              <Route path="/vendor-licenses" element={<VendorLicenses />} />
               <Route path="/sla-performance" element={<SLAPerformance />} />
               <Route path="/wfm" element={<WorkforceManagement />} />
               <Route path="/data-operations" element={<DataOperations />} />
               <Route path="/ingestion" element={<IngestionCenter />} />
+              <Route path="/tasks" element={<Tasks />} />
               <Route path="/activity" element={<ActivityLog />} />
               <Route path="/agent" element={<Agent />} />
               <Route path="/admin/users" element={<AdminUsers />} />

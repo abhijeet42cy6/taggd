@@ -90,6 +90,8 @@ from .routers.revenue_billing import router as revenue_billing_router
 from .routers.candidates import router as candidates_router
 from .routers.project_contracts import router as project_contracts_router
 from .routers.meetings import router as meetings_router
+from .routers.resume_supplier_licenses import router as resume_supplier_licenses_router
+from .routers.tasks import router as tasks_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
@@ -99,6 +101,8 @@ app.include_router(revenue_billing_router)
 app.include_router(candidates_router)
 app.include_router(project_contracts_router)
 app.include_router(meetings_router)
+app.include_router(resume_supplier_licenses_router)
+app.include_router(tasks_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (

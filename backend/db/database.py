@@ -287,6 +287,86 @@ class MeetingActionItem(Base):
     meeting = relationship("Meeting", back_populates="action_items")
 
 
+class ResumeSupplierLicense(Base):
+    """Org-level job board / resume vendor license cost tracker (not tied to projects)."""
+
+    __tablename__ = "resume_supplier_licenses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vendor_name = Column(String(512), nullable=False, index=True)
+    login_ids_count = Column(Integer, nullable=True)
+    resume_inventory = Column(String(255), nullable=True)
+    job_postings = Column(Integer, nullable=True)
+    naukri_invites = Column(Integer, nullable=True)
+    utilization = Column(String(255), nullable=True)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    contract_duration_months = Column(Integer, nullable=True)
+    cost_inr = Column(Float, nullable=True)
+
+    primary_person_name = Column(String(255), nullable=True)
+    primary_person_phone = Column(String(64), nullable=True)
+    primary_person_email = Column(String(255), nullable=True)
+    secondary_person_name = Column(String(255), nullable=True)
+    secondary_person_phone = Column(String(64), nullable=True)
+    secondary_person_email = Column(String(255), nullable=True)
+
+    remarks = Column(Text, nullable=True)
+    fiscal_year_label = Column(String(64), nullable=True, index=True)
+    sort_order = Column(Integer, nullable=False, default=0, index=True)
+
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    system_created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    system_updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class Task(Base):
+    """Cross-cutting work items: deadlines, multi-assignee, optional link to platform entities."""
+
+    __tablename__ = "platform_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(512), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False, default="open", index=True)
+    priority = Column(String(16), nullable=True, index=True)
+    task_category = Column(String(64), nullable=True, index=True)
+    task_subtype = Column(String(128), nullable=True)
+    linked_resource_type = Column(String(64), nullable=True, index=True)
+    linked_resource_id = Column(String(128), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    due_at = Column(DateTime, nullable=True, index=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    completed_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    meta_json = Column(JSON, nullable=True)
+    system_created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    system_updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    project = relationship("Project", backref="platform_tasks")
+    assignments = relationship(
+        "TaskAssignee",
+        back_populates="task",
+        cascade="all, delete-orphan",
+    )
+
+
+class TaskAssignee(Base):
+    __tablename__ = "task_assignees"
+    __table_args__ = (UniqueConstraint("task_id", "user_id", name="uq_task_assignee_user"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("platform_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    assigned_at = Column(DateTime, default=datetime.datetime.utcnow)
+    assignee_role = Column(String(32), nullable=False, default="assignee")
+
+    task = relationship("Task", back_populates="assignments")
+    user = relationship("User", backref="task_assignee_links")
+
+
 class Record(Base, AuditMixin):
     """Tracker row / requisition mandate. Legacy columns remain for ingest + revenue; RPO fields extend for Req. ID grain."""
 
