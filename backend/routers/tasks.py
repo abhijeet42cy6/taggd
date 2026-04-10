@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
 
-from backend.auth.deps import allowed_project_ids, get_current_user, normalized_role
+from backend.auth.deps import allowed_project_ids, get_current_user, is_platform_admin
+from backend.auth.profile import ROLE_EXECUTIVE, effective_role
 from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import Task, TaskAssignee, User, UserProjectAssignment, get_db
@@ -20,7 +21,7 @@ VALID_STATUSES = frozenset({"open", "in_progress", "blocked", "done", "cancelled
 
 
 def _apply_task_scope(q, user: User, db: Session):
-    if normalized_role(user) == "admin":
+    if is_platform_admin(user):
         return q
     sub_assigned = exists().where(TaskAssignee.task_id == Task.id, TaskAssignee.user_id == user.id)
     mine = or_(Task.created_by_user_id == user.id, sub_assigned)
@@ -33,7 +34,7 @@ def _apply_task_scope(q, user: User, db: Session):
 
 
 def _assert_task_access(db: Session, user: User, task: Task) -> None:
-    if normalized_role(user) == "admin":
+    if is_platform_admin(user):
         return
     if task.created_by_user_id == user.id:
         return
@@ -87,7 +88,7 @@ def _task_to_dict(db: Session, task: Task) -> dict[str, Any]:
 
 
 def _validate_manager_assignees(db: Session, user: User, assignee_ids: List[int]) -> None:
-    if normalized_role(user) != "manager":
+    if effective_role(user) != ROLE_PROJECT_HEAD:
         return
     pids = allowed_project_ids(user, db)
     if pids is None or len(pids) == 0:
@@ -168,10 +169,9 @@ def list_assignable_users(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Users the current operator may assign tasks to (scoped for managers)."""
-    role = normalized_role(user)
+    """Users the current operator may assign tasks to (scoped for project heads / legacy managers)."""
     q = db.query(User).filter(User.is_active.is_(True)).order_by(User.email)
-    if role == "admin":
+    if is_platform_admin(user):
         rows = q.all()
     else:
         pids = allowed_project_ids(user, db)
@@ -353,7 +353,11 @@ def delete_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     _assert_task_access(db, user, task)
-    if normalized_role(user) not in ("admin", "executive") and task.created_by_user_id != user.id:
+    if (
+        not is_platform_admin(user)
+        and effective_role(user) != ROLE_EXECUTIVE
+        and task.created_by_user_id != user.id
+    ):
         raise HTTPException(status_code=403, detail="Only creator or admin/executive may delete")
     title = task.title
     pid = task.project_id

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.auth.deps import get_current_user
-from backend.auth.scope import apply_project_scope, assert_project_access
+from backend.auth.scope import apply_project_scope, apply_recruiter_candidate_scope, assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import Candidate, Record, User, get_db
 
@@ -29,7 +29,14 @@ _RPO_DATE_FIELDS = frozenset(
         "medical_initiation_date",
     }
 )
-_INT_FIELDS = frozenset({"notice_period_days", "excel_row_index"})
+_INT_FIELDS = frozenset(
+    {
+        "notice_period_days",
+        "excel_row_index",
+        "hiring_manager_user_id",
+        "assigned_recruiter_user_id",
+    }
+)
 _FLOAT_FIELDS = frozenset(
     {
         "current_ctc_lpa",
@@ -135,6 +142,8 @@ class CandidateCreateBody(BaseModel):
     sourcer_name: Optional[str] = None
     taggd_pm: Optional[str] = None
     offer_onboarding_extras: Optional[dict[str, Any]] = None
+    hiring_manager_user_id: Optional[int] = None
+    assigned_recruiter_user_id: Optional[int] = None
 
 
 class CandidatePatchBody(BaseModel):
@@ -191,6 +200,8 @@ class CandidatePatchBody(BaseModel):
     taggd_pm: Optional[str] = None
     offer_onboarding_extras: Optional[dict[str, Any]] = None
     record_id: Optional[int] = Field(None, ge=1)
+    hiring_manager_user_id: Optional[int] = None
+    assigned_recruiter_user_id: Optional[int] = None
 
 
 def _body_to_candidate_dict(body: CandidateCreateBody | CandidatePatchBody, *, is_create: bool) -> dict[str, Any]:
@@ -246,6 +257,7 @@ def list_candidates(
 ):
     q = db.query(Candidate)
     q = apply_project_scope(q, user, db, Candidate)
+    q = apply_recruiter_candidate_scope(q, user, db)
     if project_id is not None:
         assert_project_access(user, db, project_id)
         q = q.filter(Candidate.project_id == project_id)
@@ -332,6 +344,12 @@ def patch_candidate(
         raise HTTPException(status_code=404, detail="Candidate not found")
     assert_project_access(user, db, c.project_id)
 
+    def _validate_user_fk(uid: Optional[int]) -> None:
+        if uid is None:
+            return
+        if not db.query(User).filter(User.id == uid, User.is_active.is_(True)).first():
+            raise HTTPException(status_code=400, detail=f"Invalid or inactive user id: {uid}")
+
     patch_raw = body.model_dump(exclude_unset=True)
     if patch_raw.get("record_id") is not None:
         rec = db.query(Record).filter(Record.id == patch_raw["record_id"]).first()
@@ -340,6 +358,10 @@ def patch_candidate(
         c.record_id = patch_raw["record_id"]
 
     typed = _body_to_candidate_dict(body, is_create=False)
+    if "hiring_manager_user_id" in patch_raw:
+        _validate_user_fk(patch_raw.get("hiring_manager_user_id"))
+    if "assigned_recruiter_user_id" in patch_raw:
+        _validate_user_fk(patch_raw.get("assigned_recruiter_user_id"))
     _apply_patch(c, typed)
 
     db.commit()

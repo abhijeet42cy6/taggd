@@ -5,12 +5,20 @@ from typing import Callable, Optional, Set
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from backend.db.database import User, UserProjectAssignment, get_db
+from backend.db.database import User
+
+from backend.auth.profile import (
+    ROLE_PLATFORM_ADMIN,
+    ROLE_EXECUTIVE,
+    effective_role,
+    resolve_user_profile,
+    stored_role_normalized,
+)
 
 
 def normalized_role(user: User) -> str:
-    """Lowercase trimmed role string — DB/UI may vary in casing."""
-    return (user.role or "").strip().lower()
+    """Lowercase trimmed role string as stored in DB (may be legacy `admin` / `manager`)."""
+    return stored_role_normalized(user)
 
 
 def get_current_user(request: Request) -> User:
@@ -24,44 +32,42 @@ def get_current_user(request: Request) -> User:
 
 def require_roles(*roles: str) -> Callable:
     allowed = {r.strip().lower() for r in roles}
+    expanded = set(allowed)
+    if "admin" in allowed:
+        expanded.add("platform_admin")
+    if "platform_admin" in allowed:
+        expanded.add("admin")
+    if "manager" in allowed:
+        expanded.add("project_head")
+    if "project_head" in allowed:
+        expanded.add("manager")
 
     def _inner(user: User = Depends(get_current_user)) -> User:
-        if normalized_role(user) not in allowed:
+        if stored_role_normalized(user) not in expanded:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
 
     return _inner
 
 
+def is_platform_admin(user: User) -> bool:
+    return effective_role(user) == ROLE_PLATFORM_ADMIN
+
+
 def allowed_project_ids(user: User, db: Session) -> Optional[Set[int]]:
     """
-    None = unrestricted (admin only).
-    Set of project_ids for executive and manager from user_project_assignments (may be empty).
+    None = unrestricted (full org).
+    Set = allowed project ids (may be empty).
+    Unknown / unrecognised roles: empty set (restrictive), not HTTP 403.
     """
-    role = normalized_role(user)
-    if role == "admin":
-        return None
-    if role in ("executive", "manager"):
-        rows = (
-            db.query(UserProjectAssignment.project_id)
-            .filter(UserProjectAssignment.user_id == user.id)
-            .all()
-        )
-        ids = {r[0] for r in rows}
-        # Executive with no explicit assignments = org-wide (same as admin for reads).
-        # Managers with no assignments stay empty (assignment-only role).
-        if role == "executive" and len(ids) == 0:
-            return None
-        return ids
-    raise HTTPException(status_code=403, detail="Unknown role")
+    profile = resolve_user_profile(user, db)
+    return profile.project_ids
 
 
 def can_create_unmatched_project(user: User) -> bool:
-    """
-    Who may create a new Project row when upload does not match an existing client/file.
-    Admin and executive: yes. Managers are assignment-scoped and must not create new accounts.
-    """
-    return normalized_role(user) in ("admin", "executive")
+    """Who may create a new Project when upload does not match an existing client/file."""
+    er = effective_role(user)
+    return er in (ROLE_PLATFORM_ADMIN, ROLE_EXECUTIVE)
 
 
 def project_scope_filter(user: User, db: Session):

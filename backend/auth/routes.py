@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from backend.db.database import User, get_db
 from backend.auth.security import verify_password, create_access_token
 from backend.auth.deps import get_current_user, allowed_project_ids
+from backend.auth.profile import profile_to_me_dict, resolve_user_profile
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -37,9 +38,11 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not u:
         raise HTTPException(status_code=401, detail="User not found")
     ids = allowed_project_ids(u, db)
+    profile = resolve_user_profile(u, db)
     return {
         "id": u.id,
         "email": u.email,
         "role": u.role,
         "project_ids": sorted(ids) if ids is not None else None,
+        **profile_to_me_dict(profile),
     }

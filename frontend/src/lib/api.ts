@@ -485,14 +485,24 @@ export type AdminUserRow = {
   role: string;
   is_active: boolean;
   project_ids: number[];
+  manager_user_id?: number | null;
+  vertical_access?: string[] | null;
 };
 
 export const adminApi = {
   listUsers: () => api.get<AdminUserRow[]>("/admin/users").then((r) => r.data),
   createUser: (body: { email: string; password: string; role: string }) =>
     api.post("/admin/users", body).then((r) => r.data),
-  patchUser: (id: number, body: { is_active?: boolean; role?: string; password?: string }) =>
-    api.patch(`/admin/users/${id}`, body).then((r) => r.data),
+  patchUser: (
+    id: number,
+    body: {
+      is_active?: boolean;
+      role?: string;
+      password?: string;
+      manager_user_id?: number | null;
+      vertical_access?: string[] | null;
+    },
+  ) => api.patch(`/admin/users/${id}`, body).then((r) => r.data),
   setUserProjects: (userId: number, project_ids: number[]) =>
     api.put(`/admin/users/${userId}/projects`, { project_ids }).then((r) => r.data),
   listProjectsForAdmin: () => api.get<Project[]>("/projects").then((r) => r.data),

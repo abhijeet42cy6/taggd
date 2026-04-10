@@ -17,7 +17,7 @@ Base = declarative_base()
 
 
 class User(Base):
-    """Platform login: admin | executive | manager (executive & manager use user_project_assignments)."""
+    """Platform login: legacy admin|executive|manager or canonical platform_admin|executive|operations|project_head|recruiter."""
 
     __tablename__ = "users"
 
@@ -28,6 +28,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    manager_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    vertical_access_json = Column(JSON, nullable=True)
 
     project_assignments = relationship(
         "UserProjectAssignment",
@@ -117,6 +119,7 @@ class Project(Base, AuditMixin):
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=True, index=True)
     # SBU / engagement label (e.g. TATA Motors); finance rows often key off account_name — keep both aligned in ingest
     engagement_name = Column(String, nullable=True, index=True)
+    project_head_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     client = relationship("Client", back_populates="projects")
     
     # Enhanced Enterprise Metadata
@@ -380,6 +383,8 @@ class Record(Base, AuditMixin):
     position_title = Column(String)
     status = Column(String, index=True) # Joined, Offered, etc.
     hiring_manager = Column(String)
+    hiring_manager_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_recruiter_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     offered_ctc = Column(Float)
     joining_date = Column(DateTime)
     creation_date = Column(DateTime)
@@ -479,6 +484,8 @@ class Candidate(Base, AuditMixin):
     resume_screening = Column(String, nullable=True)
     assigned_recruiter = Column(String, nullable=True)
     hiring_manager = Column(String, nullable=True)
+    hiring_manager_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_recruiter_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     current_stage = Column(String, nullable=True, index=True)
     offer_ctc_lpa = Column(Float, nullable=True)
     offer_release_date = Column(DateTime, nullable=True)
@@ -915,6 +922,33 @@ def _ensure_projects_project_head_column():
         logging.warning("projects project_head migration: %s", e)
 
 
+def _ensure_user_rbac_and_attribution_columns():
+    """SQLite: profile columns on users + optional user FKs on projects/records/candidates."""
+    from sqlalchemy import text
+
+    def addcol(table: str, col: str, ddl: str) -> None:
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+                cols = {r[1] for r in rows}
+                if not cols or col in cols:
+                    return
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+                conn.commit()
+        except Exception as e:
+            import logging
+
+            logging.warning("%s.%s migration: %s", table, col, e)
+
+    addcol("users", "manager_user_id", "INTEGER")
+    addcol("users", "vertical_access_json", "TEXT")
+    addcol("projects", "project_head_user_id", "INTEGER")
+    addcol("records", "hiring_manager_user_id", "INTEGER")
+    addcol("records", "assigned_recruiter_user_id", "INTEGER")
+    addcol("candidates", "hiring_manager_user_id", "INTEGER")
+    addcol("candidates", "assigned_recruiter_user_id", "INTEGER")
+
+
 def _ensure_finance_ledger_cash_metrics_audit_columns():
     """SQLite: who/when for platform edits on ledger + cashflow rows."""
     from sqlalchemy import text
@@ -1131,6 +1165,7 @@ def init_db():
     _ensure_clients_and_project_client_columns()
     _ensure_records_rpo_columns()
     _ensure_projects_project_head_column()
+    _ensure_user_rbac_and_attribution_columns()
     _ensure_finance_ledger_cash_metrics_audit_columns()
     _ensure_finance_efficiency_scorecard_columns()
     _ensure_project_enterprise_columns()

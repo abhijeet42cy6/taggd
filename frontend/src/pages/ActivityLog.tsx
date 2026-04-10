@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { queries, type ActivityLogItem } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { isPlatformAdminRole, useAuth } from "@/lib/auth";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 
 const RESOURCE_TYPE_LABEL: Record<string, string> = {
@@ -73,7 +73,7 @@ export function ActivityLog() {
   }, [loading, total, fetchPage]);
 
   const scopeHint =
-    user?.role === "admin"
+    isPlatformAdminRole(user?.role)
       ? "All recorded actions across the platform."
       : "Your actions and teammates’ activity on projects you share. Portfolio-wide actions without a project are visible only to the actor.";
 

@@ -3,12 +3,23 @@ import { api, clearApiCache } from "./api";
 
 const TOKEN_KEY = "tgddata_access_token";
 
-export type AuthRole = "admin" | "executive" | "manager";
+/** Stored `users.role` (legacy + canonical). */
+export type AuthRole =
+  | "admin"
+  | "platform_admin"
+  | "executive"
+  | "manager"
+  | "project_head"
+  | "operations"
+  | "recruiter";
 
 export type AuthUser = {
   id: number;
   email: string;
-  role: AuthRole;
+  role: string;
+  effectiveRole?: string;
+  verticalAccess?: string[] | null;
+  managerUserId?: number | null;
 };
 
 export type AuthContextValue = {
@@ -56,10 +67,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data } = await api.get<{
       id: number;
       email: string;
-      role: AuthRole;
+      role: string;
       project_ids: number[] | null;
+      effective_role?: string;
+      vertical_access?: string[] | null;
+      manager_user_id?: number | null;
     }>("/auth/me");
-    setUser({ id: data.id, email: data.email, role: data.role });
+    setUser({
+      id: data.id,
+      email: data.email,
+      role: data.role,
+      effectiveRole: data.effective_role,
+      verticalAccess: data.vertical_access,
+      managerUserId: data.manager_user_id,
+    });
     setProjectIds(data.project_ids);
   }, [applyToken]);
 
@@ -129,8 +150,28 @@ export function useAuth() {
 }
 
 /** Route prefixes allowed per role (backend enforces data scope). */
-export const ROLE_NAV_PATHS: Record<AuthRole, string[]> = {
+export const ROLE_NAV_PATHS: Record<string, string[]> = {
   admin: [
+    "/",
+    "/portfolio",
+    "/clients",
+    "/client-contracts",
+    "/meetings",
+    "/requisitions",
+    "/finance",
+    "/revenue-trackers",
+    "/billing",
+    "/vendor-licenses",
+    "/sla-performance",
+    "/wfm",
+    "/data-operations",
+    "/ingestion",
+    "/tasks",
+    "/activity",
+    "/agent",
+    "/admin/users",
+  ],
+  platform_admin: [
     "/",
     "/portfolio",
     "/clients",
@@ -169,6 +210,23 @@ export const ROLE_NAV_PATHS: Record<AuthRole, string[]> = {
     "/activity",
     "/agent",
   ],
+  project_head: [
+    "/",
+    "/clients",
+    "/client-contracts",
+    "/meetings",
+    "/requisitions",
+    "/finance",
+    "/revenue-trackers",
+    "/billing",
+    "/vendor-licenses",
+    "/sla-performance",
+    "/wfm",
+    "/ingestion",
+    "/tasks",
+    "/activity",
+    "/agent",
+  ],
   manager: [
     "/",
     "/clients",
@@ -186,10 +244,47 @@ export const ROLE_NAV_PATHS: Record<AuthRole, string[]> = {
     "/activity",
     "/agent",
   ],
+  operations: [
+    "/",
+    "/portfolio",
+    "/clients",
+    "/client-contracts",
+    "/meetings",
+    "/requisitions",
+    "/finance",
+    "/revenue-trackers",
+    "/billing",
+    "/vendor-licenses",
+    "/sla-performance",
+    "/wfm",
+    "/data-operations",
+    "/ingestion",
+    "/tasks",
+    "/activity",
+    "/agent",
+  ],
+  recruiter: ["/", "/requisitions", "/clients", "/tasks", "/activity", "/agent"],
 };
 
-export function navAllowedForRole(pathname: string, role: AuthRole): boolean {
-  const allowed = ROLE_NAV_PATHS[role] ?? [];
+function navRoleKey(role: string): string {
+  const r = (role || "").toLowerCase();
+  if (r === "admin" || r === "platform_admin") return "admin";
+  if (r === "manager" || r === "project_head") return "manager";
+  if (r === "operations") return "operations";
+  if (r === "recruiter") return "recruiter";
+  if (r === "executive") return "executive";
+  return "manager";
+}
+
+/** True for full platform admin (legacy `admin` or canonical `platform_admin`). */
+export function isPlatformAdminRole(role: string | undefined): boolean {
+  const r = (role || "").toLowerCase();
+  return r === "admin" || r === "platform_admin";
+}
+
+export function navAllowedForRole(pathname: string, role: string): boolean {
+  const key = navRoleKey(role);
+  const allowed = ROLE_NAV_PATHS[key] ?? ROLE_NAV_PATHS.manager;
   if (allowed.includes(pathname)) return true;
   if (pathname.startsWith("/clients/") && allowed.includes("/clients")) return true;
   return false;

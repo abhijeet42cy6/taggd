@@ -4,11 +4,12 @@ from __future__ import annotations
 from typing import Type
 
 from fastapi import HTTPException
-from sqlalchemy import false, func
+from sqlalchemy import and_, false, func, or_
 from sqlalchemy.orm import Query, Session
 
-from backend.db.database import Client, Project, Record, User
 from backend.auth.deps import allowed_project_ids
+from backend.auth.profile import ROLE_RECRUITER, effective_role
+from backend.db.database import Candidate, Client, Project, Record, User
 
 
 def apply_project_scope(q: Query, user: User, db: Session, model: Type) -> Query:
@@ -73,3 +74,52 @@ def scoped_clause_record(user: User, db: Session):
     if len(ids) == 0:
         return false()
     return Record.project_id.in_(ids)
+
+
+def apply_recruiter_record_scope(q: Query, user: User, db: Session) -> Query:
+    """Recruiters: only requisitions assigned to them (FK) or legacy string match on email/local-part."""
+    if effective_role(user) != ROLE_RECRUITER:
+        return q
+    u = db.query(User).filter(User.id == user.id).first()
+    if not u:
+        return q.filter(false())
+    email = (u.email or "").strip()
+    local = email.split("@")[0].lower() if "@" in email else email.lower()
+    parts = [Record.assigned_recruiter_user_id == user.id, Record.hiring_manager_user_id == user.id]
+    if email:
+        parts.append(
+            and_(
+                Record.assigned_recruiter_user_id.is_(None),
+                or_(
+                    Record.assigned_recruiter_rpo.ilike(f"%{email}%"),
+                    Record.hiring_manager.ilike(f"%{email}%"),
+                    Record.assigned_recruiter_rpo.ilike(f"%{local}%"),
+                    Record.hiring_manager.ilike(f"%{local}%"),
+                ),
+            )
+        )
+    return q.filter(or_(*parts))
+
+
+def apply_recruiter_candidate_scope(q: Query, user: User, db: Session) -> Query:
+    if effective_role(user) != ROLE_RECRUITER:
+        return q
+    u = db.query(User).filter(User.id == user.id).first()
+    if not u:
+        return q.filter(false())
+    email = (u.email or "").strip()
+    local = email.split("@")[0].lower() if "@" in email else email.lower()
+    parts = [Candidate.assigned_recruiter_user_id == user.id, Candidate.hiring_manager_user_id == user.id]
+    if email:
+        parts.append(
+            and_(
+                Candidate.assigned_recruiter_user_id.is_(None),
+                or_(
+                    Candidate.assigned_recruiter.ilike(f"%{email}%"),
+                    Candidate.hiring_manager.ilike(f"%{email}%"),
+                    Candidate.assigned_recruiter.ilike(f"%{local}%"),
+                    Candidate.hiring_manager.ilike(f"%{local}%"),
+                ),
+            )
+        )
+    return q.filter(or_(*parts))

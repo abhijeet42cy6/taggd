@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
 from backend.auth.deps import get_current_user
+from backend.auth.verticals import require_vertical
 from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
 from backend.core.sla_period import canonical_month_label
@@ -20,7 +21,11 @@ from backend.db.database import (
     get_db,
 )
 
-router = APIRouter(prefix="/sla", tags=["sla"])
+router = APIRouter(
+    prefix="/sla",
+    tags=["sla"],
+    dependencies=[Depends(require_vertical("sla"))],
+)
 
 
 class PerformancePayload(BaseModel):

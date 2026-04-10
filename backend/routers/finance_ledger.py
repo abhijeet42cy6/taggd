@@ -9,11 +9,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.auth.deps import get_current_user
+from backend.auth.verticals import require_vertical
 from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import FinanceCashFlow, FinanceEfficiencyKPI, FinanceMonthlyLedger, User, get_db
 
-router = APIRouter(prefix="/finance", tags=["finance"])
+router = APIRouter(
+    prefix="/finance",
+    tags=["finance"],
+    dependencies=[Depends(require_vertical("finance"))],
+)
 
 
 class FinanceLedgerUpsertBody(BaseModel):

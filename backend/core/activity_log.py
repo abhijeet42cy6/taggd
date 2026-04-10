@@ -8,6 +8,7 @@ from typing import Any, List, Optional
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
+from ..auth.profile import ROLE_PLATFORM_ADMIN, ROLE_RECRUITER, resolve_user_profile
 from ..db.database import ActivityLog, User, UserProjectAssignment
 
 
@@ -42,9 +43,15 @@ def log_activity(
 
 def _scoped_activity_query(db: Session, user: User):
     q = db.query(ActivityLog).order_by(ActivityLog.created_at.desc())
-    role = (user.role or "").strip().lower()
-    if role == "admin":
+    u = db.query(User).filter(User.id == user.id).first()
+    if not u:
+        return q.filter(ActivityLog.user_id == user.id)
+    profile = resolve_user_profile(u, db)
+    srole = (u.role or "").strip().lower()
+    if profile.effective_role == ROLE_PLATFORM_ADMIN or srole == "admin":
         return q
+    if profile.effective_role == ROLE_RECRUITER:
+        return q.filter(ActivityLog.user_id == user.id)
 
     pids = [
         r[0]

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, queries, columnMappingEntryCount, type IngestionEventRow } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { isPlatformAdminRole, useAuth } from "@/lib/auth";
 import { PlatformSection, PageHeader, Tabs } from "@/components/platform/PlatformBlocks";
 import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
 
@@ -460,7 +460,7 @@ function IngestionActivitySection({
   role: string | undefined;
 }) {
   const scopeHint =
-    role === "admin" || role === "executive"
+    isPlatformAdminRole(role) || role === "executive"
       ? "Portfolio-wide: all users’ uploads and ingest runs."
       : "Your runs and teammates’ activity on projects you share (project-scoped).";
   return (

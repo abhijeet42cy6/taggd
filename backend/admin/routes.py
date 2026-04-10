@@ -4,13 +4,30 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from backend.auth.profile import VERTICAL_KEYS
 from backend.db.database import User, UserProjectAssignment, get_db
 from backend.auth.security import hash_password
 from backend.auth.deps import require_roles
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-VALID_ROLES = frozenset({"admin", "executive", "manager"})
+VALID_ROLES = frozenset(
+    {
+        "admin",
+        "platform_admin",
+        "executive",
+        "manager",
+        "project_head",
+        "operations",
+        "recruiter",
+    }
+)
+
+
+def _normalize_role_input(role: str) -> str:
+    r = role.strip().lower()
+    aliases = {"admin": "platform_admin", "manager": "project_head"}
+    return aliases.get(r, r)
 
 
 class UserCreate(BaseModel):
@@ -23,6 +40,8 @@ class UserPatch(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+    manager_user_id: Optional[int] = None
+    vertical_access: Optional[List[str]] = None
 
 
 class ProjectsBody(BaseModel):
@@ -42,6 +61,7 @@ def list_users(
             .filter(UserProjectAssignment.user_id == u.id)
             .all()
         )
+        va = getattr(u, "vertical_access_json", None)
         out.append(
             {
                 "id": u.id,
@@ -49,6 +69,8 @@ def list_users(
                 "role": u.role,
                 "is_active": u.is_active,
                 "project_ids": [r[0] for r in pids],
+                "manager_user_id": getattr(u, "manager_user_id", None),
+                "vertical_access": list(va) if isinstance(va, list) else va,
             }
         )
     return out
@@ -60,9 +82,10 @@ def create_user(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_roles("admin")),
 ):
-    role = body.role.strip().lower()
-    if role not in VALID_ROLES:
+    role_in = body.role.strip().lower()
+    if role_in not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+    role = _normalize_role_input(body.role)
     email = body.email.strip().lower()
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -91,17 +114,39 @@ def patch_user(
     if u.id == admin.id and body.is_active is False:
         raise HTTPException(status_code=400, detail="Cannot disable yourself")
     if body.role is not None:
-        r = body.role.strip().lower()
-        if r not in VALID_ROLES:
+        r_in = body.role.strip().lower()
+        if r_in not in VALID_ROLES:
             raise HTTPException(status_code=400, detail="Invalid role")
-        u.role = r
+        u.role = _normalize_role_input(body.role)
     if body.is_active is not None:
         u.is_active = body.is_active
     if body.password:
         u.password_hash = hash_password(body.password)
+    patch_raw = body.model_dump(exclude_unset=True)
+    if "manager_user_id" in patch_raw:
+        mid = patch_raw["manager_user_id"]
+        if mid is not None:
+            if mid == user_id:
+                raise HTTPException(status_code=400, detail="manager_user_id cannot equal self")
+            if not db.query(User).filter(User.id == mid).first():
+                raise HTTPException(status_code=400, detail="manager_user_id not found")
+        u.manager_user_id = mid
+    if body.vertical_access is not None:
+        keys = [str(x).strip().lower() for x in body.vertical_access if str(x).strip()]
+        unknown = [k for k in keys if k not in VERTICAL_KEYS]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown vertical keys: {unknown}")
+        u.vertical_access_json = keys
     db.commit()
     db.refresh(u)
-    return {"id": u.id, "email": u.email, "role": u.role, "is_active": u.is_active}
+    return {
+        "id": u.id,
+        "email": u.email,
+        "role": u.role,
+        "is_active": u.is_active,
+        "manager_user_id": getattr(u, "manager_user_id", None),
+        "vertical_access": u.vertical_access_json if isinstance(u.vertical_access_json, list) else None,
+    }
 
 
 @router.put("/users/{user_id}/projects")

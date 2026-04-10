@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { queries, type Project, type TaskRow } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { isPlatformAdminRole, useAuth } from "@/lib/auth";
 import { PageHeader, PlatformKpi, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
 import {
@@ -628,7 +628,8 @@ export function Tasks() {
   }
 
   const canDelete = (t: TaskRow) =>
-    !isDemoTask(t) && (role === "admin" || role === "executive" || (uid != null && t.created_by_user_id === uid));
+    !isDemoTask(t) &&
+    (isPlatformAdminRole(role) || role === "executive" || (uid != null && t.created_by_user_id === uid));
 
   const lbl = (t: string) => (
     <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{t}</span>

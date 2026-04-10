@@ -107,6 +107,7 @@ app.include_router(tasks_router)
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (
     apply_project_scope,
+    apply_recruiter_record_scope,
     assert_project_access,
     assert_client_access,
     account_accessible,
@@ -140,6 +141,7 @@ class ProjectMetadataPatch(BaseModel):
     regional_head: Optional[str] = None
     practice_head: Optional[str] = None
     project_head: Optional[str] = None
+    project_head_user_id: Optional[int] = None
     be_spoc: Optional[str] = None
     category: Optional[str] = None
     vertical: Optional[str] = None
@@ -301,6 +303,8 @@ class RecordPatch(BaseModel):
     candidate_name: Optional[str] = None
     position_title: Optional[str] = None
     hiring_manager: Optional[str] = None
+    hiring_manager_user_id: Optional[int] = None
+    assigned_recruiter_user_id: Optional[int] = None
     department: Optional[str] = None
     location: Optional[str] = None
     offered_ctc: Optional[float] = None
@@ -1023,6 +1027,10 @@ def patch_project_metadata(
         c = db.query(Client).filter(Client.id == data["client_id"]).first()
         if not c:
             raise HTTPException(status_code=400, detail="client_id does not exist")
+    if data.get("project_head_user_id") is not None:
+        uid = data["project_head_user_id"]
+        if not db.query(User).filter(User.id == uid, User.is_active.is_(True)).first():
+            raise HTTPException(status_code=400, detail=f"Invalid or inactive user id: {uid}")
     for key, val in data.items():
         if hasattr(project, key):
             setattr(project, key, val)
@@ -1368,6 +1376,7 @@ def get_all_records(
     c = scoped_clause_record(user, db)
     if c is not None:
         q = q.filter(c)
+    q = apply_recruiter_record_scope(q, user, db)
 
     if project_id:
         assert_project_access(user, db, project_id)
@@ -1431,6 +1440,23 @@ def patch_record(
             continue
         val = patch[key]
         setattr(r, key, (val.strip() if isinstance(val, str) else val) or None)
+
+    def _validate_user_fk(uid: Optional[int]) -> None:
+        if uid is None:
+            return
+        if not db.query(User).filter(User.id == uid, User.is_active.is_(True)).first():
+            raise HTTPException(status_code=400, detail=f"Invalid or inactive user id: {uid}")
+
+    if "hiring_manager_user_id" in patch:
+        uid = patch["hiring_manager_user_id"]
+        if uid is not None:
+            _validate_user_fk(uid)
+        r.hiring_manager_user_id = uid
+    if "assigned_recruiter_user_id" in patch:
+        uid = patch["assigned_recruiter_user_id"]
+        if uid is not None:
+            _validate_user_fk(uid)
+        r.assigned_recruiter_user_id = uid
 
     if "offered_ctc" in patch:
         r.offered_ctc = patch["offered_ctc"]
