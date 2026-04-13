@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.auth.profile import VERTICAL_KEYS
+from backend.auth.profile import ROLE_CLIENT_USER, VERTICAL_KEYS, effective_role
 from backend.db.database import User, UserProjectAssignment, get_db
 from backend.auth.security import hash_password
 from backend.auth.deps import require_roles
@@ -20,6 +20,7 @@ VALID_ROLES = frozenset(
         "project_head",
         "operations",
         "recruiter",
+        "client_user",
     }
 )
 
@@ -34,6 +35,7 @@ class UserCreate(BaseModel):
     email: str = Field(..., min_length=3)
     password: str = Field(..., min_length=6)
     role: str
+    vertical_access: Optional[List[str]] = None
 
 
 class UserPatch(BaseModel):
@@ -95,6 +97,19 @@ def create_user(
         role=role,
         is_active=True,
     )
+    if body.vertical_access is not None:
+        keys = [str(x).strip().lower() for x in body.vertical_access if str(x).strip()]
+        unknown = [k for k in keys if k not in VERTICAL_KEYS]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown vertical keys: {unknown}")
+        u.vertical_access_json = keys
+    if role == ROLE_CLIENT_USER:
+        va = getattr(u, "vertical_access_json", None)
+        if not isinstance(va, list) or len(va) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="client_user requires non-empty vertical_access (which dashboards this account may open)",
+            )
     db.add(u)
     db.commit()
     db.refresh(u)
@@ -137,6 +152,13 @@ def patch_user(
         if unknown:
             raise HTTPException(status_code=400, detail=f"Unknown vertical keys: {unknown}")
         u.vertical_access_json = keys
+    if effective_role(u) == ROLE_CLIENT_USER:
+        va = getattr(u, "vertical_access_json", None)
+        if not isinstance(va, list) or len(va) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="client_user requires non-empty vertical_access (assign at least one module)",
+            )
     db.commit()
     db.refresh(u)
     return {
@@ -159,6 +181,11 @@ def set_user_projects(
     u = db.query(User).filter(User.id == user_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
+    if effective_role(u) == ROLE_CLIENT_USER and len(body.project_ids) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="client_user must be assigned to at least one project",
+        )
     db.query(UserProjectAssignment).filter(UserProjectAssignment.user_id == user_id).delete(
         synchronize_session=False
     )

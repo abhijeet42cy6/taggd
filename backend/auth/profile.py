@@ -18,6 +18,7 @@ ROLE_EXECUTIVE = "executive"
 ROLE_OPERATIONS = "operations"
 ROLE_PROJECT_HEAD = "project_head"
 ROLE_RECRUITER = "recruiter"
+ROLE_CLIENT_USER = "client_user"
 
 LEGACY_ROLE_ALIASES: dict[str, str] = {
     "admin": ROLE_PLATFORM_ADMIN,
@@ -31,6 +32,7 @@ CANONICAL_ROLES = frozenset(
         ROLE_OPERATIONS,
         ROLE_PROJECT_HEAD,
         ROLE_RECRUITER,
+        ROLE_CLIENT_USER,
     }
 )
 
@@ -110,6 +112,10 @@ class UserAccessProfile:
     def is_recruiter(self) -> bool:
         return self.effective_role == ROLE_RECRUITER
 
+    @property
+    def is_client_user(self) -> bool:
+        return self.effective_role == ROLE_CLIENT_USER
+
 
 def resolve_user_profile(user: User, db: Session) -> UserAccessProfile:
     stored = stored_role_normalized(user)
@@ -125,7 +131,7 @@ def resolve_user_profile(user: User, db: Session) -> UserAccessProfile:
             return UserAccessProfile(stored, eff, None, _vertical_keys_from_user(user), mgr_id)
         return UserAccessProfile(stored, eff, set(pids), _vertical_keys_from_user(user), mgr_id)
 
-    if eff in (ROLE_PROJECT_HEAD, ROLE_OPERATIONS, ROLE_RECRUITER):
+    if eff in (ROLE_PROJECT_HEAD, ROLE_OPERATIONS, ROLE_RECRUITER, ROLE_CLIENT_USER):
         v = _vertical_keys_from_user(user)
         return UserAccessProfile(stored, eff, set(pids), v, mgr_id)
 
@@ -139,6 +145,7 @@ def profile_to_me_dict(profile: UserAccessProfile) -> dict[str, Any]:
         "effective_role": profile.effective_role,
         "vertical_access": sorted(v) if v is not None else None,
         "manager_user_id": profile.manager_user_id,
+        "is_read_only": profile.is_client_user,
     }
 
 
@@ -169,3 +176,15 @@ def operations_may_access_vertical(profile: UserAccessProfile, vertical_key: str
     if len(keys) == 0:
         return False
     return vertical_key.lower() in {k.lower() for k in keys}
+
+
+def profile_may_access_vertical(profile: UserAccessProfile, vertical_key: str) -> bool:
+    """Used by `require_vertical`: operations and client_user are allow-listed; others pass."""
+    if profile.effective_role == ROLE_OPERATIONS:
+        return operations_may_access_vertical(profile, vertical_key)
+    if profile.effective_role == ROLE_CLIENT_USER:
+        keys = profile.vertical_keys
+        if keys is None or len(keys) == 0:
+            return False
+        return vertical_key.lower() in {k.lower() for k in keys}
+    return True

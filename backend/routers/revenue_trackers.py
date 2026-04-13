@@ -6,6 +6,7 @@ import re
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -14,7 +15,11 @@ from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import RevenueForecastWeekly, RevenueVisibilitySnapshot, User, get_db
 
-router = APIRouter(prefix="/revenue-trackers", tags=["revenue-trackers"])
+router = APIRouter(
+    prefix="/revenue-trackers",
+    tags=["revenue-trackers"],
+    dependencies=[Depends(require_vertical("revenue_forecast"))],
+)
 
 LAKHS_TO_INR = 100_000.0
 

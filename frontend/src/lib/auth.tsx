@@ -11,7 +11,8 @@ export type AuthRole =
   | "manager"
   | "project_head"
   | "operations"
-  | "recruiter";
+  | "recruiter"
+  | "client_user";
 
 export type AuthUser = {
   id: number;
@@ -20,6 +21,12 @@ export type AuthUser = {
   effectiveRole?: string;
   verticalAccess?: string[] | null;
   managerUserId?: number | null;
+  /** From GET /auth/me when `effective_role` is `client_user`. */
+  isReadOnly?: boolean;
+  givenName?: string | null;
+  familyName?: string | null;
+  phone?: string | null;
+  hasAvatar?: boolean;
 };
 
 export type AuthContextValue = {
@@ -72,6 +79,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       effective_role?: string;
       vertical_access?: string[] | null;
       manager_user_id?: number | null;
+      is_read_only?: boolean;
+      given_name?: string | null;
+      family_name?: string | null;
+      phone?: string | null;
+      has_avatar?: boolean;
     }>("/auth/me");
     setUser({
       id: data.id,
@@ -80,6 +92,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       effectiveRole: data.effective_role,
       verticalAccess: data.vertical_access,
       managerUserId: data.manager_user_id,
+      isReadOnly: data.is_read_only,
+      givenName: data.given_name,
+      familyName: data.family_name,
+      phone: data.phone,
+      hasAvatar: data.has_avatar,
     });
     setProjectIds(data.project_ids);
   }, [applyToken]);
@@ -266,6 +283,69 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
   recruiter: ["/", "/requisitions", "/clients", "/tasks", "/activity", "/agent"],
 };
 
+/** Backend `VERTICAL_KEYS` → app routes (client portal allow-list). */
+const VERTICAL_TO_NAV_PATHS: Record<string, string[]> = {
+  finance: ["/finance"],
+  sla: ["/sla-performance"],
+  wfm: ["/wfm"],
+  requisitions: ["/requisitions"],
+  candidates: ["/requisitions"],
+  contracts: ["/client-contracts"],
+  meetings: ["/meetings"],
+  ingestion: ["/ingestion"],
+  revenue_forecast: ["/revenue-trackers"],
+  revenue_billing: ["/billing"],
+  vendor_licenses: ["/vendor-licenses"],
+  tasks: ["/tasks"],
+  portfolio: ["/", "/portfolio"],
+  clients: ["/clients"],
+  data_operations: ["/data-operations"],
+};
+
+export type NavAllowedOpts = {
+  effectiveRole?: string;
+  verticalAccess?: string[] | null;
+};
+
+export function clientPortalNavPaths(verticalAccess: string[] | null | undefined): string[] {
+  const keys = verticalAccess?.filter(Boolean) ?? [];
+  const out = new Set<string>();
+  for (const k of keys) {
+    const paths = VERTICAL_TO_NAV_PATHS[k.toLowerCase()];
+    if (paths) paths.forEach((p) => out.add(p));
+  }
+  return [...out];
+}
+
+/** Prefer executive-style order when choosing a default landing route. */
+export const CLIENT_NAV_PRIORITY = [
+  "/",
+  "/portfolio",
+  "/clients",
+  "/client-contracts",
+  "/meetings",
+  "/requisitions",
+  "/finance",
+  "/revenue-trackers",
+  "/billing",
+  "/vendor-licenses",
+  "/sla-performance",
+  "/wfm",
+  "/data-operations",
+  "/ingestion",
+  "/tasks",
+  "/activity",
+];
+
+export function firstAllowedNavPathForClient(verticalAccess: string[] | null | undefined): string {
+  const paths = clientPortalNavPaths(verticalAccess);
+  if (paths.length === 0) return "/no-access";
+  for (const p of CLIENT_NAV_PRIORITY) {
+    if (paths.includes(p)) return p;
+  }
+  return paths[0];
+}
+
 function navRoleKey(role: string): string {
   const r = (role || "").toLowerCase();
   if (r === "admin" || r === "platform_admin") return "admin";
@@ -273,6 +353,7 @@ function navRoleKey(role: string): string {
   if (r === "operations") return "operations";
   if (r === "recruiter") return "recruiter";
   if (r === "executive") return "executive";
+  if (r === "client_user") return "client_user";
   return "manager";
 }
 
@@ -282,7 +363,42 @@ export function isPlatformAdminRole(role: string | undefined): boolean {
   return r === "admin" || r === "platform_admin";
 }
 
-export function navAllowedForRole(pathname: string, role: string): boolean {
+export function isReadOnlyClient(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  const er = (user.effectiveRole ?? user.role).toLowerCase();
+  return er === "client_user" || user.isReadOnly === true;
+}
+
+/** Preferred display string for header / profile (not necessarily unique). */
+export function displayNameFromUser(user: AuthUser | null): string {
+  if (!user) return "";
+  const g = (user.givenName ?? "").trim();
+  const f = (user.familyName ?? "").trim();
+  if (g || f) return `${g} ${f}`.trim();
+  const local = user.email.split("@")[0] ?? "";
+  return local || user.email;
+}
+
+export function initialsFromUser(user: AuthUser | null): string {
+  const dn = displayNameFromUser(user);
+  const parts = dn.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  if (dn.length >= 2) return dn.slice(0, 2).toUpperCase();
+  if (user?.email && user.email.length >= 2) return user.email.slice(0, 2).toUpperCase();
+  return "?";
+}
+
+export function navAllowedForRole(pathname: string, role: string, opts?: NavAllowedOpts): boolean {
+  if (pathname === "/profile") return true;
+  const er = (opts?.effectiveRole ?? role).toLowerCase();
+  if (er === "client_user") {
+    if (pathname === "/no-access") return true;
+    const paths = clientPortalNavPaths(opts?.verticalAccess);
+    if (paths.length === 0) return pathname === "/no-access";
+    if (paths.includes(pathname)) return true;
+    if (pathname.startsWith("/clients/") && paths.includes("/clients")) return true;
+    return false;
+  }
   const key = navRoleKey(role);
   const allowed = ROLE_NAV_PATHS[key] ?? ROLE_NAV_PATHS.manager;
   if (allowed.includes(pathname)) return true;

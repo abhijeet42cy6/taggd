@@ -17,7 +17,7 @@ Base = declarative_base()
 
 
 class User(Base):
-    """Platform login: legacy admin|executive|manager or canonical platform_admin|executive|operations|project_head|recruiter."""
+    """Platform login: legacy admin|executive|manager or canonical platform_admin|executive|operations|project_head|recruiter|client_user."""
 
     __tablename__ = "users"
 
@@ -30,6 +30,10 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     manager_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     vertical_access_json = Column(JSON, nullable=True)
+    given_name = Column(String(120), nullable=True)
+    family_name = Column(String(120), nullable=True)
+    phone = Column(String(64), nullable=True)
+    avatar_filename = Column(String(255), nullable=True)
 
     project_assignments = relationship(
         "UserProjectAssignment",
@@ -942,6 +946,10 @@ def _ensure_user_rbac_and_attribution_columns():
 
     addcol("users", "manager_user_id", "INTEGER")
     addcol("users", "vertical_access_json", "TEXT")
+    addcol("users", "given_name", "VARCHAR(120)")
+    addcol("users", "family_name", "VARCHAR(120)")
+    addcol("users", "phone", "VARCHAR(64)")
+    addcol("users", "avatar_filename", "VARCHAR(255)")
     addcol("projects", "project_head_user_id", "INTEGER")
     addcol("records", "hiring_manager_user_id", "INTEGER")
     addcol("records", "assigned_recruiter_user_id", "INTEGER")

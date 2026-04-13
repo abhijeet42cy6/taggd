@@ -75,9 +75,14 @@ app.add_middleware(
 )
 
 from .auth.middleware import AuthMiddleware
+from .auth.client_write_guard import ClientWriteGuardMiddleware
+from .auth.client_vertical_read_guard import ClientVerticalReadGuardMiddleware
 from .auth.routes import router as auth_router
 from .admin.routes import router as admin_router
 
+# Stack (last added runs first on request): Auth → CORS → ClientWriteGuard → ClientVerticalReadGuard → routes.
+app.add_middleware(ClientVerticalReadGuardMiddleware)
+app.add_middleware(ClientWriteGuardMiddleware)
 app.add_middleware(AuthMiddleware)
 app.include_router(auth_router)
 app.include_router(admin_router)

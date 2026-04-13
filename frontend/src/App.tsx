@@ -9,7 +9,15 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { PersonaProvider, usePersona } from "@/lib/persona";
-import { AuthProvider, navAllowedForRole, useAuth } from "@/lib/auth";
+import {
+  AuthProvider,
+  displayNameFromUser,
+  firstAllowedNavPathForClient,
+  initialsFromUser,
+  navAllowedForRole,
+  useAuth,
+} from "@/lib/auth";
+import { UserAvatarImg } from "@/components/UserAvatarImg";
 import { ClientsHub } from "./pages/ClientsHub";
 import { ClientDetail } from "./pages/ClientDetail";
 import { ClientContracts } from "./pages/ClientContracts";
@@ -30,8 +38,21 @@ import { SLAPerformance } from "./pages/SLAPerformance";
 import { WorkforceManagement } from "./pages/WorkforceManagement";
 import { Login } from "./pages/Login";
 import { AdminUsers } from "./pages/AdminUsers";
+import { Profile } from "./pages/Profile";
 import taggdLogo from "@/assets/taggd-logo.png";
 import "./styles/platform.css";
+
+function ClientPortalNoAccess() {
+  return (
+    <div style={{ padding: 28, maxWidth: 520 }}>
+      <h2 style={{ fontFamily: "'Syne',sans-serif", fontSize: 18, margin: "0 0 10px" }}>No dashboards enabled</h2>
+      <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)", lineHeight: 1.55 }}>
+        This client portal login has no modules assigned. Ask your platform administrator to enable at least one
+        dashboard in <strong>Users &amp; access</strong> for your account.
+      </p>
+    </div>
+  );
+}
 
 type NavItem = { label: string; path: string };
 type NavGroup = { title: string; items: NavItem[] };
@@ -67,6 +88,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   {
     title: "Platform",
     items: [
+      { label: "My profile", path: "/profile" },
       { label: "Tasks", path: "/tasks" },
       { label: "Data Operations", path: "/data-operations" },
       { label: "Ingestion Center", path: "/ingestion" },
@@ -108,21 +130,29 @@ function AppShell() {
   const { user, logout } = useAuth();
   const { persona } = usePersona();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const role = user?.role;
+  const role = user?.role ?? "";
+  const effectiveRole = user?.effectiveRole ?? role;
+  const verticalAccess = user?.verticalAccess ?? null;
+
+  if (effectiveRole === "client_user") {
+    const allowed = navAllowedForRole(location.pathname, role, { effectiveRole, verticalAccess });
+    if (!allowed) {
+      return <Navigate to={firstAllowedNavPathForClient(verticalAccess)} replace />;
+    }
+  }
+
   const filteredGroups: NavGroup[] = ALL_NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((item) => (role ? navAllowedForRole(item.path, role) : false)),
+    items: g.items.filter((item) =>
+      role ? navAllowedForRole(item.path, role, { effectiveRole, verticalAccess }) : false,
+    ),
   })).filter((g) => g.items.length > 0);
 
   const email = user?.email ?? "";
-  const initials =
-    email.length >= 2
-      ? email
-          .split("@")[0]
-          .slice(0, 2)
-          .toUpperCase()
-      : "?";
+  const displayName = user ? displayNameFromUser(user) : "";
+  const initials = user ? initialsFromUser(user) : "?";
 
   return (
     <div className="platform-app">
@@ -160,23 +190,30 @@ function AppShell() {
               gap: 9,
             }}
           >
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                flexShrink: 0,
-                background: `linear-gradient(135deg, ${persona.accentColor}, var(--accent2))`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 10,
-                fontWeight: 700,
-                color: "#fff",
-              }}
-            >
-              {initials}
-            </div>
+            <UserAvatarImg
+              userId={user?.id}
+              hasAvatar={user?.hasAvatar}
+              size={28}
+              fallback={
+                <div
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    background: `linear-gradient(135deg, ${persona.accentColor}, var(--accent2))`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#fff",
+                  }}
+                >
+                  {initials}
+                </div>
+              }
+            />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
@@ -187,12 +224,38 @@ function AppShell() {
                   whiteSpace: "nowrap",
                 }}
               >
-                {email || "—"}
+                {displayName || email || "—"}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {email}
               </div>
               <div style={{ fontSize: 9, color: "var(--accent)", fontFamily: "'DM Mono',monospace" }}>
-                {user?.role ?? ""}
+                {effectiveRole || user?.role || ""}
               </div>
             </div>
+            <button
+              type="button"
+              title="My profile"
+              onClick={() => navigate("/profile")}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                fontSize: 11,
+                cursor: "pointer",
+                padding: "0 4px",
+              }}
+            >
+              Profile
+            </button>
             <button
               type="button"
               title="Log out"
@@ -225,6 +288,8 @@ function AppShell() {
 
           <section className="platform-content">
             <Routes>
+              <Route path="/no-access" element={<ClientPortalNoAccess />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="/" element={<Dashboard />} />
               <Route path="/portfolio" element={<PortfolioIntelligence />} />
               <Route path="/clients" element={<ClientsHub />} />

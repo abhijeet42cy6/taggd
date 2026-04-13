@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import { queries, type Project, type TaskRow } from "@/lib/api";
-import { isPlatformAdminRole, useAuth } from "@/lib/auth";
+import { isPlatformAdminRole, isReadOnlyClient, useAuth } from "@/lib/auth";
 import { PageHeader, PlatformKpi, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
 import {
@@ -12,6 +13,24 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+
+function getApiErrorMessage(e: unknown): string {
+  if (axios.isAxiosError(e)) {
+    const d = e.response?.data as { detail?: unknown } | undefined;
+    if (typeof d?.detail === "string" && d.detail) return d.detail;
+    if (Array.isArray(d?.detail) && d.detail.length) {
+      return d.detail
+        .map((x: unknown) => {
+          if (x && typeof x === "object" && "msg" in x) return String((x as { msg: string }).msg);
+          return JSON.stringify(x);
+        })
+        .join("; ");
+    }
+    if (e.message) return e.message;
+  }
+  if (e instanceof Error && e.message) return e.message;
+  return "Save failed";
+}
 
 const STATUSES = ["open", "in_progress", "blocked", "done", "cancelled"] as const;
 
@@ -349,6 +368,7 @@ export function Tasks() {
   const { user } = useAuth();
   const uid = user?.id ?? null;
   const role = (user?.role ?? "").toLowerCase();
+  const readOnlyPortal = isReadOnlyClient(user);
 
   const [rows, setRows] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -365,6 +385,7 @@ export function Tasks() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TaskRow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -460,6 +481,7 @@ export function Tasks() {
   }, [displayRows]);
 
   function resetForm() {
+    setSaveError(null);
     setEditing(null);
     setTitle("");
     setDescription("");
@@ -481,6 +503,7 @@ export function Tasks() {
   }
 
   function openEdit(t: TaskRow) {
+    setSaveError(null);
     setEditing(t);
     setTitle(t.title);
     setDescription(t.description ?? "");
@@ -507,7 +530,7 @@ export function Tasks() {
 
   async function save() {
     if (!title.trim()) {
-      alert("Title is required.");
+      setSaveError("Title is required.");
       return;
     }
     const dueIso = toIsoFromLocal(dueLocal);
@@ -526,6 +549,7 @@ export function Tasks() {
       assignee_user_ids: Array.from(assigneeIds),
     };
     setSaving(true);
+    setSaveError(null);
     try {
       if (editing && !isDemoTask(editing)) {
         const u = await queries.patchTask(editing.id, body);
@@ -537,8 +561,9 @@ export function Tasks() {
       setDialogOpen(false);
       resetForm();
     } catch (e: unknown) {
-      const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Save failed";
-      alert(msg);
+      const msg = getApiErrorMessage(e);
+      setSaveError(msg);
+      console.error("Task save failed", e);
     } finally {
       setSaving(false);
     }
@@ -560,6 +585,7 @@ export function Tasks() {
   }
 
   function handleTaskDragStart(e: React.DragEvent, t: TaskRow) {
+    if (readOnlyPortal) return;
     e.dataTransfer.setData("text/task-id", String(t.id));
     e.dataTransfer.setData("text/from-status", t.status);
     e.dataTransfer.effectAllowed = "move";
@@ -573,6 +599,7 @@ export function Tasks() {
 
   function handleColumnDrop(e: React.DragEvent, columnStatus: string) {
     e.preventDefault();
+    if (readOnlyPortal) return;
     setDragOverColumn(null);
     const idStr = e.dataTransfer.getData("text/task-id");
     const from = e.dataTransfer.getData("text/from-status");
@@ -587,6 +614,7 @@ export function Tasks() {
   }
 
   async function confirmStatusMove() {
+    if (readOnlyPortal) return;
     if (!pendingMove) return;
     const { task, nextStatus } = pendingMove;
     if (task.status === nextStatus) {
@@ -628,6 +656,7 @@ export function Tasks() {
   }
 
   const canDelete = (t: TaskRow) =>
+    !readOnlyPortal &&
     !isDemoTask(t) &&
     (isPlatformAdminRole(role) || role === "executive" || (uid != null && t.created_by_user_id === uid));
 
@@ -642,15 +671,22 @@ export function Tasks() {
           title="Tasks"
           subtitle="Cross-cutting work: deadlines, assignees, links to ingestion, requisitions, contracts, meetings, billing, and more."
         />
-        <button
-          type="button"
-          className="platform-dialog__btn platform-dialog__btn--primary"
-          style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
-          onClick={() => openCreate()}
-        >
-          + New task
-        </button>
+        {!readOnlyPortal ? (
+          <button
+            type="button"
+            className="platform-dialog__btn platform-dialog__btn--primary"
+            style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
+            onClick={() => openCreate()}
+          >
+            + New task
+          </button>
+        ) : null}
       </div>
+      {readOnlyPortal ? (
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -6 }}>
+          View only — this client portal account cannot create, edit, or move tasks.
+        </div>
+      ) : null}
 
       {loading ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
@@ -820,7 +856,7 @@ export function Tasks() {
                     return (
                       <div
                         key={t.id}
-                        draggable={!loading}
+                        draggable={!loading && !readOnlyPortal}
                         onDragStart={(e) => handleTaskDragStart(e, t)}
                         onDragEnd={() => setDragOverColumn(null)}
                         style={{
@@ -887,7 +923,9 @@ export function Tasks() {
                             className="platform-dialog__btn"
                             style={{ fontSize: 10, padding: "4px 10px" }}
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => openEdit(t)}
+                            onClick={() => {
+                              if (!readOnlyPortal) openEdit(t);
+                            }}
                           >
                             Update task
                           </button>
@@ -917,6 +955,7 @@ export function Tasks() {
         open={dialogOpen}
         onOpenChange={(o) => {
           if (!o) resetForm();
+          else setSaveError(null);
           setDialogOpen(o);
         }}
       >
@@ -935,6 +974,13 @@ export function Tasks() {
               ) : null}
             </DialogDescription>
           </DialogHeader>
+          <form
+            className="flex min-h-0 min-w-0 flex-1 flex-col"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
           <div className="platform-dialog__body space-y-3" style={{ display: "grid", gap: 10 }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {lbl("Title *")}
@@ -1023,14 +1069,16 @@ export function Tasks() {
               </div>
             </div>
           </div>
+          {saveError ? <div className="platform-dialog__alert mx-5 mb-0 mt-1 shrink-0">{saveError}</div> : null}
           <DialogFooter className="platform-dialog__footer">
             <button type="button" className="platform-dialog__btn" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
             </button>
-            <button type="button" className="platform-dialog__btn platform-dialog__btn--primary" onClick={() => void save()} disabled={saving}>
+            <button type="submit" className="platform-dialog__btn platform-dialog__btn--primary" disabled={saving}>
               {saving ? "Saving…" : editing ? "Save changes" : "Create"}
             </button>
           </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

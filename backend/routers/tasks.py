@@ -5,6 +5,7 @@ import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
@@ -15,7 +16,11 @@ from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import Task, TaskAssignee, User, UserProjectAssignment, get_db
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(
+    prefix="/tasks",
+    tags=["tasks"],
+    dependencies=[Depends(require_vertical("tasks"))],
+)
 
 VALID_STATUSES = frozenset({"open", "in_progress", "blocked", "done", "cancelled"})
 

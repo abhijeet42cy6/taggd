@@ -5,6 +5,7 @@ import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -14,7 +15,11 @@ from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import Meeting, MeetingActionItem, User, get_db
 
-router = APIRouter(prefix="/meetings", tags=["meetings"])
+router = APIRouter(
+    prefix="/meetings",
+    tags=["meetings"],
+    dependencies=[Depends(require_vertical("meetings"))],
+)
 
 
 def _apply_meeting_scope(q, user: User, db: Session):

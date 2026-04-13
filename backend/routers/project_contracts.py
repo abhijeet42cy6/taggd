@@ -5,6 +5,7 @@ import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -13,7 +14,11 @@ from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import Project, ProjectContract, User, get_db
 
-router = APIRouter(prefix="/contracts", tags=["contracts"])
+router = APIRouter(
+    prefix="/contracts",
+    tags=["contracts"],
+    dependencies=[Depends(require_vertical("contracts"))],
+)
 
 
 def _contract_to_dict(c: ProjectContract) -> dict[str, Any]:

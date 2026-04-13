@@ -5,6 +5,7 @@ import datetime
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -13,7 +14,11 @@ from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import User, WFMHRBenchmark, get_db
 
-router = APIRouter(prefix="/wfm", tags=["wfm"])
+router = APIRouter(
+    prefix="/wfm",
+    tags=["wfm"],
+    dependencies=[Depends(require_vertical("wfm"))],
+)
 
 
 class WfmBenchmarkUpsertBody(BaseModel):

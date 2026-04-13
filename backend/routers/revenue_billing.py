@@ -7,6 +7,7 @@ import re
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
@@ -15,7 +16,11 @@ from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import Project, TaggdRevenueBilling, User, get_db
 
-router = APIRouter(prefix="/revenue-billing", tags=["revenue-billing"])
+router = APIRouter(
+    prefix="/revenue-billing",
+    tags=["revenue-billing"],
+    dependencies=[Depends(require_vertical("revenue_billing"))],
+)
 
 
 def _parse_dt_optional(val: Optional[str]) -> Optional[datetime.datetime]:

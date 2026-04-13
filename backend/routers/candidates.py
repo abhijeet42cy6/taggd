@@ -6,6 +6,7 @@ import math
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -14,7 +15,11 @@ from backend.auth.scope import apply_project_scope, apply_recruiter_candidate_sc
 from backend.core.activity_log import log_activity
 from backend.db.database import Candidate, Record, User, get_db
 
-router = APIRouter(prefix="/candidates", tags=["candidates"])
+router = APIRouter(
+    prefix="/candidates",
+    tags=["candidates"],
+    dependencies=[Depends(require_vertical("candidates"))],
+)
 
 _RPO_DATE_FIELDS = frozenset(
     {

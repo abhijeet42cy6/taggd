@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { adminApi, type AdminUserRow, type Project } from "@/lib/api";
 
 /** Matches backend `auth/profile.py` VERTICAL_KEYS — order is UI-only. */
-const VERTICAL_MODULES: { key: string; label: string }[] = [
+export const VERTICAL_MODULES: { key: string; label: string }[] = [
   { key: "finance", label: "Finance" },
   { key: "sla", label: "SLA" },
   { key: "wfm", label: "WFM" },
@@ -23,12 +23,18 @@ const VERTICAL_MODULES: { key: string; label: string }[] = [
 
 const ALL_VERTICAL_KEYS = VERTICAL_MODULES.map((m) => m.key);
 
+const VERTICAL_MODULES_CLIENT_CREATE = VERTICAL_MODULES.filter((m) => m.key !== "admin_users");
+
 const ROLE_OPTIONS_CREATE: { value: string; label: string }[] = [
   { value: "platform_admin", label: "Platform admin — full platform" },
   { value: "executive", label: "Executive — org-wide data" },
   { value: "operations", label: "Operations — assigned projects + module list" },
   { value: "project_head", label: "Project head — full stack on assigned projects" },
   { value: "recruiter", label: "Recruiter — assigned requisitions / candidates" },
+  {
+    value: "client_user",
+    label: "Client portal — read-only dashboards (assigned projects + module list)",
+  },
 ];
 
 function effectiveRoleLabel(stored: string): string {
@@ -41,6 +47,7 @@ function effectiveRoleLabel(stored: string): string {
     executive: "Executive",
     operations: "Operations",
     recruiter: "Recruiter",
+    client_user: "Client portal",
   };
   return map[r] || stored;
 }
@@ -61,6 +68,7 @@ function roleSelectOptions(currentStoredRole: string): { value: string; label: s
     "project_head",
     "manager",
     "recruiter",
+    "client_user",
   ];
   const seen = new Set<string>();
   const out: { value: string; label: string }[] = [];
@@ -96,6 +104,7 @@ export function AdminUsers() {
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("project_head");
+  const [newClientModules, setNewClientModules] = useState<string[]>(["portfolio", "sla"]);
 
   const [editingProjectsFor, setEditingProjectsFor] = useState<number | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
@@ -127,7 +136,10 @@ export function AdminUsers() {
     setDraftRole(u.role);
     setDraftManagerId(u.manager_user_id != null ? String(u.manager_user_id) : "");
     const va = u.vertical_access;
-    if (va == null || va.length === 0) {
+    const stored = (u.role || "").toLowerCase();
+    if (stored === "client_user" && (va == null || va.length === 0)) {
+      setDraftVerticals(new Set(["portfolio", "sla"]));
+    } else if (va == null || va.length === 0) {
       setDraftVerticals(new Set(ALL_VERTICAL_KEYS));
     } else {
       setDraftVerticals(new Set(va));
@@ -157,9 +169,22 @@ export function AdminUsers() {
     e.preventDefault();
     setBusy(true);
     try {
-      await adminApi.createUser({ email: newEmail.trim(), password: newPassword, role: newRole });
+      if (newRole === "client_user" && newClientModules.length === 0) {
+        setLoadError("Client portal users need at least one dashboard module.");
+        return;
+      }
+      const body: { email: string; password: string; role: string; vertical_access?: string[] } = {
+        email: newEmail.trim(),
+        password: newPassword,
+        role: newRole,
+      };
+      if (newRole === "client_user") {
+        body.vertical_access = [...newClientModules].sort();
+      }
+      await adminApi.createUser(body);
       setNewEmail("");
       setNewPassword("");
+      setNewClientModules(["portfolio", "sla"]);
       await refresh();
     } finally {
       setBusy(false);
@@ -197,8 +222,11 @@ export function AdminUsers() {
     }
     setBusy(true);
     try {
-      const vertical_access =
+      let vertical_access =
         draftVerticals.size === ALL_VERTICAL_KEYS.length ? [...ALL_VERTICAL_KEYS].sort() : [...draftVerticals].sort();
+      if ((draftRole || "").toLowerCase() === "client_user") {
+        vertical_access = vertical_access.filter((k) => k !== "admin_users");
+      }
       await adminApi.patchUser(accessModalUser.id, {
         role: draftRole,
         manager_user_id,
@@ -234,10 +262,11 @@ export function AdminUsers() {
         </h1>
         <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", maxWidth: 720, lineHeight: 1.5 }}>
           Create accounts, assign{" "}
-          <strong>roles</strong> (platform admin, executive, operations, project head, recruiter),{" "}
+          <strong>roles</strong> (including <strong>client portal</strong> read-only logins),{" "}
           <strong>project assignments</strong>, optional <strong>reports-to</strong> hierarchy, and for{" "}
-          <strong>operations</strong> users a <strong>vertical allow-list</strong> (e.g. finance + SLA only). The API
-          enforces scopes; finance and SLA routes additionally require the matching vertical for operations roles.
+          <strong>operations</strong> and <strong>client portal</strong> users a <strong>vertical allow-list</strong>{" "}
+          (which dashboards they may open). Client portal accounts cannot modify data. Finance, SLA, and other module
+          APIs enforce the same vertical keys.
         </p>
       </div>
 
@@ -294,6 +323,33 @@ export function AdminUsers() {
             ))}
           </select>
         </div>
+        {newRole === "client_user" ? (
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6 }}>
+              Client portal — dashboards this login may open (assign projects after create)
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {VERTICAL_MODULES_CLIENT_CREATE.map((m) => (
+                <label
+                  key={m.key}
+                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, cursor: "pointer" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={newClientModules.includes(m.key)}
+                    onChange={(e) => {
+                      setNewClientModules((prev) => {
+                        if (e.target.checked) return [...prev, m.key];
+                        return prev.filter((k) => k !== m.key);
+                      });
+                    }}
+                  />
+                  {m.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div>
           <button type="submit" className="platform-chip active" disabled={busy} style={{ cursor: "pointer" }}>
             Add user

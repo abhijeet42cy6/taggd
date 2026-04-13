@@ -5,6 +5,7 @@ import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,7 +13,11 @@ from backend.auth.deps import get_current_user
 from backend.core.activity_log import log_activity
 from backend.db.database import ResumeSupplierLicense, User, get_db
 
-router = APIRouter(prefix="/vendor-licenses", tags=["vendor-licenses"])
+router = APIRouter(
+    prefix="/vendor-licenses",
+    tags=["vendor-licenses"],
+    dependencies=[Depends(require_vertical("vendor_licenses"))],
+)
 
 
 def _parse_date(s: Optional[str]) -> Optional[datetime.date]:

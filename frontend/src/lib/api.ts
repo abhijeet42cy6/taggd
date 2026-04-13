@@ -491,7 +491,7 @@ export type AdminUserRow = {
 
 export const adminApi = {
   listUsers: () => api.get<AdminUserRow[]>("/admin/users").then((r) => r.data),
-  createUser: (body: { email: string; password: string; role: string }) =>
+  createUser: (body: { email: string; password: string; role: string; vertical_access?: string[] }) =>
     api.post("/admin/users", body).then((r) => r.data),
   patchUser: (
     id: number,
@@ -506,6 +506,23 @@ export const adminApi = {
   setUserProjects: (userId: number, project_ids: number[]) =>
     api.put(`/admin/users/${userId}/projects`, { project_ids }).then((r) => r.data),
   listProjectsForAdmin: () => api.get<Project[]>("/projects").then((r) => r.data),
+};
+
+export const authProfileApi = {
+  patchProfile: (body: { given_name?: string | null; family_name?: string | null; phone?: string | null }) =>
+    api.patch<{
+      status: string;
+      given_name: string | null;
+      family_name: string | null;
+      phone: string | null;
+      has_avatar: boolean;
+    }>("/auth/me/profile", body),
+  postAvatar: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post<{ status: string; has_avatar: boolean }>("/auth/me/avatar", fd);
+  },
+  deleteAvatar: () => api.delete<{ status: string; has_avatar: boolean }>("/auth/me/avatar"),
 };
 
 /** Matches backend `RecordRpoPatch` — use on create/patch nested `rpo` and as optional fields on row responses. */
