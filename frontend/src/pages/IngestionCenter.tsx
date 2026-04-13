@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, queries, columnMappingEntryCount, type IngestionEventRow } from "@/lib/api";
-import { isPlatformAdminRole, useAuth } from "@/lib/auth";
+import { isPlatformAdminRole, isRecruiterUser, useAuth } from "@/lib/auth";
 import { PlatformSection, PageHeader, Tabs } from "@/components/platform/PlatformBlocks";
 import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
 
@@ -541,6 +541,7 @@ function IngestionActivitySection({
 
 export function IngestionCenter() {
   const { user } = useAuth();
+  const recruiterView = isRecruiterUser(user);
   const [tab, setTab] = useState<IngestionTab>("Express");
 
   const [ingestionEvents, setIngestionEvents] = useState<IngestionEventRow[]>([]);
@@ -746,7 +747,14 @@ export function IngestionCenter() {
   // ── RENDER ────────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader title="Ingestion Center" subtitle="Data onboarding · AI-assisted schema mapping · Validation gates · Multi-path ingestion" />
+      <PageHeader
+        title="Ingestion Center"
+        subtitle={
+          recruiterView
+            ? "Run uploads for your assigned projects. The activity feed shows ingestion you triggered; project scope still applies to matching and commits."
+            : "Data onboarding · AI-assisted schema mapping · Validation gates · Multi-path ingestion"
+        }
+      />
 
       <div
         style={{

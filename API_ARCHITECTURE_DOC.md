@@ -4,107 +4,104 @@
 **Subject**: Codebase Architecture and API Endpoint Analysis
 
 ## 1. High-Level Architecture
+
 The system follows a standard modern web stack:
-*   **Frontend**: React (Vite) + TypeScript + TailwindCSS, providing a highly visual, data-dense interface.
-    *   **Environment Context**: Runs locally on `http://localhost:5173` (or network host IP). All API calls from the frontend are statically routed to the backend via an `API_BASE` configuration (e.g., `http://localhost:8000/api` or `http://localhost:8000`).
-*   **Backend**: FastAPI (Python), serving as the core ingestion engine, API gateway, and agent coordinator.
-    *   **Environment Context**: Runs locally on `http://localhost:8000` (e.g., via `uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload`). This exposes the API endpoints to the frontend interface.
-*   **Database**: SQLite (`revenue_generator.db`) managed via SQLAlchemy ORM.
-    *   **Connection Config**: The database connection string defaults to `sqlite:///./revenue_generator.db` in `backend/db/database.py`. It operates locally without requiring an external DB host, keeping the system lightweight. SQLAlchemy's `SessionLocal` manages thread-safe connections.
-*   **AI Layer**: Deeply integrated Gemini AI agents (`LogicGeneratorAgent`, `ColumnMapperAgent`) that handle dynamic schema mapping and complex business logic generation.
+
+- **Frontend**: React (Vite) + TypeScript + TailwindCSS, providing a highly visual, data-dense interface.
+  - **Environment Context**: Runs locally on `http://localhost:5173` (or network host IP). All API calls from the frontend are statically routed to the backend via an `API_BASE` configuration (e.g., `http://localhost:8000/api` or `http://localhost:8000`).
+- **Backend**: FastAPI (Python), serving as the core ingestion engine, API gateway, and agent coordinator.
+  - **Environment Context**: Runs locally on `http://localhost:8000` (e.g., via `uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload`). This exposes the API endpoints to the frontend interface.
+- **Database**: SQLite (`revenue_generator.db`) managed via SQLAlchemy ORM.
+  - **Connection Config**: The database connection string defaults to `sqlite:///./revenue_generator.db` in `backend/db/database.py`. It operates locally without requiring an external DB host, keeping the system lightweight. SQLAlchemy's `SessionLocal` manages thread-safe connections.
+- **AI Layer**: Deeply integrated Gemini AI agents (`LogicGeneratorAgent`, `ColumnMapperAgent`) that handle dynamic schema mapping and complex business logic generation.
 
 ## 2. Codebase Structure (`/backend`)
-*   `main.py`: The entry point and API router. Contains all the endpoints.
-*   `db/database.py`: Defines the SQLAlchemy models (`Project`, `Record`, `ProjectBudget`, `ProjectForecast`) and database connection logic.
-*   `core/processor.py`: Contains the `ExcelProcessor` class, which handles the heavy lifting of parsing Excel files, communicating with the AI agents, and normalizing data into standard structures (Express Path vs Pro Path).
-*   `agents/`: 
-    *   `column_mapper.py`: Analyzes Excel headers and maps them to universal keys (e.g., handling synonymous headers).
-    *   `logic_generator.py`: Generates executable Python code to calculate revenue, fees, and determine status based on the specific project's rules.
+
+- `main.py`: The entry point and API router. Contains all the endpoints.
+- `db/database.py`: Defines the SQLAlchemy models (`Project`, `Record`, `ProjectBudget`, `ProjectForecast`) and database connection logic.
+- `core/processor.py`: Contains the `ExcelProcessor` class, which handles the heavy lifting of parsing Excel files, communicating with the AI agents, and normalizing data into standard structures (Express Path vs Pro Path).
+- `agents/`: 
+  - `column_mapper.py`: Analyzes Excel headers and maps them to universal keys (e.g., handling synonymous headers).
+  - `logic_generator.py`: Generates executable Python code to calculate revenue, fees, and determine status based on the specific project's rules.
 
 ## 3. API Endpoints Analysis (`main.py`)
 
 The API surface is cleanly divided into four primary domains:
 
 ### Domain A: System Health
-*   **`GET /`**
-    *   **Purpose**: A basic health check endpoint to verify the API is running.
+
+- `**GET /`**
+  - **Purpose**: A basic health check endpoint to verify the API is running.
 
 ### Domain B: Data Ingestion (Express & Pro Paths)
+
 The core engine for bringing data into the system.
 
-*   **`POST /upload`**
-    *   **Purpose**: Handles the standard "Express Path" ingestion.
-    *   **Flow**: Accepts a single Excel file -> Parses it -> Uses AI to map columns and generate revenue logic -> Stores `Project` and associated `Records` -> Returns success.
-    *   **Frontend Usage**: Used by the main 'Data Import' drag-and-drop zone.
-
-*   **`POST /upload/pro/inspect`**
-    *   **Purpose**: Phase 1 of the "Pro Path" (Async multi-sheet processing).
-    *   **Flow**: Accepts a complex Excel workbook -> Scans all sheets to build a structural schema -> Takes semantic samples -> Analyzes the data using AI -> Returns a proposed mapping and logic blueprint *before* committing to the database.
-
-*   **`POST /upload/pro/confirm`**
-    *   **Purpose**: Phase 2 of the "Pro Path".
-    *   **Flow**: Confirms the logic generated by `/inspect` -> Executes the generated code across all rows -> Ingests the normalized data into the database.
+- `**POST /upload`**
+  - **Purpose**: Handles the standard "Express Path" ingestion.
+  - **Flow**: Accepts a single Excel file -> Parses it -> Uses AI to map columns and generate revenue logic -> Stores `Project` and associated `Records` -> Returns success.
+  - **Frontend Usage**: Used by the main 'Data Import' drag-and-drop zone.
+- `**POST /upload/pro/inspect`**
+  - **Purpose**: Phase 1 of the "Pro Path" (Async multi-sheet processing).
+  - **Flow**: Accepts a complex Excel workbook -> Scans all sheets to build a structural schema -> Takes semantic samples -> Analyzes the data using AI -> Returns a proposed mapping and logic blueprint *before* committing to the database.
+- `**POST /upload/pro/confirm`**
+  - **Purpose**: Phase 2 of the "Pro Path".
+  - **Flow**: Confirms the logic generated by `/inspect` -> Executes the generated code across all rows -> Ingests the normalized data into the database.
 
 ### Domain C: Project & Record Vault (Read/Delete)
+
 Endpoints for retrieving and managing ingested flat files.
 
-*   **`GET /projects`**
-    *   **Purpose**: Retrieves a list of all active projects (vaults) and metadata (file name, sheet name, creation date).
-    *   **Frontend Usage**: Populates the sidebar and the main Project Vault list.
-
-*   **`GET /projects/{project_id}`**
-    *   **Purpose**: Retrieves detailed metadata and generated AI logic for a specific project.
-
-*   **`GET /projects/{project_id}/records`**
-    *   **Purpose**: Retrieves all dynamically parsed candidate records belonging to a specific project.
-    *   **Frontend Usage**: Populates the detailed data table when a user clicks on a specific project vault.
-
-*   **`DELETE /projects/{project_id}`**
-    *   **Purpose**: Deletes a project and recursively deletes all associated `records`.
+- `**GET /projects`**
+  - **Purpose**: Retrieves a list of all active projects (vaults) and metadata (file name, sheet name, creation date).
+  - **Frontend Usage**: Populates the sidebar and the main Project Vault list.
+- `**GET /projects/{project_id}`**
+  - **Purpose**: Retrieves detailed metadata and generated AI logic for a specific project.
+- `**GET /projects/{project_id}/records`**
+  - **Purpose**: Retrieves all dynamically parsed candidate records belonging to a specific project.
+  - **Frontend Usage**: Populates the detailed data table when a user clicks on a specific project vault.
+- `**DELETE /projects/{project_id}`**
+  - **Purpose**: Deletes a project and recursively deletes all associated `records`.
 
 ### Domain D: Global Command Center & Analytics
+
 Aggregates data across all vaults for dashboard visualizations.
 
-*   **`GET /stats/global`**
-    *   **Purpose**: Provides simple aggregated totals (total revenue, opening fees, joinees).
-    
-*   **`GET /stats/global/monitor`**
-    *   **Purpose**: The central API for the Command Center. 
-    *   **Flow**: Aggregates data from *all* records. Calculates dynamic req statuses ("JOINED" vs "Yet to Join" based on today's date) and constructs ageing buckets (0-30 days, etc.). returns `status_breakdown`, `req_status_breakdown`, and `project_stats`.
-    *   **Frontend Usage**: Powers the primary Dashboard charts and KPIs.
-
-*   **`GET /stats/drilldown`**
-    *   **Purpose**: Allows grouping the master dataset by specific fields (e.g., Hiring Manager, Location).
+- `**GET /stats/global`**
+  - **Purpose**: Provides simple aggregated totals (total revenue, opening fees, joinees).
+- `**GET /stats/global/monitor`**
+  - **Purpose**: The central API for the Command Center. 
+  - **Flow**: Aggregates data from *all* records. Calculates dynamic req statuses ("JOINED" vs "Yet to Join" based on today's date) and constructs ageing buckets (0-30 days, etc.). returns `status_breakdown`, `req_status_breakdown`, and `project_stats`.
+  - **Frontend Usage**: Powers the primary Dashboard charts and KPIs.
+- `**GET /stats/drilldown`**
+  - **Purpose**: Allows grouping the master dataset by specific fields (e.g., Hiring Manager, Location).
 
 ### Domain E: Planning, Budgeting & Forecasting
+
 The newest suite of APIs connecting static financial plans to live recruitment data.
 
-*   **`POST /api/upload/budget-forecast`**
-    *   **Purpose**: Ingests Book19-style financial plans. Stores static Q1-Q4 targets and month-by-month MMF/Joiner projections.
-
-*   **`GET /api/budget-forecast/data`**
-    *   **Purpose**: Retrieves the master view of budgets and forecasts.
-    *   **Flow**: Reads the static budget tables and joins them with live realization data (`calculate_realized_revenue`). This endpoint calculates the `total_actual` vs `total_budget` variance based on linked nodes.
-    *   **Frontend Usage**: Populates the Planning Repository's matrices and Delta KPI.
-
-*   **`GET /api/budget-forecast/waterfall`**
-    *   **Purpose**: Calculates velocity metrics for the MoM Bridge.
-    *   **Flow**: Aggregates Current Month Forecast (Opening) -> Current Month Record Additions -> Current Month Closures -> Current Month Leakage (Cancellations/Holds). 
-    *   **Frontend Usage**: Powers the dynamic Waterfall bridge chart.
-
-*   **`POST /api/budget-forecast/recalculate`**
-    *   **Purpose**: The "Sync" trigger. Runs a heuristic string match between the raw client names in the Budget file and the filenames of actively ingested Projects (e.g., matching "Honeywell" to "Honeywell Trackers.xlsx"). Links them by setting `project_id`.
-
-*   **`PUT /api/budget/{project_id}` & `PUT /api/forecast/{project_id}`**
-    *   **Purpose**: Allows manual overrides of the fiscal targets from the UI.
-
-*   **`GET /api/budget-forecast/comparison/{project_id}`**
-    *   **Purpose**: Provides a detailed breakdown comparing Forecast vs Actuals for a *single* project.
+- `**POST /api/upload/budget-forecast`**
+  - **Purpose**: Ingests Book19-style financial plans. Stores static Q1-Q4 targets and month-by-month MMF/Joiner projections.
+- `**GET /api/budget-forecast/data`**
+  - **Purpose**: Retrieves the master view of budgets and forecasts.
+  - **Flow**: Reads the static budget tables and joins them with live realization data (`calculate_realized_revenue`). This endpoint calculates the `total_actual` vs `total_budget` variance based on linked nodes.
+  - **Frontend Usage**: Populates the Planning Repository's matrices and Delta KPI.
+- `**GET /api/budget-forecast/waterfall`**
+  - **Purpose**: Calculates velocity metrics for the MoM Bridge.
+  - **Flow**: Aggregates Current Month Forecast (Opening) -> Current Month Record Additions -> Current Month Closures -> Current Month Leakage (Cancellations/Holds). 
+  - **Frontend Usage**: Powers the dynamic Waterfall bridge chart.
+- `**POST /api/budget-forecast/recalculate`**
+  - **Purpose**: The "Sync" trigger. Runs a heuristic string match between the raw client names in the Budget file and the filenames of actively ingested Projects (e.g., matching "Honeywell" to "Honeywell Trackers.xlsx"). Links them by setting `project_id`.
+- `**PUT /api/budget/{project_id}` & `PUT /api/forecast/{project_id}`**
+  - **Purpose**: Allows manual overrides of the fiscal targets from the UI.
+- `**GET /api/budget-forecast/comparison/{project_id}`**
+  - **Purpose**: Provides a detailed breakdown comparing Forecast vs Actuals for a *single* project.
 
 ---
 
 ## 4. Frontend Integration Flow Summary
-1.  **Ingestion**: User drops a file -> React calls `POST /upload` (Express) or initiates the two-step `POST /upload/pro/...` sequence.
-2.  **Display**: React routes to the Dashboard -> Fetches `GET /stats/global/monitor` to render top-level KPIs based on the newly ingested data.
-3.  **Drill-down**: User navigates to Project Vault -> React calls `GET /projects/{id}/records` to display the raw data table normalized by the AI.
-4.  **Reconciliation**: User uploads a Budget -> React calls `POST /api/upload/budget-forecast`, then triggers `POST /api/budget-forecast/recalculate` to actively link the new financial plan to the existing live project vaults.
+
+1. **Ingestion**: User drops a file -> React calls `POST /upload` (Express) or initiates the two-step `POST /upload/pro/...` sequence.
+2. **Display**: React routes to the Dashboard -> Fetches `GET /stats/global/monitor` to render top-level KPIs based on the newly ingested data.
+3. **Drill-down**: User navigates to Project Vault -> React calls `GET /projects/{id}/records` to display the raw data table normalized by the AI.
+4. **Reconciliation**: User uploads a Budget -> React calls `POST /api/upload/budget-forecast`, then triggers `POST /api/budget-forecast/recalculate` to actively link the new financial plan to the existing live project vaults.

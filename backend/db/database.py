@@ -176,6 +176,55 @@ class Project(Base, AuditMixin):
         back_populates="project",
         cascade="all, delete-orphan",
     )
+    transition_record = relationship(
+        "ProjectTransition",
+        back_populates="project",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class ProjectTransition(Base):
+    """Client onboarding / transition tracking: milestones, attendees, docs, delay metrics (one row per project)."""
+
+    __tablename__ = "project_transitions"
+    __table_args__ = (UniqueConstraint("project_id", name="uq_project_transitions_project_id"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(32), nullable=True, index=True)
+
+    project_signed_date = Column(Date, nullable=True)
+    kickoff_date = Column(Date, nullable=True)
+    as_is_study_date = Column(Date, nullable=True)
+    to_be_presentation_date = Column(Date, nullable=True)
+    soft_launch_date = Column(Date, nullable=True)
+    go_live_date = Column(Date, nullable=True)
+
+    transition_done_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    attendees_internal = Column(Text, nullable=True)
+    attendees_external = Column(Text, nullable=True)
+    external_attendees_names = Column(Text, nullable=True)
+    external_attendees_contact = Column(Text, nullable=True)
+    external_attendees_email = Column(Text, nullable=True)
+
+    rpo_solution_deck_url = Column(Text, nullable=True)
+    transition_document_url = Column(Text, nullable=True)
+
+    dead_days = Column(Integer, nullable=True)
+    ageing_days = Column(Integer, nullable=True)
+    reason_for_delay = Column(Text, nullable=True)
+
+    linked_meeting_ids_json = Column(JSON, nullable=True)
+
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    system_created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    system_updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    project = relationship("Project", back_populates="transition_record")
+    transition_done_by = relationship("User", foreign_keys=[transition_done_by_user_id])
 
 
 class ProjectContract(Base, AuditMixin):
@@ -524,8 +573,65 @@ class Candidate(Base, AuditMixin):
     taggd_pm = Column(String, nullable=True)
     offer_onboarding_extras = Column(JSON, nullable=True)
 
+    # Profile & provenance (CV, structured experience, creator — project/record FKs above)
+    cv_storage_key = Column(String(512), nullable=True, index=True)
+    cv_original_filename = Column(String(512), nullable=True)
+    professional_experience_json = Column(JSON, nullable=True)
+    professional_summary = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
     project = relationship("Project", back_populates="candidates")
     requisition = relationship("Record", back_populates="candidates")
+    created_by_user = relationship("User", foreign_keys=[created_by_user_id])
+    master_link = relationship(
+        "CandidateMasterLink",
+        back_populates="candidate",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class CandidateMaster(Base):
+    """Enterprise-wide talent identity: one logical person, many mandate rows (`candidates`)."""
+
+    __tablename__ = "candidate_masters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    display_name = Column(String(512), nullable=True, index=True)
+    email_normalized = Column(String(255), nullable=True, index=True)
+    phone_normalized = Column(String(64), nullable=True, index=True)
+    global_fingerprint = Column(String(128), nullable=True, index=True)
+    consent_json = Column(JSON, nullable=True)
+    meta_json = Column(JSON, nullable=True)
+    migration_batch_tag = Column(String(64), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False
+    )
+
+    links = relationship(
+        "CandidateMasterLink",
+        back_populates="master",
+        cascade="all, delete-orphan",
+    )
+
+
+class CandidateMasterLink(Base):
+    """Links a pipeline `candidates` row to exactly one `candidate_masters` row."""
+
+    __tablename__ = "candidate_master_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    master_id = Column(Integer, ForeignKey("candidate_masters.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_id = Column(Integer, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    link_source = Column(String(32), nullable=False, default="auto")
+    confidence = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    master = relationship("CandidateMaster", back_populates="links")
+    candidate = relationship("Candidate", back_populates="master_link")
+
 
 class MetricDefinition(Base, AuditMixin):
     __tablename__ = "metric_definitions"
@@ -1070,6 +1176,34 @@ def _ensure_records_rpo_columns():
         logging.warning("records RPO columns migration: %s", e)
 
 
+def _ensure_candidates_profile_columns():
+    """SQLite: add CV, professional experience, and created-by columns on legacy DBs."""
+    from sqlalchemy import text
+
+    alters = [
+        ("cv_storage_key", "VARCHAR(512)"),
+        ("cv_original_filename", "VARCHAR(512)"),
+        ("professional_experience_json", "TEXT"),
+        ("professional_summary", "TEXT"),
+        ("created_by_user_id", "INTEGER"),
+    ]
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(candidates)")).fetchall()
+            cols = {r[1] for r in rows}
+            if not cols:
+                return
+            for col, ddl in alters:
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE candidates ADD COLUMN {col} {ddl}"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_candidates_created_by_user_id ON candidates (created_by_user_id)"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("candidates profile columns migration: %s", e)
+
+
 def ensure_project_client(db: Session, project: Project) -> Client:
     """Attach a Client row to project if missing (one-to-one bootstrap or new upload)."""
     if project.client_id is not None:
@@ -1172,6 +1306,7 @@ def init_db():
         logging.warning("legacy project_budgets/project_forecasts migration: %s", e)
     _ensure_clients_and_project_client_columns()
     _ensure_records_rpo_columns()
+    _ensure_candidates_profile_columns()
     _ensure_projects_project_head_column()
     _ensure_user_rbac_and_attribution_columns()
     _ensure_finance_ledger_cash_metrics_audit_columns()
@@ -1195,6 +1330,14 @@ def init_db():
             import logging
 
             logging.info("backfilled client_id on %s projects", n_c)
+        if os.getenv("CANDIDATE_MASTER_BACKFILL_ON_INIT", "").strip().lower() in ("1", "true", "yes"):
+            from backend.core.candidate_master_mgmt import backfill_candidate_masters
+
+            tag = (os.getenv("CANDIDATE_MASTER_BACKFILL_TAG") or "initdb").strip()
+            stats = backfill_candidate_masters(db, migration_batch_tag=tag, dry_run=False)
+            import logging
+
+            logging.info("candidate master backfill on init: %s", stats)
         db.commit()
     except Exception as e:
         db.rollback()

@@ -19,10 +19,12 @@ _SKIP_PATH_PREFIXES: tuple[str, ...] = (
     "/revenue-trackers",
     "/revenue-billing",
     "/candidates",
+    "/candidate-masters",
     "/contracts",
     "/meetings",
     "/vendor-licenses",
     "/tasks",
+    "/transitions",
 )
 
 # Longest match wins; (path prefix, vertical key from VERTICAL_KEYS).

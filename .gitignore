@@ -19,3 +19,6 @@ revenue_generator.db
 
 # Uploaded user profile pictures
 user_avatars/
+
+# Candidate CV uploads (server-local)
+uploads/candidate_cvs/

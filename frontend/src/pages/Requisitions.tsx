@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { queries, type Project, type RecordRow, type RecordsPage, type RequisitionKpis } from "@/lib/api";
 import { PlatformKpi, PlatformSection, PageHeader, StatusTag } from "@/components/platform/PlatformBlocks";
+import { isRecruiterUser, useAuth } from "@/lib/auth";
 import { RequisitionCreateDrawer } from "@/components/platform/RequisitionCreateDrawer";
 import { RequisitionRecordDrawer } from "@/components/platform/RequisitionRecordDrawer";
 import { LevelDonutChart, AgeingBars } from "@/components/platform/Charts";
@@ -27,6 +28,8 @@ function buildDeptData(records: import("@/lib/api").RecordRow[]) {
 }
 
 export function Requisitions() {
+  const { user } = useAuth();
+  const recruiterView = isRecruiterUser(user);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -162,9 +165,13 @@ export function Requisitions() {
       <PageHeader
         title="Requisitions"
         subtitle={
-          reqKpis
-            ? `${reqKpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are portfolio-wide`
-            : `${totalRecords.toLocaleString()} on this view · loading portfolio KPIs…`
+          recruiterView
+            ? reqKpis
+              ? `${reqKpis.total_records.toLocaleString()} visible to you — assigned to you or on your projects (same scope as the table below)`
+              : `${totalRecords.toLocaleString()} on this view · loading KPIs…`
+            : reqKpis
+              ? `${reqKpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are portfolio-wide`
+              : `${totalRecords.toLocaleString()} on this view · loading portfolio KPIs…`
         }
       />
 

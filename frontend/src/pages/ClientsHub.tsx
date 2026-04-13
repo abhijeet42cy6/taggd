@@ -6,6 +6,7 @@ import { PlatformSection, PageHeader, MiniStatRow, Tabs, StatusTag } from "@/com
 import { Skeleton } from "@/components/platform/Skeleton";
 import { clientGroupsToVm, clientsVm, type ClientVm } from "@/lib/view-models/clients";
 import { formatCurrency } from "@/lib/utils";
+import { isRecruiterUser, useAuth } from "@/lib/auth";
 
 // Real composite from projectStats — same formula as ClientDetail & PortfolioIntelligence
 // Falls back to a neutral 50 when no stats are available yet.
@@ -51,6 +52,8 @@ function goToClient(id: number, navigate: ReturnType<typeof useNavigate>) {
 type ProjectStat = { positions: number; revenue: number; closed?: number; active?: number; on_hold?: number };
 
 export function ClientsHub() {
+  const { user } = useAuth();
+  const recruiterView = isRecruiterUser(user);
   const [clientsList, setClientsList] = useState<ClientVm[]>([]);
   const [projectStats, setProjectStats] = useState<Map<number, ProjectStat>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -112,8 +115,18 @@ export function ClientsHub() {
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <PageHeader
-        title={persona.id === "client_manager" ? "My Accounts" : "Client 360 Hub"}
-        subtitle="Unified client intelligence across Finance · SLA · Hiring · Workforce"
+        title={
+          recruiterView
+            ? "My clients & projects"
+            : persona.id === "client_manager"
+              ? "My Accounts"
+              : "Client 360 Hub"
+        }
+        subtitle={
+          recruiterView
+            ? "Clients and SBUs tied to projects you are assigned to — same access as requisitions and tasks."
+            : "Unified client intelligence across Finance · SLA · Hiring · Workforce"
+        }
       />
 
       {/* Legacy-only: inferred merge from duplicate account_name */}

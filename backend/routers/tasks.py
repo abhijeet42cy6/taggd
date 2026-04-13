@@ -11,7 +11,7 @@ from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
 
 from backend.auth.deps import allowed_project_ids, get_current_user, is_platform_admin
-from backend.auth.profile import ROLE_EXECUTIVE, effective_role
+from backend.auth.profile import ROLE_EXECUTIVE, ROLE_PROJECT_HEAD, effective_role
 from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
 from backend.db.database import Task, TaskAssignee, User, UserProjectAssignment, get_db

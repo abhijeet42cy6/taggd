@@ -3,17 +3,23 @@ from __future__ import annotations
 
 import datetime
 import math
+import os
+import re
+import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import or_
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from starlette.responses import FileResponse
 
 from backend.auth.deps import get_current_user
 from backend.auth.scope import apply_project_scope, apply_recruiter_candidate_scope, assert_project_access
 from backend.core.activity_log import log_activity
-from backend.db.database import Candidate, Record, User, get_db
+from backend.core.candidate_master_mgmt import ensure_master_link_for_candidate
+from backend.db.database import Candidate, CandidateMasterLink, Record, User, get_db
 
 router = APIRouter(
     prefix="/candidates",
@@ -54,6 +60,55 @@ _FLOAT_FIELDS = frozenset(
     }
 )
 
+_CV_ALLOWED_EXT = frozenset({".pdf", ".doc", ".docx"})
+_MAX_CV_BYTES = 15 * 1024 * 1024
+
+
+def _cv_root_dir() -> str:
+    env = (os.environ.get("CANDIDATE_CV_ROOT") or "").strip()
+    if env:
+        return os.path.abspath(env)
+    return os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "candidate_cvs")
+    )
+
+
+def _abs_cv_path(storage_key: str) -> Optional[str]:
+    if not storage_key or ".." in storage_key:
+        return None
+    key = storage_key.replace("\\", "/").strip("/")
+    parts = [p for p in key.split("/") if p and p != ".."]
+    if len(parts) < 2:
+        return None
+    root = os.path.realpath(_cv_root_dir())
+    full = os.path.realpath(os.path.join(root, *parts))
+    if not full.startswith(root + os.sep) and full != root:
+        return None
+    return full if os.path.isfile(full) else None
+
+
+def _delete_cv_file_if_any(storage_key: Optional[str]) -> None:
+    if not storage_key:
+        return
+    p = _abs_cv_path(storage_key)
+    if p:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+        try:
+            parent = os.path.dirname(p)
+            if parent and os.path.isdir(parent) and not os.listdir(parent):
+                os.rmdir(parent)
+        except OSError:
+            pass
+
+
+def _sanitize_cv_basename(name: str) -> str:
+    base = os.path.basename(name or "") or "cv"
+    base = re.sub(r"[^a-zA-Z0-9._-]+", "_", base)[:120]
+    return base or "cv"
+
 
 def _parse_dt(val: Any) -> Optional[datetime.datetime]:
     if val is None:
@@ -74,7 +129,7 @@ def _parse_dt(val: Any) -> Optional[datetime.datetime]:
         raise HTTPException(status_code=400, detail=f"Invalid datetime: {val!r}")
 
 
-def _serialize_candidate(c: Candidate) -> dict[str, Any]:
+def _serialize_candidate(c: Candidate, db: Optional[Session] = None) -> dict[str, Any]:
     def clean(data: Any) -> Any:
         if isinstance(data, dict):
             return {k: clean(v) for k, v in data.items()}
@@ -88,7 +143,40 @@ def _serialize_candidate(c: Candidate) -> dict[str, Any]:
 
     d = c.__dict__.copy()
     d.pop("_sa_instance_state", None)
-    return clean(d)
+    d.pop("created_by_user", None)
+    d = clean(d)
+    mid: Optional[int] = None
+    link = getattr(c, "master_link", None)
+    if link is not None:
+        mid = link.master_id
+    elif db is not None:
+        ml = db.query(CandidateMasterLink).filter(CandidateMasterLink.candidate_id == c.id).first()
+        if ml is not None:
+            mid = ml.master_id
+    d["master_id"] = mid
+    sk = d.get("cv_storage_key")
+    d["has_cv"] = bool(sk and _abs_cv_path(str(sk)))
+    d.pop("cv_storage_key", None)
+    cb = getattr(c, "created_by_user", None)
+    if cb is not None:
+        d["created_by_email"] = getattr(cb, "email", None)
+    elif d.get("created_by_user_id") and db is not None:
+        u = db.query(User).filter(User.id == d["created_by_user_id"]).first()
+        d["created_by_email"] = u.email if u else None
+    else:
+        d["created_by_email"] = None
+    exp = d.get("professional_experience_json")
+    d["experience_role_count"] = len(exp) if isinstance(exp, list) else 0
+    return d
+
+
+def _assert_candidate_view(db: Session, user: User, c: Candidate) -> None:
+    """404 if this mandate row is not visible under the same rules as GET /candidates."""
+    q = db.query(Candidate).filter(Candidate.id == c.id)
+    q = apply_project_scope(q, user, db, Candidate)
+    q = apply_recruiter_candidate_scope(q, user, db)
+    if q.first() is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
 
 
 class CandidateCreateBody(BaseModel):
@@ -149,6 +237,8 @@ class CandidateCreateBody(BaseModel):
     offer_onboarding_extras: Optional[dict[str, Any]] = None
     hiring_manager_user_id: Optional[int] = None
     assigned_recruiter_user_id: Optional[int] = None
+    professional_experience_json: Optional[list[dict[str, Any]]] = None
+    professional_summary: Optional[str] = Field(None, max_length=32_000)
 
 
 class CandidatePatchBody(BaseModel):
@@ -207,6 +297,8 @@ class CandidatePatchBody(BaseModel):
     record_id: Optional[int] = Field(None, ge=1)
     hiring_manager_user_id: Optional[int] = None
     assigned_recruiter_user_id: Optional[int] = None
+    professional_experience_json: Optional[list[dict[str, Any]]] = None
+    professional_summary: Optional[str] = Field(None, max_length=32_000)
 
 
 def _body_to_candidate_dict(body: CandidateCreateBody | CandidatePatchBody, *, is_create: bool) -> dict[str, Any]:
@@ -226,6 +318,10 @@ def _body_to_candidate_dict(body: CandidateCreateBody | CandidatePatchBody, *, i
             out[k] = float(v)
         elif k in ("candidate_extras", "offer_onboarding_extras", "revenue_results"):
             out[k] = v
+        elif k == "professional_experience_json":
+            out[k] = v
+        elif k == "professional_summary" and isinstance(v, str):
+            out[k] = v.strip() or None
         elif isinstance(v, str):
             out[k] = v.strip() or None
         else:
@@ -247,6 +343,10 @@ def _apply_patch(c: Candidate, patch: dict[str, Any]) -> None:
             if not isinstance(v, dict):
                 raise HTTPException(status_code=400, detail="revenue_results must be an object")
             c.revenue_results = {**base, **v}
+        elif k == "professional_experience_json" and v is not None:
+            if not isinstance(v, list):
+                raise HTTPException(status_code=400, detail="professional_experience_json must be an array")
+            setattr(c, k, v)
         else:
             setattr(c, k, v)
 
@@ -257,12 +357,24 @@ def list_candidates(
     user: User = Depends(get_current_user),
     project_id: Optional[int] = Query(None),
     record_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None, description="Matches name, email, or client candidate id (substring)"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     q = db.query(Candidate)
     q = apply_project_scope(q, user, db, Candidate)
     q = apply_recruiter_candidate_scope(q, user, db)
+    if search and str(search).strip():
+        term = f"%{str(search).strip()}%"
+        q = q.filter(
+            or_(
+                Candidate.full_name.ilike(term),
+                Candidate.email_id.ilike(term),
+                Candidate.client_candidate_id.ilike(term),
+                Candidate.current_organization.ilike(term),
+                Candidate.professional_summary.ilike(term),
+            )
+        )
     if project_id is not None:
         assert_project_access(user, db, project_id)
         q = q.filter(Candidate.project_id == project_id)
@@ -273,8 +385,138 @@ def list_candidates(
         assert_project_access(user, db, rec.project_id)
         q = q.filter(Candidate.record_id == record_id)
     total = q.count()
-    rows = q.order_by(Candidate.id.desc()).offset(offset).limit(limit).all()
-    return {"items": [_serialize_candidate(x) for x in rows], "total": total, "limit": limit, "offset": offset}
+    rows = (
+        q.options(joinedload(Candidate.master_link), joinedload(Candidate.created_by_user))
+        .order_by(Candidate.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return {"items": [_serialize_candidate(x, db) for x in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/{candidate_id}/cv")
+def download_candidate_cv(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    import mimetypes
+
+    c = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    _assert_candidate_view(db, user, c)
+    if not c.cv_storage_key:
+        raise HTTPException(status_code=404, detail="No CV on file for this candidate")
+    path = _abs_cv_path(c.cv_storage_key)
+    if not path:
+        raise HTTPException(status_code=404, detail="CV file missing on server")
+    media, _ = mimetypes.guess_type(c.cv_original_filename or path)
+    return FileResponse(
+        path,
+        media_type=media or "application/octet-stream",
+        filename=c.cv_original_filename or os.path.basename(path),
+    )
+
+
+@router.post("/{candidate_id}/cv")
+async def upload_candidate_cv(
+    candidate_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    _assert_candidate_view(db, user, c)
+
+    orig = file.filename or "cv.pdf"
+    ext = os.path.splitext(orig)[1].lower() or ".pdf"
+    if ext not in _CV_ALLOWED_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type {ext!r}; allowed: {', '.join(sorted(_CV_ALLOWED_EXT))}",
+        )
+
+    root = _cv_root_dir()
+    os.makedirs(root, exist_ok=True)
+    sub = os.path.join(root, str(c.id))
+    os.makedirs(sub, exist_ok=True)
+    new_name = f"{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(sub, new_name)
+    rel_key = f"{c.id}/{new_name}".replace("\\", "/")
+
+    old_key = c.cv_storage_key
+    size = 0
+    try:
+        with open(dest, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > _MAX_CV_BYTES:
+                    try:
+                        os.remove(dest)
+                    except OSError:
+                        pass
+                    raise HTTPException(status_code=413, detail=f"CV exceeds {_MAX_CV_BYTES // (1024 * 1024)} MiB limit")
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail=f"Could not save CV: {e}") from e
+
+    c.cv_storage_key = rel_key
+    c.cv_original_filename = _sanitize_cv_basename(orig)
+    db.commit()
+    db.refresh(c)
+    _delete_cv_file_if_any(old_key)
+    log_activity(
+        db,
+        user=user,
+        action="update",
+        resource_type="candidate",
+        summary=f"Candidate #{c.id} CV uploaded — {c.cv_original_filename}",
+        project_id=c.project_id,
+        resource_id=str(c.id),
+        meta={"cv_bytes": size},
+    )
+    return _serialize_candidate(c, db)
+
+
+@router.delete("/{candidate_id}/cv")
+def delete_candidate_cv(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    _assert_candidate_view(db, user, c)
+    old = c.cv_storage_key
+    c.cv_storage_key = None
+    c.cv_original_filename = None
+    db.commit()
+    db.refresh(c)
+    _delete_cv_file_if_any(old)
+    log_activity(
+        db,
+        user=user,
+        action="update",
+        resource_type="candidate",
+        summary=f"Candidate #{c.id} CV removed",
+        project_id=c.project_id,
+        resource_id=str(c.id),
+    )
+    return _serialize_candidate(c, db)
 
 
 @router.get("/{candidate_id}")
@@ -283,11 +525,16 @@ def get_candidate(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    c = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    c = (
+        db.query(Candidate)
+        .options(joinedload(Candidate.master_link), joinedload(Candidate.created_by_user))
+        .filter(Candidate.id == candidate_id)
+        .first()
+    )
     if not c:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    assert_project_access(user, db, c.project_id)
-    return _serialize_candidate(c)
+    _assert_candidate_view(db, user, c)
+    return _serialize_candidate(c, db)
 
 
 @router.post("")
@@ -319,9 +566,13 @@ def create_candidate(
         record_id=body.record_id,
         client_candidate_id=body.client_candidate_id.strip(),
         revenue_results=rev,
+        created_by_user_id=user.id,
         **data,
     )
     db.add(c)
+    db.commit()
+    db.refresh(c)
+    ensure_master_link_for_candidate(db, c)
     db.commit()
     db.refresh(c)
     log_activity(
@@ -334,7 +585,7 @@ def create_candidate(
         resource_id=str(c.id),
         meta={"record_id": c.record_id},
     )
-    return _serialize_candidate(c)
+    return _serialize_candidate(c, db)
 
 
 @router.patch("/{candidate_id}")
@@ -347,7 +598,7 @@ def patch_candidate(
     c = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    assert_project_access(user, db, c.project_id)
+    _assert_candidate_view(db, user, c)
 
     def _validate_user_fk(uid: Optional[int]) -> None:
         if uid is None:
@@ -380,7 +631,7 @@ def patch_candidate(
         project_id=c.project_id,
         resource_id=str(c.id),
     )
-    return _serialize_candidate(c)
+    return _serialize_candidate(c, db)
 
 
 @router.delete("/{candidate_id}")
@@ -392,8 +643,9 @@ def delete_candidate(
     c = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    assert_project_access(user, db, c.project_id)
+    _assert_candidate_view(db, user, c)
     pid, cid, label = c.project_id, c.id, c.client_candidate_id
+    _delete_cv_file_if_any(c.cv_storage_key)
     db.delete(c)
     db.commit()
     log_activity(

@@ -35,9 +35,10 @@ export type AuthContextValue = {
   /** Present for executive & manager; null means unrestricted (admin only). */
   projectIds: number[] | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** Resolves to the loaded user (from `/auth/me`) or null if not authenticated. */
+  login: (email: string, password: string) => Promise<AuthUser | null>;
   logout: () => void;
-  refreshMe: () => Promise<void>;
+  refreshMe: () => Promise<AuthUser | null>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -63,12 +64,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const refreshMe = useCallback(async () => {
+  const refreshMe = useCallback(async (): Promise<AuthUser | null> => {
     const t = readStoredToken();
     if (!t) {
       setUser(null);
       setProjectIds(null);
-      return;
+      return null;
     }
     applyToken(t);
     const { data } = await api.get<{
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       phone?: string | null;
       has_avatar?: boolean;
     }>("/auth/me");
-    setUser({
+    const authUser: AuthUser = {
       id: data.id,
       email: data.email,
       role: data.role,
@@ -97,8 +98,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       familyName: data.family_name,
       phone: data.phone,
       hasAvatar: data.has_avatar,
-    });
+    };
+    setUser(authUser);
     setProjectIds(data.project_ids);
+    return authUser;
   }, [applyToken]);
 
   useEffect(() => {
@@ -122,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [applyToken, refreshMe]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string): Promise<AuthUser | null> => {
       clearApiCache();
       const { data } = await api.post<{
         access_token: string;
@@ -130,9 +133,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user: AuthUser;
       }>("/auth/login", { email, password });
       applyToken(data.access_token);
-      setUser(data.user);
-      await refreshMe();
+      const me = await refreshMe();
       clearApiCache();
+      return me;
     },
     [applyToken, refreshMe]
   );
@@ -174,7 +177,10 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/clients",
     "/client-contracts",
     "/meetings",
+    "/transitions",
     "/requisitions",
+    "/candidates",
+    "/candidate-store",
     "/finance",
     "/revenue-trackers",
     "/billing",
@@ -194,7 +200,10 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/clients",
     "/client-contracts",
     "/meetings",
+    "/transitions",
     "/requisitions",
+    "/candidates",
+    "/candidate-store",
     "/finance",
     "/revenue-trackers",
     "/billing",
@@ -214,7 +223,10 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/clients",
     "/client-contracts",
     "/meetings",
+    "/transitions",
     "/requisitions",
+    "/candidates",
+    "/candidate-store",
     "/finance",
     "/revenue-trackers",
     "/billing",
@@ -232,7 +244,10 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/clients",
     "/client-contracts",
     "/meetings",
+    "/transitions",
     "/requisitions",
+    "/candidates",
+    "/candidate-store",
     "/finance",
     "/revenue-trackers",
     "/billing",
@@ -249,7 +264,10 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/clients",
     "/client-contracts",
     "/meetings",
+    "/transitions",
     "/requisitions",
+    "/candidates",
+    "/candidate-store",
     "/finance",
     "/revenue-trackers",
     "/billing",
@@ -267,7 +285,10 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/clients",
     "/client-contracts",
     "/meetings",
+    "/transitions",
     "/requisitions",
+    "/candidates",
+    "/candidate-store",
     "/finance",
     "/revenue-trackers",
     "/billing",
@@ -280,8 +301,37 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/activity",
     "/agent",
   ],
-  recruiter: ["/", "/requisitions", "/clients", "/tasks", "/activity", "/agent"],
+  recruiter: [
+    "/",
+    "/tasks",
+    "/requisitions",
+    "/candidates",
+    "/candidate-store",
+    "/meetings",
+    "/clients",
+    "/transitions",
+    "/ingestion",
+    "/activity",
+    "/agent",
+  ],
 };
+
+/** Default landing for recruiter persona (tasks-first home). */
+export const RECRUITER_LANDING_PATH = "/tasks";
+
+export function isRecruiterUser(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  return (user.effectiveRole ?? user.role).toLowerCase() === "recruiter";
+}
+
+/** Post-login or “go home” path from resolved `/auth/me` user. */
+export function homePathAfterAuth(user: AuthUser | null | undefined): string {
+  if (!user) return "/";
+  if (isRecruiterUser(user)) return RECRUITER_LANDING_PATH;
+  const er = (user.effectiveRole ?? user.role).toLowerCase();
+  if (er === "client_user") return firstAllowedNavPathForClient(user.verticalAccess);
+  return "/";
+}
 
 /** Backend `VERTICAL_KEYS` → app routes (client portal allow-list). */
 const VERTICAL_TO_NAV_PATHS: Record<string, string[]> = {
@@ -289,9 +339,10 @@ const VERTICAL_TO_NAV_PATHS: Record<string, string[]> = {
   sla: ["/sla-performance"],
   wfm: ["/wfm"],
   requisitions: ["/requisitions"],
-  candidates: ["/requisitions"],
+  candidates: ["/requisitions", "/candidates", "/candidate-store"],
   contracts: ["/client-contracts"],
   meetings: ["/meetings"],
+  transitions: ["/transitions"],
   ingestion: ["/ingestion"],
   revenue_forecast: ["/revenue-trackers"],
   revenue_billing: ["/billing"],
@@ -324,7 +375,10 @@ export const CLIENT_NAV_PRIORITY = [
   "/clients",
   "/client-contracts",
   "/meetings",
+  "/transitions",
   "/requisitions",
+  "/candidates",
+  "/candidate-store",
   "/finance",
   "/revenue-trackers",
   "/billing",
@@ -399,7 +453,7 @@ export function navAllowedForRole(pathname: string, role: string, opts?: NavAllo
     if (pathname.startsWith("/clients/") && paths.includes("/clients")) return true;
     return false;
   }
-  const key = navRoleKey(role);
+  const key = navRoleKey(opts?.effectiveRole ?? role);
   const allowed = ROLE_NAV_PATHS[key] ?? ROLE_NAV_PATHS.manager;
   if (allowed.includes(pathname)) return true;
   if (pathname.startsWith("/clients/") && allowed.includes("/clients")) return true;

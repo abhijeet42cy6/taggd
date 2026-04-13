@@ -14,6 +14,7 @@ import {
   displayNameFromUser,
   firstAllowedNavPathForClient,
   initialsFromUser,
+  isRecruiterUser,
   navAllowedForRole,
   useAuth,
 } from "@/lib/auth";
@@ -34,11 +35,14 @@ import { ActivityLog } from "./pages/ActivityLog";
 import { IngestionCenter } from "./pages/IngestionCenter";
 import { PortfolioIntelligence } from "./pages/PortfolioIntelligence";
 import { Requisitions } from "./pages/Requisitions";
+import { Candidates } from "./pages/Candidates";
+import { CandidateStore } from "./pages/CandidateStore";
 import { SLAPerformance } from "./pages/SLAPerformance";
 import { WorkforceManagement } from "./pages/WorkforceManagement";
 import { Login } from "./pages/Login";
 import { AdminUsers } from "./pages/AdminUsers";
 import { Profile } from "./pages/Profile";
+import { Transitions } from "./pages/Transitions";
 import taggdLogo from "@/assets/taggd-logo.png";
 import "./styles/platform.css";
 
@@ -57,6 +61,39 @@ function ClientPortalNoAccess() {
 type NavItem = { label: string; path: string };
 type NavGroup = { title: string; items: NavItem[] };
 
+/** Recruiter-focused IA: work queue first, then accounts, then data & audit. */
+const RECRUITER_NAV_GROUPS: NavGroup[] = [
+  {
+    title: "My work",
+    items: [
+      { label: "Tasks", path: "/tasks" },
+      { label: "Requisitions", path: "/requisitions" },
+      { label: "Candidates", path: "/candidates" },
+      { label: "Candidate store", path: "/candidate-store" },
+      { label: "Meetings", path: "/meetings" },
+    ],
+  },
+  {
+    title: "Clients & onboarding",
+    items: [
+      { label: "Clients", path: "/clients" },
+      { label: "Client onboarding", path: "/transitions" },
+    ],
+  },
+  {
+    title: "Data & tools",
+    items: [
+      { label: "Ingestion Center", path: "/ingestion" },
+      { label: "Activity log", path: "/activity" },
+      { label: "Assistant", path: "/agent" },
+    ],
+  },
+  {
+    title: "Account",
+    items: [{ label: "My profile", path: "/profile" }],
+  },
+];
+
 const ALL_NAV_GROUPS: NavGroup[] = [
   {
     title: "Overview",
@@ -71,7 +108,10 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { label: "Clients", path: "/clients" },
       { label: "Contracts", path: "/client-contracts" },
       { label: "Meetings", path: "/meetings" },
+      { label: "Client onboarding", path: "/transitions" },
       { label: "Requisitions", path: "/requisitions" },
+      { label: "Candidates", path: "/candidates" },
+      { label: "Candidate store", path: "/candidate-store" },
     ],
   },
   {
@@ -126,6 +166,15 @@ function AuthenticatedApp() {
   );
 }
 
+/** Non–exec roles land on role-specific home; recruiters use tasks-first workspace. */
+function RoleHome() {
+  const { user } = useAuth();
+  if (isRecruiterUser(user)) {
+    return <Navigate to="/tasks" replace />;
+  }
+  return <Dashboard />;
+}
+
 function AppShell() {
   const { user, logout } = useAuth();
   const { persona } = usePersona();
@@ -135,6 +184,7 @@ function AppShell() {
   const role = user?.role ?? "";
   const effectiveRole = user?.effectiveRole ?? role;
   const verticalAccess = user?.verticalAccess ?? null;
+  const isRecruiter = isRecruiterUser(user);
 
   if (effectiveRole === "client_user") {
     const allowed = navAllowedForRole(location.pathname, role, { effectiveRole, verticalAccess });
@@ -143,12 +193,21 @@ function AppShell() {
     }
   }
 
-  const filteredGroups: NavGroup[] = ALL_NAV_GROUPS.map((g) => ({
-    ...g,
-    items: g.items.filter((item) =>
-      role ? navAllowedForRole(item.path, role, { effectiveRole, verticalAccess }) : false,
-    ),
-  })).filter((g) => g.items.length > 0);
+  if (isRecruiter) {
+    const allowed = navAllowedForRole(location.pathname, role, { effectiveRole, verticalAccess });
+    if (!allowed) {
+      return <Navigate to="/tasks" replace />;
+    }
+  }
+
+  const filteredGroups: NavGroup[] = (isRecruiter ? RECRUITER_NAV_GROUPS : ALL_NAV_GROUPS)
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((item) =>
+        role ? navAllowedForRole(item.path, role, { effectiveRole, verticalAccess }) : false,
+      ),
+    }))
+    .filter((g) => g.items.length > 0);
 
   const email = user?.email ?? "";
   const displayName = user ? displayNameFromUser(user) : "";
@@ -160,7 +219,7 @@ function AppShell() {
         <aside className="platform-sidebar">
           <div className="platform-logo">
             <img src={taggdLogo} alt="Taggd" className="platform-logo-img" />
-            <div className="platform-logo-tagline">Intelligence Platform</div>
+            <div className="platform-logo-tagline">{isRecruiter ? "Recruiting workspace" : "Intelligence Platform"}</div>
           </div>
 
           <div style={{ flex: 1, overflow: "auto" }}>
@@ -278,9 +337,11 @@ function AppShell() {
 
         <main className="platform-main">
           <header className="platform-topbar">
-            <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "'Syne',sans-serif" }}>Control Center</div>
+            <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "'Syne',sans-serif" }}>
+              {isRecruiter ? "Recruiting" : "Control Center"}
+            </div>
             <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-              / FY2024-25
+              {isRecruiter ? "/ Your queue & accounts" : "/ FY2024-25"}
             </span>
             <div style={{ flex: 1 }} />
             <input className="platform-search" placeholder="⌕  Search..." />
@@ -290,13 +351,16 @@ function AppShell() {
             <Routes>
               <Route path="/no-access" element={<ClientPortalNoAccess />} />
               <Route path="/profile" element={<Profile />} />
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/transitions" element={<Transitions />} />
+              <Route path="/" element={<RoleHome />} />
               <Route path="/portfolio" element={<PortfolioIntelligence />} />
               <Route path="/clients" element={<ClientsHub />} />
               <Route path="/clients/:clientId" element={<ClientDetail />} />
               <Route path="/client-contracts" element={<ClientContracts />} />
               <Route path="/meetings" element={<Meetings />} />
               <Route path="/requisitions" element={<Requisitions />} />
+              <Route path="/candidates" element={<Candidates />} />
+              <Route path="/candidate-store" element={<CandidateStore />} />
               <Route path="/finance" element={<FiscalPerformance />} />
               <Route path="/revenue-trackers" element={<RevenueTrackers />} />
               <Route path="/billing" element={<Billing />} />

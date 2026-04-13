@@ -328,6 +328,39 @@ export type Project = {
   logic_explanation?: string | null;
 };
 
+/** `project_transitions` — client onboarding / transition tracker (GET /transitions, …). */
+export type ProjectTransitionRow = {
+  id: number;
+  project_id: number;
+  status: string | null;
+  project_signed_date: string | null;
+  kickoff_date: string | null;
+  as_is_study_date: string | null;
+  to_be_presentation_date: string | null;
+  soft_launch_date: string | null;
+  go_live_date: string | null;
+  transition_done_by_user_id: number | null;
+  attendees_internal: string | null;
+  attendees_external: string | null;
+  external_attendees_names: string | null;
+  external_attendees_contact: string | null;
+  external_attendees_email: string | null;
+  rpo_solution_deck_url: string | null;
+  transition_document_url: string | null;
+  dead_days: number | null;
+  ageing_days: number | null;
+  dead_days_effective: number | null;
+  ageing_days_effective: number | null;
+  reason_for_delay: string | null;
+  linked_meeting_ids_json: number[] | null;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  system_created_at: string | null;
+  system_updated_at: string | null;
+  account_name?: string | null;
+  engagement_name?: string | null;
+};
+
 /** Parent account (legal client) with scoped projects from GET /clients. */
 export type ClientGroup = {
   id: number;
@@ -630,6 +663,18 @@ export type RecordCreate = {
   rpo?: RecordRpoPatch;
 };
 
+/** Structured work history for `professional_experience_json` (flexible keys). */
+export type ProfessionalExperienceEntry = {
+  company?: string | null;
+  title?: string | null;
+  location?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  is_current?: boolean | null;
+  description?: string | null;
+  [key: string]: unknown;
+};
+
 /** Row shape from `GET /candidates` / `GET /candidates/{id}` (mirrors ORM + audit mixin). */
 export type CandidateRow = {
   id: number;
@@ -692,6 +737,51 @@ export type CandidateRow = {
   system_updated_at?: string | null;
   source_filename?: string | null;
   uploaded_by?: string | null;
+  hiring_manager_user_id?: number | null;
+  assigned_recruiter_user_id?: number | null;
+  /** Enterprise master (`candidate_masters.id`) when linked. */
+  master_id?: number | null;
+  /** Original CV filename (stored file is server-side only). */
+  cv_original_filename?: string | null;
+  /** Whether a CV file exists and resolves on disk. */
+  has_cv?: boolean | null;
+  professional_experience_json?: ProfessionalExperienceEntry[] | null;
+  professional_summary?: string | null;
+  /** Number of entries in `professional_experience_json` (server-computed). */
+  experience_role_count?: number | null;
+  created_by_user_id?: number | null;
+  created_by_email?: string | null;
+};
+
+/** `GET /candidate-masters` row (light). */
+export type CandidateMasterRow = {
+  id: number;
+  display_name?: string | null;
+  email_normalized?: string | null;
+  phone_normalized?: string | null;
+  global_fingerprint?: string | null;
+  consent_json?: Record<string, unknown> | null;
+  meta_json?: Record<string, unknown> | null;
+  migration_batch_tag?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  placement_count: number;
+};
+
+/** `GET /candidate-masters/{id}` */
+export type CandidateMasterDetail = CandidateMasterRow & {
+  placements: Array<{
+    id: number;
+    project_id: number;
+    record_id: number;
+    client_candidate_id: string;
+    full_name?: string | null;
+    email_id?: string | null;
+    current_stage?: string | null;
+    global_status?: string | null;
+    assigned_recruiter_user_id?: number | null;
+    hiring_manager_user_id?: number | null;
+  }>;
 };
 
 /** POST /candidates */
@@ -708,6 +798,21 @@ export type CandidatePatch = Partial<
   Pick<CandidateRow, "record_id"> &
     Omit<CandidateRow, "id" | "project_id" | "record_id" | "client_candidate_id">
 >;
+
+/** Download CV with Bearer auth (blob + local save). */
+export async function downloadCandidateCvFile(candidateId: number, filename?: string | null): Promise<void> {
+  const r = await api.get(`/candidates/${candidateId}/cv`, { responseType: "blob" });
+  const blob = r.data instanceof Blob ? r.data : new Blob([r.data]);
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (filename && filename.trim()) || `candidate-${candidateId}-cv.pdf`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
 
 export type RecordsPage = {
   records: RecordRow[];
@@ -853,6 +958,14 @@ export const queries = {
     cachedGet<Project>(`project/${id}`, () =>
       api.get<Project>(`/projects/${id}`).then((r) => r.data)
     ),
+
+  transitionsList: () => api.get<ProjectTransitionRow[]>("/transitions").then((r) => r.data),
+  transitionByProject: (projectId: number) =>
+    api.get<ProjectTransitionRow>(`/transitions/by-project/${projectId}`).then((r) => r.data),
+  createTransition: (project_id: number) =>
+    api.post<ProjectTransitionRow>("/transitions", { project_id }).then((r) => r.data),
+  patchTransition: (projectId: number, body: Record<string, unknown>) =>
+    api.patch<ProjectTransitionRow>(`/transitions/by-project/${projectId}`, body).then((r) => r.data),
 
   /** PATCH directory metadata (charge code, heads, region, category, …). */
   patchProjectMetadata: (
@@ -1068,12 +1181,14 @@ export const queries = {
   candidatesList: (params: {
     project_id?: number;
     record_id?: number;
+    search?: string;
     limit?: number;
     offset?: number;
   } = {}) => {
     const qs = new URLSearchParams();
     if (params.project_id != null) qs.set("project_id", String(params.project_id));
     if (params.record_id != null) qs.set("record_id", String(params.record_id));
+    if (params.search != null && params.search.trim()) qs.set("search", params.search.trim());
     if (params.limit != null) qs.set("limit", String(params.limit));
     if (params.offset != null) qs.set("offset", String(params.offset));
     const q = qs.toString();
@@ -1103,6 +1218,43 @@ export const queries = {
 
   deleteCandidate: (id: number) =>
     api.delete<{ status: string; id: number }>(`/candidates/${id}`).then((r) => {
+      invalidateCache("candidates");
+      return r.data;
+    }),
+
+  candidateUploadCv: (id: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post<CandidateRow>(`/candidates/${id}/cv`, fd).then((r) => {
+      invalidateCache("candidates");
+      return r.data;
+    });
+  },
+
+  candidateDeleteCv: (id: number) =>
+    api.delete<CandidateRow>(`/candidates/${id}/cv`).then((r) => {
+      invalidateCache("candidates");
+      return r.data;
+    }),
+
+  candidateMastersList: (params: { q?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q != null && params.q.trim()) qs.set("q", params.q.trim());
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return api
+      .get<{ items: CandidateMasterRow[]; total: number; limit: number; offset: number }>(
+        `/candidate-masters${q ? `?${q}` : ""}`
+      )
+      .then((r) => r.data);
+  },
+
+  candidateMaster: (id: number) =>
+    api.get<CandidateMasterDetail>(`/candidate-masters/${id}`).then((r) => r.data),
+
+  candidateMasterBackfill: (body: { dry_run?: boolean; limit?: number; migration_batch_tag?: string }) =>
+    api.post<Record<string, unknown>>("/candidate-masters/backfill", body).then((r) => {
       invalidateCache("candidates");
       return r.data;
     }),

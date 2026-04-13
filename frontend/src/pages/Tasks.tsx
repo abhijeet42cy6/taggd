@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { queries, type Project, type TaskRow } from "@/lib/api";
-import { isPlatformAdminRole, isReadOnlyClient, useAuth } from "@/lib/auth";
+import { isPlatformAdminRole, isReadOnlyClient, isRecruiterUser, useAuth } from "@/lib/auth";
 import { PageHeader, PlatformKpi, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
 import {
@@ -369,6 +369,7 @@ export function Tasks() {
   const uid = user?.id ?? null;
   const role = (user?.role ?? "").toLowerCase();
   const readOnlyPortal = isReadOnlyClient(user);
+  const recruiterView = isRecruiterUser(user);
 
   const [rows, setRows] = useState<TaskRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -669,7 +670,11 @@ export function Tasks() {
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <PageHeader
           title="Tasks"
-          subtitle="Cross-cutting work: deadlines, assignees, links to ingestion, requisitions, contracts, meetings, billing, and more."
+          subtitle={
+            recruiterView
+              ? "Your queue: tasks you created, are assigned to, or on projects you have access to — start here each day."
+              : "Cross-cutting work: deadlines, assignees, links to ingestion, requisitions, contracts, meetings, billing, and more."
+          }
         />
         {!readOnlyPortal ? (
           <button

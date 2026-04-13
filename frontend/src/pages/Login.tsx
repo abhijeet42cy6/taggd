@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
+import { homePathAfterAuth, useAuth } from "@/lib/auth";
 import taggdLogo from "@/assets/taggd-logo.png";
 import loginBg from "@/assets/taggd-login-bg.png";
 import "@/styles/platform.css";
@@ -18,7 +18,7 @@ const loginShellStyle: React.CSSProperties = {
 };
 
 export function Login() {
-  const { login, loading, token } = useAuth();
+  const { login, loading, token, user } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
@@ -27,18 +27,18 @@ export function Login() {
   const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
-    if (!loading && token) {
-      navigate("/", { replace: true });
+    if (!loading && token && user) {
+      navigate(homePathAfterAuth(user), { replace: true });
     }
-  }, [loading, token, navigate]);
+  }, [loading, token, user, navigate]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await login(email.trim(), password);
-      navigate("/", { replace: true });
+      const me = await login(email.trim(), password);
+      navigate(homePathAfterAuth(me), { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

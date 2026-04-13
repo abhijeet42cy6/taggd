@@ -10,6 +10,7 @@ export const VERTICAL_MODULES: { key: string; label: string }[] = [
   { key: "candidates", label: "Candidates" },
   { key: "contracts", label: "Contracts" },
   { key: "meetings", label: "Meetings" },
+  { key: "transitions", label: "Client onboarding (transition)" },
   { key: "ingestion", label: "Ingestion" },
   { key: "revenue_forecast", label: "Revenue forecast" },
   { key: "revenue_billing", label: "Revenue / billing" },

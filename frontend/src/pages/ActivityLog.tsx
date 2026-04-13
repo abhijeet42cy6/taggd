@@ -5,6 +5,14 @@ import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlock
 
 const RESOURCE_TYPE_LABEL: Record<string, string> = {
   requisition: "Requisition",
+  transition: "Client onboarding",
+  meeting: "Meeting",
+  task: "Task",
+  client: "Client",
+  user_profile: "Profile",
+  user_avatar: "Profile photo",
+  candidate_master_backfill: "Candidate master backfill",
+  candidate_master_link: "Candidate master link",
   project: "Project",
   project_logic: "Revenue logic",
   sla_metric: "SLA metric",
@@ -72,17 +80,20 @@ export function ActivityLog() {
     await fetchPage(offset, true);
   }, [loading, total, fetchPage]);
 
-  const scopeHint =
-    isPlatformAdminRole(user?.role)
-      ? "All recorded actions across the platform."
+  const effective = (user?.effectiveRole ?? user?.role ?? "").toLowerCase();
+  const isRecruiter = effective === "recruiter";
+  const scopeHint = isPlatformAdminRole(user?.role)
+    ? "All recorded actions across the platform."
+    : isRecruiter
+      ? "Your own actions on the platform (requisitions, tasks, onboarding, profile, uploads you run). Teammates’ activity is not shown here."
       : "Your actions and teammates’ activity on projects you share. Portfolio-wide actions without a project are visible only to the actor.";
+  const pageSubtitle = isRecruiter
+    ? "A personal audit trail of changes and uploads you made while signed in."
+    : "Edits, additions, deletions, and uploads — scoped to your role and project assignments";
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader
-        title="Activity log"
-        subtitle="Edits, additions, deletions, and uploads — scoped to your role and project assignments"
-      />
+      <PageHeader title="Activity log" subtitle={pageSubtitle} />
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -8 }}>
         <button

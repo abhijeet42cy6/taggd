@@ -12,6 +12,7 @@ from backend.auth.avatar_storage import delete_stored_avatar, media_type_for_fil
 from backend.auth.security import verify_password, create_access_token
 from backend.auth.deps import get_current_user, allowed_project_ids
 from backend.auth.profile import profile_to_me_dict, resolve_user_profile
+from backend.core.activity_log import log_activity
 from backend.db.database import User, get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -98,6 +99,16 @@ def patch_me_profile(
     db.add(u)
     db.commit()
     db.refresh(u)
+    log_activity(
+        db,
+        user=u,
+        action="update",
+        resource_type="user_profile",
+        summary="Profile details updated",
+        project_id=None,
+        resource_id=str(u.id),
+        meta={"fields": [k for k in ("given_name", "family_name", "phone") if k in raw]},
+    )
     return {"status": "ok", **_profile_fields(u)}
 
 
@@ -118,6 +129,16 @@ async def post_me_avatar(
     u.avatar_filename = fn
     db.add(u)
     db.commit()
+    log_activity(
+        db,
+        user=u,
+        action="upload",
+        resource_type="user_avatar",
+        summary="Profile photo uploaded",
+        project_id=None,
+        resource_id=str(u.id),
+        meta={"filename": fn},
+    )
     return {"status": "ok", "has_avatar": True}
 
 
@@ -130,6 +151,15 @@ def delete_me_avatar(user: User = Depends(get_current_user), db: Session = Depen
     u.avatar_filename = None
     db.add(u)
     db.commit()
+    log_activity(
+        db,
+        user=u,
+        action="delete",
+        resource_type="user_avatar",
+        summary="Profile photo removed",
+        project_id=None,
+        resource_id=str(u.id),
+    )
     return {"status": "ok", "has_avatar": False}
 
 

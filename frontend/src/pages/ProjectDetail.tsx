@@ -174,6 +174,14 @@ export const ProjectDetail = () => {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(`/transitions?project=${id}`)}
+                        className="h-8 text-[10px] font-bold gap-2 uppercase tracking-wider"
+                    >
+                        <FileText size={14} /> Transition
+                    </Button>
                     <Button 
                         variant="outline" 
                         size="sm" 

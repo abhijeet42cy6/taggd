@@ -93,10 +93,12 @@ from .routers.wfm_benchmark import router as wfm_benchmark_router
 from .routers.revenue_trackers import router as revenue_trackers_router
 from .routers.revenue_billing import router as revenue_billing_router
 from .routers.candidates import router as candidates_router
+from .routers.candidate_masters import router as candidate_masters_router
 from .routers.project_contracts import router as project_contracts_router
 from .routers.meetings import router as meetings_router
 from .routers.resume_supplier_licenses import router as resume_supplier_licenses_router
 from .routers.tasks import router as tasks_router
+from .routers.transitions import router as transitions_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
@@ -104,10 +106,12 @@ app.include_router(wfm_benchmark_router)
 app.include_router(revenue_trackers_router)
 app.include_router(revenue_billing_router)
 app.include_router(candidates_router)
+app.include_router(candidate_masters_router)
 app.include_router(project_contracts_router)
 app.include_router(meetings_router)
 app.include_router(resume_supplier_licenses_router)
 app.include_router(tasks_router)
+app.include_router(transitions_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (
@@ -369,7 +373,10 @@ def get_activity_log(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Unified activity: requisitions, KPI edits, uploads, etc. Scoped by role + project assignments."""
+    """Unified activity: requisitions, KPI edits, uploads, etc.
+
+    Recruiters (and other scoped roles without project rows) see only rows they authored (`user_id`).
+    """
     from fastapi.responses import JSONResponse
 
     rows, total = list_activity_for_user(db, user, limit=limit, offset=offset)
@@ -1492,6 +1499,7 @@ def patch_record(
         summary=f"Requisition #{record_id} updated — {(r.candidate_name or '')[:80]}",
         project_id=r.project_id,
         resource_id=str(record_id),
+        meta={"fields": sorted(patch.keys())},
     )
     return _serialize_record_row(r, today)
 
