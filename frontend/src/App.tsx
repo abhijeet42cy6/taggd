@@ -31,6 +31,8 @@ import { DataOperations } from "./pages/DataOperations";
 import { FiscalPerformance } from "./pages/FiscalPerformance";
 import { RevenueTrackers } from "./pages/RevenueTrackers";
 import { Billing } from "./pages/Billing";
+import { FinanceValidation } from "./pages/FinanceValidation";
+import { RevenueGovernance } from "./pages/RevenueGovernance";
 import { ActivityLog } from "./pages/ActivityLog";
 import { IngestionCenter } from "./pages/IngestionCenter";
 import { PortfolioIntelligence } from "./pages/PortfolioIntelligence";
@@ -120,6 +122,8 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { label: "Finance Command", path: "/finance" },
       { label: "Revenue trackers", path: "/revenue-trackers" },
       { label: "Billing", path: "/billing" },
+      { label: "Finance validation", path: "/finance-validation" },
+      { label: "Revenue packs", path: "/revenue-governance" },
       { label: "Vendor licenses", path: "/vendor-licenses" },
       { label: "SLA Performance", path: "/sla-performance" },
       { label: "Workforce Mgmt", path: "/wfm" },
@@ -364,6 +368,8 @@ function AppShell() {
               <Route path="/finance" element={<FiscalPerformance />} />
               <Route path="/revenue-trackers" element={<RevenueTrackers />} />
               <Route path="/billing" element={<Billing />} />
+              <Route path="/finance-validation" element={<FinanceValidation />} />
+              <Route path="/revenue-governance" element={<RevenueGovernance />} />
               <Route path="/vendor-licenses" element={<VendorLicenses />} />
               <Route path="/sla-performance" element={<SLAPerformance />} />
               <Route path="/wfm" element={<WorkforceManagement />} />

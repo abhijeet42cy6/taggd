@@ -184,6 +184,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
+    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -192,6 +193,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/tasks",
     "/activity",
     "/agent",
+    "/revenue-governance",
     "/admin/users",
   ],
   platform_admin: [
@@ -207,6 +209,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
+    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -215,6 +218,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/tasks",
     "/activity",
     "/agent",
+    "/revenue-governance",
     "/admin/users",
   ],
   executive: [
@@ -230,6 +234,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
+    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -238,6 +243,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/tasks",
     "/activity",
     "/agent",
+    "/revenue-governance",
   ],
   project_head: [
     "/",
@@ -251,6 +257,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
+    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -271,6 +278,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
+    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -292,6 +300,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
+    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -300,6 +309,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/tasks",
     "/activity",
     "/agent",
+    "/revenue-governance",
   ],
   recruiter: [
     "/",
@@ -346,6 +356,8 @@ const VERTICAL_TO_NAV_PATHS: Record<string, string[]> = {
   ingestion: ["/ingestion"],
   revenue_forecast: ["/revenue-trackers"],
   revenue_billing: ["/billing"],
+  finance_validation: ["/finance-validation"],
+  revenue_kpi_governance: ["/revenue-governance"],
   vendor_licenses: ["/vendor-licenses"],
   tasks: ["/tasks"],
   portfolio: ["/", "/portfolio"],
@@ -382,6 +394,8 @@ export const CLIENT_NAV_PRIORITY = [
   "/finance",
   "/revenue-trackers",
   "/billing",
+  "/finance-validation",
+  "/revenue-governance",
   "/vendor-licenses",
   "/sla-performance",
   "/wfm",
@@ -442,6 +456,22 @@ export function initialsFromUser(user: AuthUser | null): string {
   return "?";
 }
 
+/** Mirrors backend `_practice_may_submit` plus operations needing `revenue_billing` when verticals are configured. */
+export function canPracticeSubmitBilling(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  const raw = (user.effectiveRole ?? user.role).toLowerCase();
+  if (raw === "recruiter" || raw === "client_user") return false;
+  const canon = raw === "admin" ? "platform_admin" : raw === "manager" ? "project_head" : raw;
+  if (canon === "platform_admin" || canon === "executive" || canon === "project_head") return true;
+  if (canon === "operations") {
+    const va = user.verticalAccess;
+    if (va === null || va === undefined) return true;
+    if (va.length === 0) return false;
+    return va.some((x) => String(x).toLowerCase() === "revenue_billing");
+  }
+  return false;
+}
+
 export function navAllowedForRole(pathname: string, role: string, opts?: NavAllowedOpts): boolean {
   if (pathname === "/profile") return true;
   const er = (opts?.effectiveRole ?? role).toLowerCase();
@@ -455,7 +485,39 @@ export function navAllowedForRole(pathname: string, role: string, opts?: NavAllo
   }
   const key = navRoleKey(opts?.effectiveRole ?? role);
   const allowed = ROLE_NAV_PATHS[key] ?? ROLE_NAV_PATHS.manager;
+  if (pathname === "/finance-validation") {
+    if (!allowed.includes(pathname)) return false;
+    if (er === "operations") {
+      const va = opts?.verticalAccess ?? [];
+      return va.some((x) => String(x).toLowerCase() === "finance_validation");
+    }
+    return true;
+  }
+  if (pathname === "/revenue-governance") {
+    if (!allowed.includes(pathname)) return false;
+    if (er === "operations" || er === "client_user") {
+      const va = opts?.verticalAccess ?? [];
+      return va.some((x) => String(x).toLowerCase() === "revenue_kpi_governance");
+    }
+    return true;
+  }
   if (allowed.includes(pathname)) return true;
   if (pathname.startsWith("/clients/") && allowed.includes("/clients")) return true;
   return false;
+}
+
+export function canAccessFinanceValidation(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  return navAllowedForRole("/finance-validation", user.role, {
+    effectiveRole: user.effectiveRole,
+    verticalAccess: user.verticalAccess,
+  });
+}
+
+export function canAccessRevenueGovernance(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  return navAllowedForRole("/revenue-governance", user.role, {
+    effectiveRole: user.effectiveRole,
+    verticalAccess: user.verticalAccess,
+  });
 }

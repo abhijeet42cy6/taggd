@@ -5,7 +5,9 @@ import {
   type Project,
   type RevenueForecastWeeklyRow,
   type RevenueVisibilitySnapshotRow,
+  type RevenueWeeklyPackResponse,
 } from "@/lib/api";
+import { canPracticeSubmitBilling, useAuth } from "@/lib/auth";
 import { formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { PageHeader, PlatformSection, Tabs } from "@/components/platform/PlatformBlocks";
 import {
@@ -152,6 +154,7 @@ function KpiTile({ icon, label, value, sub, accent = "default" }: KpiProps) {
 }
 
 export function RevenueTrackers() {
+  const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectFilter, setProjectFilter] = useState<string>("");
   const [forecast, setForecast] = useState<RevenueForecastWeeklyRow[]>([]);
@@ -168,8 +171,11 @@ export function RevenueTrackers() {
   const [editVisibilityRow, setEditVisibilityRow] = useState<RevenueVisibilitySnapshotRow | null>(null);
 
   const [mainTab, setMainTab] = useState<"Revenue visibility" | "Revenue forecast">("Revenue visibility");
+  const [governanceWeek, setGovernanceWeek] = useState(() => mondayYmd());
+  const [weeklyPack, setWeeklyPack] = useState<RevenueWeeklyPackResponse | null>(null);
 
   const pid = projectFilter ? Number(projectFilter) : undefined;
+  const governancePid = pid ?? projects[0]?.id;
 
   const reload = useCallback(async () => {
     setErr(null);
@@ -181,11 +187,20 @@ export function RevenueTrackers() {
       ]);
       setForecast(f.items ?? []);
       setVisibility(v.items ?? []);
+      if (governancePid) {
+        try {
+          setWeeklyPack(await queries.revenueWeeklyPack(governancePid, governanceWeek));
+        } catch {
+          setWeeklyPack(null);
+        }
+      } else {
+        setWeeklyPack(null);
+      }
       setLastRefresh(new Date());
     } catch (e: unknown) {
       setErr(String(e instanceof Error ? e.message : e));
     }
-  }, [pid]);
+  }, [pid, governancePid, governanceWeek]);
 
   useEffect(() => {
     void queries.projects().then(setProjects).catch(() => setProjects([]));
@@ -419,6 +434,73 @@ export function RevenueTrackers() {
           onChange={(t) => setMainTab(t as "Revenue visibility" | "Revenue forecast")}
         />
       </div>
+
+      {governancePid ? (
+        <PlatformSection title="Weekly pack (forecast + visibility)">
+          <div className="flex flex-wrap gap-3 items-end text-[11px] font-mono">
+            <label className="flex flex-col gap-1 text-muted-foreground">
+              Governance week (Mon)
+              <input
+                className="platform-search h-9 text-xs min-w-[140px]"
+                value={governanceWeek}
+                onChange={(e) => setGovernanceWeek(e.target.value)}
+              />
+            </label>
+            <div className="rounded-md border border-border/60 bg-muted/15 px-3 py-2 min-w-[200px]">
+              <div className="text-[10px] uppercase text-muted-foreground">Pack status</div>
+              <div className="text-sm mt-1">
+                {weeklyPack?.submission?.status ? (
+                  <span className="text-primary">{weeklyPack.submission.status}</span>
+                ) : (
+                  <span className="text-muted-foreground">No pack yet — save forecast for this week</span>
+                )}
+              </div>
+              {weeklyPack?.submission?.approved_by?.email ? (
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Approved by {weeklyPack.submission.approved_by.email}{" "}
+                  {weeklyPack.submission.approved_at ? `· ${weeklyPack.submission.approved_at}` : ""}
+                </div>
+              ) : null}
+              {weeklyPack?.submission?.submitted_by?.email && weeklyPack.submission.status !== "draft" ? (
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Submitted by {weeklyPack.submission.submitted_by.email}
+                </div>
+              ) : null}
+              {weeklyPack?.submission?.review_notes ? (
+                <div className="text-[10px] text-amber-600 mt-2 max-w-md">{weeklyPack.submission.review_notes}</div>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-1 text-muted-foreground text-[10px]">
+              <span>Forecast row: {weeklyPack?.forecast ? "✓" : "—"}</span>
+              <span>Visibility linked: {weeklyPack?.visibility ? "✓" : "— (save visibility with week link)"}</span>
+            </div>
+            {weeklyPack?.submission &&
+            ["draft", "changes_requested", "rejected"].includes(String(weeklyPack.submission.status)) &&
+            canPracticeSubmitBilling(user) ? (
+              <Button
+                type="button"
+                size="sm"
+                className="text-xs font-mono h-9"
+                onClick={async () => {
+                  try {
+                    await queries.revenueWeeklySubmissionSubmit(weeklyPack.submission!.id);
+                    await reload();
+                  } catch (e: unknown) {
+                    window.alert(e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              >
+                Submit pack for finance
+              </Button>
+            ) : null}
+          </div>
+          <p className="text-[10px] text-muted-foreground font-mono mt-2 max-w-3xl">
+            Saving a <strong>weekly forecast</strong> for this week creates or updates the draft pack. Save{" "}
+            <strong>revenue visibility</strong> with the same week in the form (&quot;Link to governance week&quot;) so
+            finance sees both. Approved packs lock edits until finance requests changes.
+          </p>
+        </PlatformSection>
+      ) : null}
 
       <div
         style={{
@@ -860,6 +942,7 @@ export function RevenueTrackers() {
         projects={projects}
         defaultProjectId={pid}
         defaultAsOf={effectiveAsOf}
+        governanceWeekStart={governancePid ? governanceWeek : null}
         initialRow={editVisibilityRow}
         onSaved={reload}
       />
@@ -1010,6 +1093,8 @@ function ForecastFormDialog({
       });
       onSaved();
       onOpenChange(false);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -1119,6 +1204,7 @@ function VisibilityFormDialog({
   projects,
   defaultProjectId,
   defaultAsOf,
+  governanceWeekStart,
   initialRow,
   onSaved,
 }: {
@@ -1127,6 +1213,8 @@ function VisibilityFormDialog({
   projects: Project[];
   defaultProjectId?: number;
   defaultAsOf: string;
+  /** When set, POST includes week_start_date to link this snapshot to the weekly governance pack. */
+  governanceWeekStart: string | null;
   initialRow: RevenueVisibilitySnapshotRow | null;
   onSaved: () => void;
 }) {
@@ -1223,6 +1311,7 @@ function VisibilityFormDialog({
       await queries.upsertRevenueVisibility({
         project_id: projectId,
         as_of_date: asOf,
+        week_start_date: governanceWeekStart?.trim() || undefined,
         practice_head: practiceHead || null,
         mmf_inr: parseFloat(mmfInr) || 0,
         open_req: parseInt(openReq, 10) || 0,
@@ -1238,6 +1327,8 @@ function VisibilityFormDialog({
       });
       onSaved();
       onOpenChange(false);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -1258,6 +1349,11 @@ function VisibilityFormDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit}>
+          {governanceWeekStart ? (
+            <p className="text-[10px] font-mono text-primary mb-2">
+              Link to governance week: <strong>{governanceWeekStart}</strong> (included on save)
+            </p>
+          ) : null}
           <div style={gridForm}>
             <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
               Project

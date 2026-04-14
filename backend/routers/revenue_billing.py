@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from backend.auth.deps import get_current_user
 from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
+from backend.core.finance_billing_workflow_core import workflow_allows_billing_row_edit
 from backend.db.database import Project, TaggdRevenueBilling, User, get_db
 
 router = APIRouter(
@@ -91,6 +92,18 @@ def _serialize(row: TaggdRevenueBilling) -> dict[str, Any]:
     for k, v in list(d.items()):
         if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
             d[k] = None
+    wf = getattr(row, "workflow", None)
+    if wf is not None:
+        d["workflow"] = {
+            "id": wf.id,
+            "validation_status": wf.validation_status,
+            "practice_submitted_at": iso(wf.practice_submitted_at),
+            "finance_reviewer_user_id": wf.finance_reviewer_user_id,
+            "junior_validated_at": iso(wf.junior_validated_at),
+            "cfo_approved_at": iso(wf.cfo_approved_at),
+        }
+    else:
+        d["workflow"] = None
     return d
 
 
@@ -197,7 +210,10 @@ def list_revenue_billing(
         q = q.filter(TaggdRevenueBilling.project_id == project_id)
     total = q.count()
     rows = (
-        q.options(joinedload(TaggdRevenueBilling.project))
+        q.options(
+            joinedload(TaggdRevenueBilling.project),
+            joinedload(TaggdRevenueBilling.workflow),
+        )
         .order_by(TaggdRevenueBilling.id.desc())
         .offset(offset)
         .limit(limit)
@@ -214,7 +230,7 @@ def get_revenue_billing(
 ):
     row = (
         db.query(TaggdRevenueBilling)
-        .options(joinedload(TaggdRevenueBilling.project))
+        .options(joinedload(TaggdRevenueBilling.project), joinedload(TaggdRevenueBilling.workflow))
         .filter(TaggdRevenueBilling.id == row_id)
         .first()
     )
@@ -258,10 +274,20 @@ def patch_revenue_billing(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    row = db.query(TaggdRevenueBilling).filter(TaggdRevenueBilling.id == row_id).first()
+    row = (
+        db.query(TaggdRevenueBilling)
+        .options(joinedload(TaggdRevenueBilling.workflow))
+        .filter(TaggdRevenueBilling.id == row_id)
+        .first()
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
     assert_project_access(user, db, row.project_id)
+    if not workflow_allows_billing_row_edit(row.workflow):
+        raise HTTPException(
+            status_code=423,
+            detail="This billing row is locked for editing under the finance validation workflow.",
+        )
     attrs = _body_to_row_attrs(body, is_create=False)
     for k, v in attrs.items():
         setattr(row, k, v)
@@ -285,10 +311,20 @@ def delete_revenue_billing(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    row = db.query(TaggdRevenueBilling).filter(TaggdRevenueBilling.id == row_id).first()
+    row = (
+        db.query(TaggdRevenueBilling)
+        .options(joinedload(TaggdRevenueBilling.workflow))
+        .filter(TaggdRevenueBilling.id == row_id)
+        .first()
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
     assert_project_access(user, db, row.project_id)
+    if not workflow_allows_billing_row_edit(row.workflow):
+        raise HTTPException(
+            status_code=423,
+            detail="Cannot delete while this billing row is in an active finance workflow state.",
+        )
     pid = row.project_id
     db.delete(row)
     db.commit()

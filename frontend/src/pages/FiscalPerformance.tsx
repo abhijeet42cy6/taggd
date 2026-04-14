@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { api, invalidateCache, queries } from "@/lib/api";
 import { formatCurrency, formatPercent } from "@/lib/utils";
@@ -6,12 +7,14 @@ import { PlatformKpi, PlatformSection, PageHeader, Tabs, KvRow } from "@/compone
 import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
 import { FinanceTrendChart, WaterfallChart } from "@/components/platform/Charts";
 import { FinanceLedgerFormDialog } from "@/components/platform/FinanceLedgerFormDialog";
+import { Button } from "@/components/ui/button";
 import { financeRowsVm, financeStatsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import { ProductivityAveragesSection, fmtFinInrMetric, fmtFinRatio } from "@/components/platform/ProductivityAveragesSection";
 
 const FY_MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 
 export function FiscalPerformance() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<any>(null);
   const [rows, setRows] = useState<FinanceRowVm[]>([]);
   const [waterfall, setWaterfall] = useState<any>(null);
@@ -232,7 +235,7 @@ export function FiscalPerformance() {
       <ProductivityAveragesSection rows={rows} loading={loading} />
 
       {/* TABS */}
-      <Tabs tabs={["Overview", "Ledger", "Cashflow"]} active={tab} onChange={setTab} />
+      <Tabs tabs={["Overview", "Ledger", "Cashflow", "Forecast packs"]} active={tab} onChange={setTab} />
 
       {tab === "Overview" && (
         <div className="platform-grid-2">
@@ -490,6 +493,18 @@ export function FiscalPerformance() {
               </tbody>
             </table>
           </div>
+        </PlatformSection>
+      )}
+
+      {tab === "Forecast packs" && (
+        <PlatformSection title="Weekly revenue pack approvals">
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 14, maxWidth: 560, lineHeight: 1.5 }}>
+            Project heads submit weekly forecast + visibility from <strong>Revenue trackers</strong>. Finance reviews and
+            approves packs here.
+          </p>
+          <Button type="button" variant="outline" size="sm" className="text-xs font-mono" onClick={() => navigate("/revenue-governance")}>
+            Open revenue pack queue
+          </Button>
         </PlatformSection>
       )}
 

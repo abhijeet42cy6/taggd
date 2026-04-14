@@ -35,6 +35,8 @@ const RESOURCE_TYPE_LABEL: Record<string, string> = {
   ingestion_finance_upload: "Finance ingest",
   candidate: "Candidate",
   revenue_billing: "Revenue billing",
+  finance_billing_workflow: "Finance billing workflow",
+  revenue_weekly_submission: "Weekly revenue pack",
 };
 
 function actionAccent(action: string): string {

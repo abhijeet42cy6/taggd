@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { invalidateCache, queries, type Project, type RevenueBillingRow, type RevenueBillingCreate, type RevenueBillingPatch } from "@/lib/api";
+import {
+  invalidateCache,
+  queries,
+  type Project,
+  type RevenueBillingRow,
+  type RevenueBillingCreate,
+  type RevenueBillingPatch,
+} from "@/lib/api";
+import { canPracticeSubmitBilling, useAuth } from "@/lib/auth";
 import { formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import {
@@ -25,6 +33,18 @@ import { RefreshCw, Plus, PencilLine, Trash2, Search, FilterX } from "lucide-rea
 
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
+
+function billingRowLocked(r: RevenueBillingRow): boolean {
+  const w = r.workflow;
+  if (!w?.validation_status) return false;
+  return !["draft", "disputed"].includes(String(w.validation_status));
+}
+
+function canSubmitBilling(r: RevenueBillingRow): boolean {
+  const st = r.workflow?.validation_status;
+  if (!st) return true;
+  return st === "draft" || st === "disputed";
+}
 
 function rowMatchesBillingTableFilters(
   r: RevenueBillingRow,
@@ -407,6 +427,7 @@ function FormGrid({
 }
 
 export function Billing() {
+  const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [rows, setRows] = useState<RevenueBillingRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -541,6 +562,17 @@ export function Billing() {
       setErr(String(e instanceof Error ? e.message : e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSubmitForFinance(r: RevenueBillingRow) {
+    if (!canSubmitBilling(r)) return;
+    setErr(null);
+    try {
+      await queries.financeBillingWorkflowSubmit(r.id);
+      await reload();
+    } catch (e: unknown) {
+      setErr(String(e instanceof Error ? e.message : e));
     }
   }
 
@@ -733,6 +765,7 @@ export function Billing() {
                   <th className="px-3 py-2 text-right whitespace-nowrap">Net rev</th>
                   <th className="px-3 py-2 text-right whitespace-nowrap">MMF</th>
                   <th className="px-3 py-2 whitespace-nowrap">Invoice</th>
+                  <th className="px-3 py-2 whitespace-nowrap">Workflow</th>
                   <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
@@ -759,16 +792,41 @@ export function Billing() {
                     <td className="px-3 py-2 font-mono max-w-[100px] truncate" title={r.invoice_number || ""}>
                       {r.invoice_number || "—"}
                     </td>
+                    <td className="px-3 py-2 font-mono text-[10px] max-w-[100px]">
+                      {r.workflow?.validation_status ?? "draft"}
+                    </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => openEdit(r)} title="Edit">
+                      {canSubmitBilling(r) && canPracticeSubmitBilling(user) ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px] mr-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleSubmitForFinance(r);
+                          }}
+                          title="Submit to finance for validation"
+                        >
+                          Submit
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2"
+                        disabled={billingRowLocked(r)}
+                        onClick={() => openEdit(r)}
+                        title={billingRowLocked(r) ? "Locked under finance workflow" : "Edit"}
+                      >
                         <PencilLine className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-destructive hover:text-destructive"
+                        disabled={billingRowLocked(r)}
                         onClick={() => void handleDelete(r.id)}
-                        title="Delete"
+                        title={billingRowLocked(r) ? "Locked" : "Delete"}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>

@@ -40,6 +40,7 @@ CANONICAL_ROLES = frozenset(
 VERTICAL_KEYS = frozenset(
     {
         "finance",
+        "finance_validation",
         "sla",
         "wfm",
         "requisitions",
@@ -48,6 +49,7 @@ VERTICAL_KEYS = frozenset(
         "meetings",
         "ingestion",
         "revenue_forecast",
+        "revenue_kpi_governance",
         "revenue_billing",
         "vendor_licenses",
         "tasks",

@@ -91,6 +91,7 @@ from .routers.sla_metrics import router as sla_metrics_write_router
 from .routers.finance_ledger import router as finance_ledger_router
 from .routers.wfm_benchmark import router as wfm_benchmark_router
 from .routers.revenue_trackers import router as revenue_trackers_router
+from .routers.revenue_weekly_submission import router as revenue_weekly_submission_router
 from .routers.revenue_billing import router as revenue_billing_router
 from .routers.candidates import router as candidates_router
 from .routers.candidate_masters import router as candidate_masters_router
@@ -99,11 +100,13 @@ from .routers.meetings import router as meetings_router
 from .routers.resume_supplier_licenses import router as resume_supplier_licenses_router
 from .routers.tasks import router as tasks_router
 from .routers.transitions import router as transitions_router
+from .routers.finance_billing_workflow import router as finance_billing_workflow_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
 app.include_router(wfm_benchmark_router)
 app.include_router(revenue_trackers_router)
+app.include_router(revenue_weekly_submission_router)
 app.include_router(revenue_billing_router)
 app.include_router(candidates_router)
 app.include_router(candidate_masters_router)
@@ -112,6 +115,7 @@ app.include_router(meetings_router)
 app.include_router(resume_supplier_licenses_router)
 app.include_router(tasks_router)
 app.include_router(transitions_router)
+app.include_router(finance_billing_workflow_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (

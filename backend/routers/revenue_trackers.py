@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from backend.auth.deps import get_current_user
 from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
-from backend.db.database import RevenueForecastWeekly, RevenueVisibilitySnapshot, User, get_db
+from backend.core.revenue_weekly_submission_core import submission_allows_child_edit
+from backend.db.database import RevenueForecastWeekly, RevenueVisibilitySnapshot, RevenueWeeklySubmission, User, get_db
 
 router = APIRouter(
     prefix="/revenue-trackers",
@@ -38,6 +39,20 @@ def _parse_ymd(s: str) -> datetime.datetime:
 
 def _lakhs_to_inr(v: float) -> float:
     return float(v) * LAKHS_TO_INR
+
+
+def _submission_for_project_week(
+    db: Session, project_id: int, week_start: datetime.datetime
+) -> Optional[RevenueWeeklySubmission]:
+    return (
+        db.query(RevenueWeeklySubmission)
+        .filter(
+            RevenueWeeklySubmission.project_id == project_id,
+            RevenueWeeklySubmission.week_start_date == week_start,
+            RevenueWeeklySubmission.period_type == "weekly",
+        )
+        .first()
+    )
 
 
 def _serialize_forecast(row: RevenueForecastWeekly) -> dict[str, Any]:
@@ -65,6 +80,7 @@ def _serialize_forecast(row: RevenueForecastWeekly) -> dict[str, Any]:
         "achievement_pct": row.achievement_pct,
         "remarks": row.remarks,
         "entered_by_user_id": row.entered_by_user_id,
+        "weekly_submission_id": row.weekly_submission_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -90,6 +106,7 @@ def _serialize_visibility(row: RevenueVisibilitySnapshot) -> dict[str, Any]:
         "gap_to_mmf_inr": row.gap_to_mmf_inr,
         "status": row.status,
         "entered_by_user_id": row.entered_by_user_id,
+        "weekly_submission_id": row.weekly_submission_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -120,6 +137,8 @@ class ForecastWeeklyUpsertBody(BaseModel):
 class VisibilityUpsertBody(BaseModel):
     project_id: int = Field(..., ge=1)
     as_of_date: str = Field(..., min_length=8, max_length=32)
+    """When set, snapshot is linked to the weekly governance pack for this ISO week start (YYYY-MM-DD)."""
+    week_start_date: Optional[str] = Field(None, min_length=8, max_length=32)
     practice_head: Optional[str] = None
     mmf_inr: float = 0.0
     open_req: int = 0
@@ -164,6 +183,12 @@ def upsert_forecast_weekly(
 ):
     assert_project_access(user, db, body.project_id)
     week_start = _parse_ymd(body.week_start_date)
+    sub_gate = _submission_for_project_week(db, body.project_id, week_start)
+    if sub_gate and not submission_allows_child_edit(sub_gate.status):
+        raise HTTPException(
+            status_code=423,
+            detail="This week is locked under the revenue pack workflow (submitted or approved).",
+        )
     month_anchor = _parse_ymd(body.month_anchor)
     upd = _parse_ymd(body.update_date) if body.update_date else datetime.datetime.utcnow().replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -200,6 +225,18 @@ def upsert_forecast_weekly(
     if is_create:
         db.add(row)
     db.flush()
+    pack_sub = _submission_for_project_week(db, body.project_id, week_start)
+    if pack_sub is None:
+        pack_sub = RevenueWeeklySubmission(
+            project_id=body.project_id,
+            week_start_date=week_start,
+            period_type="weekly",
+            status="draft",
+        )
+        db.add(pack_sub)
+        db.flush()
+    row.weekly_submission_id = pack_sub.id
+    db.flush()
     _ = row.project
     db.commit()
     db.refresh(row)
@@ -228,6 +265,17 @@ def delete_forecast_weekly(
     if not row:
         raise HTTPException(status_code=404, detail="Not found")
     assert_project_access(user, db, row.project_id)
+    if row.weekly_submission_id:
+        s = (
+            db.query(RevenueWeeklySubmission)
+            .filter(RevenueWeeklySubmission.id == row.weekly_submission_id)
+            .first()
+        )
+        if s and not submission_allows_child_edit(s.status):
+            raise HTTPException(
+                status_code=423,
+                detail="Cannot delete forecast while weekly pack is submitted or approved.",
+            )
     pid, key = row.project_id, row.week_start_date.date().isoformat() if row.week_start_date else str(row_id)
     db.delete(row)
     db.commit()
@@ -273,6 +321,14 @@ def upsert_visibility(
 ):
     assert_project_access(user, db, body.project_id)
     as_of = _parse_ymd(body.as_of_date)
+    if body.week_start_date and str(body.week_start_date).strip():
+        ws_chk = _parse_ymd(str(body.week_start_date).strip())
+        sub_chk = _submission_for_project_week(db, body.project_id, ws_chk)
+        if sub_chk and not submission_allows_child_edit(sub_chk.status):
+            raise HTTPException(
+                status_code=423,
+                detail="This week is locked under the revenue pack workflow (submitted or approved).",
+            )
 
     existing = (
         db.query(RevenueVisibilitySnapshot)
@@ -299,6 +355,20 @@ def upsert_visibility(
     row.entered_by_user_id = user.id
     if is_create:
         db.add(row)
+    db.flush()
+    if body.week_start_date and str(body.week_start_date).strip():
+        ws = _parse_ymd(str(body.week_start_date).strip())
+        pack_sub = _submission_for_project_week(db, body.project_id, ws)
+        if pack_sub is None:
+            pack_sub = RevenueWeeklySubmission(
+                project_id=body.project_id,
+                week_start_date=ws,
+                period_type="weekly",
+                status="draft",
+            )
+            db.add(pack_sub)
+            db.flush()
+        row.weekly_submission_id = pack_sub.id
     db.flush()
     _ = row.project
     db.commit()
@@ -328,6 +398,17 @@ def delete_visibility(
     if not row:
         raise HTTPException(status_code=404, detail="Not found")
     assert_project_access(user, db, row.project_id)
+    if row.weekly_submission_id:
+        s = (
+            db.query(RevenueWeeklySubmission)
+            .filter(RevenueWeeklySubmission.id == row.weekly_submission_id)
+            .first()
+        )
+        if s and not submission_allows_child_edit(s.status):
+            raise HTTPException(
+                status_code=423,
+                detail="Cannot delete visibility while weekly pack is submitted or approved.",
+            )
     pid, key = row.project_id, row.as_of_date.date().isoformat() if row.as_of_date else str(row_id)
     db.delete(row)
     db.commit()

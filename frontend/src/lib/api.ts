@@ -102,6 +102,7 @@ export type RevenueForecastWeeklyRow = {
   achievement_pct: number | null;
   remarks: string | null;
   entered_by_user_id: number | null;
+  weekly_submission_id?: number | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -124,6 +125,7 @@ export type RevenueVisibilitySnapshotRow = {
   gap_to_mmf_inr: number;
   status: string | null;
   entered_by_user_id: number | null;
+  weekly_submission_id?: number | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -153,6 +155,8 @@ export type RevenueForecastWeeklyUpsert = {
 export type RevenueVisibilityUpsert = {
   project_id: number;
   as_of_date: string;
+  /** Link snapshot to weekly governance pack (ISO week start YYYY-MM-DD). */
+  week_start_date?: string | null;
   practice_head?: string | null;
   mmf_inr?: number;
   open_req?: number;
@@ -165,6 +169,104 @@ export type RevenueVisibilityUpsert = {
   revenue_realised_pct?: number | null;
   gap_to_mmf_inr?: number;
   status?: string | null;
+};
+
+export type RevenueWeeklySubmissionActor = { id: number; email: string } | null;
+
+export type RevenueWeeklySubmissionDto = {
+  id: number;
+  project_id: number;
+  week_start_date: string | null;
+  period_type: string;
+  status: string;
+  submitted_by_user_id: number | null;
+  submitted_at: string | null;
+  submitted_by?: RevenueWeeklySubmissionActor;
+  reviewed_by_user_id: number | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  reviewed_by?: RevenueWeeklySubmissionActor;
+  approved_by_user_id: number | null;
+  approved_at: string | null;
+  approved_by?: RevenueWeeklySubmissionActor;
+  version: number;
+  created_at: string | null;
+  updated_at: string | null;
+  account_name?: string;
+  client_id?: number | null;
+};
+
+export type RevenueWeeklyPackResponse = {
+  submission: RevenueWeeklySubmissionDto | null;
+  forecast: RevenueForecastWeeklyRow | null;
+  visibility: RevenueVisibilitySnapshotRow | null;
+};
+
+/** Short workflow summary embedded on `GET /revenue-billing` rows. */
+export type RevenueBillingWorkflowSummary = {
+  id?: number | null;
+  validation_status?: string | null;
+  practice_submitted_at?: string | null;
+  finance_reviewer_user_id?: number | null;
+  junior_validated_at?: string | null;
+  cfo_approved_at?: string | null;
+};
+
+/** Full workflow payload from `GET /finance-billing-workflow/{billingId}`. */
+export type FinanceBillingWorkflowDto = {
+  id: number;
+  taggd_revenue_billing_id: number;
+  validation_status: string;
+  practice_submitted_at?: string | null;
+  practice_submitted_by_user_id?: number | null;
+  finance_reviewer_user_id?: number | null;
+  finance_review_started_at?: string | null;
+  validation_completed_at?: string | null;
+  discrepancy_notes?: string | null;
+  payment_mode?: string | null;
+  payment_reference_utr?: string | null;
+  partial_payment?: boolean | null;
+  amount_received_inr?: number | null;
+  tds_deducted_inr?: number | null;
+  gst_reconciliation_status?: string | null;
+  junior_validated_by_user_id?: number | null;
+  junior_validated_at?: string | null;
+  cfo_approved_by_user_id?: number | null;
+  cfo_approved_at?: string | null;
+  cfo_sign_off_acknowledged?: boolean | null;
+  bank_match_status?: string | null;
+  bank_match_confidence?: number | null;
+  bank_match_payload_json?: Record<string, unknown> | null;
+  overdue_escalation_last_at?: string | null;
+  overdue_escalation_level?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  outstanding_inr?: number | null;
+  payment_receipts?: FinancePaymentReceiptRow[];
+  invoice_amount_inr_for_threshold?: number;
+  cfo_threshold_inr?: number;
+};
+
+export type FinancePaymentReceiptRow = {
+  id: number;
+  workflow_id: number;
+  amount_inr: number;
+  received_date?: string | null;
+  payment_mode?: string | null;
+  utr_reference?: string | null;
+  partial: boolean;
+  notes?: string | null;
+  created_by_user_id?: number | null;
+  created_at?: string | null;
+};
+
+export type FinanceBillingValidationEventRow = {
+  id: number;
+  workflow_id: number;
+  user_id?: number | null;
+  action: string;
+  payload_json?: Record<string, unknown> | null;
+  created_at?: string | null;
 };
 
 /** TAGGD-style revenue / billing tracker (`GET /revenue-billing`); amounts in INR. */
@@ -206,7 +308,11 @@ export type RevenueBillingRow = {
   system_updated_at: string | null;
   source_filename: string | null;
   uploaded_by: string | null;
+  workflow?: RevenueBillingWorkflowSummary | null;
 };
+
+/** Billing row + embedded workflow (same shape as list queue items). */
+export type RevenueBillingWithWorkflow = RevenueBillingRow & { workflow?: FinanceBillingWorkflowDto | null };
 
 export type RevenueBillingCreate = {
   project_id: number;
@@ -1374,6 +1480,81 @@ export const queries = {
       return r.data;
     }),
 
+  revenueWeeklyPack: (projectId: number, weekStartDate: string) =>
+    api
+      .get<RevenueWeeklyPackResponse>(
+        `/revenue-weekly-submissions/pack?project_id=${projectId}&week_start_date=${encodeURIComponent(weekStartDate)}`
+      )
+      .then((r) => r.data),
+
+  revenueWeeklySubmissionQueue: (params: {
+    status?: string;
+    client_id?: number;
+    project_id?: number;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set("status", params.status);
+    if (params.client_id != null) qs.set("client_id", String(params.client_id));
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return api
+      .get<{ items: RevenueWeeklySubmissionDto[]; total: number; limit: number; offset: number }>(
+        `/revenue-weekly-submissions/queue${q ? `?${q}` : ""}`
+      )
+      .then((r) => r.data);
+  },
+
+  revenueWeeklySubmissionSubmit: (submissionId: number) =>
+    api.post<RevenueWeeklySubmissionDto>(`/revenue-weekly-submissions/${submissionId}/submit`, {}).then((r) => {
+      invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  revenueWeeklySubmissionStartReview: (submissionId: number) =>
+    api.post<RevenueWeeklySubmissionDto>(`/revenue-weekly-submissions/${submissionId}/start-review`, {}).then((r) => {
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  revenueWeeklySubmissionApprove: (submissionId: number) =>
+    api.post<RevenueWeeklySubmissionDto>(`/revenue-weekly-submissions/${submissionId}/approve`, {}).then((r) => {
+      invalidateCache("revenue-trackers/");
+      invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  revenueWeeklySubmissionRequestChanges: (submissionId: number, notes?: string) =>
+    api
+      .post<RevenueWeeklySubmissionDto>(`/revenue-weekly-submissions/${submissionId}/request-changes`, {
+        notes: notes ?? null,
+      })
+      .then((r) => {
+        invalidateCache("revenue-trackers/");
+        invalidateCache("activity/log");
+        return r.data;
+      }),
+
+  revenueWeeklySubmissionReject: (submissionId: number, notes?: string) =>
+    api
+      .post<RevenueWeeklySubmissionDto>(`/revenue-weekly-submissions/${submissionId}/reject`, { notes: notes ?? null })
+      .then((r) => {
+        invalidateCache("revenue-trackers/");
+        invalidateCache("activity/log");
+        return r.data;
+      }),
+
+  revenueWeeklyClientSummary: (clientId: number) =>
+    api
+      .get<{ client_id: number; pending_count: number; project_ids: number[] }>(
+        `/revenue-weekly-submissions/by-client/${clientId}/summary`
+      )
+      .then((r) => r.data),
+
   revenueBillingList: (params: {
     project_id?: number;
     limit?: number;
@@ -1415,6 +1596,132 @@ export const queries = {
     api.delete<{ status: string; id: number }>(`/revenue-billing/${id}`).then((r) => {
       invalidateCache("revenue-billing");
       invalidateCache("activity/log");
+      return r.data;
+    }),
+
+  financeBillingWorkflowQueue: (params: {
+    status?: string;
+    project_id?: number;
+    mine?: boolean;
+    overdue_only?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set("status", params.status);
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    if (params.mine) qs.set("mine", "true");
+    if (params.overdue_only) qs.set("overdue_only", "true");
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return api
+      .get<{ items: RevenueBillingWithWorkflow[]; total: number; limit: number; offset: number }>(
+        `/finance-billing-workflow/queue${q ? `?${q}` : ""}`
+      )
+      .then((r) => r.data);
+  },
+
+  financeBillingWorkflowDetail: (billingId: number) =>
+    api.get<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}`).then((r) => r.data),
+
+  financeBillingWorkflowEvents: (billingId: number) =>
+    api
+      .get<{ items: FinanceBillingValidationEventRow[] }>(`/finance-billing-workflow/${billingId}/events`)
+      .then((r) => r.data),
+
+  financeBillingWorkflowPatch: (billingId: number, body: Record<string, unknown>) =>
+    api.patch<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}`, body).then((r) => {
+      invalidateCache("revenue-billing");
+      return r.data;
+    }),
+
+  financeBillingWorkflowSubmit: (billingId: number) =>
+    api.post<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}/submit`, {}).then((r) => {
+      invalidateCache("revenue-billing");
+      return r.data;
+    }),
+
+  financeBillingWorkflowStartReview: (billingId: number) =>
+    api.post<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}/start-review`, {}).then((r) => {
+      invalidateCache("revenue-billing");
+      return r.data;
+    }),
+
+  financeBillingWorkflowDispute: (billingId: number, discrepancy_notes: string) =>
+    api
+      .post<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}/dispute`, {
+        discrepancy_notes,
+      })
+      .then((r) => {
+        invalidateCache("revenue-billing");
+        return r.data;
+      }),
+
+  financeBillingWorkflowJuniorApprove: (billingId: number) =>
+    api.post<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}/junior-approve`, {}).then((r) => {
+      invalidateCache("revenue-billing");
+      return r.data;
+    }),
+
+  financeBillingWorkflowCfoApprove: (billingId: number, cfo_sign_off_acknowledged: boolean) =>
+    api
+      .post<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}/cfo-approve`, {
+        cfo_sign_off_acknowledged,
+      })
+      .then((r) => {
+        invalidateCache("revenue-billing");
+        return r.data;
+      }),
+
+  financeBillingWorkflowReject: (billingId: number, discrepancy_notes?: string) =>
+    api
+      .post<RevenueBillingWithWorkflow>(`/finance-billing-workflow/${billingId}/reject`, {
+        discrepancy_notes: discrepancy_notes ?? null,
+      })
+      .then((r) => {
+        invalidateCache("revenue-billing");
+        return r.data;
+      }),
+
+  financeBillingWorkflowAddReceipt: (
+    billingId: number,
+    body: {
+      amount_inr: number;
+      received_date?: string | null;
+      payment_mode?: string | null;
+      utr_reference?: string | null;
+      partial?: boolean;
+      notes?: string | null;
+    }
+  ) =>
+    api.post<FinancePaymentReceiptRow>(`/finance-billing-workflow/${billingId}/payment-receipts`, body).then((r) => {
+      invalidateCache("revenue-billing");
+      return r.data;
+    }),
+
+  financeBillingWorkflowAddTdsCertificate: (
+    billingId: number,
+    body: {
+      fy_label?: string | null;
+      counterparty_name?: string | null;
+      certificate_type?: string | null;
+      received_date?: string | null;
+      file_ref?: string | null;
+      notes?: string | null;
+    }
+  ) =>
+    api.post<Record<string, unknown>>(`/finance-billing-workflow/${billingId}/tds-certificates`, body).then((r) => {
+      invalidateCache("revenue-billing");
+      return r.data;
+    }),
+
+  financeBillingWorkflowOverdueTick: (billingId: number) =>
+    api.post<{ status: string; overdue_escalation_level?: number }>(
+      `/finance-billing-workflow/${billingId}/run-overdue-escalation`,
+      {}
+    ).then((r) => {
+      invalidateCache("revenue-billing");
       return r.data;
     }),
 

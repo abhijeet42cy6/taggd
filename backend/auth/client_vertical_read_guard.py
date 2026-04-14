@@ -18,6 +18,8 @@ _SKIP_PATH_PREFIXES: tuple[str, ...] = (
     "/wfm",
     "/revenue-trackers",
     "/revenue-billing",
+    "/finance-billing-workflow",
+    "/revenue-weekly-submissions",
     "/candidates",
     "/candidate-masters",
     "/contracts",

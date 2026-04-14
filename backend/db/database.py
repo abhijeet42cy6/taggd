@@ -162,6 +162,9 @@ class Project(Base, AuditMixin):
     revenue_visibility_snapshots = relationship(
         "RevenueVisibilitySnapshot", back_populates="project", cascade="all, delete-orphan"
     )
+    revenue_weekly_submissions = relationship(
+        "RevenueWeeklySubmission", back_populates="project", cascade="all, delete-orphan"
+    )
     taggd_revenue_billing_rows = relationship(
         "TaggdRevenueBilling", back_populates="project", cascade="all, delete-orphan"
     )
@@ -753,6 +756,40 @@ class FinanceEfficiencyKPI(Base, AuditMixin):
     metrics_updated_by = relationship("User", foreign_keys=[metrics_updated_by_user_id])
 
 
+class RevenueWeeklySubmission(Base):
+    """Weekly revenue pack: links forecast + visibility rows under one submit/approve workflow."""
+
+    __tablename__ = "revenue_weekly_submission"
+    __table_args__ = (UniqueConstraint("project_id", "week_start_date", "period_type", name="uq_rev_weekly_submission"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    week_start_date = Column(DateTime, nullable=False, index=True)
+    period_type = Column(String(16), nullable=False, default="weekly", index=True)
+
+    status = Column(String(32), nullable=False, default="draft", index=True)
+
+    submitted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    submitted_at = Column(DateTime, nullable=True)
+
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    review_notes = Column(Text, nullable=True)
+
+    approved_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    approved_at = Column(DateTime, nullable=True)
+
+    version = Column(Integer, nullable=False, default=1)
+
+    project = relationship("Project", back_populates="revenue_weekly_submissions")
+    submitted_by = relationship("User", foreign_keys=[submitted_by_user_id])
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_user_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_user_id])
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
 class RevenueForecastWeekly(Base):
     """TAGGD-style weekly revenue forecast row; amounts stored in INR (API accepts Lakhs)."""
 
@@ -784,8 +821,13 @@ class RevenueForecastWeekly(Base):
     remarks = Column(Text, nullable=True)
     entered_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
+    weekly_submission_id = Column(
+        Integer, ForeignKey("revenue_weekly_submission.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     project = relationship("Project", back_populates="revenue_forecast_weekly")
     entered_by = relationship("User", foreign_keys=[entered_by_user_id])
+    weekly_submission = relationship("RevenueWeeklySubmission", foreign_keys=[weekly_submission_id])
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -816,8 +858,13 @@ class RevenueVisibilitySnapshot(Base):
 
     entered_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
+    weekly_submission_id = Column(
+        Integer, ForeignKey("revenue_weekly_submission.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     project = relationship("Project", back_populates="revenue_visibility_snapshots")
     entered_by = relationship("User", foreign_keys=[entered_by_user_id])
+    weekly_submission = relationship("RevenueWeeklySubmission", foreign_keys=[weekly_submission_id])
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -871,6 +918,150 @@ class TaggdRevenueBilling(Base, AuditMixin):
 
     project = relationship("Project", back_populates="taggd_revenue_billing_rows")
     entered_by = relationship("User", foreign_keys=[entered_by_user_id])
+    workflow = relationship(
+        "FinanceBillingWorkflow",
+        back_populates="billing",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class FinanceBillingWorkflow(Base):
+    """Validation & approval envelope for one TAGGD revenue billing row (invoice lifecycle)."""
+
+    __tablename__ = "finance_billing_workflow"
+    __table_args__ = (UniqueConstraint("taggd_revenue_billing_id", name="uq_finance_billing_workflow_billing"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    taggd_revenue_billing_id = Column(
+        Integer, ForeignKey("taggd_revenue_billing.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    validation_status = Column(String(64), nullable=False, default="draft", index=True)
+    practice_submitted_at = Column(DateTime, nullable=True)
+    practice_submitted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    finance_reviewer_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    finance_review_started_at = Column(DateTime, nullable=True)
+    validation_completed_at = Column(DateTime, nullable=True)
+
+    discrepancy_notes = Column(Text, nullable=True)
+    payment_mode = Column(String(32), nullable=True)
+    payment_reference_utr = Column(String(255), nullable=True)
+    partial_payment = Column(Boolean, nullable=True)
+    amount_received_inr = Column(Float, nullable=True)
+    tds_deducted_inr = Column(Float, nullable=True)
+    gst_reconciliation_status = Column(String(32), nullable=True)
+
+    junior_validated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    junior_validated_at = Column(DateTime, nullable=True)
+    cfo_approved_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    cfo_approved_at = Column(DateTime, nullable=True)
+    cfo_sign_off_acknowledged = Column(Boolean, nullable=True)
+
+    bank_match_status = Column(String(64), nullable=True)
+    bank_match_confidence = Column(Float, nullable=True)
+    bank_match_payload_json = Column(JSON, nullable=True)
+    overdue_escalation_last_at = Column(DateTime, nullable=True)
+    overdue_escalation_level = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False
+    )
+
+    billing = relationship("TaggdRevenueBilling", back_populates="workflow")
+    practice_submitted_by = relationship("User", foreign_keys=[practice_submitted_by_user_id])
+    finance_reviewer = relationship("User", foreign_keys=[finance_reviewer_user_id])
+    junior_validated_by = relationship("User", foreign_keys=[junior_validated_by_user_id])
+    cfo_approved_by = relationship("User", foreign_keys=[cfo_approved_by_user_id])
+    payment_receipts = relationship(
+        "FinancePaymentReceipt",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="FinancePaymentReceipt.id",
+    )
+    validation_events = relationship(
+        "FinanceBillingValidationEvent",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="FinanceBillingValidationEvent.id",
+    )
+
+
+class FinanceBillingValidationEvent(Base):
+    """Append-only audit trail for billing workflow transitions."""
+
+    __tablename__ = "finance_billing_validation_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(Integer, ForeignKey("finance_billing_workflow.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action = Column(String(64), nullable=False, index=True)
+    payload_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False, index=True)
+
+    workflow = relationship("FinanceBillingWorkflow", back_populates="validation_events")
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class FinancePaymentReceipt(Base):
+    """Partial or full payment lines against a billing workflow (treasury / collections)."""
+
+    __tablename__ = "finance_payment_receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(Integer, ForeignKey("finance_billing_workflow.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount_inr = Column(Float, nullable=False)
+    received_date = Column(DateTime, nullable=True)
+    payment_mode = Column(String(32), nullable=True)
+    utr_reference = Column(String(255), nullable=True)
+    partial = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    workflow = relationship("FinanceBillingWorkflow", back_populates="payment_receipts")
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+
+
+class FinanceTdsCertificate(Base):
+    """Form 16A / TDS certificate tracking (per billing workflow or project-level)."""
+
+    __tablename__ = "finance_tds_certificates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(Integer, ForeignKey("finance_billing_workflow.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    fy_label = Column(String(64), nullable=True, index=True)
+    counterparty_name = Column(String(512), nullable=True)
+    certificate_type = Column(String(64), nullable=True)
+    received_date = Column(DateTime, nullable=True)
+    file_ref = Column(String(512), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    workflow = relationship("FinanceBillingWorkflow", foreign_keys=[workflow_id])
+    project = relationship("Project", foreign_keys=[project_id])
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+
+
+class FinanceBankStatementLine(Base):
+    """Stub rows for future auto-reconciliation (import bank CSV / API)."""
+
+    __tablename__ = "finance_bank_statement_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    txn_date = Column(DateTime, nullable=True, index=True)
+    amount_inr = Column(Float, nullable=True)
+    narration = Column(Text, nullable=True)
+    import_batch_id = Column(String(64), nullable=True, index=True)
+    matched_workflow_id = Column(Integer, ForeignKey("finance_billing_workflow.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    matched_workflow = relationship("FinanceBillingWorkflow", foreign_keys=[matched_workflow_id])
 
 
 def _ensure_finance_unique_indexes():
@@ -921,6 +1112,60 @@ def _ensure_revenue_tracker_indexes():
         import logging
 
         logging.warning("revenue tracker unique indexes: %s", e)
+
+
+def _ensure_revenue_weekly_submission_schema():
+    """SQLite: weekly governance table + FK columns on forecast/visibility (legacy DBs)."""
+    from sqlalchemy import text
+
+    ddl_table = """
+    CREATE TABLE IF NOT EXISTS revenue_weekly_submission (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        week_start_date DATETIME NOT NULL,
+        period_type VARCHAR(16) NOT NULL DEFAULT 'weekly',
+        status VARCHAR(32) NOT NULL DEFAULT 'draft',
+        submitted_by_user_id INTEGER,
+        submitted_at DATETIME,
+        reviewed_by_user_id INTEGER,
+        reviewed_at DATETIME,
+        review_notes TEXT,
+        approved_by_user_id INTEGER,
+        approved_at DATETIME,
+        version INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME,
+        updated_at DATETIME,
+        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE,
+        FOREIGN KEY(submitted_by_user_id) REFERENCES users (id) ON DELETE SET NULL,
+        FOREIGN KEY(reviewed_by_user_id) REFERENCES users (id) ON DELETE SET NULL,
+        FOREIGN KEY(approved_by_user_id) REFERENCES users (id) ON DELETE SET NULL
+    )
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(ddl_table))
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_rev_weekly_submission "
+                    "ON revenue_weekly_submission (project_id, week_start_date, period_type)"
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rev_weekly_sub_status ON revenue_weekly_submission (status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_rev_weekly_sub_project ON revenue_weekly_submission (project_id)"))
+            for table, col in (
+                ("revenue_forecast_weekly", "weekly_submission_id"),
+                ("revenue_visibility_snapshot", "weekly_submission_id"),
+            ):
+                rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+                cols = {r[1] for r in rows} if rows else set()
+                if cols and col not in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} INTEGER REFERENCES revenue_weekly_submission(id) ON DELETE SET NULL"))
+                    conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{col} ON {table} ({col})"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("revenue_weekly_submission schema migration: %s", e)
 
 
 def _ensure_project_enterprise_columns():
@@ -1348,6 +1593,7 @@ def init_db():
         db.close()
     _ensure_finance_unique_indexes()
     _ensure_revenue_tracker_indexes()
+    _ensure_revenue_weekly_submission_schema()
     try:
         from backend.auth.bootstrap import bootstrap_default_admin
 
