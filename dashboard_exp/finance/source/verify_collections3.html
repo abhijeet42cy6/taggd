@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Collections Part 2</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    async function getSheetTotals(file, sheetName) {
+      const resp = await fetch(file);
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+      const sn   = wb.SheetNames.find(s => s.toLowerCase().includes(sheetName.toLowerCase()));
+      if (!sn) return { name: sheetName + ' NOT FOUND', totals: new Array(12).fill(0) };
+      const ws   = wb.Sheets[sn];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+      const totals = new Array(12).fill(0);
+      rows.slice(1).forEach(r => {
+        const name = String(r[1]||r[0]||'').trim();
+        if (!name) return;
+        for (let i=0;i<12;i++) {
+          const v = typeof r[7+i]==='number' ? r[7+i] : 0;
+          totals[i] += v;
+        }
+      });
+      return { name: sn, totals };
+    }
+
+    const MONTHS24 = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+    const MONTHS25 = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+
+    // Get all 4 sheets
+    const [cA24, cT24, cA25, cT25] = await Promise.all([
+      getSheetTotals('FY24-25_Finance_Data.xlsx', 'Revenue_Collected'),
+      getSheetTotals('FY24-25_Finance_Data.xlsx', 'Collection Target'),
+      getSheetTotals('FY25-26_Finance_Data.xlsx', 'Actual_Collection'),
+      getSheetTotals('FY25-26_Finance_Data.xlsx', 'Target_Collection'),
+    ]);
+
+    log += '=== FY24-25 Collection Actual (from Excel) ===\n';
+    log += 'revA: [' + cA24.totals.map(v=>v.toFixed(2)).join(', ') + ']\n';
+    log += 'Total: ' + cA24.totals.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (cA24.totals.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n\n';
+
+    log += '=== FY24-25 Collection Target (from Excel) ===\n';
+    log += 'collT: [' + cT24.totals.map(v=>v.toFixed(2)).join(', ') + ']\n';
+    log += 'Total: ' + cT24.totals.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (cT24.totals.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n\n';
+
+    log += '=== FY25-26 Collection Actual (from Excel) ===\n';
+    log += 'collA: [' + cA25.totals.map(v=>v.toFixed(2)).join(', ') + ']\n';
+    log += 'Total: ' + cA25.totals.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (cA25.totals.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n\n';
+
+    log += '=== FY25-26 Collection Target (from Excel) ===\n';
+    log += 'collT: [' + cT25.totals.map(v=>v.toFixed(2)).join(', ') + ']\n';
+    log += 'Total: ' + cT25.totals.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (cT25.totals.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n\n';
+
+    // Month-by-month comparison FY24-25
+    log += '=== FY24-25 Month Comparison ===\n';
+    log += 'Month   | Actual(Excel) | Actual(js) | Target(Excel) | Target(js)\n';
+    const js_cA24 = [946.37, 758.93, 1073.20, 779.78, 782.54, 768.34, 881.05, 892.40, 950.00, 825.00, 630.00, 717.04];
+    const js_cT24 = [1444.87, 1209.70, 1507.47, 1142.32, 1066.33, 1201.04, 1134.12, 1216.83, 1390.72, 986.18, 1380.65, 1578.01];
+    MONTHS24.forEach((m,i) => {
+      const aE=cA24.totals[i], aJ=js_cA24[i], tE=cT24.totals[i], tJ=js_cT24[i];
+      const aOK = Math.abs(aE-aJ)<1, tOK = Math.abs(tE-tJ)<1;
+      log += m.padEnd(7)+'| '+aE.toFixed(2).padStart(13)+'| '+aJ.toFixed(2).padStart(10)+' '+(aOK?'✓':'✗')+
+        '| '+tE.toFixed(2).padStart(13)+'| '+tJ.toFixed(2).padStart(10)+' '+(tOK?'✓':'✗')+'\n';
+    });
+
+    log += '\n=== FY25-26 Month Comparison ===\n';
+    log += 'Month   | Actual(Excel) | Actual(js) | Target(Excel) | Target(js)\n';
+    const js_cA25 = [879.72, 832.36, 1046.94, 794.16, 838.86, 993.51, 856.21, 936.73, 1063.28, 915.44, 0, 0];
+    const js_cT25 = [1206.84, 1124.38, 1307.62, 952.08, 1009.46, 1164.87, 928.00, 1044.12, 1271.42, 1165.35, 0, 0];
+    MONTHS25.forEach((m,i) => {
+      const aE=cA25.totals[i], aJ=js_cA25[i], tE=cT25.totals[i], tJ=js_cT25[i];
+      const aOK = Math.abs(aE-aJ)<1, tOK = Math.abs(tE-tJ)<1;
+      log += m.padEnd(7)+'| '+aE.toFixed(2).padStart(13)+'| '+aJ.toFixed(2).padStart(10)+' '+(aOK?'✓':'✗')+
+        '| '+tE.toFixed(2).padStart(13)+'| '+tJ.toFixed(2).padStart(10)+' '+(tOK?'✓':'✗')+'\n';
+    });
+
+    // YTD totals for FY25-26
+    const ytdActual25 = cA25.totals.filter(v=>v>0).reduce((s,v)=>s+v,0);
+    const ytdTarget25 = cT25.totals.filter(v=>v>0).reduce((s,v)=>s+v,0);
+    log += '\nFY25-26 YTD (months with data):\n';
+    log += 'Actual: '+ytdActual25.toFixed(2)+' L = ₹'+(ytdActual25/100).toFixed(2)+' Cr\n';
+    log += 'Target: '+ytdTarget25.toFixed(2)+' L = ₹'+(ytdTarget25/100).toFixed(2)+' Cr\n';
+    log += 'Attainment: '+(ytdTarget25>0?(ytdActual25/ytdTarget25*100).toFixed(1):'N/A')+'%\n';
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR:'+e.message+'\n'+e.stack);
+    document.getElementById('out').textContent='ERROR:'+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

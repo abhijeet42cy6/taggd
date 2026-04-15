@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>FY2526 Taggd Full</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body><pre id="out">Loading...</pre>
+<script>
+async function run() {
+  const out = document.getElementById('out');
+  try {
+    const resp = await fetch('../source/FY25-26_Finance_Data.xlsx');
+    const ab   = await resp.arrayBuffer();
+    const wb   = XLSX.read(ab, { type: 'array' });
+
+    let result = '';
+    // Serial dates: 45748=Apr25, 45778=May25, 45809=Jun25, 45839=Jul25,
+    //               45870=Aug25, 45901=Sep25, 45931=Oct25, 45962=Nov25,
+    //               45992=Dec25, 46023=Jan26, 46054=Feb26, 46082=Mar26
+    const MONTH_COLS   = [7,8,9,10,11,12,13,14,15,16,17,18];
+    const MONTH_LABELS = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+
+    ['Taggd_Source_Joiner','Non Taggd_Source_Joiner'].forEach(name => {
+      const ws  = wb.Sheets[name];
+      if (!ws) { result += `SHEET NOT FOUND: ${name}\n`; return; }
+      const arr = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+
+      // Verify header serial numbers map to correct months
+      result += `\n===== ${name} =====\n`;
+      result += `Col headers: ${MONTH_COLS.map(c => arr[0][c]).join(', ')}\n`;
+
+      const totals = MONTH_COLS.map(col => {
+        let sum = 0;
+        for (let r = 1; r < arr.length; r++) {
+          sum += parseFloat(arr[r][col]) || 0;
+        }
+        return Math.round(sum);
+      });
+
+      MONTH_LABELS.forEach((lbl, i) => { result += `  ${lbl}: ${totals[i]}\n`; });
+      result += `TOTAL: ${totals.reduce((a,b)=>a+b,0)}\n`;
+
+      // Also print ALL rows
+      result += '\nPER-PROJECT:\n';
+      arr.slice(1).forEach((row, ri) => {
+        const vals = MONTH_COLS.map(c => parseFloat(row[c])||0);
+        const s = vals.reduce((a,b)=>a+b,0);
+        if (s > 0) result += `  ${String(row[1]).padEnd(30)} | ${vals.join(' | ')} | Sum=${Math.round(s)}\n`;
+      });
+    });
+
+    out.textContent = result;
+    console.log('RESULT:', result);
+  } catch(e) {
+    console.error('ERR:', e.message);
+    out.textContent = 'ERROR: ' + e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

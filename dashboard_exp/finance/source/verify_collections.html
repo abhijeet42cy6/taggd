@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Verify Collections Both FYs</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    for (const file of ['FY24-25_Finance_Data.xlsx', 'FY25-26_Finance_Data.xlsx']) {
+      const resp = await fetch(file);
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+      const fy   = file.includes('24') ? 'FY24-25' : 'FY25-26';
+      const MONTHS = fy === 'FY24-25'
+        ? ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25']
+        : ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+
+      log += '\n========== ' + fy + ' ==========\n';
+      log += 'All sheets: ' + wb.SheetNames.join(', ') + '\n\n';
+
+      // Find collection-related sheets
+      const collSheets = wb.SheetNames.filter(s =>
+        /collect|revenue_collect|actual_collect/i.test(s)
+      );
+      const targetSheets = wb.SheetNames.filter(s =>
+        /target.*collect|collect.*target/i.test(s)
+      );
+      log += 'Collection sheets: ' + collSheets.join(', ') + '\n';
+      log += 'Target sheets: ' + targetSheets.join(', ') + '\n\n';
+
+      // Read each collection sheet
+      for (const shName of [...collSheets, ...targetSheets]) {
+        const ws = wb.Sheets[shName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+        log += '--- ' + shName + ' ---\n';
+        log += 'Row 0: ' + JSON.stringify(rows[0]) + '\n';
+        log += 'Row 1: ' + JSON.stringify(rows[1]) + '\n\n';
+
+        // Sum all project rows (cols 7 onward = months)
+        const totals = new Array(12).fill(0);
+        let cnt = 0;
+        rows.slice(1).forEach(r => {
+          const name = String(r[1]||r[0]||'').trim();
+          if (!name) return;
+          let has = false;
+          for (let i=0;i<12;i++) {
+            const v = typeof r[7+i]==='number' ? r[7+i] : 0;
+            totals[i] += v;
+            if (v) has = true;
+          }
+          if (has) cnt++;
+        });
+
+        log += 'Projects/rows with data: ' + cnt + '\n';
+        MONTHS.forEach((m,i) => {
+          if (totals[i] !== 0) log += m + ': ' + totals[i].toFixed(2) + ' L\n';
+        });
+        const grandTotal = totals.reduce((s,v)=>s+v,0);
+        log += 'TOTAL: ' + grandTotal.toFixed(2) + ' L = ₹' + (grandTotal/100).toFixed(2) + ' Cr\n\n';
+      }
+    }
+
+    // Cross-check with js/data.js values
+    log += '\n========== Cross-check with js/data.js ==========\n';
+
+    // FY24-25 stored values
+    const collA24 = [946.37, 758.93, 1073.20, 779.78, 782.54, 768.34, 881.05, 892.40, 950.00, 825.00, 630.00, 717.04];
+    const collT24 = [1444.87, 1209.70, 1507.47, 1142.32, 1066.33, 1201.04, 1134.12, 1216.83, 1200.00, 1100.00, 900.00, 1707.66];
+    log += 'FY24-25 collA sum: ' + collA24.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (collA24.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n';
+    log += 'FY24-25 collT sum: ' + collT24.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (collT24.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n\n';
+
+    // FY25-26 stored values
+    const collA25 = [879.72, 832.36, 1046.94, 794.16, 838.86, 993.51, 856.21, 936.73, 1063.28, 915.44, 0, 0];
+    const collT25 = [1206.84, 1124.38, 1307.62, 952.08, 1009.46, 1164.87, 928.00, 1044.12, 1271.42, 1165.35, 0, 0];
+    log += 'FY25-26 collA sum (stored): ' + collA25.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (collA25.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n';
+    log += 'FY25-26 collT sum (stored): ' + collT25.reduce((s,v)=>s+v,0).toFixed(2) + ' L = ₹' + (collT25.reduce((s,v)=>s+v,0)/100).toFixed(2) + ' Cr\n';
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR: ' + e.message + '\n' + e.stack);
+    document.getElementById('out').textContent = 'ERROR: ' + e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

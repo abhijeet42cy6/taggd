@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Extract Rev Forecast Sheet</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<h2>Rev Forecast Sheet Extractor</h2>
+<p>Loading FY25-26 latest Excel...</p>
+<script>
+async function run() {
+  try {
+    const resp = await fetch('FY2526_latest.xlsx');
+    const ab   = await resp.arrayBuffer();
+    const wb   = XLSX.read(ab, { type: 'array' });
+
+    console.log('=== All Sheet Names ===');
+    console.log(wb.SheetNames.join(' | '));
+
+    // Find Rev_Forecast sheet
+    const rfName = wb.SheetNames.find(s => s.toLowerCase().replace(/[^a-z0-9]/g,'').includes('revforecast') || s.toLowerCase().includes('rev_forecast') || s.toLowerCase().includes('forecast'));
+    console.log('Rev_Forecast sheet name: ' + rfName);
+
+    if (!rfName) {
+      console.log('ERROR: Could not find Rev_Forecast sheet');
+      return;
+    }
+
+    const ws = wb.Sheets[rfName];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+
+    // Print first 5 rows to understand structure
+    console.log('=== Header rows (first 5 rows) ===');
+    for (let i = 0; i < Math.min(5, data.length); i++) {
+      console.log('Row ' + i + ': ' + JSON.stringify(data[i].slice(0, 20)));
+    }
+
+    // Find the row containing month headers (Apr, May, Jun etc.)
+    let headerRow = -1;
+    let monthCols = {};
+    const MONTHS = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+    
+    for (let r = 0; r < Math.min(10, data.length); r++) {
+      const row = data[r];
+      let found = 0;
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] || '').toLowerCase().trim();
+        if (MONTHS.some(m => cell.startsWith(m))) {
+          found++;
+          if (found >= 3) {
+            headerRow = r;
+            // Map month columns
+            for (let cc = 0; cc < row.length; cc++) {
+              const cellVal = String(row[cc] || '').toLowerCase().trim();
+              for (let mi = 0; mi < MONTHS.length; mi++) {
+                if (cellVal.startsWith(MONTHS[mi]) && monthCols[mi] === undefined) {
+                  monthCols[mi] = cc;
+                }
+              }
+            }
+            break;
+          }
+        }
+      }
+      if (headerRow >= 0) break;
+    }
+
+    console.log('Header row index: ' + headerRow);
+    console.log('Month column mapping: ' + JSON.stringify(monthCols));
+
+    if (headerRow < 0) {
+      // Try numeric approach: look at the structure differently
+      console.log('=== Trying to find data rows ===');
+      // Print rows 0-10 fully
+      for (let i = 0; i < Math.min(15, data.length); i++) {
+        console.log('Row ' + i + ': ' + JSON.stringify(data[i]));
+      }
+      return;
+    }
+
+    // Now sum all data rows for each month
+    const monthSums = new Array(12).fill(0);
+    for (let r = headerRow + 1; r < data.length; r++) {
+      const row = data[r];
+      for (let mi = 0; mi < 12; mi++) {
+        const col = monthCols[mi];
+        if (col !== undefined) {
+          const val = parseFloat(row[col]) || 0;
+          monthSums[mi] += val;
+        }
+      }
+    }
+
+    console.log('=== Monthly Revenue Forecast Sums (₹ L) ===');
+    const mNames = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+    monthSums.forEach((v, i) => {
+      console.log(mNames[i] + ': ' + v.toFixed(2));
+    });
+
+    const q1 = monthSums[0]+monthSums[1]+monthSums[2];
+    const q2 = monthSums[3]+monthSums[4]+monthSums[5];
+    const q3 = monthSums[6]+monthSums[7]+monthSums[8];
+    const q4 = monthSums[9]+monthSums[10]+monthSums[11];
+    const ytd = monthSums.reduce((t,v) => t+v, 0);
+    const ytdActual = monthSums.slice(0,10).reduce((t,v) => t+v, 0); // Apr-Jan only
+
+    console.log('=== Quarterly Totals (₹ L) ===');
+    console.log('Q1 (Apr-Jun): ' + q1.toFixed(2));
+    console.log('Q2 (Jul-Sep): ' + q2.toFixed(2));
+    console.log('Q3 (Oct-Dec): ' + q3.toFixed(2));
+    console.log('Q4 (Jan-Mar): ' + q4.toFixed(2));
+    console.log('Full Year: ' + ytd.toFixed(2));
+    console.log('YTD (Apr-Jan): ' + ytdActual.toFixed(2));
+
+    // Also check Revenue_Actual sheet
+    const raName = wb.SheetNames.find(s => s.toLowerCase().replace(/[^a-z]/g,'').includes('revenueactual') || s.toLowerCase().includes('revenue_actual'));
+    console.log('\n=== Revenue_Actual sheet: ' + raName + ' ===');
+    
+    if (raName) {
+      const wsA = wb.Sheets[raName];
+      const dataA = XLSX.utils.sheet_to_json(wsA, { header: 1, defval: 0 });
+      
+      // Find header row in actual sheet
+      let headerRowA = -1;
+      let monthColsA = {};
+      for (let r = 0; r < Math.min(10, dataA.length); r++) {
+        const row = dataA[r];
+        let found = 0;
+        for (let c = 0; c < row.length; c++) {
+          const cell = String(row[c] || '').toLowerCase().trim();
+          if (MONTHS.some(m => cell.startsWith(m))) {
+            found++;
+            if (found >= 3) {
+              headerRowA = r;
+              for (let cc = 0; cc < row.length; cc++) {
+                const cellVal = String(row[cc] || '').toLowerCase().trim();
+                for (let mi = 0; mi < MONTHS.length; mi++) {
+                  if (cellVal.startsWith(MONTHS[mi]) && monthColsA[mi] === undefined) {
+                    monthColsA[mi] = cc;
+                  }
+                }
+              }
+              break;
+            }
+          }
+        }
+        if (headerRowA >= 0) break;
+      }
+
+      if (headerRowA >= 0) {
+        const actualSums = new Array(12).fill(0);
+        for (let r = headerRowA + 1; r < dataA.length; r++) {
+          const row = dataA[r];
+          for (let mi = 0; mi < 12; mi++) {
+            const col = monthColsA[mi];
+            if (col !== undefined) {
+              actualSums[mi] += parseFloat(row[col]) || 0;
+            }
+          }
+        }
+        
+        console.log('Revenue_Actual monthly sums:');
+        actualSums.forEach((v, i) => {
+          console.log(mNames[i] + ': ' + v.toFixed(2));
+        });
+        
+        const ytdA = actualSums.slice(0,10).reduce((t,v) => t+v, 0);
+        console.log('YTD Actual (Apr-Jan): ' + ytdA.toFixed(2));
+      }
+    }
+
+    // Print raw data rows to debug
+    console.log('\n=== First 3 data rows of Rev_Forecast ===');
+    for (let r = headerRow+1; r < Math.min(headerRow+4, data.length); r++) {
+      console.log('Row ' + r + ': ' + JSON.stringify(data[r]));
+    }
+
+  } catch(e) {
+    console.error('ERROR: ' + e.message);
+    console.error(e.stack);
+  }
+}
+run();
+</script>
+</body>
+</html>

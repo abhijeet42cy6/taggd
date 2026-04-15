@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { padding: 50px; font-family: Arial; background: #111; color: white; }
+        .upload-btn {
+            padding: 20px 40px;
+            font-size: 18px;
+            background: #ff6600;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 20px 0;
+        }
+        .upload-btn:hover { background: #ff8833; }
+        #status { 
+            margin-top: 20px; 
+            padding: 20px; 
+            background: #222; 
+            border-radius: 8px;
+            min-height: 100px;
+        }
+        .progress { 
+            width: 100%; 
+            height: 30px; 
+            background: #333; 
+            border-radius: 5px; 
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6600, #ff8833);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Excel Upload Test</h1>
+    
+    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;">
+    <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+        📁 Select Excel File
+    </button>
+    
+    <div class="progress">
+        <div class="progress-bar" id="progressBar">0%</div>
+    </div>
+    
+    <div id="status">
+        <h3>Status:</h3>
+        <p>Waiting for file...</p>
+    </div>
+    
+    <script>
+        console.log('✅ Script loaded');
+        console.log('✅ XLSX library:', typeof XLSX);
+        
+        const fileInput = document.getElementById('fileInput');
+        const status = document.getElementById('status');
+        const progressBar = document.getElementById('progressBar');
+        
+        fileInput.addEventListener('change', function(event) {
+            console.log('📁 File input changed!');
+            const file = event.target.files[0];
+            
+            if (!file) {
+                status.innerHTML = '<h3>Status:</h3><p style="color: #ff6600;">No file selected</p>';
+                return;
+            }
+            
+            console.log('📁 File:', file.name, file.size, 'bytes');
+            status.innerHTML = '<h3>Status:</h3><p style="color: #ffaa00;">Reading file: ' + file.name + '</p>';
+            progressBar.style.width = '20%';
+            progressBar.textContent = '20%';
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                console.log('📖 File read complete');
+                status.innerHTML = '<h3>Status:</h3><p style="color: #ffaa00;">Parsing Excel...</p>';
+                progressBar.style.width = '50%';
+                progressBar.textContent = '50%';
+                
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    console.log('📊 Workbook sheets:', workbook.SheetNames);
+                    
+                    progressBar.style.width = '100%';
+                    progressBar.textContent = '100%';
+                    
+                    let html = '<h3>✅ Success!</h3>';
+                    html += '<p><strong>File:</strong> ' + file.name + '</p>';
+                    html += '<p><strong>Size:</strong> ' + (file.size / 1024 / 1024).toFixed(2) + ' MB</p>';
+                    html += '<p><strong>Sheets found:</strong></p><ul>';
+                    
+                    workbook.SheetNames.forEach(sheetName => {
+                        const sheet = workbook.Sheets[sheetName];
+                        const data = XLSX.utils.sheet_to_json(sheet);
+                        html += '<li><strong>' + sheetName + ':</strong> ' + data.length + ' rows</li>';
+                    });
+                    
+                    html += '</ul>';
+                    status.innerHTML = html;
+                    
+                } catch (error) {
+                    console.error('❌ Error:', error);
+                    status.innerHTML = '<h3>❌ Error!</h3><p style="color: #ff0000;">' + error.message + '</p>';
+                    progressBar.style.width = '0%';
+                    progressBar.textContent = '0%';
+                }
+            };
+            
+            reader.onerror = function(error) {
+                console.error('❌ FileReader error:', error);
+                status.innerHTML = '<h3>❌ Error!</h3><p style="color: #ff0000;">Failed to read file</p>';
+                progressBar.style.width = '0%';
+                progressBar.textContent = '0%';
+            };
+            
+            reader.readAsArrayBuffer(file);
+        });
+        
+        console.log('✅ Event listener attached');
+    </script>
+</body>
+</html>

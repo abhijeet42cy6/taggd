@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Taggd Finance Dashboard</title>
+  <!-- v2.4 — FY24-25 taggd/nontaggd data corrected from Excel source -->
+  <!-- cache-bust: 20260304d -->
+  <link rel="stylesheet" href="css/lib/fontawesome.min.css" />
+  <link rel="stylesheet" href="css/style.css?v=20260304d" />
+</head>
+<body>
+
+<!-- ══ PASSWORD GATE ════════════════════════════════════════ -->
+<div id="pwd-gate">
+  <div id="pwd-modal">
+    <div id="pwd-logo-wrap">
+      <img src="images/taggd-logo.png" alt="Tagger" id="pwd-logo" />
+    </div>
+    <div id="pwd-welcome">Welcome Tagger!</div>
+    <div id="pwd-subtitle">You are now accessing the <strong>Finance Dashboard</strong>.</div>
+    <div id="pwd-date" class="pwd-meta"></div>
+    <div id="pwd-instruction"><i class="fas fa-lock" style="margin-right:6px;opacity:.7"></i>Please enter password to continue</div>
+    <div id="pwd-input-wrap">
+      <input type="password" id="pwd-input" placeholder="Enter password" autocomplete="off" />
+      <button id="pwd-eye" type="button" onclick="togglePwdEye()" title="Show/Hide password">
+        <i class="fas fa-eye" id="pwd-eye-icon"></i>
+      </button>
+    </div>
+    <div id="pwd-error"></div>
+    <button id="pwd-submit" onclick="submitPassword()">
+      <i class="fas fa-unlock-alt"></i>&nbsp; Unlock Dashboard
+    </button>
+    <div id="pwd-footer">Made by Tagger &nbsp;·&nbsp; Powered by AI</div>
+  </div>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-txt" id="loading-txt">Loading…</div>
+</div>
+
+<div id="app">
+
+  <!-- ══ SIDEBAR ══════════════════════════════════════════════ -->
+  <nav id="sidebar">
+    <a class="sb-logo" href="#">
+      <img src="images/taggd-logo.png" alt="Taggd" class="sb-logo-img" />
+    </a>
+    <div class="nav-section">
+      <div class="nav-group">Dashboard Views</div>
+      <a class="nav-item active" href="#" data-page="overview"><i class="fas fa-gauge-high"></i><span class="nav-lbl">Executive Overview</span></a>
+      <a class="nav-item" href="#" data-page="pnl"><i class="fas fa-file-invoice-dollar"></i><span class="nav-lbl">P&amp;L Statement</span></a>
+      <a class="nav-item" href="#" data-page="revenue"><i class="fas fa-chart-line"></i><span class="nav-lbl">Revenue Analysis</span></a>
+      <a class="nav-item" href="#" data-page="expense"><i class="fas fa-percent"></i><span class="nav-lbl">Expense &amp; CM</span></a>
+      <a class="nav-item" href="#" data-page="hiring"><i class="fas fa-user-plus"></i><span class="nav-lbl">Hiring Analysis</span></a>
+      <a class="nav-item" href="#" data-page="cashflow"><i class="fas fa-money-bill-trend-up"></i><span class="nav-lbl">Collections &amp; Cash</span></a>
+      <div class="nav-group" style="margin-top:8px">Reference</div>
+      <a class="nav-item" href="#" data-page="manual"><i class="fas fa-book-open"></i><span class="nav-lbl">User Manual</span></a>
+      <a class="nav-item" href="upload.html" style="color:var(--orange)"><i class="fas fa-cloud-arrow-up"></i><span class="nav-lbl">Upload / Update Data</span></a>
+      <div class="nav-group" style="margin-top:8px">Data Sources</div>
+      <div class="nav-info"><i class="fas fa-table-cells"></i><span class="nav-lbl">FY24-25_Finance_Data.xlsx ✓</span></div>
+      <div class="nav-info"><i class="fas fa-table-cells"></i><span class="nav-lbl">FY25-26_Finance_Data.xlsx ✓</span></div>
+    </div>
+    <div class="sb-foot">
+      <div class="sb-foot-title">Made by Tagger</div>
+      <div class="sb-foot-sub">Powered by AI</div>
+    </div>
+  </nav>
+
+  <!-- ══ MAIN ════════════════════════════════════════════════ -->
+  <div id="main">
+
+    <!-- Topbar -->
+    <header id="topbar">
+      <button class="tb-toggle" id="sb-toggle" title="Toggle Sidebar"><i class="fas fa-bars"></i></button>
+      <div class="tb-title" id="page-title">Executive <span>Overview</span></div>
+      <div class="tb-fy">
+        <button class="tb-fy-btn" data-fy="FY2425">FY 2024-25</button>
+        <button class="tb-fy-btn active" data-fy="FY2526">FY 2025-26</button>
+      </div>
+      <button class="btn btn-outline active" id="compare-toggle">
+        <i class="fas fa-code-branch"></i>
+        <span id="cmp-label">FY Compare: ON</span>
+      </button>
+      <div class="tb-actions">
+        <button class="btn btn-primary" onclick="window.print()" title="Print / Export PDF">
+          <i class="fas fa-download"></i> Export
+        </button>
+      </div>
+    </header>
+
+    <!-- ══ FILTER BAR ══ -->
+    <div id="filterbar">
+      <div class="fb-row">
+
+        <!-- Quarter pills -->
+        <div class="fb-group" title="Filter by Quarter">
+          <span class="fb-label"><i class="fas fa-calendar-week"></i>Period:</span>
+          <div class="fb-pills" id="quarter-pills">
+            <div class="fb-pill q-pill active" data-q="ALL">All</div>
+            <div class="fb-pill q-pill" data-q="Q1" title="Apr – Jun">Q1</div>
+            <div class="fb-pill q-pill" data-q="Q2" title="Jul – Sep">Q2</div>
+            <div class="fb-pill q-pill" data-q="Q3" title="Oct – Dec">Q3</div>
+            <div class="fb-pill q-pill" data-q="Q4" title="Jan – Mar">Q4</div>
+          </div>
+        </div>
+
+        <div class="fb-div"></div>
+
+        <!-- Month picker -->
+        <div class="fb-group" id="month-fb-group" title="Select specific months">
+          <span class="fb-label"><i class="fas fa-calendar-days"></i>Month:</span>
+          <div class="month-dropdown-wrap">
+            <button class="month-dropdown-btn" id="month-dropdown-btn">
+              <span id="month-btn-label">All</span>
+              <span class="badge" id="month-badge" style="display:none">0</span>
+              <i class="fas fa-chevron-down"></i>
+            </button>
+            <div class="month-dropdown-panel" id="month-dropdown-panel">
+              <div class="month-grid" id="month-grid"></div>
+              <div class="mdp-actions">
+                <button class="mdp-btn" onclick="clearMonths()">Clear</button>
+                <button class="mdp-btn" onclick="selectAllMonths()">All</button>
+                <button class="mdp-btn primary" onclick="applyMonths()">Apply</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fb-div"></div>
+
+        <!-- Region (multi-select, populated dynamically) -->
+        <div class="fb-group" title="Filter by Region">
+          <span class="fb-label"><i class="fas fa-map-marker-alt"></i>Region:</span>
+          <select class="fb-sel" id="region-sel" style="display:none"></select>
+        </div>
+
+        <!-- Sub Region (multi-select, populated dynamically) -->
+        <div class="fb-group" title="Filter by Sub Region">
+          <span class="fb-label"><i class="fas fa-map-pin"></i>Sub Region:</span>
+          <select class="fb-sel" id="subregion-sel" style="display:none"></select>
+        </div>
+
+        <!-- Region Head (multi-select, populated dynamically) -->
+        <div class="fb-group" title="Filter by Region Head">
+          <span class="fb-label"><i class="fas fa-user-tie"></i>Region Head:</span>
+          <select class="fb-sel" id="regionhead-sel" style="display:none;min-width:100px"></select>
+        </div>
+
+        <!-- Practice Head (multi-select, populated dynamically) -->
+        <div class="fb-group" title="Filter by Practice Head">
+          <span class="fb-label"><i class="fas fa-user-gear"></i>Practice Head:</span>
+          <select class="fb-sel" id="practicehead-sel" style="display:none"></select>
+        </div>
+
+        <!-- Vertical (multi-select, populated dynamically) -->
+        <div class="fb-group" title="Filter by Vertical">
+          <span class="fb-label"><i class="fas fa-layer-group"></i>Vertical:</span>
+          <select class="fb-sel" id="vertical-sel" style="display:none"></select>
+        </div>
+
+        <!-- Account (multi-select, populated dynamically) -->
+        <div class="fb-group" title="Filter by Account">
+          <span class="fb-label"><i class="fas fa-building"></i>Account:</span>
+          <select class="fb-sel" id="account-sel" style="display:none"></select>
+        </div>
+
+        <div class="fb-div"></div>
+
+        <!-- Reset -->
+        <button class="fb-reset" id="reset-filters" title="Reset all filters">
+          <i class="fas fa-rotate-left"></i> Reset
+        </button>
+
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div id="content"></div>
+
+  </div>
+</div>
+
+<!-- ── Scripts: load Chart.js synchronously, then boot app ── -->
+<script>
+// Safety net: force-hide overlay after 2s no matter what
+window._overlayTimer = setTimeout(function() {
+  var ov = document.getElementById('loading-overlay');
+  if (ov) { ov.style.display = 'none'; ov.style.opacity = '0'; }
+}, 2000);
+</script>
+
+<!-- Chart.js + datalabels plugin (local copies for reliability) -->
+<script src="js/lib/chart.umd.min.js"></script>
+<script src="js/lib/chartjs-plugin-datalabels.min.js"></script>
+
+<!-- App data & logic -->
+<script src="js/data.js?v=20260304d"></script>
+<script src="js/app.js?v=20260304d"></script>
+
+<script>
+// Post-load check: if Chart didn't load, show an inline stub so app.js doesn't crash
+(function() {
+  if (typeof Chart === 'undefined') {
+    console.warn('Chart.js failed to load from CDN — using stub');
+    window.Chart = function() { return { destroy: function(){} }; };
+    window.Chart.defaults = { font:{}, color:'', plugins:{ legend:{display:false}, datalabels:{display:false} } };
+    window.Chart.register = function(){};
+    window.ChartDataLabels = {};
+  }
+  if (typeof ChartDataLabels === 'undefined') {
+    window.ChartDataLabels = {};
+  }
+})();
+</script>
+
+<!-- ══ PASSWORD GATE LOGIC ══════════════════════════════════ -->
+<script>
+(function() {
+  // ── Set live date in the modal ──────────────────────────
+  const now  = new Date();
+  const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
+  const liveDate = now.toLocaleDateString('en-IN', opts);
+  const el = document.getElementById('pwd-date');
+  if (el) el.textContent = liveDate;
+
+  // ── Auto-unlock if already authenticated this session ───
+  if (sessionStorage.getItem('tagger_auth') === '1') {
+    hidePwdGate();
+  } else {
+    // Focus the input for quick entry
+    const inp = document.getElementById('pwd-input');
+    if (inp) setTimeout(function(){ inp.focus(); }, 300);
+  }
+})();
+
+function submitPassword() {
+  var val = (document.getElementById('pwd-input').value || '').trim();
+  var err = document.getElementById('pwd-error');
+  var btn = document.getElementById('pwd-submit');
+
+  if (val === 'Finance@0326') {
+    // ── Correct password ──
+    sessionStorage.setItem('tagger_auth', '1');
+    err.textContent = '';
+    btn.innerHTML   = '<i class="fas fa-check-circle"></i>&nbsp; Unlocking…';
+    btn.style.background = 'linear-gradient(135deg,#10B981 0%,#059669 100%)';
+
+    var gate = document.getElementById('pwd-gate');
+    setTimeout(function() {
+      gate.style.transition = 'opacity .45s ease, transform .45s ease';
+      gate.style.opacity    = '0';
+      gate.style.transform  = 'scale(1.04)';
+    }, 350);
+    setTimeout(function() {
+      gate.style.display = 'none';
+    }, 800);
+  } else {
+    // ── Wrong password ──
+    err.textContent = '✕  Incorrect password. Please try again.';
+    var input = document.getElementById('pwd-input');
+    input.classList.add('shake');
+    setTimeout(function(){ input.classList.remove('shake'); }, 500);
+    input.value = '';
+    input.focus();
+  }
+}
+
+function hidePwdGate() {
+  var gate = document.getElementById('pwd-gate');
+  if (gate) gate.style.display = 'none';
+}
+
+function togglePwdEye() {
+  var inp  = document.getElementById('pwd-input');
+  var icon = document.getElementById('pwd-eye-icon');
+  if (inp.type === 'password') {
+    inp.type        = 'text';
+    icon.className  = 'fas fa-eye-slash';
+  } else {
+    inp.type        = 'password';
+    icon.className  = 'fas fa-eye';
+  }
+}
+
+// Allow Enter key to submit
+document.getElementById('pwd-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitPassword();
+});
+</script>
+</body>
+</html>

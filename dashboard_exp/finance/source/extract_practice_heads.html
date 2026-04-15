@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>Extract Practice Heads</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<h2>Practice Head Extractor</h2>
+<div id="out" style="font-family:monospace;white-space:pre;font-size:12px;"></div>
+<script>
+const log = s => { document.getElementById('out').textContent += s + '\n'; };
+
+async function loadWB(url) {
+  const resp = await fetch(url);
+  const buf = await resp.arrayBuffer();
+  return XLSX.read(buf, {type:'array'});
+}
+
+async function run() {
+  const files = [
+    { label:'FY24-25', url:'FY24-25_Finance_Data.xlsx' },
+    { label:'FY25-26', url:'FY25-26_Finance_Data.xlsx' }
+  ];
+
+  for (const f of files) {
+    log('\n========== ' + f.label + ' ==========');
+    const wb = await loadWB(f.url);
+    log('Sheets: ' + wb.SheetNames.join(', '));
+
+    // Try every sheet to find account/practice head info
+    for (const name of wb.SheetNames) {
+      const ws = wb.Sheets[name];
+      const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+      if (rows.length === 0) continue;
+
+      // Check if this sheet has relevant columns
+      const keys = Object.keys(rows[0] || {}).map(k => k.toString().toLowerCase());
+      const hasPH = keys.some(k => k.includes('practice') || k.includes('ph'));
+      const hasAcc = keys.some(k => k.includes('account') || k.includes('project') || k.includes('client'));
+
+      if (hasPH || hasAcc) {
+        log('\n--- Sheet: ' + name + ' (' + rows.length + ' rows) ---');
+        log('Columns: ' + Object.keys(rows[0]).join(' | '));
+        // Print all rows
+        rows.forEach((r, i) => {
+          const vals = Object.values(r).join(' | ');
+          if (vals.trim().replace(/\|/g,'').trim()) {
+            log('  Row ' + (i+1) + ': ' + vals);
+          }
+        });
+      }
+    }
+
+    // Also dump first 5 rows of every sheet for inspection
+    log('\n--- FIRST ROW OF EACH SHEET ---');
+    for (const name of wb.SheetNames) {
+      const ws = wb.Sheets[name];
+      const rows = XLSX.utils.sheet_to_json(ws, {defval:'', header:1});
+      if (rows.length > 0) {
+        log(name + ': ' + JSON.stringify(rows[0]).substring(0,200));
+      }
+    }
+  }
+}
+
+run().catch(e => log('ERROR: ' + e.message));
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Verify Rev Productivity Both FYs</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    // ── FY25-26 ──
+    {
+      const resp = await fetch('FY25-26_Finance_Data.xlsx');
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+      log += 'FY25-26 sheets: ' + wb.SheetNames.join(', ') + '\n\n';
+
+      const prodSheet = wb.SheetNames.find(s => /rev.*prod|productivity/i.test(s));
+      log += 'Productivity sheet: ' + prodSheet + '\n';
+
+      if (prodSheet) {
+        const ws = wb.Sheets[prodSheet];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+        log += 'First 3 rows:\n';
+        rows.slice(0,3).forEach((r,i) => log += 'Row '+i+': '+JSON.stringify(r.slice(0,16))+'\n');
+
+        // Sum all project rows for each month col (cols 7-18)
+        const MONTHS = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+        const totals = new Array(12).fill(0);
+        let cnt = 0;
+        rows.slice(1).forEach(r => {
+          const name = String(r[1]||'').trim();
+          if (!name) return;
+          let has = false;
+          for (let i=0;i<12;i++) {
+            const v = typeof r[7+i]==='number'?r[7+i]:0;
+            totals[i]+=v; if(v) has=true;
+          }
+          if(has) cnt++;
+        });
+        log += 'Projects: ' + cnt + '\n';
+        MONTHS.forEach((m,i) => log += m+': '+totals[i].toFixed(2)+'\n');
+        log += 'Avg (non-zero): ' + (totals.filter(v=>v>0).reduce((s,v)=>s+v,0)/totals.filter(v=>v>0).length).toFixed(2) + '\n\n';
+      }
+
+      // Also read WL1 and RevActual to manually verify formula
+      const wl1Sheet = wb.SheetNames.find(s => /headcount.*wl1|wl1.*head|wl1/i.test(s));
+      const revASheet = wb.SheetNames.find(s => /revenue_actual|rev.*actual/i.test(s));
+      log += 'WL1 sheet: ' + wl1Sheet + ', RevActual sheet: ' + revASheet + '\n';
+    }
+
+    // ── FY24-25 ──
+    {
+      const resp = await fetch('FY24-25_Finance_Data.xlsx');
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+      log += '\nFY24-25 sheets: ' + wb.SheetNames.join(', ') + '\n\n';
+
+      // Check if Rev Productivity sheet exists
+      const prodSheet = wb.SheetNames.find(s => /rev.*prod|productivity/i.test(s));
+      log += 'Productivity sheet: ' + (prodSheet||'NOT FOUND') + '\n';
+
+      if (prodSheet) {
+        const ws = wb.Sheets[prodSheet];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+        log += 'First 3 rows:\n';
+        rows.slice(0,3).forEach((r,i) => log += 'Row '+i+': '+JSON.stringify(r.slice(0,16))+'\n');
+
+        const MONTHS = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+        const totals = new Array(12).fill(0);
+        let cnt = 0;
+        rows.slice(1).forEach(r => {
+          const name = String(r[1]||'').trim();
+          if (!name) return;
+          let has = false;
+          for (let i=0;i<12;i++) {
+            const v = typeof r[7+i]==='number'?r[7+i]:0;
+            totals[i]+=v; if(v) has=true;
+          }
+          if(has) cnt++;
+        });
+        log += 'Projects: ' + cnt + '\n';
+        MONTHS.forEach((m,i) => log += m+': '+totals[i].toFixed(2)+'\n');
+        log += 'Avg (non-zero): ' + (totals.filter(v=>v>0).reduce((s,v)=>s+v,0)/totals.filter(v=>v>0).length).toFixed(2) + '\n';
+      }
+
+      // Manual calculation check
+      // FY24-25 revA monthly and hcWL1 monthly from data.js
+      const revA2425 = [639.72,710.79,714.58,684.24,701.91,853.35,625.97,765.04,839.46,731.29,534.71,676.20];
+      const wl1_2425 = [531,510,503,478,467,486,459,462,460,459,455,452];
+      log += '\n=== Manual calculation FY24-25 ===\n';
+      log += 'Month-by-month RevA/WL1:\n';
+      revA2425.forEach((r,i) => {
+        const prod = wl1_2425[i]>0 ? r/wl1_2425[i] : 0;
+        log += ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'][i]+': '+r.toFixed(2)+'/'+wl1_2425[i]+' = '+prod.toFixed(2)+' L/rec\n';
+      });
+      const avgProd2425 = revA2425.map((r,i)=>wl1_2425[i]>0?r/wl1_2425[i]:0);
+      const avgNz = avgProd2425.filter(v=>v>0);
+      log += 'Simple avg (RevA/WL1 per month, avg): ' + (avgNz.reduce((s,v)=>s+v,0)/avgNz.length).toFixed(2) + ' L\n';
+
+      // Total RevA / AvgWL1 / 12
+      const totRevA = revA2425.reduce((s,v)=>s+v,0);
+      const avgWL1 = wl1_2425.reduce((s,v)=>s+v,0)/12;
+      log += 'Total RevA/AvgWL1/12: ' + (totRevA/avgWL1/12).toFixed(2) + ' L\n';
+      log += '(For comparison, FY25-26 source sheet avg = 71.40 L)\n';
+    }
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR: '+e.message+'\n'+e.stack);
+    document.getElementById('out').textContent = 'ERROR: '+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

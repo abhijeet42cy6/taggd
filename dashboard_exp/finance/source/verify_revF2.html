@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Verify RevF Summary Only</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    const resp = await fetch('FY25-26_Finance_Data.xlsx');
+    const buf  = await resp.arrayBuffer();
+    const wb   = XLSX.read(buf, { type: 'array', cellDates: false });
+    const ws = wb.Sheets['Rev_Forecast'];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+
+    const MONTHS = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+    const colStart = 7;
+
+    const grandTotals = new Array(12).fill(0);
+    let count = 0;
+    rows.slice(1).forEach(r => {
+      const name = String(r[1]||'').trim();
+      if (!name) return;
+      let has = false;
+      for (let mi=0; mi<12; mi++) {
+        const v = typeof r[colStart+mi]==='number' ? r[colStart+mi] : 0;
+        grandTotals[mi] += v;
+        if (v) has = true;
+      }
+      if (has) count++;
+    });
+
+    const grandTotal = grandTotals.reduce((s,v)=>s+v,0);
+
+    const jsDataRevF = [564.19, 789.92, 902.67, 661.87, 926.68, 1059.14, 561.63, 786.29, 898.63, 863.52, 917.30, 1233.96];
+    const jsTotal = jsDataRevF.reduce((s,v)=>s+v,0);
+
+    let log = '=== FY25-26 Rev_Forecast sheet — PROJECT COUNT: ' + count + ' ===\n\n';
+    log += 'MONTHLY TOTALS FROM EXCEL:\n';
+    MONTHS.forEach((m,i) => {
+      const diff = grandTotals[i] - jsDataRevF[i];
+      log += m + ': ' + grandTotals[i].toFixed(2) + ' L (js=' + jsDataRevF[i].toFixed(2) + ', diff=' + diff.toFixed(2) + ')' + (Math.abs(diff)>1?' *** MISMATCH ***':'') + '\n';
+    });
+
+    const ytd10 = grandTotals.slice(0,10).reduce((s,v)=>s+v,0);
+    const ytd11 = grandTotals.slice(0,11).reduce((s,v)=>s+v,0);
+
+    log += '\n=== TOTALS COMPARISON ===\n';
+    log += 'Excel FULL YEAR (12mo): ' + grandTotal.toFixed(2) + ' L = ₹' + (grandTotal/100).toFixed(2) + ' Cr\n';
+    log += 'js/data.js FULL YEAR  : ' + jsTotal.toFixed(2) + ' L = ₹' + (jsTotal/100).toFixed(2) + ' Cr\n';
+    log += 'DIFFERENCE            : ' + (grandTotal-jsTotal).toFixed(2) + ' L = ₹' + ((grandTotal-jsTotal)/100).toFixed(2) + ' Cr\n\n';
+    log += 'Excel YTD Apr-Jan (10mo): ' + ytd10.toFixed(2) + ' L = ₹' + (ytd10/100).toFixed(2) + ' Cr\n';
+    log += 'Excel YTD Apr-Feb (11mo): ' + ytd11.toFixed(2) + ' L = ₹' + (ytd11/100).toFixed(2) + ' Cr\n\n';
+    log += 'Dashboard shows: ₹101.66 Cr (js/data.js full year sum)\n';
+    log += 'User reports seeing: ₹99.50 Cr\n';
+    log += 'Excel full-year: ₹' + (grandTotal/100).toFixed(2) + ' Cr\n';
+
+    document.getElementById('out').textContent = log;
+    console.log('SUMMARY:\n' + log);
+  } catch(e) {
+    console.error('ERROR: ' + e.message);
+    document.getElementById('out').textContent = 'ERROR: '+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

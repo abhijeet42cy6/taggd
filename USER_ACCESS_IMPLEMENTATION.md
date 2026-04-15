@@ -79,7 +79,7 @@ If `users.role` is not a known canonical or legacy value, `**allowed_project_ids
 
 ### 4.2 Allowed keys
 
-Defined in `**backend/auth/profile.py**` as `VERTICAL_KEYS`, e.g.:
+Defined in `**backend/auth/profile.py`** as `VERTICAL_KEYS`, e.g.:
 
 `finance`, `sla`, `wfm`, `requisitions`, `candidates`, `contracts`, `meetings`, `ingestion`, `revenue_forecast`, `revenue_billing`, `vendor_licenses`, `tasks`, `portfolio`, `clients`, `data_operations`, `admin_users`.
 
@@ -112,7 +112,7 @@ Admin `**PATCH /admin/users/{id}**` rejects unknown keys.
 ### 5.1 Implemented
 
 - Column `**users.manager_user_id`** (nullable FK → `users.id`).
-- `**GET /auth/me**` returns `manager_user_id`.
+- `**GET /auth/me`** returns `manager_user_id`.
 - **Admin** `PATCH` can set/clear it (with validation: not self, target user must exist).
 - `**descendant_user_ids()`** in `profile.py` — **BFS over `manager_user_id`**, cycle-safe — **available for future use**.
 
@@ -127,10 +127,10 @@ Current rules: **platform admin / legacy admin** → all; **recruiter** → own 
 
 ### 6.1 Requisitions (`records`)
 
-After normal `**project_id` scoping**, `**GET /records/all`** applies `**apply_recruiter_record_scope**` (`backend/auth/scope.py`) when **effective role is `recruiter`**:
+After normal `**project_id` scoping**, `**GET /records/all`** applies `**apply_recruiter_record_scope`** (`backend/auth/scope.py`) when **effective role is `recruiter`**:
 
 - Rows where `**assigned_recruiter_user_id**` or `**hiring_manager_user_id**` = current user, **or**
-- Legacy fallback: `**assigned_recruiter_user_id` is null** and **text** fields `**assigned_recruiter_rpo`** / `**hiring_manager**` ILIKE the user’s **email** or **local-part**.
+- Legacy fallback: `**assigned_recruiter_user_id` is null** and **text** fields `**assigned_recruiter_rpo`** / `**hiring_manager`** ILIKE the user’s **email** or **local-part**.
 
 ### 6.2 Candidates
 
@@ -164,7 +164,7 @@ Legacy **string** columns (e.g. `hiring_manager`, `assigned_recruiter`) remain f
 ### 7.2 API support
 
 - `**PATCH /records/{id}`** — optional `hiring_manager_user_id`, `assigned_recruiter_user_id` (validates active user).
-- `**PATCH /projects/{id}**` metadata — optional `project_head_user_id`.
+- `**PATCH /projects/{id}`** metadata — optional `project_head_user_id`.
 - **Candidates router** — create/patch supports the two FKs; **PATCH** validates user ids.
 
 ### 7.3 Not implemented
@@ -177,7 +177,7 @@ Legacy **string** columns (e.g. `hiring_manager`, `assigned_recruiter`) remain f
 
 ## 8. Tasks and platform admin checks
 
-- `**backend/routers/tasks.py`** uses `**is_platform_admin()**` and `**effective_role()**` instead of comparing raw `"admin"` / `"manager"` strings.
+- `**backend/routers/tasks.py`** uses `**is_platform_admin()`** and `**effective_role()**` instead of comparing raw `"admin"` / `"manager"` strings.
 - **Assignee validation** for “shared project” applies to **effective `project_head`** (includes legacy `manager`).
 - **Delete task:** allowed for **platform admin**, **executive**, or **creator** (same intent as before, with alias-aware admin).
 
@@ -190,7 +190,7 @@ Legacy **string** columns (e.g. `hiring_manager`, `assigned_recruiter`) remain f
 Returns:
 
 - Existing: `id`, `email`, `role`, `project_ids`
-- Added: `**effective_role`**, `**vertical_access**` (sorted list or `null`), `**manager_user_id**`
+- Added: `**effective_role`**, `**vertical_access`** (sorted list or `null`), `**manager_user_id**`
 
 ### 9.2 `POST /auth/login`
 
@@ -201,8 +201,8 @@ Unchanged shape; `user.role` reflects **stored** DB value.
 ## 10. Admin API (`/admin/users`)
 
 - **Roles accepted:** `admin`, `platform_admin`, `executive`, `manager`, `project_head`, `operations`, `recruiter`.
-- **List users** includes `**manager_user_id`**, `**vertical_access**`.
-- **Patch user** supports `**manager_user_id`**, `**vertical_access**` (validated keys).
+- **List users** includes `**manager_user_id`**, `**vertical_access`**.
+- **Patch user** supports `**manager_user_id`**, `**vertical_access`** (validated keys).
 - **Create user** normalises `admin` → `platform_admin`, `manager` → `project_head` on write.
 
 ---
@@ -211,9 +211,9 @@ Unchanged shape; `user.role` reflects **stored** DB value.
 
 ### 11.1 Implemented
 
-- `**frontend/src/lib/auth.tsx`** — Wider role typing; stores `**effectiveRole**`, `**verticalAccess**`, `**managerUserId**` from `/auth/me`; `**isPlatformAdminRole()**` for `admin` + `platform_admin`; nav maps for new roles (including narrower **recruiter** paths).
+- `**frontend/src/lib/auth.tsx`** — Wider role typing; stores `**effectiveRole`**, `**verticalAccess**`, `**managerUserId**` from `/auth/me`; `**isPlatformAdminRole()**` for `admin` + `platform_admin`; nav maps for new roles (including narrower **recruiter** paths).
 - `**frontend/src/pages/AdminUsers.tsx`** (**Users & access**) — Five create roles; table shows **stored role**, **effective label**, **reports-to**, **vertical summary**, **projects**; **Edit access** modal (role, manager dropdown, module checkboxes); **Projects** modal with updated help text.
-- `**frontend/src/lib/api.ts`** — `**AdminUserRow**` and `**patchUser**` extended.
+- `**frontend/src/lib/api.ts`** — `**AdminUserRow`** and `**patchUser**` extended.
 - **Tasks / Activity log / Ingestion** copy or guards use `**isPlatformAdminRole`** where relevant.
 
 ### 11.2 Not implemented
@@ -246,7 +246,7 @@ Unchanged shape; `user.role` reflects **stored** DB value.
 ## 13. Operational notes
 
 1. **Bootstrap admin** may still be stored as `**admin`**; behaviour is **platform admin** via aliases.
-2. **Operations** users need `**finance` / `sla`** in `**vertical_access_json**` to use `**/finance**` and `**/sla**` APIs; **null** JSON means **no vertical restriction** for operations.
+2. **Operations** users need `**finance` / `sla`** in `**vertical_access_json`** to use `**/finance**` and `**/sla**` APIs; **null** JSON means **no vertical restriction** for operations.
 3. **Saving “all modules”** from the admin UI typically persists the **full** key list (equivalent to unrestricted for gating).
 4. **Clearing `vertical_access` back to SQL `NULL`** via API is **not** exposed (patch only updates when `vertical_access` is sent); workarounds: direct DB or future API flag.
 

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head><title>Excel Full Data</title></head>
+<body>
+<pre id="out" style="font-size:8px;white-space:pre-wrap;max-height:95vh;overflow:auto;"></pre>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+function excelDateToStr(serial) {
+  if (typeof serial !== 'number' || serial < 40000) return serial;
+  const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + d.getFullYear().toString().slice(-2);
+}
+
+async function parseExcel(url) {
+  const resp = await fetch(url);
+  const ab = await resp.arrayBuffer();
+  const wb = XLSX.read(ab, {type:'array'});
+  const result = {};
+  wb.SheetNames.forEach(name => {
+    const ws = wb.Sheets[name];
+    const json = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    if (!json.length) return;
+    const hdr = json[0].map(h => typeof h==='number' && h>40000 ? excelDateToStr(h) : String(h||''));
+    result[name] = { headers: hdr, monthCols: hdr.slice(7), rows: json.slice(1).filter(r=>r[1]) };
+  });
+  return result;
+}
+
+function sumAll(sheets, name) {
+  const s = sheets[name]; if (!s) return 0;
+  return s.rows.reduce((t,r) => {
+    for(let i=7;i<r.length;i++) { const v=r[i]; if(v!==null&&!isNaN(Number(v))) t+=Number(v); }
+    return t;
+  }, 0);
+}
+
+function sumByMonth(sheets, name) {
+  const s = sheets[name]; if (!s) return {};
+  const m = {};
+  s.monthCols.forEach((col,i) => {
+    m[col] = s.rows.reduce((t,r) => { const v=r[7+i]; return t+(v!==null&&!isNaN(Number(v))?Number(v):0); }, 0);
+  });
+  return m;
+}
+
+function sumByDim(sheets, name, dimIdx) {
+  const s = sheets[name]; if (!s) return {};
+  const d = {};
+  s.rows.forEach(r => {
+    const key = r[dimIdx]; if (!key) return;
+    if (!d[key]) d[key] = 0;
+    for(let i=7;i<r.length;i++){const v=r[i];if(v!==null&&!isNaN(Number(v)))d[key]+=Number(v);}
+  });
+  return d;
+}
+
+function latestHC(sheets, name) {
+  const s = sheets[name]; if (!s) return 0;
+  for (let mi=s.monthCols.length-1; mi>=0; mi--) {
+    let t=0, has=false;
+    s.rows.forEach(r=>{const v=r[7+mi];if(v!==null&&Number(v)>0){t+=Number(v);has=true;}});
+    if(has) return t;
+  }
+  return 0;
+}
+
+function avgNonZero(sheets, name) {
+  const s = sheets[name]; if (!s) return 0;
+  let sum=0,cnt=0;
+  s.rows.forEach(r=>{for(let i=7;i<r.length;i++){const v=r[i];if(v!==null&&Number(v)>0){sum+=Number(v);cnt++;}}});
+  return cnt>0?sum/cnt:0;
+}
+
+function avgByMonth(sheets, name) {
+  const s = sheets[name]; if (!s) return {};
+  const m = {};
+  s.monthCols.forEach((col,i) => {
+    let sum=0,cnt=0;
+    s.rows.forEach(r=>{const v=r[7+i];if(v!==null&&Number(v)>0){sum+=Number(v);cnt++;}});
+    m[col] = cnt>0?sum/cnt:0;
+  });
+  return m;
+}
+
+function sumByProject(sheets, name) {
+  const s = sheets[name]; if (!s) return {};
+  const d = {};
+  s.rows.forEach(r=>{
+    const p=r[1]; if(!p) return;
+    if(!d[p]) d[p]={total:0,region:r[3],sub:r[4],vertical:r[2],head:r[5]};
+    for(let i=7;i<r.length;i++){const v=r[i];if(v!==null&&!isNaN(Number(v)))d[p].total+=Number(v);}
+  });
+  return d;
+}
+
+(async () => {
+  const [d24, d25] = await Promise.all([
+    parseExcel('FY24-25_Finance_Data.xlsx'),
+    parseExcel('FY25-26_Finance_Data.xlsx')
+  ]);
+
+  const allData = {FY2425: d24, FY2526: d25};
+  let out = '';
+
+  Object.entries(allData).forEach(([fy, sheets]) => {
+    out += `\n============ ${fy} ============\n`;
+    
+    const revA = sumAll(sheets,'Revenue_Actual');
+    const revB = sumAll(sheets,'Revenue_Budget');
+    const revF = sumAll(sheets,'Rev_Forecast');
+    const cmA = sumAll(sheets,'CM_Actual');
+    const cmB = sumAll(sheets,'CM_Budget');
+    const cmF = sumAll(sheets,'CM_Forecast');
+    const collA = sumAll(sheets,'Revenue_Collected');
+    const collT = sumAll(sheets,'Collection Target');
+    const taggd = sumAll(sheets,'Taggd_Source_Joiner');
+    const nonTaggd = sumAll(sheets,'Non Taggd Source Joiner');
+    const unbilled = sumAll(sheets,'Unbilled');
+    const badDebt = sumAll(sheets,'Bad Debt');
+    const hcOverall = latestHC(sheets,'Actual_Headcount Overall');
+    const hcApproved = latestHC(sheets,'Approved_Headcount');
+    const hcWL1 = latestHC(sheets,'Actual Headcount WL1');
+    const ppc = avgNonZero(sheets,'Actual_PPC');
+    
+    out += `Rev Actual: ${(revA/100).toFixed(2)}Cr | Budget: ${(revB/100).toFixed(2)}Cr | Forecast: ${(revF/100).toFixed(2)}Cr\n`;
+    out += `CM Actual: ${cmA.toFixed(2)}L = ${(revA>0?cmA/revA*100:0).toFixed(1)}% | Budget: ${cmB.toFixed(2)}L = ${(revB>0?cmB/revB*100:0).toFixed(1)}% | Forecast: ${cmF.toFixed(2)}L = ${(revF>0?cmF/revF*100:0).toFixed(1)}%\n`;
+    out += `Coll Actual: ${(collA/100).toFixed(2)}Cr, Target: ${(collT/100).toFixed(2)}Cr\n`;
+    out += `HC: Overall=${Math.round(hcOverall)}, Approved=${Math.round(hcApproved)}, WL1=${Math.round(hcWL1)}\n`;
+    out += `PPC Avg: ${Math.round(ppc).toLocaleString('en-IN')}/person/month\n`;
+    out += `Joiners: Taggd=${Math.round(taggd)}, NonTaggd=${Math.round(nonTaggd)}, Total=${Math.round(taggd+nonTaggd)}\n`;
+    out += `Unbilled: ${(unbilled/100).toFixed(2)}Cr, BadDebt: ${(badDebt/100).toFixed(2)}Cr\n`;
+
+    const monthCols = sheets['Revenue_Actual']?.monthCols || [];
+    
+    const revMA = sumByMonth(sheets,'Revenue_Actual');
+    const revMB = sumByMonth(sheets,'Revenue_Budget');
+    const revMF = sumByMonth(sheets,'Rev_Forecast');
+    const cmMA = sumByMonth(sheets,'CM_Actual');
+    const cmMB = sumByMonth(sheets,'CM_Budget');
+    const ppcM = avgByMonth(sheets,'Actual_PPC');
+    const collMA = sumByMonth(sheets,'Revenue_Collected');
+    const collMT = sumByMonth(sheets,'Collection Target');
+    const hcM = sumByMonth(sheets,'Actual_Headcount Overall');
+    const taggdM = sumByMonth(sheets,'Taggd_Source_Joiner');
+    const nonTaggdM = sumByMonth(sheets,'Non Taggd Source Joiner');
+    const unbilledM = sumByMonth(sheets,'Unbilled');
+    const badDebtM = sumByMonth(sheets,'Bad Debt');
+    const wl1M = sumByMonth(sheets,'Actual Headcount WL1');
+
+    out += `\nMONTHLY:\n`;
+    out += `Month,RevAct,RevBud,RevFcs,CM_Act,CM%,CM_Bud,CMBud%,PPC_Avg,CollAct,CollTgt,HC,WL1,Taggd,NonT,Unbilled,BadDebt\n`;
+    monthCols.forEach(mo => {
+      const ra=revMA[mo]||0, rb=revMB[mo]||0, rf=revMF[mo]||0;
+      const ca=cmMA[mo]||0, cb=cmMB[mo]||0;
+      const ub=unbilledM[mo]||0, bd=badDebtM[mo]||0;
+      out += `${mo},${ra.toFixed(1)},${rb.toFixed(1)},${rf.toFixed(1)},${ca.toFixed(1)},${ra>0?(ca/ra*100).toFixed(1):0},${cb.toFixed(1)},${rb>0?(cb/rb*100).toFixed(1):0},${Math.round(ppcM[mo]||0)},${(collMA[mo]||0).toFixed(1)},${(collMT[mo]||0).toFixed(1)},${Math.round(hcM[mo]||0)},${Math.round(wl1M[mo]||0)},${Math.round(taggdM[mo]||0)},${Math.round(nonTaggdM[mo]||0)},${ub.toFixed(1)},${bd.toFixed(1)}\n`;
+    });
+
+    out += `\nBY REGION:\n`;
+    const rRegA = sumByDim(sheets,'Revenue_Actual',3);
+    const rRegB = sumByDim(sheets,'Revenue_Budget',3);
+    const cmRegA = sumByDim(sheets,'CM_Actual',3);
+    Object.entries(rRegA).sort((a,b)=>b[1]-a[1]).forEach(([r,v])=>{
+      const bud=rRegB[r]||0, cm=cmRegA[r]||0;
+      out+=`  ${r}: Act=${v.toFixed(1)}L, Bud=${bud.toFixed(1)}L, CM%=${v>0?(cm/v*100).toFixed(1):0}%\n`;
+    });
+
+    out += `\nBY VERTICAL:\n`;
+    const rVA = sumByDim(sheets,'Revenue_Actual',2);
+    const rVB = sumByDim(sheets,'Revenue_Budget',2);
+    Object.entries(rVA).sort((a,b)=>b[1]-a[1]).forEach(([v,val])=>{
+      const bud=rVB[v]||0;
+      out+=`  ${v}: Act=${val.toFixed(1)}L, Bud=${bud.toFixed(1)}L\n`;
+    });
+
+    out += `\nALL PROJECTS:\n`;
+    const projRev = sumByProject(sheets,'Revenue_Actual');
+    const projBud = sumByProject(sheets,'Revenue_Budget');
+    const projCM = sumByProject(sheets,'CM_Actual');
+    const projFcs = sumByProject(sheets,'Rev_Forecast');
+    Object.entries(projRev).sort((a,b)=>b[1].total-a[1].total).forEach(([p,d])=>{
+      const bud = projBud[p]?.total||0;
+      const fcs = projFcs[p]?.total||0;
+      const cm = projCM[p]?.total||0;
+      const cmPct = d.total>0?(cm/d.total*100).toFixed(1):0;
+      const varPct = bud>0?((d.total-bud)/bud*100).toFixed(1):'N/A';
+      out+=`  ${p}|${d.total.toFixed(0)}|${bud.toFixed(0)}|${fcs.toFixed(0)}|${cmPct}|${varPct}|${d.region}|${d.vertical}\n`;
+    });
+    out += '\n';
+  });
+
+  document.getElementById('out').textContent = out;
+  console.log('DONE');
+  console.log(out.substring(0,4000));
+  console.log('PART2:' + out.substring(4000,8000));
+  console.log('PART3:' + out.substring(8000,12000));
+  console.log('PART4:' + out.substring(12000,16000));
+  console.log('PART5:' + out.substring(16000,20000));
+  console.log('PART6:' + out.substring(20000));
+})();
+</script>
+</body>
+</html>

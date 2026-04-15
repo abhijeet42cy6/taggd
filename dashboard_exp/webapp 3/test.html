@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Click Test</title>
+    <style>
+        body { padding: 50px; font-family: Arial; background: #111; color: white; }
+        button { 
+            padding: 20px 40px; 
+            font-size: 18px; 
+            margin: 20px;
+            cursor: pointer;
+            background: #ff6600;
+            color: white;
+            border: none;
+            border-radius: 8px;
+        }
+        button:hover { background: #ff8833; }
+        .box {
+            padding: 20px;
+            margin: 20px;
+            background: #222;
+            border: 2px solid #ff6600;
+            cursor: pointer;
+        }
+        .box:hover { background: #333; }
+    </style>
+</head>
+<body>
+    <h1>Click Test Page</h1>
+    
+    <button onclick="alert('Button 1 clicked!')">Test Button 1</button>
+    
+    <button onclick="console.log('Button 2 clicked'); alert('Button 2 clicked!')">Test Button 2</button>
+    
+    <div class="box" onclick="alert('Box clicked!')">Click this box</div>
+    
+    <button id="testBtn3">Test Button 3 (Event Listener)</button>
+    
+    <div id="result" style="margin-top: 30px; padding: 20px; background: #222; border: 2px solid #444;"></div>
+    
+    <script>
+        console.log('✅ Script loaded');
+        
+        document.getElementById('testBtn3').addEventListener('click', function() {
+            alert('Button 3 clicked via event listener!');
+        });
+        
+        document.getElementById('result').innerHTML = 'Script is running. Click the buttons and boxes above.';
+        console.log('✅ Script executed successfully');
+    </script>
+</body>
+</html>

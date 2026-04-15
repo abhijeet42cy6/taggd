@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Rev Prod Quick Check</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    // ── FY25-26: Read Rev_Productivity_Actual sheet ──
+    {
+      const resp = await fetch('FY25-26_Finance_Data.xlsx');
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+
+      const shName = 'Rev_Productivity_Actual';
+      const ws = wb.Sheets[shName];
+      if (!ws) { log += shName + ' NOT FOUND\n'; }
+      else {
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+        const MONTHS = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+        const totals = new Array(12).fill(0);
+        let cnt = 0;
+        rows.slice(1).forEach(r => {
+          const name = String(r[1]||'').trim();
+          if (!name) return;
+          let has = false;
+          for (let i=0;i<12;i++) {
+            const v = typeof r[7+i]==='number'?r[7+i]:0;
+            totals[i]+=v; if(v) has=true;
+          }
+          if(has) cnt++;
+        });
+        log += '=== FY25-26 Rev_Productivity_Actual ('+cnt+' projects) ===\n';
+        MONTHS.forEach((m,i) => log += m+': '+totals[i].toFixed(4)+'\n');
+        const nzVals = totals.filter(v=>v>0);
+        log += 'Avg (non-zero): '+(nzVals.reduce((s,v)=>s+v,0)/nzVals.length).toFixed(4)+'\n\n';
+        log += 'NOTE: These appear to be ₹L/Rec/Mo values already calculated in Excel\n\n';
+      }
+    }
+
+    // ── FY24-25: Check if Rev_Productivity_Actual exists ──
+    {
+      const resp = await fetch('FY24-25_Finance_Data.xlsx');
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+
+      const shName = 'Rev_Productivity_Actual';
+      const ws = wb.Sheets[shName];
+      log += '=== FY24-25 Rev_Productivity_Actual: ' + (ws ? 'EXISTS' : 'NOT FOUND') + ' ===\n';
+
+      if (ws) {
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+        const MONTHS = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+        const totals = new Array(12).fill(0);
+        let cnt = 0;
+        rows.slice(1).forEach(r => {
+          const name = String(r[1]||'').trim();
+          if (!name) return;
+          let has = false;
+          for (let i=0;i<12;i++) {
+            const v = typeof r[7+i]==='number'?r[7+i]:0;
+            totals[i]+=v; if(v) has=true;
+          }
+          if(has) cnt++;
+        });
+        log += 'Projects: ' + cnt + '\n';
+        MONTHS.forEach((m,i) => log += m+': '+totals[i].toFixed(4)+'\n');
+        const nzVals = totals.filter(v=>v>0);
+        if (nzVals.length) log += 'Avg (non-zero): '+(nzVals.reduce((s,v)=>s+v,0)/nzVals.length).toFixed(4)+'\n';
+      }
+
+      // Also check Target Rev Productivity for FY24-25
+      const tgtSheet = wb.Sheets['Target_Rev_Productivity'] || wb.Sheets['Target Rev Productivity'];
+      log += '\nFY24-25 Target_Rev_Productivity: ' + (tgtSheet ? 'EXISTS' : 'NOT FOUND') + '\n';
+      if (tgtSheet) {
+        const rows = XLSX.utils.sheet_to_json(tgtSheet, { header:1, defval:0 });
+        log += 'Row 0: '+JSON.stringify(rows[0].slice(0,16))+'\n';
+        log += 'Row 1: '+JSON.stringify(rows[1].slice(0,16))+'\n';
+        const MONTHS = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+        const totals = new Array(12).fill(0);
+        let cnt = 0;
+        rows.slice(1).forEach(r => {
+          const name = String(r[1]||'').trim();
+          if (!name) return;
+          let has = false;
+          for (let i=0;i<12;i++) {
+            const v = typeof r[7+i]==='number'?r[7+i]:0;
+            totals[i]+=v; if(v) has=true;
+          }
+          if(has) cnt++;
+        });
+        log += 'Budget Productivity FY24-25 ('+cnt+' projects):\n';
+        MONTHS.forEach((m,i) => log += m+': '+totals[i].toFixed(2)+'\n');
+        const nzVals = totals.filter(v=>v>0);
+        if (nzVals.length) log += 'Avg: '+(nzVals.reduce((s,v)=>s+v,0)/nzVals.length).toFixed(2)+' L/Rec/Mo\n';
+      }
+    }
+
+    // ── Manual verification: month-by-month RevA/WL1 ──
+    {
+      log += '\n=== Manual: FY24-25 RevA/WL1 per month ===\n';
+      const revA = [639.72,710.79,714.58,684.24,701.91,853.35,625.97,765.04,839.46,731.29,534.71,676.20];
+      const wl1  = [531,510,503,478,467,486,459,462,460,459,455,452];
+      const mo   = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+      const perMo = revA.map((r,i)=>wl1[i]>0?r/wl1[i]:0);
+      perMo.forEach((v,i)=>log += mo[i]+': '+revA[i].toFixed(2)+'/'+wl1[i]+' = '+v.toFixed(2)+' L/rec\n');
+      const nz = perMo.filter(v=>v>0);
+      log += 'Simple avg of monthly (RevA/WL1): '+(nz.reduce((s,v)=>s+v,0)/nz.length).toFixed(2)+' L/Rec/Mo\n\n';
+
+      log += '=== Manual: FY25-26 RevA/WL1 per month ===\n';
+      const revA2 = [711.06,813.29,875.52,744.83,865.00,991.31,688.72,901.18,1043.64,854.20,917.30,0];
+      const wl12  = [462,439,433,398,401,418,412,407,407,419,0,0];
+      const mo2   = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+      const perMo2 = revA2.map((r,i)=>wl12[i]>0&&r>0?r/wl12[i]:0);
+      perMo2.forEach((v,i)=>log += mo2[i]+': '+(revA2[i]>0?revA2[i].toFixed(2):'—')+'/'+wl12[i]+' = '+(v>0?v.toFixed(2):'—')+' L/rec\n');
+      const nz2 = perMo2.filter(v=>v>0);
+      log += 'Simple avg of monthly (RevA/WL1): '+(nz2.reduce((s,v)=>s+v,0)/nz2.length).toFixed(2)+' L/Rec/Mo\n';
+      log += 'Source data avg (js/data.js): 71.40 L/Rec/Mo\n';
+    }
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR:'+e.message);
+    document.getElementById('out').textContent='ERROR:'+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

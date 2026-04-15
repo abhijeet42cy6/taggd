@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Verify Forecast Logic</title></head>
+<body>
+<script>
+// Simulate the fixed forecast logic with actual data
+const revA = [711.11, 813.34, 875.49, 744.78, 864.98, 991.28, 688.67, 901.20, 1043.62, 854.19, 0.0, 0.0];
+const revF = [569.00, 791.00, 901.00, 666.00, 929.00, 1059.00, 639.00, 897.00, 1019.00, 804.00, 1111.00, 1261.00];
+const cmA =  [175.97, 283.81, 360.20, 210.34, 331.68, 432.62, 122.42, 319.34, 468.85, 287.69, 0.0, 0.0];
+const cmF =  [256.05, 355.95, 405.45, 299.70, 418.05, 476.55, 287.55, 403.65, 458.55, 361.80, 499.95, 567.45];
+
+const Q_MAP = {
+  ALL: [0,1,2,3,4,5,6,7,8,9,10,11],
+  Q1: [0,1,2], Q2: [3,4,5], Q3: [6,7,8], Q4: [9,10,11]
+};
+
+function sumAt(arr, indices) { return indices.reduce((t,i) => t+(arr[i]||0), 0); }
+
+function calcForecast(quarter, selectedMonths) {
+  const isYTD = (quarter === 'ALL' && (!selectedMonths || selectedMonths.length === 0 || selectedMonths.length > 3));
+  const indices = selectedMonths && selectedMonths.length > 0 ? selectedMonths : Q_MAP[quarter] || [0,1,2,3,4,5,6,7,8,9,10,11];
+  
+  const revFResult = isYTD
+    ? indices.reduce((t,i) => t + ((revA[i]||0) > 0 ? (revA[i]||0) : 0), 0)
+    : sumAt(revF, indices);
+  
+  const cmFResult = isYTD
+    ? indices.reduce((t,i) => { const a=(revA[i]||0); return t + (a>0?(cmA[i]||0):0); }, 0)
+    : sumAt(cmF, indices);
+
+  return { isYTD, revF: revFResult, cmF: cmFResult, revFCr: (revFResult/100).toFixed(2), cmFCr: (cmFResult/100).toFixed(2) };
+}
+
+console.log('=== VERIFICATION OF FORECAST LOGIC ===\n');
+console.log('YTD (ALL quarters, no month filter):');
+const ytd = calcForecast('ALL', null);
+console.log('  revF = ' + ytd.revF.toFixed(2) + ' L = ₹' + ytd.revFCr + ' Cr');
+console.log('  Expected: 8488.65 L = ₹84.89 Cr (= Revenue Actual Apr-Jan)');
+console.log('  PASS: ' + (Math.abs(ytd.revF - 8488.65) < 0.01 ? '✅' : '❌'));
+
+console.log('\nQ1 (Apr-Jun) — from Rev_Forecast sheet:');
+const q1 = calcForecast('Q1', [0,1,2]);
+console.log('  revF = ' + q1.revF.toFixed(2) + ' L = ₹' + q1.revFCr + ' Cr');
+console.log('  Expected: 2261 L = ₹22.61 Cr');
+console.log('  PASS: ' + (Math.abs(q1.revF - 2261) < 0.01 ? '✅' : '❌'));
+
+console.log('\nQ2 (Jul-Sep) — from Rev_Forecast sheet:');
+const q2 = calcForecast('Q2', [3,4,5]);
+console.log('  revF = ' + q2.revF.toFixed(2) + ' L = ₹' + q2.revFCr + ' Cr');
+console.log('  Expected: 2654 L = ₹26.54 Cr');
+
+console.log('\nQ3 (Oct-Dec) — from Rev_Forecast sheet:');
+const q3 = calcForecast('Q3', [6,7,8]);
+console.log('  revF = ' + q3.revF.toFixed(2) + ' L = ₹' + q3.revFCr + ' Cr');
+console.log('  Expected: 2555 L = ₹25.55 Cr');
+
+console.log('\nQ4 (Jan-Mar) — from Rev_Forecast sheet:');
+const q4 = calcForecast('Q4', [9,10,11]);
+console.log('  revF = ' + q4.revF.toFixed(2) + ' L = ₹' + q4.revFCr + ' Cr');
+console.log('  Expected: 3176 L = ₹31.76 Cr');
+
+console.log('\nSingle Month (Apr only) — from Rev_Forecast sheet:');
+const apr = calcForecast('ALL', [0]);
+console.log('  revF = ' + apr.revF.toFixed(2) + ' L = ₹' + apr.revFCr + ' Cr');
+console.log('  Expected: 569.00 L = ₹5.69 Cr');
+
+const revASum = revA.reduce((t,v)=>t+v,0);
+const revFSum = revF.reduce((t,v)=>t+v,0);
+const revAActual = revA.filter(v=>v>0).reduce((t,v)=>t+v,0);
+console.log('\n=== SUMMARY ===');
+console.log('revA sum (full year with zeros): ' + revASum.toFixed(2));
+console.log('revA sum (actual months only Apr-Jan): ' + revAActual.toFixed(2));
+console.log('revF sum (full year from Rev_Forecast): ' + revFSum.toFixed(2));
+console.log('YTD Forecast per user requirement: ' + revAActual.toFixed(2) + ' ✅');
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.dev.vars
+
+# Build output
+dist/
+.output/
+
+# PM2
+.pm2/
+pids/
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.backup
+*.bak
+
+# Wrangler
+.wrangler/
+
+# Allow public/data folder for BaseFile
+!public/data/
+!public/data/BaseFile.xlsx

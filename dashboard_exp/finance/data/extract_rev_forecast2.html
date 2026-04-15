@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Extract Rev Forecast Sheet v2</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<h2>Rev Forecast Sheet Extractor v2</h2>
+<script>
+async function run() {
+  try {
+    const resp = await fetch('FY2526_latest.xlsx');
+    const ab   = await resp.arrayBuffer();
+    const wb   = XLSX.read(ab, { type: 'array' });
+
+    // Rev_Forecast sheet: Row 0 is header, columns 7-18 are months (indices 0-11 = Apr25-Mar26)
+    const ws = wb.Sheets['Rev_Forecast'];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+
+    // Months are at col index 7..18
+    const COL_START = 7;
+    const monthSums = new Array(12).fill(0);
+    
+    // Row 0 is header, rows 1..N are data
+    for (let r = 1; r < data.length; r++) {
+      const row = data[r];
+      if (!row[1]) continue; // skip empty rows
+      for (let mi = 0; mi < 12; mi++) {
+        const val = parseFloat(row[COL_START + mi]) || 0;
+        monthSums[mi] += val;
+      }
+    }
+
+    const mNames = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+    console.log('=== Rev_Forecast Monthly Sums (₹ L) ===');
+    monthSums.forEach((v, i) => console.log(mNames[i] + ': ' + v.toFixed(2)));
+
+    const q1 = monthSums[0]+monthSums[1]+monthSums[2];
+    const q2 = monthSums[3]+monthSums[4]+monthSums[5];
+    const q3 = monthSums[6]+monthSums[7]+monthSums[8];
+    const q4 = monthSums[9]+monthSums[10]+monthSums[11];
+    const total = monthSums.reduce((t,v)=>t+v,0);
+    console.log('--- Quarterly ---');
+    console.log('Q1(Apr-Jun): ' + q1.toFixed(2));
+    console.log('Q2(Jul-Sep): ' + q2.toFixed(2));
+    console.log('Q3(Oct-Dec): ' + q3.toFixed(2));
+    console.log('Q4(Jan-Mar): ' + q4.toFixed(2));
+    console.log('Full Year:   ' + total.toFixed(2));
+
+    // Revenue_Actual
+    const wsA = wb.Sheets['Revenue_Actual'];
+    const dataA = XLSX.utils.sheet_to_json(wsA, { header: 1, defval: 0 });
+    const actualSums = new Array(12).fill(0);
+    for (let r = 1; r < dataA.length; r++) {
+      const row = dataA[r];
+      if (!row[1]) continue;
+      for (let mi = 0; mi < 12; mi++) {
+        actualSums[mi] += parseFloat(row[COL_START + mi]) || 0;
+      }
+    }
+    console.log('\n=== Revenue_Actual Monthly Sums (₹ L) ===');
+    actualSums.forEach((v,i) => console.log(mNames[i] + ': ' + v.toFixed(2)));
+    const ytdA10 = actualSums.slice(0,10).reduce((t,v)=>t+v,0);
+    const ytdA12 = actualSums.reduce((t,v)=>t+v,0);
+    console.log('YTD Apr-Jan (10M): ' + ytdA10.toFixed(2));
+    console.log('Full Year (with zeros): ' + ytdA12.toFixed(2));
+
+    // Now build the CORRECT YTD Forecast as user specified:
+    // YTD Forecast = Revenue Actual (where available) — i.e., sum only actual months
+    // For Quarterly/Monthly = pure revF from Rev_Forecast sheet
+    console.log('\n=== CORRECT FORECAST VALUES ===');
+    console.log('YTD Forecast (= Revenue Actual Apr-Jan): ' + ytdA10.toFixed(2));
+    console.log('Q1 Forecast (pure Rev_Forecast): ' + q1.toFixed(2));
+    console.log('Q2 Forecast (pure Rev_Forecast): ' + q2.toFixed(2));
+    console.log('Q3 Forecast (pure Rev_Forecast): ' + q3.toFixed(2));
+    console.log('Q4 Forecast (pure Rev_Forecast): ' + q4.toFixed(2));
+
+    // Also check CM_Forecast
+    const wsCmF = wb.Sheets['CM_Forecast'];
+    const dataCmF = XLSX.utils.sheet_to_json(wsCmF, { header: 1, defval: 0 });
+    const cmFSums = new Array(12).fill(0);
+    for (let r = 1; r < dataCmF.length; r++) {
+      const row = dataCmF[r];
+      if (!row[1]) continue;
+      for (let mi = 0; mi < 12; mi++) {
+        cmFSums[mi] += parseFloat(row[COL_START + mi]) || 0;
+      }
+    }
+    console.log('\n=== CM_Forecast Monthly Sums (₹ L) ===');
+    cmFSums.forEach((v,i) => console.log(mNames[i] + ': ' + v.toFixed(2)));
+    const cmFQ1 = cmFSums[0]+cmFSums[1]+cmFSums[2];
+    const cmFQ2 = cmFSums[3]+cmFSums[4]+cmFSums[5];
+    const cmFQ3 = cmFSums[6]+cmFSums[7]+cmFSums[8];
+    const cmFQ4 = cmFSums[9]+cmFSums[10]+cmFSums[11];
+    console.log('CM_Forecast Q1: ' + cmFQ1.toFixed(2));
+    console.log('CM_Forecast Q2: ' + cmFQ2.toFixed(2));
+    console.log('CM_Forecast Q3: ' + cmFQ3.toFixed(2));
+    console.log('CM_Forecast Q4: ' + cmFQ4.toFixed(2));
+    console.log('CM_Forecast Full Year: ' + cmFSums.reduce((t,v)=>t+v,0).toFixed(2));
+
+    // Check CM Actual
+    const wsCmA = wb.Sheets['CM Actual'];
+    const dataCmA = XLSX.utils.sheet_to_json(wsCmA, { header: 1, defval: 0 });
+    const cmASums = new Array(12).fill(0);
+    for (let r = 1; r < dataCmA.length; r++) {
+      const row = dataCmA[r];
+      if (!row[1]) continue;
+      for (let mi = 0; mi < 12; mi++) {
+        cmASums[mi] += parseFloat(row[COL_START + mi]) || 0;
+      }
+    }
+    console.log('\n=== CM_Actual Monthly Sums (₹ L) ===');
+    cmASums.forEach((v,i) => console.log(mNames[i] + ': ' + v.toFixed(2)));
+    console.log('CM Actual YTD (Apr-Jan): ' + cmASums.slice(0,10).reduce((t,v)=>t+v,0).toFixed(2));
+
+    // Print JS arrays for data.js
+    console.log('\n=== JS ARRAYS FOR data.js ===');
+    console.log('revF: [' + monthSums.map(v=>v.toFixed(2)).join(', ') + ']');
+    console.log('revA: [' + actualSums.map(v=>v.toFixed(2)).join(', ') + ']');
+    console.log('cmF: [' + cmFSums.map(v=>v.toFixed(2)).join(', ') + ']');
+    console.log('cmA: [' + cmASums.map(v=>v.toFixed(2)).join(', ') + ']');
+
+  } catch(e) {
+    console.error('ERROR: ' + e.message + '\n' + e.stack);
+  }
+}
+run();
+</script>
+</body>
+</html>

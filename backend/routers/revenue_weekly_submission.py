@@ -163,6 +163,38 @@ def get_pack(
     }
 
 
+@router.get("/mine-packs")
+def list_my_packs(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Weekly packs for projects in scope — project head / practice lead only."""
+    if not _may_revenue_forecast_vertical(user, db):
+        raise HTTPException(status_code=403, detail="revenue_forecast vertical required")
+    er = effective_role(user)
+    if er not in ("project_head", "manager"):
+        raise HTTPException(status_code=403, detail="Pack history is available to project heads")
+    q = (
+        db.query(RevenueWeeklySubmission)
+        .options(
+            joinedload(RevenueWeeklySubmission.submitted_by),
+            joinedload(RevenueWeeklySubmission.approved_by),
+            joinedload(RevenueWeeklySubmission.project),
+        )
+    )
+    q = apply_project_scope(q, user, db, RevenueWeeklySubmission)
+    rows = q.order_by(RevenueWeeklySubmission.updated_at.desc()).limit(limit).all()
+    out = []
+    for s in rows:
+        _ = s.project
+        item = _serialize_submission(s, db)
+        item["account_name"] = (s.project.account_name or s.project.filename or "") if s.project else ""
+        item["client_id"] = s.project.client_id if s.project else None
+        out.append(item)
+    return {"items": out, "total": len(out), "limit": limit, "offset": 0}
+
+
 @router.get("/queue")
 def list_queue(
     db: Session = Depends(get_db),

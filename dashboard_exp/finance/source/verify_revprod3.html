@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Rev Prod Final Check</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    // FY24-25: get Target Rev Productivity totals
+    {
+      const resp = await fetch('FY24-25_Finance_Data.xlsx');
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+      const ws = wb.Sheets['Target_Rev_Productivity'] || wb.Sheets['Target Rev Productivity'];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+      const MONTHS = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+      const totals = new Array(12).fill(0);
+      rows.slice(1).forEach(r => {
+        const name = String(r[1]||'').trim();
+        if (!name) return;
+        for (let i=0;i<12;i++) {
+          const v = typeof r[7+i]==='number'?r[7+i]:0;
+          totals[i]+=v;
+        }
+      });
+      log += '=== FY24-25 Target Rev Productivity (Budget) ===\n';
+      MONTHS.forEach((m,i)=>log+=m+': '+totals[i].toFixed(2)+'\n');
+      const nz=totals.filter(v=>v>0);
+      log+='Avg: '+(nz.reduce((s,v)=>s+v,0)/nz.length).toFixed(2)+' L\n\n';
+    }
+
+    // Manual: month-by-month
+    log += '=== Manual RevA/WL1 per month ===\n';
+    const revA24 = [639.72,710.79,714.58,684.24,701.91,853.35,625.97,765.04,839.46,731.29,534.71,676.20];
+    const wl1_24 = [531,510,503,478,467,486,459,462,460,459,455,452];
+    const revA25 = [711.06,813.29,875.52,744.83,865.00,991.31,688.72,901.18,1043.64,854.20,917.30,0];
+    const wl1_25 = [462,439,433,398,401,418,412,407,407,419,0,0];
+    const mo = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+
+    log += '\nFY24-25 RevA/WL1:\n';
+    const perMo24 = revA24.map((r,i)=>wl1_24[i]>0?r/wl1_24[i]:0);
+    perMo24.forEach((v,i)=>log+=mo[i]+': '+revA24[i].toFixed(2)+'/'+wl1_24[i]+' = '+v.toFixed(2)+'\n');
+    const nz24 = perMo24.filter(v=>v>0);
+    const avg24 = nz24.reduce((s,v)=>s+v,0)/nz24.length;
+    log += 'Avg monthly (RevA/WL1): '+avg24.toFixed(2)+' L/Rec/Mo\n\n';
+
+    log += 'FY25-26 RevA/WL1:\n';
+    const perMo25 = revA25.map((r,i)=>wl1_25[i]>0&&r>0?r/wl1_25[i]:0);
+    perMo25.forEach((v,i)=>log+=mo[i]+': '+(revA25[i]>0?revA25[i].toFixed(2):'0')+'/'+wl1_25[i]+' = '+(v>0?v.toFixed(2):'—')+'\n');
+    const nz25 = perMo25.filter(v=>v>0);
+    const avg25 = nz25.reduce((s,v)=>s+v,0)/nz25.length;
+    log += 'Avg monthly (RevA/WL1): '+avg25.toFixed(2)+' L/Rec/Mo\n\n';
+
+    log += '=== COMPARISON ===\n';
+    log += 'FY24-25 Rev Prod (calculated RevA/WL1/mo avg): '+avg24.toFixed(2)+' L\n';
+    log += 'FY25-26 Rev Prod (source sheet avg):            71.40 L\n';
+    log += 'FY25-26 Rev Prod (manual RevA/WL1/mo avg):      '+avg25.toFixed(2)+' L\n';
+    log += 'YoY % change (source): '+((71.40-avg24)/avg24*100).toFixed(1)+'%\n';
+    log += 'YoY % change (manual): '+((avg25-avg24)/avg24*100).toFixed(1)+'%\n\n';
+    log += 'CONCLUSION:\n';
+    log += 'FY24-25 should show: ~'+avg24.toFixed(2)+' L (needs to be put in data.js revProdA array)\n';
+    log += 'FY25-26 correctly shows: 71.40 L (from source sheet)\n';
+    log += 'Correct YoY change would be: ~'+((71.40-avg24)/avg24*100).toFixed(1)+'%\n';
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR:'+e.message);
+    document.getElementById('out').textContent='ERROR:'+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

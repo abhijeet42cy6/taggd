@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out" style="font-size:11px;white-space:pre-wrap"></pre>
+<script>
+async function readFile(url, label) {
+  const resp = await fetch(url);
+  const buf  = await resp.arrayBuffer();
+  const wb   = XLSX.read(buf, { type: 'array' });
+  let out = `\n${'='.repeat(60)}\n${label}\nSheets: ${wb.SheetNames.join(', ')}\n${'='.repeat(60)}\n`;
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+    out += `\n--- Sheet: ${name} ---\n`;
+    rows.forEach((r,i) => { if(r.some(c=>c!=='')) out += `R${i+1}: ${JSON.stringify(r)}\n`; });
+  }
+  return out;
+}
+(async()=>{
+  const el = document.getElementById('out');
+  el.textContent = 'Loading...';
+  const a = await readFile('FY24-25_Finance_Data.xlsx','FY 2024-25');
+  const b = await readFile('FY25-26_Finance_Data.xlsx','FY 2025-26');
+  el.textContent = a + b;
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Verify CM Forecast FY25-26</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    const resp = await fetch('FY25-26_Finance_Data.xlsx');
+    const buf  = await resp.arrayBuffer();
+    const wb   = XLSX.read(buf, { type: 'array', cellDates: false });
+
+    const sheets = ['Rev_Forecast','CM_Forecast'];
+    let log = '';
+
+    for (const shName of sheets) {
+      const ws = wb.Sheets[shName];
+      if (!ws) { log += shName + ': NOT FOUND\n'; continue; }
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+      const MONTHS = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+      const colStart = 7;
+
+      const grandTotals = new Array(12).fill(0);
+      let count = 0;
+      rows.slice(1).forEach(r => {
+        const name = String(r[1]||'').trim();
+        if (!name) return;
+        let has = false;
+        for (let mi=0; mi<12; mi++) {
+          const v = typeof r[colStart+mi]==='number' ? r[colStart+mi] : 0;
+          grandTotals[mi] += v;
+          if (v) has = true;
+        }
+        if (has) count++;
+      });
+      const grandTotal = grandTotals.reduce((s,v)=>s+v,0);
+
+      log += '=== ' + shName + ' ('+count+' projects) ===\n';
+      MONTHS.forEach((m,i) => log += m+': '+grandTotals[i].toFixed(2)+' L\n');
+      log += 'FULL YEAR TOTAL: '+grandTotal.toFixed(2)+' L = ₹'+(grandTotal/100).toFixed(2)+' Cr\n\n';
+    }
+
+    // Cross-check CM Forecast
+    const jsDataCmF = [197.47, 276.47, 316.43, 231.65, 324.34, 370.70, 196.57, 275.20, 314.52, 302.23, 321.06, 431.29];
+    const jsCmFTotal = jsDataCmF.reduce((s,v)=>s+v,0);
+    log += 'js/data.js cmF total: '+jsCmFTotal.toFixed(2)+' L = ₹'+(jsCmFTotal/100).toFixed(2)+' Cr\n';
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR: '+e.message);
+    document.getElementById('out').textContent = 'ERROR: '+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

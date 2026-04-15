@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Sterling Data</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background: #667eea; color: white; }
+        .error { background: #fee; color: #c00; padding: 15px; margin: 10px 0; }
+        .success { background: #efe; color: #060; padding: 15px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Sterling Tools Data Test</h1>
+    <div id="status">Loading...</div>
+    <div id="results"></div>
+
+    <script>
+        fetch('sample_data.json')
+            .then(response => response.json())
+            .then(data => {
+                const status = document.getElementById('status');
+                const results = document.getElementById('results');
+                
+                // Check data structure
+                if (!data.fy25_26_metrics_details) {
+                    status.innerHTML = '<div class="error">❌ Missing fy25_26_metrics_details in JSON!</div>';
+                    return;
+                }
+                
+                // Find Sterling tools data
+                const sterlingData = data.fy25_26_metrics_details.filter(row => 
+                    row.Project && row.Project.includes('Sterling')
+                );
+                
+                if (sterlingData.length === 0) {
+                    status.innerHTML = '<div class="error">❌ No Sterling tools data found!</div>';
+                    return;
+                }
+                
+                status.innerHTML = `<div class="success">✅ Found ${sterlingData.length} Sterling tools entries</div>`;
+                
+                // Build table
+                let html = `
+                    <h2>Sterling tools - Detailed Performance Metrics</h2>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Performance Measure</th>
+                                <th>Target</th>
+                                <th>Apr'25</th>
+                                <th>May'25</th>
+                                <th>Jun'25</th>
+                                <th>Jul'25</th>
+                                <th>Aug'25</th>
+                                <th>Sep'25</th>
+                                <th>Oct'25</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                sterlingData.forEach(row => {
+                    html += `
+                        <tr>
+                            <td><strong>${row['Performance Measure '] || '-'}</strong></td>
+                            <td>${row['Target'] || '-'}</td>
+                            <td>${row['April25 Score'] || '-'}</td>
+                            <td>${row['May25 Score'] || '-'}</td>
+                            <td>${row['June25 Score'] || '-'}</td>
+                            <td>${row['July25 Score'] || '-'}</td>
+                            <td>${row['Aug25 Score'] || '-'}</td>
+                            <td>${row['Sep25 Score'] || '-'}</td>
+                            <td>${row['Oct25 Score'] || '-'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                        </tbody>
+                    </table>
+                    
+                    <h3 style="margin-top: 40px;">Raw JSON Data (First Entry)</h3>
+                    <pre style="background: #f5f5f5; padding: 15px; overflow-x: auto;">${JSON.stringify(sterlingData[0], null, 2)}</pre>
+                `;
+                
+                results.innerHTML = html;
+            })
+            .catch(error => {
+                document.getElementById('status').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            });
+    </script>
+</body>
+</html>

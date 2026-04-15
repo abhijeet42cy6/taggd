@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head><title>Extract FY24-25 TC/HC</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>body{font-family:monospace;font-size:11px;} #out{white-space:pre;overflow:auto;height:95vh;}</style>
+</head>
+<body>
+<div id="out">Loading...</div>
+<script>
+const outEl = document.getElementById('out');
+const lines = [];
+function log(m) { lines.push(m); outEl.textContent = lines.join('\n'); console.log(m); }
+function extractByAccount(rows, nameCol, startCol, n) {
+  const acc={};
+  for(let r=1;r<rows.length;r++){
+    const row=rows[r];
+    if(!row||row[nameCol]===undefined||row[nameCol]===null) continue;
+    const nm=String(row[nameCol]).trim();
+    if(!nm||nm.toLowerCase()==='total'||nm.toLowerCase()==='grand total') continue;
+    if(!acc[nm]) acc[nm]=new Array(n).fill(0);
+    for(let c=0;c<n;c++) acc[nm][c]+=parseFloat(row[startCol+c])||0;
+  }
+  return acc;
+}
+function extractMonthly(rows, nameCol, startCol, n) {
+  const totals = new Array(n).fill(0);
+  for (let r=1;r<rows.length;r++) {
+    const row=rows[r];
+    if(!row||row[nameCol]===undefined||row[nameCol]===null) continue;
+    const nm=String(row[nameCol]).trim().toLowerCase();
+    if(nm===''||nm==='total'||nm==='grand total') continue;
+    for(let c=0;c<n;c++) totals[c]+=parseFloat(row[startCol+c])||0;
+  }
+  return totals;
+}
+function sheetRows(wb, name) {
+  const s = wb.Sheets[name]; if(!s) return [];
+  return XLSX.utils.sheet_to_json(s, {header:1, defval:null});
+}
+async function process() {
+  // FY25-26 HC continued
+  const ab26 = await (await fetch('FY2526_latest.xlsx')).arrayBuffer();
+  const wb26 = XLSX.read(ab26, {type:'array'});
+  {
+    const rows = sheetRows(wb26, 'Headcount_Overall');
+    const byAcc = extractByAccount(rows,1,7,12);
+    log('=== FY25-26 HC By Account (all) ===');
+    for(const [nm,arr] of Object.entries(byAcc)) {
+      const tot=arr.reduce((a,b)=>a+b,0);
+      if(tot>0) log(nm+': ['+arr.map(v=>+v.toFixed(2)).join(',')+']');
+    }
+    const t=extractMonthly(rows,1,7,12);
+    log('HC Monthly totals: '+t.map(v=>v.toFixed(2)).join(','));
+    // Compute PPC per month
+    const tcRows = sheetRows(wb26, 'Total Cost');
+    const tcTotals = extractMonthly(tcRows,1,7,12);
+    log('TC Monthly totals: '+tcTotals.map(v=>Math.round(v)).join(','));
+    const ppc = t.map((h,i)=>h>0?Math.round(tcTotals[i]/h):0);
+    log('PPC per month: '+ppc.join(','));
+  }
+  
+  // FY24-25
+  const ab25 = await (await fetch('FY2425_latest.xlsx')).arrayBuffer();
+  const wb25 = XLSX.read(ab25, {type:'array'});
+  log('\n===== FY24-25 =====');
+  {
+    const rows = sheetRows(wb25, 'Total Cost');
+    if(rows.length) {
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      const byAcc = extractByAccount(rows,1,7,12);
+      log('=== FY24-25 TC By Account (all) ===');
+      for(const [nm,arr] of Object.entries(byAcc)) {
+        const tot=arr.reduce((a,b)=>a+b,0);
+        if(tot>0) log(nm+': ['+arr.map(v=>Math.round(v)).join(',')+']');
+      }
+      const t=extractMonthly(rows,1,7,12);
+      log('TC Monthly totals: '+t.map(v=>Math.round(v)).join(','));
+    } else log('No Total Cost');
+  }
+  {
+    const rows = sheetRows(wb25, 'Actual_Headcount Overall');
+    if(rows.length) {
+      const byAcc = extractByAccount(rows,1,7,12);
+      log('\n=== FY24-25 HC By Account (all) ===');
+      for(const [nm,arr] of Object.entries(byAcc)) {
+        const tot=arr.reduce((a,b)=>a+b,0);
+        if(tot>0) log(nm+': ['+arr.map(v=>+v.toFixed(2)).join(',')+']');
+      }
+      const tcRows = sheetRows(wb25, 'Total Cost');
+      const tcTotals = extractMonthly(tcRows,1,7,12);
+      const hcTotals = extractMonthly(rows,1,7,12);
+      log('TC Monthly totals FY24-25: '+tcTotals.map(v=>Math.round(v)).join(','));
+      log('HC Monthly totals FY24-25: '+hcTotals.map(v=>v.toFixed(2)).join(','));
+      const ppc = hcTotals.map((h,i)=>h>0?Math.round(tcTotals[i]/h):0);
+      log('PPC per month FY24-25: '+ppc.join(','));
+    }
+  }
+  log('\nDONE');
+}
+process().catch(e=>log('ERROR: '+e.message));
+</script>
+</body>
+</html>

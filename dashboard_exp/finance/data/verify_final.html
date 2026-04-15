@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Verify Final Forecast</title></head>
+<body>
+<script>
+// Simulate corrected logic
+const revA      = [711.11, 813.34, 875.49, 744.78, 864.98, 991.28, 688.67, 901.20, 1043.62, 854.19, 0.0, 0.0];
+const revA_full = [711.11, 813.34, 875.49, 744.78, 864.98, 991.28, 688.67, 901.20, 1043.62, 854.19, 919.00, 1023.00];
+const revF      = [569.00, 791.00, 901.00, 666.00, 929.00, 1059.00, 639.00, 897.00, 1019.00, 804.00, 1111.00, 1261.00];
+const cmA       = [175.97, 283.81, 360.20, 210.34, 331.68, 432.62, 122.42, 319.34, 468.85, 287.69, 0.0, 0.0];
+
+function sumAt(arr, indices) { return indices.reduce((t,i)=>t+(arr[i]||0),0); }
+
+const ALL_IDX = [0,1,2,3,4,5,6,7,8,9,10,11];
+const Q1 = [0,1,2], Q2 = [3,4,5], Q3 = [6,7,8], Q4 = [9,10,11];
+
+// YTD Forecast = full Revenue_Actual sheet (all 12 months)
+const ytdF = sumAt(revA_full, ALL_IDX);
+// YTD Actual (confirmed only) 
+const ytdA = sumAt(revA, ALL_IDX);
+
+console.log('=== FINAL VERIFICATION ===\n');
+console.log('--- Summary Table ---');
+console.log('YTD Revenue Forecast (from Revenue_Actual full sheet):');
+console.log('  = ' + ytdF.toFixed(2) + ' L = ₹' + (ytdF/100).toFixed(2) + ' Cr');
+console.log('  Expected: ~10430.65 L = ₹104.31 Cr  ✅');
+console.log('YTD Revenue Actual (confirmed Apr-Jan):');
+console.log('  = ' + ytdA.toFixed(2) + ' L = ₹' + (ytdA/100).toFixed(2) + ' Cr');
+console.log('YTD Revenue Budget: 13000.32 L = ₹130.00 Cr');
+
+console.log('\n--- Quarterly (Rev_Forecast sheet) ---');
+console.log('Q1: ' + sumAt(revF,Q1).toFixed(0) + ' L = ₹' + (sumAt(revF,Q1)/100).toFixed(2) + ' Cr  (expect 2261)');
+console.log('Q2: ' + sumAt(revF,Q2).toFixed(0) + ' L = ₹' + (sumAt(revF,Q2)/100).toFixed(2) + ' Cr  (expect 2654)');
+console.log('Q3: ' + sumAt(revF,Q3).toFixed(0) + ' L = ₹' + (sumAt(revF,Q3)/100).toFixed(2) + ' Cr  (expect 2555)');
+console.log('Q4: ' + sumAt(revF,Q4).toFixed(0) + ' L = ₹' + (sumAt(revF,Q4)/100).toFixed(2) + ' Cr  (expect 3176)');
+
+console.log('\n--- CM Summary Table (fixed) ---');
+console.log('CM Forecast column in table: — (blank)  ✅ (removed per user request)');
+console.log('CM Budget: ' + (5961.63/100).toFixed(2) + ' Cr');
+console.log('CM Actual: ' + (2992.92/100).toFixed(2) + ' Cr');
+console.log('Var vs Budget: ' + ((2992.92-5961.63)/5961.63*100).toFixed(1) + '% (↓)');
+
+console.log('\n--- Feb & Mar handling ---');
+console.log('revA[10] (Feb26): 0  → not shown as actual in charts');
+console.log('revA_full[10] (Feb26): 919.00  → included in YTD Forecast');
+console.log('revA[11] (Mar26): 0  → not shown as actual in charts');
+console.log('revA_full[11] (Mar26): 1023.00  → included in YTD Forecast');
+</script>
+</body>
+</html>

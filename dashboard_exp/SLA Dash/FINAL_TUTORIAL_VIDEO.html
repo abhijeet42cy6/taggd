@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAGGD Dashboard - Complete Video Tutorial</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.95;
+        }
+        
+        .video-section {
+            padding: 40px;
+            background: #f8f9fa;
+        }
+        
+        .video-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: black;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .video-info {
+            background: white;
+            padding: 30px;
+            margin-top: 20px;
+            border-radius: 15px;
+            text-align: center;
+        }
+        
+        .video-info h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.8em;
+        }
+        
+        .video-info p {
+            color: #666;
+            font-size: 1.1em;
+            line-height: 1.8;
+            margin-bottom: 20px;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            padding: 40px;
+        }
+        
+        .feature-card {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .feature-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+        
+        .feature-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .feature-desc {
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 15px 40px;
+            border-radius: 50px;
+            font-size: 1.2em;
+            font-weight: bold;
+            text-decoration: none;
+            transition: all 0.3s;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+        
+        .btn-secondary:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        .timeline {
+            background: white;
+            padding: 40px;
+            margin: 20px 40px;
+            border-radius: 15px;
+        }
+        
+        .timeline h2 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        
+        .timeline-item {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .timeline-time {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 100px;
+            font-size: 1.1em;
+        }
+        
+        .timeline-content {
+            flex: 1;
+        }
+        
+        .timeline-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+            font-size: 1.2em;
+        }
+        
+        .timeline-desc {
+            color: #666;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 TAGGD SLA Dashboard</h1>
+            <p>Complete Video Tutorial with Audio Narration</p>
+        </div>
+        
+        <div class="video-section">
+            <div class="video-container">
+                <video controls autoplay>
+                    <source src="https://www.genspark.ai/api/files/s/LYXJzdlm" type="video/mp4">
+                    Your browser does not support the video tag.
+                </video>
+            </div>
+            
+            <div class="video-info">
+                <h2>📺 Tutorial Overview</h2>
+                <p>
+                    <strong>Duration:</strong> 8 minutes with professional voice narration<br>
+                    <strong>Quality:</strong> 1920x1080 HD | 16:9 Aspect Ratio<br>
+                    <strong>Content:</strong> Complete dashboard walkthrough with live demonstrations
+                </p>
+                
+                <div class="action-buttons">
+                    <a href="https://3000-i06je7d51yb0robxe7bji-3844e1b6.sandbox.novita.ai/TAGGD_Dashboard_ENHANCED.html" 
+                       target="_blank" 
+                       class="btn btn-primary">
+                        🚀 Open Live Dashboard
+                    </a>
+                    <a href="https://www.genspark.ai/api/files/s/LYXJzdlm" 
+                       download="TAGGD_Dashboard_Tutorial.mp4" 
+                       class="btn btn-secondary">
+                        ⬇️ Download Video
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="timeline">
+            <h2>📖 Video Timeline</h2>
+            
+            <div class="timeline-item">
+                <div class="timeline-time">0:00 - 0:30</div>
+                <div class="timeline-content">
+                    <div class="timeline-title">Scene 1: Dashboard Overview</div>
+                    <div class="timeline-desc">
+                        Introduction to the dashboard interface, navigation tabs (FY Comparison, Project Analysis, Regional Performance), 
+                        and main data table with status indicators (Green ✓, Amber ⚠️, Red ✗).
+                    </div>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-time">0:30 - 1:00</div>
+                <div class="timeline-content">
+                    <div class="timeline-title">Scene 2: RAG Status System</div>
+                    <div class="timeline-desc">
+                        Detailed view of performance metrics with percentages (75%, 50%, 40%) and color-coded cells. 
+                        Explains RAG status: Green (≥75%), Amber (50-74%), Red (<50%).
+                    </div>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-time">1:00 - 3:00</div>
+                <div class="timeline-content">
+                    <div class="timeline-title">Scene 3: Project Drill-Down Feature ⭐</div>
+                    <div class="timeline-desc">
+                        <strong>Most Important Section!</strong> Demonstrates clicking on "Siemens - GBS" to open detailed modal. 
+                        Shows performance measures (Time to Hire, Source Mix, Diversity), targets (70 Days, ER 15%, 60%), 
+                        monthly scores (40.91%, 8%, 0%), and Met/Not Met indicators (✓/✗). Scrolls through all 11 measures.
+                    </div>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-time">3:00 - 3:45</div>
+                <div class="timeline-content">
+                    <div class="timeline-title">Scene 4: Regional Performance</div>
+                    <div class="timeline-desc">
+                        Charts and graphs view showing regional breakdown with bar charts (blue, green, orange bars), 
+                        pie charts with distribution percentages, and interactive dropdown filters.
+                    </div>
+                </div>
+            </div>
+            
+            <div class="timeline-item">
+                <div class="timeline-time">3:45 - 5:00</div>
+                <div class="timeline-content">
+                    <div class="timeline-title">Scene 5: Export & Advanced Features</div>
+                    <div class="timeline-desc">
+                        Export functionality with dropdown menu (Download Excel, Generate PowerPoint), 
+                        voice command microphone icon, file upload button, and closing with dashboard URL and TAGGD logo.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <div class="feature-title">484 Metrics Tracked</div>
+                <div class="feature-desc">
+                    Comprehensive coverage across all projects and performance measures with real-time updates
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">✅</div>
+                <div class="feature-title">Smart Formatting</div>
+                <div class="feature-desc">
+                    Clean percentages (40% not 40.00%), zero values display as 0%, keeps necessary decimals (46.43%)
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <div class="feature-title">Excel Accuracy</div>
+                <div class="feature-desc">
+                    All values match your source Excel file exactly - verified for Siemens, SKF, Sterling, M&M, and more
+                </div>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">🚀</div>
+                <div class="feature-title">Real-Time Updates</div>
+                <div class="feature-desc">
+                    Upload new data via Excel file and see instant updates across all dashboard views
+                </div>
+            </div>
+        </div>
+        
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 50px; text-align: center; color: white;">
+            <h2 style="font-size: 2.5em; margin-bottom: 20px;">Ready to Get Started?</h2>
+            <p style="font-size: 1.3em; margin-bottom: 30px; opacity: 0.95;">
+                Access your live dashboard and start analyzing your SLA performance
+            </p>
+            <div class="action-buttons">
+                <a href="https://3000-i06je7d51yb0robxe7bji-3844e1b6.sandbox.novita.ai/TAGGD_Dashboard_ENHANCED.html" 
+                   target="_blank" 
+                   class="btn btn-primary" 
+                   style="background: white; color: #667eea;">
+                    Open Live Dashboard →
+                </a>
+            </div>
+            <p style="margin-top: 30px; font-size: 1.1em; opacity: 0.9;">
+                <strong>GitHub Pages:</strong> https://rishab25276.github.io/SLA-DASHBOARD/
+            </p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>Extract Practice Heads v2</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<h2>Practice Head Extractor</h2>
+<pre id="out" style="font-size:11px;background:#f0f0f0;padding:10px;max-height:90vh;overflow:auto;"></pre>
+<script>
+const out = document.getElementById('out');
+function log(s) { out.textContent += s + '\n'; console.log(s); }
+
+async function loadWB(url) {
+  const resp = await fetch(url);
+  const buf = await resp.arrayBuffer();
+  return XLSX.read(buf, {type:'array'});
+}
+
+async function run() {
+  const files = [
+    { label:'FY24-25', url:'FY24-25_Finance_Data.xlsx' },
+    { label:'FY25-26', url:'FY25-26_Finance_Data.xlsx' }
+  ];
+
+  for (const f of files) {
+    log('\n========== ' + f.label + ' ==========');
+    try {
+      const wb = await loadWB(f.url);
+      log('Sheets: ' + wb.SheetNames.join(', '));
+
+      for (const name of wb.SheetNames) {
+        const ws = wb.Sheets[name];
+        if (!ws) continue;
+        const rows = XLSX.utils.sheet_to_json(ws, {defval:'', header:1});
+        if (!rows || rows.length === 0) continue;
+        
+        const header = rows[0] ? rows[0].map(c => String(c||'').toLowerCase()) : [];
+        const hasPH = header.some(k => k.includes('practice'));
+        const hasRH = header.some(k => k.includes('region head') || k.includes('regionhead'));
+        
+        if (hasPH || hasRH) {
+          log('\n--- Sheet: ' + name + ' ---');
+          log('Headers: ' + rows[0].join(' | '));
+          for (let i = 1; i < rows.length; i++) {
+            if (rows[i] && rows[i].some(v => v !== '' && v !== null)) {
+              log('  [' + i + '] ' + rows[i].join(' | '));
+            }
+          }
+        }
+      }
+      
+      // Also show all sheet headers
+      log('\n--- ALL SHEET HEADERS ---');
+      for (const name of wb.SheetNames) {
+        const ws = wb.Sheets[name];
+        if (!ws) { log(name + ': (empty)'); continue; }
+        const rows = XLSX.utils.sheet_to_json(ws, {defval:'', header:1});
+        if (rows && rows[0]) {
+          log(name + ': ' + rows[0].join(' | '));
+        }
+      }
+
+    } catch(e) {
+      log('Error loading ' + f.label + ': ' + e.message);
+    }
+  }
+  log('\n=== DONE ===');
+}
+
+run();
+</script>
+</body>
+</html>

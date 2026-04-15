@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head><title>CM% Verify</title></head>
+<body>
+<script src="../js/data.js"></script>
+<script>
+const fd24 = FIN_DATA.FY2425;
+const fd25 = FIN_DATA.FY2526;
+
+console.log('=== FY24-25 monthly CM% (cmA/revA*100) ===');
+fd24.monthly.revA.forEach((r, i) => {
+  const cmA = fd24.monthly.cmA[i];
+  const pct = r > 0 ? (cmA / r * 100).toFixed(2) : 'N/A';
+  console.log(`  [${i}] ${fd24.months[i]}: revA=${r}, cmA=${cmA}, CM%=${pct}%`);
+});
+
+const totalRevA = fd24.monthly.revA.reduce((s,v)=>s+v,0);
+const totalCmA  = fd24.monthly.cmA.reduce((s,v)=>s+v,0);
+console.log(`FY24-25 Total CM% = ${(totalCmA/totalRevA*100).toFixed(2)}%`);
+
+console.log('');
+console.log('=== FY25-26 monthly CM% (cmA/revA*100) ===');
+fd25.monthly.revA.forEach((r, i) => {
+  const cmA = fd25.monthly.cmA[i];
+  const pct = r > 0 ? (cmA / r * 100).toFixed(2) : 'N/A';
+  console.log(`  [${i}] ${fd25.months[i]}: revA=${r}, cmA=${cmA}, CM%=${pct}%`);
+});
+
+// What the chart shows for FY24-25 line when FY25-26 is selected:
+// pA = fd24.monthly.revA.map((r,i) => r>0 ? fd24.monthly.cmA[i]/r*100 : null)
+// cutAt(pA, last24)  — last24 = last index where revA > 0 in FY2425
+const last24 = fd24.monthly.revA.reduce((li, v, i) => v > 0 ? i : li, -1);
+console.log('');
+console.log('last24 index:', last24, '=', fd24.months[last24]);
+
+// labs when FY25-26 selected = fd25.mLabels = ['Apr','May',...,'Mar']
+// pA maps over fd24.monthly.revA (12 values)
+// cutAt trims after last24
+const pA = fd24.monthly.revA.map((r,i) => r>0 ? fd24.monthly.cmA[i]/r*100 : null);
+console.log('FY24-25 CM% line data (what chart plots):', pA.map((v,i)=>v!==null?v.toFixed(2)+'%':'null'));
+
+// Stored cmAPct in data.js for comparison
+console.log('Stored fd24.monthly.cmAPct:', fd24.monthly.cmAPct);
+</script>
+<p>Check console</p>
+</body>
+</html>

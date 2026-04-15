@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head><title>Monthly FY2526</title></head>
+<body>
+<pre id="out"></pre>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+function excelDateToStr(serial) {
+  if (typeof serial !== 'number' || serial < 40000) return serial;
+  const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + d.getFullYear().toString().slice(-2);
+}
+async function parseExcel(url) {
+  const resp = await fetch(url);
+  const ab = await resp.arrayBuffer();
+  const wb = XLSX.read(ab, {type:'array'});
+  const result = {};
+  wb.SheetNames.forEach(name => {
+    const ws = wb.Sheets[name];
+    const json = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    if (!json.length) return;
+    const hdr = json[0].map(h => typeof h==='number' && h>40000 ? excelDateToStr(h) : String(h||''));
+    result[name] = { headers: hdr, monthCols: hdr.slice(7), rows: json.slice(1).filter(r=>r[1]) };
+  });
+  return result;
+}
+function sumByMonth(sheets, name) {
+  const s = sheets[name]; if (!s) return {};
+  const m = {};
+  s.monthCols.forEach((col,i) => {
+    m[col] = s.rows.reduce((t,r) => { const v=r[7+i]; return t+(v!==null&&!isNaN(Number(v))?Number(v):0); }, 0);
+  });
+  return m;
+}
+function avgByMonth(sheets, name) {
+  const s = sheets[name]; if (!s) return {};
+  const m = {};
+  s.monthCols.forEach((col,i) => {
+    let sum=0,cnt=0;
+    s.rows.forEach(r=>{const v=r[7+i];if(v!==null&&Number(v)>0){sum+=Number(v);cnt++;}});
+    m[col] = cnt>0?sum/cnt:0;
+  });
+  return m;
+}
+(async () => {
+  const sheets = await parseExcel('FY25-26_Finance_Data.xlsx');
+  const monthCols = sheets['Revenue_Actual']?.monthCols || [];
+  console.log('FY25-26 Months:', monthCols.join(','));
+  console.log('Sheets:', Object.keys(sheets).join(','));
+  
+  const revMA = sumByMonth(sheets,'Revenue_Actual');
+  const revMB = sumByMonth(sheets,'Revenue_Budget');
+  const revMF = sumByMonth(sheets,'Rev_Forecast');
+  const cmMA = sumByMonth(sheets,'CM_Actual');
+  const cmMB = sumByMonth(sheets,'CM_Budget');
+  const ppcM = avgByMonth(sheets,'Actual_PPC');
+  const collMA = sumByMonth(sheets,'Revenue_Collected');
+  const collMT = sumByMonth(sheets,'Collection Target');
+  const hcM = sumByMonth(sheets,'Actual_Headcount Overall');
+  const taggdM = sumByMonth(sheets,'Taggd_Source_Joiner');
+  const nonTaggdM = sumByMonth(sheets,'Non Taggd Source Joiner');
+  const unbilledM = sumByMonth(sheets,'Unbilled');
+  const badDebtM = sumByMonth(sheets,'Bad Debt');
+  const wl1M = sumByMonth(sheets,'Actual Headcount WL1');
+  const approvedM = sumByMonth(sheets,'Approved_Headcount');
+
+  let out = 'Month,RevAct,RevBud,RevFcs,CM_Act,CM%,CM_Bud,CMBud%,PPC_Avg,CollAct,CollTgt,HC,Approved,WL1,Taggd,NonT,Unbilled,BadDebt\n';
+  monthCols.forEach(mo => {
+    const ra=revMA[mo]||0, rb=revMB[mo]||0, rf=revMF[mo]||0;
+    const ca=cmMA[mo]||0, cb=cmMB[mo]||0;
+    const ub=unbilledM[mo]||0, bd=badDebtM[mo]||0;
+    const hc=hcM[mo]||0, ap=approvedM[mo]||0, wl=wl1M[mo]||0;
+    out += `${mo},${ra.toFixed(1)},${rb.toFixed(1)},${rf.toFixed(1)},${ca.toFixed(1)},${ra>0?(ca/ra*100).toFixed(2):0},${cb.toFixed(1)},${rb>0?(cb/rb*100).toFixed(2):0},${Math.round(ppcM[mo]||0)},${(collMA[mo]||0).toFixed(1)},${(collMT[mo]||0).toFixed(1)},${Math.round(hc)},${Math.round(ap)},${Math.round(wl)},${Math.round(taggdM[mo]||0)},${Math.round(nonTaggdM[mo]||0)},${ub.toFixed(1)},${bd.toFixed(1)}\n`;
+  });
+  console.log(out);
+  document.getElementById('out').textContent = out;
+})();
+</script>
+</body>
+</html>

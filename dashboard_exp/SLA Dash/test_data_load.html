@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Data Load Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h1>Dashboard Data Load Test</h1>
+    <div id="status">Loading...</div>
+    <div id="details"></div>
+    
+    <script>
+        console.log('Starting data load test...');
+        
+        fetch('sample_data.json')
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Data loaded successfully:', data.length, 'entries');
+                
+                document.getElementById('status').innerHTML = 
+                    `<span class="success">✓ Data loaded successfully!</span>`;
+                
+                let html = `
+                    <h2>Data Summary:</h2>
+                    <ul>
+                        <li><strong>Total Entries:</strong> ${data.length}</li>
+                        <li><strong>First Project:</strong> ${data[0]['Project Name']}</li>
+                        <li><strong>JSON Size:</strong> ${JSON.stringify(data).length} bytes</li>
+                    </ul>
+                    
+                    <h3>Maruti Suzuki Diversity Check:</h3>
+                `;
+                
+                const marutiDiversity = data.find(entry => 
+                    entry['Project Name'] === 'Maruti Suzuki' && 
+                    entry['Performance Measure'].toLowerCase() === 'diversity'
+                );
+                
+                if (marutiDiversity) {
+                    html += `
+                        <div class="success">
+                            <p>✓ Found Maruti Suzuki Diversity entry!</p>
+                            <pre>${JSON.stringify(marutiDiversity, null, 2)}</pre>
+                            <p><strong>Target Value:</strong> ${marutiDiversity.Target}</p>
+                            <p><strong>Display as:</strong> ${marutiDiversity.Target * 100}%</p>
+                        </div>
+                    `;
+                } else {
+                    html += '<p class="error">✗ Maruti Suzuki Diversity NOT found!</p>';
+                }
+                
+                document.getElementById('details').innerHTML = html;
+            })
+            .catch(error => {
+                console.error('Error loading data:', error);
+                document.getElementById('status').innerHTML = 
+                    `<span class="error">✗ Error loading data: ${error.message}</span>`;
+                document.getElementById('details').innerHTML = `
+                    <h3>Troubleshooting:</h3>
+                    <ul>
+                        <li>Check if sample_data.json exists in the same directory</li>
+                        <li>Check browser console for CORS errors</li>
+                        <li>Verify file permissions</li>
+                    </ul>
+                    <pre>Error: ${error}</pre>
+                `;
+            });
+    </script>
+</body>
+</html>

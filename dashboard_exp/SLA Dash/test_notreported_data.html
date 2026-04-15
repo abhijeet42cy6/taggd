@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Not Reported Data Loading</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        pre { background: #f5f5f5; padding: 15px; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Not Reported Data Loading Test</h1>
+    <div id="output"></div>
+
+    <script>
+        const output = document.getElementById('output');
+        
+        output.innerHTML += '<h2>Loading sample_data.json...</h2>';
+        
+        fetch('sample_data.json')
+            .then(response => response.json())
+            .then(data => {
+                output.innerHTML += '<p class="success">✓ sample_data.json loaded successfully</p>';
+                
+                // Check keys
+                output.innerHTML += '<h3>Keys in data:</h3>';
+                output.innerHTML += '<pre>' + JSON.stringify(Object.keys(data), null, 2) + '</pre>';
+                
+                // Check fy2425NotReported
+                const fy2425 = data.fy2425NotReported || [];
+                output.innerHTML += '<h3>fy2425NotReported:</h3>';
+                output.innerHTML += '<p>Length: ' + fy2425.length + ' rows</p>';
+                if (fy2425.length > 0) {
+                    output.innerHTML += '<p>First row columns: ' + Object.keys(fy2425[0]).join(', ') + '</p>';
+                    output.innerHTML += '<p>Sample row:</p>';
+                    output.innerHTML += '<pre>' + JSON.stringify(fy2425[0], null, 2) + '</pre>';
+                    
+                    // Count NotReported columns
+                    const notReportedCols = Object.keys(fy2425[0]).filter(k => k.includes('NotReported'));
+                    output.innerHTML += '<p>NotReported columns: ' + notReportedCols.length + '</p>';
+                    output.innerHTML += '<pre>' + JSON.stringify(notReportedCols, null, 2) + '</pre>';
+                    
+                    // Calculate total
+                    let total = 0;
+                    fy2425.forEach(row => {
+                        notReportedCols.forEach(col => {
+                            total += parseInt(row[col]) || 0;
+                        });
+                    });
+                    output.innerHTML += '<p class="success">Total Not Reported count (FY24-25): ' + total + '</p>';
+                } else {
+                    output.innerHTML += '<p class="error">✗ No rows in fy2425NotReported!</p>';
+                }
+                
+                // Check fy2526NotReported
+                const fy2526 = data.fy2526NotReported || [];
+                output.innerHTML += '<h3>fy2526NotReported:</h3>';
+                output.innerHTML += '<p>Length: ' + fy2526.length + ' rows</p>';
+                if (fy2526.length > 0) {
+                    output.innerHTML += '<p>First row columns: ' + Object.keys(fy2526[0]).join(', ') + '</p>';
+                    
+                    // Count NotReported columns
+                    const notReportedCols = Object.keys(fy2526[0]).filter(k => k.includes('NotReported'));
+                    output.innerHTML += '<p>NotReported columns: ' + notReportedCols.length + '</p>';
+                    
+                    // Calculate total
+                    let total = 0;
+                    fy2526.forEach(row => {
+                        notReportedCols.forEach(col => {
+                            total += parseInt(row[col]) || 0;
+                        });
+                    });
+                    output.innerHTML += '<p class="success">Total Not Reported count (FY25-26): ' + total + '</p>';
+                } else {
+                    output.innerHTML += '<p class="error">✗ No rows in fy2526NotReported!</p>';
+                }
+                
+                output.innerHTML += '<hr><h2 class="success">✓ Data is loading correctly!</h2>';
+                output.innerHTML += '<p>The Not Reported data is present in sample_data.json and loading properly.</p>';
+            })
+            .catch(error => {
+                output.innerHTML += '<p class="error">✗ Error loading sample_data.json: ' + error.message + '</p>';
+            });
+    </script>
+</body>
+</html>

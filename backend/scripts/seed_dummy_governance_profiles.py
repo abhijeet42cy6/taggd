@@ -170,6 +170,10 @@ def main() -> int:
         print(f"  vertical_access includes revenue_kpi_governance for UI labels")
         print()
         print("Login at /login with the password above (use --reset-password to rotate).")
+        print()
+        print("For Finance validation queue + approval demo rows, also run:")
+        print("  python3 -m backend.scripts.seed_billing_dummy")
+        print("  (Creates taggd_revenue_billing + finance_billing_workflow per project.)")
         return 0
     except Exception as e:
         db.rollback()

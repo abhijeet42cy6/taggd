@@ -267,9 +267,10 @@ export function AdminUsers() {
           Create accounts, assign{" "}
           <strong>roles</strong> (including <strong>client portal</strong> read-only logins),{" "}
           <strong>project assignments</strong>, optional <strong>reports-to</strong> hierarchy, and for{" "}
-          <strong>operations</strong> and <strong>client portal</strong> users a <strong>vertical allow-list</strong>{" "}
-          (which dashboards they may open). Client portal accounts cannot modify data. Finance, SLA, and other module
-          APIs enforce the same vertical keys.
+          <strong>operations</strong>, <strong>executive</strong>, <strong>project head</strong>,{" "}
+          <strong>recruiter</strong>, and <strong>client portal</strong> users a <strong>vertical allow-list</strong>{" "}
+          (which app sections and APIs they may use). Leave all modules checked or clear the saved list only when you
+          intend full access (null in DB). Client portal accounts cannot modify data; gated APIs use the same keys.
         </p>
       </div>
 
@@ -454,8 +455,9 @@ export function AdminUsers() {
                 Access — {accessModalUser.email}
               </div>
               <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "8px 0 0", lineHeight: 1.45 }}>
-                Operations users need matching verticals for gated routes (e.g. <code>/finance</code>, <code>/sla</code>
-                ). Saving applies role, reports-to, and the module checklist below.
+                For executive, operations, project head, and recruiter, the checklist controls which sections and gated APIs
+                are available (e.g. <code>/finance</code>, <code>/sla-performance</code>). Saving applies role,
+                reports-to, and the module list below.
               </p>
             </div>
             <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "16px 20px" }}>
@@ -520,8 +522,9 @@ export function AdminUsers() {
                 ))}
               </div>
               <p style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.45 }}>
-                All boxes checked = full list stored (same as default for operations). None checked sends an empty list
-                (operations users lose gated modules until you fix it).
+                All boxes checked stores the full module list. None checked stores an empty list and removes access to
+                gated routes until you assign modules again. Users with no saved list in the database still get full
+                module access (legacy default).
               </p>
             </div>
             <div

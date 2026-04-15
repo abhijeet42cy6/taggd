@@ -2,6 +2,10 @@
 Insert demo rows into `taggd_revenue_billing` — one row per project (cap 80), so scoped
 users still see data for every project they can access in the UI.
 
+Also creates matching `finance_billing_workflow` rows (mixed statuses) so **Finance validation**
+`GET /finance-billing-workflow/queue` is non-empty — the queue only lists billings that already
+have a workflow row.
+
 Run from repo root:
   python3 -m backend.scripts.seed_billing_dummy
   python3 -m backend.scripts.seed_billing_dummy --force   # remove prior demo rows and re-seed
@@ -14,13 +18,73 @@ import datetime
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from backend.db.database import Project, SessionLocal, TaggdRevenueBilling, User
+from backend.core.finance_billing_workflow_core import (
+    ST_CFO_PENDING,
+    ST_DRAFT,
+    ST_SUBMITTED,
+    ST_UNDER_REVIEW,
+)
+from backend.db.database import FinanceBillingWorkflow, Project, SessionLocal, TaggdRevenueBilling, User
 
 SEED_MARKER = "[demo-billing-seed]"
 
 
 def _dt(y: int, m: int, d: int) -> datetime.datetime:
     return datetime.datetime(y, m, d)
+
+
+def _workflow_demo_variant(billing_id: int, idx: int, uid: int | None) -> FinanceBillingWorkflow:
+    """One workflow per demo billing; rotate statuses so the validation UI shows varied approval points."""
+    phase = idx % 4
+    if phase == 0:
+        return FinanceBillingWorkflow(
+            taggd_revenue_billing_id=billing_id,
+            validation_status=ST_SUBMITTED,
+            practice_submitted_at=_dt(2026, 3, 16),
+            practice_submitted_by_user_id=uid,
+        )
+    if phase == 1:
+        return FinanceBillingWorkflow(
+            taggd_revenue_billing_id=billing_id,
+            validation_status=ST_UNDER_REVIEW,
+            practice_submitted_at=_dt(2026, 3, 15),
+            practice_submitted_by_user_id=uid,
+            finance_review_started_at=_dt(2026, 3, 17),
+            finance_reviewer_user_id=uid,
+        )
+    if phase == 2:
+        return FinanceBillingWorkflow(
+            taggd_revenue_billing_id=billing_id,
+            validation_status=ST_CFO_PENDING,
+            practice_submitted_at=_dt(2026, 3, 14),
+            practice_submitted_by_user_id=uid,
+            finance_review_started_at=_dt(2026, 3, 16),
+            finance_reviewer_user_id=uid,
+            junior_validated_at=_dt(2026, 3, 18),
+            junior_validated_by_user_id=uid,
+        )
+    return FinanceBillingWorkflow(
+        taggd_revenue_billing_id=billing_id,
+        validation_status=ST_DRAFT,
+    )
+
+
+def _backfill_missing_demo_workflows(db: Session, uid: int | None) -> int:
+    rows = (
+        db.query(TaggdRevenueBilling)
+        .outerjoin(FinanceBillingWorkflow, FinanceBillingWorkflow.taggd_revenue_billing_id == TaggdRevenueBilling.id)
+        .filter(
+            TaggdRevenueBilling.notes.like(f"%{SEED_MARKER}%"),
+            FinanceBillingWorkflow.id.is_(None),
+        )
+        .order_by(TaggdRevenueBilling.id.asc())
+        .all()
+    )
+    for i, row in enumerate(rows):
+        db.add(_workflow_demo_variant(row.id, i, uid))
+    if rows:
+        db.commit()
+    return len(rows)
 
 
 def _remove_seeded(db: Session) -> int:
@@ -47,16 +111,19 @@ def run_seed(force: bool = False) -> dict[str, int]:
         if force:
             removed = _remove_seeded(db)
 
+        user = db.query(User).order_by(User.id).first()
+        uid = user.id if user else None
+
         existing_seed = (
             db.query(TaggdRevenueBilling)
             .filter(TaggdRevenueBilling.notes.like(f"%{SEED_MARKER}%"))
             .first()
         )
         if existing_seed and not force:
+            backfilled = _backfill_missing_demo_workflows(db, uid)
+            if backfilled:
+                return {"inserted": backfilled, "removed": 0, "skipped": 0, "backfill_workflows": True}
             return {"inserted": 0, "removed": 0, "skipped": 2}
-
-        user = db.query(User).order_by(User.id).first()
-        uid = user.id if user else None
 
         # Up to 4 demo rows — one per project slot, varied fields (INR)
         templates: list[dict] = [
@@ -196,6 +263,8 @@ def run_seed(force: bool = False) -> dict[str, int]:
                 **tmpl,
             )
             db.add(row)
+            db.flush()
+            db.add(_workflow_demo_variant(row.id, idx, uid))
             inserted += 1
 
         db.commit()
@@ -219,11 +288,14 @@ def main() -> None:
     if out.get("skipped") == 1:
         print("No projects in database — nothing seeded.")
     elif out.get("skipped") == 2:
-        print("Demo billing rows already present — use --force to replace.")
+        print("Demo billing rows already present (workflows OK) — use --force to replace.")
     else:
         if out.get("removed", 0):
             print(f"Removed {out['removed']} prior demo row(s).")
-        print(f"Inserted {out['inserted']} taggd_revenue_billing demo row(s).")
+        if out.get("backfill_workflows"):
+            print(f"Backfilled {out['inserted']} finance_billing_workflow row(s) for existing demo billing.")
+        else:
+            print(f"Inserted {out['inserted']} taggd_revenue_billing demo row(s) (with workflows).")
 
 
 if __name__ == "__main__":

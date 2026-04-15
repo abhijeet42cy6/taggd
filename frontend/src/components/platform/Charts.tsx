@@ -589,6 +589,222 @@ export function SlaFyComparisonLineChart({
   );
 }
 
+// ─── SLA FY: portfolio Met vs Not Met snapshot counts (grouped by period) ─────
+export type SlaFyCountDatum = { period: string; met: number; notMet: number };
+
+export function SlaFyPortfolioMetNotMetBar({ data, height = 200 }: { data: SlaFyCountDatum[]; height?: number }) {
+  if (!data.length) return null;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+        <XAxis dataKey="period" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} allowDecimals={false} width={40} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Count"]} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
+        <Bar dataKey="met" name="Met" fill="color-mix(in srgb, var(--green) 72%, transparent)" radius={[2, 2, 0, 0]} />
+        <Bar dataKey="notMet" name="Not met" fill="color-mix(in srgb, var(--red) 70%, transparent)" radius={[2, 2, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── SLA: FY comparison as grouped bars (regions / accounts) ─────────────────
+export function SlaFyComparisonGroupedBar({
+  data,
+  labelP1,
+  labelP2,
+  height = 260,
+}: {
+  data: SlaFyComparePoint[];
+  labelP1: string;
+  labelP2: string;
+  height?: number;
+}) {
+  if (!data.length) {
+    return (
+      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
+        No data for this period
+      </div>
+    );
+  }
+  const tilt = data.length > 6;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: tilt ? 48 : 12 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+        <XAxis
+          dataKey="name"
+          tick={{ fill: COLORS.text3, fontSize: 8 }}
+          interval={0}
+          angle={tilt ? -32 : 0}
+          textAnchor={tilt ? "end" : "middle"}
+          height={tilt ? 52 : 28}
+        />
+        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={40} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v) => (v == null || v === "" ? "—" : `${v}%`)} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
+        <Bar dataKey="p1" name={labelP1} fill="color-mix(in srgb, var(--accent) 65%, transparent)" radius={[2, 2, 0, 0]} />
+        <Bar dataKey="p2" name={labelP2} fill="color-mix(in srgb, var(--accent2) 65%, transparent)" radius={[2, 2, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── SLA: Met % horizontal rank (executive tiles) ─────────────────────────────
+export type SlaRankBarDatum = { name: string; value: number };
+
+export function SlaExecutiveMetPctBar({ data, height = 140 }: { data: SlaRankBarDatum[]; height?: number }) {
+  if (!data.length) return null;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart layout="vertical" data={data} style={CHART_STYLE} margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal />
+        <XAxis type="number" domain={[0, 100]} tick={{ fill: COLORS.text3, fontSize: 8 }} tickFormatter={(v) => `${v}%`} />
+        <YAxis type="category" dataKey="name" width={88} tick={{ fill: COLORS.text3, fontSize: 8 }} axisLine={false} tickLine={false} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v.toFixed(1)}%`, "Met %"]} />
+        <Bar dataKey="value" name="Met %" fill="color-mix(in srgb, var(--accent) 55%, transparent)" radius={[0, 3, 3, 0]} barSize={14} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export type SlaDeltaBarDatum = { name: string; delta: number };
+
+export function SlaExecutiveDeltaBar({ data, height = 140 }: { data: SlaDeltaBarDatum[]; height?: number }) {
+  if (!data.length) return null;
+  const vals = data.map((d) => d.delta);
+  const maxAbs = Math.max(5, ...vals.map((v) => Math.abs(v)));
+  const domain: [number, number] = [-maxAbs, maxAbs];
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart layout="vertical" data={data} style={CHART_STYLE} margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal />
+        <XAxis type="number" domain={domain} tick={{ fill: COLORS.text3, fontSize: 8 }} tickFormatter={(v) => `${v}%`} />
+        <YAxis type="category" dataKey="name" width={88} tick={{ fill: COLORS.text3, fontSize: 8 }} axisLine={false} tickLine={false} />
+        <ReferenceLine x={0} stroke={COLORS.border} strokeDasharray="4 3" />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v >= 0 ? "+" : ""}${v.toFixed(1)} pp`, "Δ Met %"]} />
+        <Bar dataKey="delta" radius={[0, 3, 3, 0]} barSize={14}>
+          {data.map((e, i) => (
+            <Cell key={i} fill={e.delta >= 0 ? "color-mix(in srgb, var(--green) 65%, transparent)" : "color-mix(in srgb, var(--red) 65%, transparent)"} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── SLA: portfolio Met vs Not met (single FY window) — doughnut ──────────────
+export function SlaMetNotMetDonut({
+  met,
+  notMet,
+  label,
+  height = 168,
+}: {
+  met: number;
+  notMet: number;
+  label: string;
+  height?: number;
+}) {
+  const total = met + notMet;
+  if (total <= 0) {
+    return (
+      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11, textAlign: "center", padding: 8 }}>
+        No met / not-met snapshots in window
+      </div>
+    );
+  }
+  const pieData = [
+    { name: "Met", value: met },
+    { name: "Not met", value: notMet },
+  ];
+  return (
+    <div style={{ width: "100%" }}>
+      <div style={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace", textAlign: "center", marginBottom: 4 }}>{label}</div>
+      <ResponsiveContainer width="100%" height={height}>
+        <PieChart>
+          <Pie
+            data={pieData}
+            cx="50%"
+            cy="50%"
+            innerRadius={44}
+            outerRadius={62}
+            dataKey="value"
+            paddingAngle={2}
+            label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`}
+            labelLine={false}
+          >
+            <Cell fill="color-mix(in srgb, var(--green) 75%, transparent)" />
+            <Cell fill="color-mix(in srgb, var(--red) 72%, transparent)" />
+          </Pie>
+          <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Snapshots"]} />
+          <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ─── SLA: client Met % vs portfolio benchmark (grouped %) ───────────────────────
+export type SlaBenchmarkDatum = { name: string; client: number; benchmark: number };
+
+export function SlaBenchmarkGroupedBar({ data, benchmarkLabel, height = 260 }: { data: SlaBenchmarkDatum[]; benchmarkLabel: string; height?: number }) {
+  if (!data.length) {
+    return (
+      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
+        No comparison data
+      </div>
+    );
+  }
+  const tilt = data.length > 5;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: tilt ? 44 : 12 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+        <XAxis
+          dataKey="name"
+          tick={{ fill: COLORS.text3, fontSize: 8 }}
+          interval={0}
+          angle={tilt ? -28 : 0}
+          textAnchor={tilt ? "end" : "middle"}
+          height={tilt ? 48 : 28}
+        />
+        <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fill: COLORS.text3, fontSize: 9 }} width={36} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v.toFixed(1)}%`]} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
+        <Bar dataKey="client" name="Client Met %" fill="color-mix(in srgb, var(--accent) 62%, transparent)" radius={[2, 2, 0, 0]} />
+        <Bar dataKey="benchmark" name={benchmarkLabel} fill="color-mix(in srgb, var(--text-subtle) 45%, transparent)" radius={[2, 2, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── SLA: not-reported snapshot counts (vertical bar) ─────────────────────────
+export type SlaCountDatum = { name: string; count: number };
+
+export function SlaNotReportedCountBar({ data, height = 200 }: { data: SlaCountDatum[]; height?: number }) {
+  if (!data.length) return null;
+  const tilt = data.length > 7;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} style={CHART_STYLE} margin={{ bottom: tilt ? 40 : 8 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+        <XAxis
+          dataKey="name"
+          tick={{ fill: COLORS.text3, fontSize: 8 }}
+          interval={0}
+          angle={tilt ? -32 : 0}
+          textAnchor={tilt ? "end" : "middle"}
+          height={tilt ? 44 : 24}
+        />
+        <YAxis allowDecimals={false} tick={{ fill: COLORS.text3, fontSize: 9 }} width={32} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Not-reported snapshots"]} />
+        <Bar dataKey="count" name="Not reported" fill="color-mix(in srgb, var(--amber) 55%, transparent)" radius={[3, 3, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 // ─── SLA: one metric, months stacked met / not met / not reported ───────────
 export type SlaMetricMonthStackDatum = { month: string; met: number; notMet: number; notReported: number };
 

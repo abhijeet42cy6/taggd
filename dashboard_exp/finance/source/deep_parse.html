@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html>
+<head><title>Deep Excel Parser</title></head>
+<body>
+<pre id="out" style="font-size:9px;white-space:pre-wrap;overflow:auto;max-height:98vh"></pre>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+// From screenshot exact values:
+// Revenue: Budget=130.00Cr, Forecast=101.66Cr, Actual=76.34Cr, VarBud=-41.3%, VarFcs=-21.8%
+// CM%:     Budget=45.9%,    Forecast=45.0%,    Actual=35.4%,  VarBud=-10.4pp, VarFcs=-9.6pp
+// PPC:     Budget=0,        Forecast=-,         Actual=1,04,400, VarBud=0.0%
+// Rev Prod:Budget=2.17L,    Forecast=-,         Actual=2.02L, VarBud=-6.7%
+// Taggd JP:-,               -,                  2.2
+// Headcount:Budget=503,      -,                  540, VarBud=107.4% Util
+// Collection:Budget=131.74Cr,-,                  91.57Cr, VarBud=-30.5%
+// Source Mix:-,              -,                  53.4%, 8202/15346 joiners
+// Unbilled:  -,              -,                  5.66Cr, 7.4% of Rev
+// Bad Debt:  -,              -,                  0.85Cr, 0.9% of Coll
+
+function excelDate(serial) {
+  if (typeof serial !== 'number' || serial < 40000) return serial;
+  const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return mn[d.getMonth()] + d.getFullYear().toString().slice(-2);
+}
+
+async function parseAll(url, fyLabel) {
+  const resp = await fetch(url);
+  const ab = await resp.arrayBuffer();
+  const wb = XLSX.read(ab, {type:'array'});
+  let out = `\n${'='.repeat(60)}\n${fyLabel}\n${'='.repeat(60)}\n`;
+  out += `Sheets: ${wb.SheetNames.join(' | ')}\n\n`;
+
+  const results = {};
+  
+  wb.SheetNames.forEach(name => {
+    const ws = wb.Sheets[name];
+    const json = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
+    if(!json.length) return;
+    
+    // Parse header
+    const hdr = (json[0]||[]).map(h => {
+      if(h===null||h===undefined) return '';
+      if(typeof h==='number' && h>40000) return excelDate(h);
+      return String(h).trim();
+    });
+    const rows = json.slice(1).filter(r => r && r.some(v=>v!==null&&v!==''));
+    
+    // Find month columns (col index 7 onwards typically, or after dim cols)
+    // Try to detect: find first numeric-looking header
+    let firstMonthIdx = -1;
+    for(let i=0;i<hdr.length;i++){
+      const h=hdr[i];
+      if(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\d{2}$/.test(h)||
+         /^(Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\d{2}$/.test(h)){
+        firstMonthIdx=i; break;
+      }
+    }
+    
+    const monthCols = firstMonthIdx>=0 ? hdr.slice(firstMonthIdx) : [];
+    
+    // Compute totals per row and grand total
+    let grandTotal = 0;
+    const rowData = [];
+    rows.forEach(r => {
+      if(!r[1] && !r[0]) return;
+      let rowTotal = 0;
+      const monthVals = {};
+      monthCols.forEach((m,i) => {
+        const v = r[firstMonthIdx+i];
+        const n = (v!==null&&v!==undefined&&!isNaN(Number(v))) ? Number(v) : 0;
+        monthVals[m] = n;
+        rowTotal += n;
+      });
+      grandTotal += rowTotal;
+      rowData.push({key:r[1]||r[0], region:r[3]||'', vert:r[2]||'', total:rowTotal, months:monthVals});
+    });
+    
+    // Monthly sums
+    const monthlyTotals = {};
+    monthCols.forEach(m => {
+      monthlyTotals[m] = rows.reduce((t,r) => {
+        if(!r[1]&&!r[0]) return t;
+        const idx = firstMonthIdx + monthCols.indexOf(m);
+        const v = r[idx];
+        return t + ((v!==null&&v!==undefined&&!isNaN(Number(v)))?Number(v):0);
+      }, 0);
+    });
+
+    results[name] = {hdr, firstMonthIdx, monthCols, monthlyTotals, grandTotal, rowData};
+    
+    out += `---- ${name} ----\n`;
+    out += `Headers[0..${Math.min(hdr.length-1,15)}]: ${hdr.slice(0,16).join(' | ')}\n`;
+    out += `Month cols (${monthCols.length}): ${monthCols.join(', ')}\n`;
+    out += `Rows: ${rowData.length}, Grand Total: ${grandTotal.toFixed(2)}\n`;
+    out += `Monthly: `;
+    monthCols.forEach(m => out += `${m}:${monthlyTotals[m].toFixed(1)} `);
+    out += '\n';
+    
+    // For headcount/PPC show avg differently
+    if(name.includes('PPC')||name.includes('ppc')) {
+      out += `[PPC] Non-zero avg per month: `;
+      monthCols.forEach(m => {
+        let s=0,c=0;
+        rows.forEach(r => {
+          const idx=firstMonthIdx+monthCols.indexOf(m);
+          const v=r[idx];
+          if(v!==null&&Number(v)>0){s+=Number(v);c++;}
+        });
+        out += `${m}:${c>0?(s/c).toFixed(0):'0'} `;
+      });
+      out += '\n';
+    }
+    
+    // Show top 5 rows
+    out += `Top rows:\n`;
+    rowData.slice(0,5).forEach(r => out += `  ${r.key}: ${r.total.toFixed(1)}\n`);
+    out += '\n';
+  });
+  
+  // ---- COMPUTE DASHBOARD METRICS ----
+  out += `\n${'*'.repeat(60)}\nDASHBOARD METRICS — ${fyLabel}\n${'*'.repeat(60)}\n`;
+  
+  const r = results;
+  const revASheet = r['Revenue_Actual'] || r['Revenue Actual'];
+  const revBSheet = r['Revenue_Budget'] || r['Revenue Budget'];
+  const revFSheet = r['Rev_Forecast'] || r['Rev Forecast'];
+  const cmASheet  = r['CM_Actual'] || r['CM Actual'] || r['CM actual'];
+  const cmBSheet  = r['CM_Budget'] || r['CM Budget'];
+  const cmFSheet  = r['CM_Forecast'] || r['CM Forecast'];
+  const collASheet= r['Revenue_Collected'] || r['Actual_Collection'] || r['Actual Collection'];
+  const collTSheet= r['Collection Target'] || r['Target_Collection'];
+  const taggdSheet= r['Taggd_Source_Joiner'] || r['Taggd Source Joiner'];
+  const nonTSheet = r['Non Taggd Source Joiner'] || r['Non Taggd_Source_Joiner'];
+  const hcSheet   = r['Actual_Headcount Overall'] || r['Headcount_Overall'];
+  const hcWL1Sheet= r['Actual Headcount WL1'] || r['Headcount_WL1'];
+  const hcAppSheet= r['Approved_Headcount'] || r['Headcount_Approved'];
+  const ppcSheet  = r['Actual_PPC'] || r['PPC_Actual'];
+  const ubSheet   = r['Unbilled'];
+  const bdSheet   = r['Bad Debt'];
+  const revAdjSheet= r['Rev_Adjustment'] || r['Revenue_Adjustment'];
+  const revProdSheet= r['Rev_Productivity_Actual'] || r['Target_Rev_Productivity'] || r['Target Rev Productivity'];
+
+  const sumSheet = s => s ? Object.values(s.monthlyTotals).reduce((t,v)=>t+v,0) : 0;
+  
+  const revA = sumSheet(revASheet);
+  const revB = sumSheet(revBSheet);
+  const revF = sumSheet(revFSheet);
+  const cmA  = sumSheet(cmASheet);
+  const cmB  = sumSheet(cmBSheet);
+  const cmF  = sumSheet(cmFSheet);
+  const collA= sumSheet(collASheet);
+  const collT= sumSheet(collTSheet);
+  const taggd= sumSheet(taggdSheet);
+  const nonT = sumSheet(nonTSheet);
+  const ub   = sumSheet(ubSheet);
+  const bd   = sumSheet(bdSheet);
+  
+  // Latest HC (last non-zero col)
+  function latestVal(sheet) {
+    if(!sheet) return 0;
+    for(let i=sheet.monthCols.length-1;i>=0;i--){
+      const m=sheet.monthCols[i];
+      const v=sheet.monthlyTotals[m];
+      if(v>0) return {val:v,month:m};
+    }
+    return {val:0,month:''};
+  }
+  
+  const hcLatest = latestVal(hcSheet);
+  const hcWL1Latest = latestVal(hcWL1Sheet);
+  const hcAppLatest = latestVal(hcAppSheet);
+  
+  // PPC avg non-zero
+  function avgNZ(sheet) {
+    if(!sheet) return 0;
+    let s=0,c=0;
+    sheet.monthCols.forEach(m => {
+      sheet.rowData.forEach(r => {
+        const v=r.months[m];
+        if(v>0){s+=v;c++;}
+      });
+    });
+    return c?s/c:0;
+  }
+  // PPC avg per month (avg of non-zero rows)
+  function avgNZPerMonth(sheet) {
+    if(!sheet) return {};
+    const res={};
+    sheet.monthCols.forEach(m => {
+      let s=0,c=0;
+      sheet.rowData.forEach(r=>{const v=r.months[m];if(v>0){s+=v;c++;}});
+      res[m]=c?s/c:0;
+    });
+    return res;
+  }
+  
+  const ppcByMonth = avgNZPerMonth(ppcSheet);
+  // Latest PPC month
+  let latestPPC=0;
+  if(ppcSheet) {
+    for(let i=ppcSheet.monthCols.length-1;i>=0;i--){
+      const m=ppcSheet.monthCols[i];
+      if(ppcByMonth[m]>0){latestPPC=ppcByMonth[m];break;}
+    }
+  }
+  
+  // Revenue Productivity = Revenue / (WL1 HC)
+  // Or from Rev_Productivity_Actual sheet if available
+  function latestRevProd(sheet) {
+    if(!sheet) return 0;
+    for(let i=sheet.monthCols.length-1;i>=0;i--){
+      const m=sheet.monthCols[i];
+      if(sheet.monthlyTotals[m]>0) return sheet.monthlyTotals[m];
+    }
+    return 0;
+  }
+  
+  // Taggd Joiner Productivity = Taggd joiners / WL1 HC (per month)
+  // Show all monthly details
+  out += `\nRevenue Actual:  ${revA.toFixed(2)}L = ${(revA/100).toFixed(2)}Cr\n`;
+  out += `Revenue Budget:  ${revB.toFixed(2)}L = ${(revB/100).toFixed(2)}Cr\n`;
+  out += `Revenue Forecast:${revF.toFixed(2)}L = ${(revF/100).toFixed(2)}Cr\n`;
+  out += `Rev Var vs Bud:  ${revB>0?((revA-revB)/revB*100).toFixed(1):'N/A'}%\n`;
+  out += `Rev Var vs Fcs:  ${revF>0?((revA-revF)/revF*100).toFixed(1):'N/A'}%\n\n`;
+  
+  out += `CM Actual:  ${cmA.toFixed(2)}L | ${revA>0?(cmA/revA*100).toFixed(2):'N/A'}%\n`;
+  out += `CM Budget:  ${cmB.toFixed(2)}L | ${revB>0?(cmB/revB*100).toFixed(2):'N/A'}%\n`;
+  out += `CM Forecast:${cmF.toFixed(2)}L | ${revF>0?(cmF/revF*100).toFixed(2):'N/A'}%\n\n`;
+  
+  out += `HC Overall (latest ${hcLatest.month}): ${hcLatest.val.toFixed(0)}\n`;
+  out += `HC WL1    (latest ${hcWL1Latest.month}): ${hcWL1Latest.val.toFixed(0)}\n`;
+  out += `HC Approved(latest ${hcAppLatest.month}): ${hcAppLatest.val.toFixed(0)}\n`;
+  out += `PPC Latest month: ${latestPPC.toFixed(0)} | Avg all: ${avgNZ(ppcSheet).toFixed(0)}\n\n`;
+  
+  out += `Collections Actual:${collA.toFixed(2)}L = ${(collA/100).toFixed(2)}Cr\n`;
+  out += `Collections Target:${collT.toFixed(2)}L = ${(collT/100).toFixed(2)}Cr\n`;
+  out += `Coll Att%: ${collT>0?(collA/collT*100).toFixed(1):'N/A'}%\n\n`;
+  
+  out += `Taggd Joiners: ${taggd.toFixed(0)}\n`;
+  out += `NonTaggd Joiners: ${nonT.toFixed(0)}\n`;
+  out += `Total Joiners: ${(taggd+nonT).toFixed(0)}\n`;
+  out += `Taggd Mix%: ${(taggd+nonT)>0?(taggd/(taggd+nonT)*100).toFixed(1):'N/A'}%\n\n`;
+  
+  out += `Unbilled: ${ub.toFixed(2)}L = ${(ub/100).toFixed(2)}Cr\n`;
+  out += `Bad Debt: ${bd.toFixed(2)}L = ${(bd/100).toFixed(2)}Cr\n\n`;
+  
+  // Rev Prod from sheet
+  if(revProdSheet) {
+    out += `Rev Productivity Sheet rows:\n`;
+    revProdSheet.rowData.slice(0,5).forEach(r=>out+=`  ${r.key}: ${r.total.toFixed(2)}\n`);
+    out += `Rev Prod monthly: `;
+    revProdSheet.monthCols.forEach(m=>out+=`${m}:${revProdSheet.monthlyTotals[m].toFixed(2)} `);
+    out+='\n';
+  }
+  
+  // Rev Adj
+  if(revAdjSheet) {
+    out += `Rev Adjustment total: ${sumSheet(revAdjSheet).toFixed(2)}L\n`;
+    out += `Rev Adj monthly: `;
+    revAdjSheet.monthCols.forEach(m=>out+=`${m}:${revAdjSheet.monthlyTotals[m].toFixed(2)} `);
+    out+='\n';
+  }
+  
+  // Monthly breakdown
+  const allMonths = revASheet?.monthCols || revBSheet?.monthCols || [];
+  out += `\nFULL MONTHLY BREAKDOWN:\n`;
+  out += `Month,RevA,RevB,RevF,CmA,CmAPct,CmB,CmBPct,CollA,CollT,HC,WL1,App,Taggd,NonT,PPC,Ub,Bd\n`;
+  allMonths.forEach(m => {
+    const ra=revASheet?.monthlyTotals[m]||0;
+    const rb=revBSheet?.monthlyTotals[m]||0;
+    const rf=revFSheet?.monthlyTotals[m]||0;
+    const ca=cmASheet?.monthlyTotals[m]||0;
+    const cb=cmBSheet?.monthlyTotals[m]||0;
+    const hc=hcSheet?.monthlyTotals[m]||0;
+    const wl=hcWL1Sheet?.monthlyTotals[m]||0;
+    const ap=hcAppSheet?.monthlyTotals[m]||0;
+    const tg=taggdSheet?.monthlyTotals[m]||0;
+    const nt=nonTSheet?.monthlyTotals[m]||0;
+    const pp=ppcByMonth[m]||0;
+    const u=ubSheet?.monthlyTotals[m]||0;
+    const bd2=bdSheet?.monthlyTotals[m]||0;
+    const coll=collASheet?.monthlyTotals[m]||0;
+    const collt=collTSheet?.monthlyTotals[m]||0;
+    out+=`${m},${ra.toFixed(1)},${rb.toFixed(1)},${rf.toFixed(1)},${ca.toFixed(1)},${ra>0?(ca/ra*100).toFixed(2):0},${cb.toFixed(1)},${rb>0?(cb/rb*100).toFixed(2):0},${coll.toFixed(1)},${collt.toFixed(1)},${hc.toFixed(0)},${wl.toFixed(0)},${ap.toFixed(0)},${tg.toFixed(0)},${nt.toFixed(0)},${pp.toFixed(0)},${u.toFixed(2)},${bd2.toFixed(2)}\n`;
+  });
+
+  // By region / vertical
+  out += `\nBY REGION (Revenue Actual):\n`;
+  if(revASheet){
+    const byReg={};
+    revASheet.rowData.forEach(r=>{if(!byReg[r.region])byReg[r.region]=0;byReg[r.region]+=r.total;});
+    Object.entries(byReg).sort((a,b)=>b[1]-a[1]).forEach(([r,v])=>out+=`  ${r}: ${v.toFixed(1)}L\n`);
+  }
+  out += `\nBY VERTICAL (Revenue Actual):\n`;
+  if(revASheet){
+    const byV={};
+    revASheet.rowData.forEach(r=>{if(!byV[r.vert])byV[r.vert]=0;byV[r.vert]+=r.total;});
+    Object.entries(byV).sort((a,b)=>b[1]-a[1]).forEach(([v,val])=>out+=`  ${v}: ${val.toFixed(1)}L\n`);
+  }
+
+  out += `\nALL PROJECTS (Rev Actual | Rev Budget | CM Actual | CM%):\n`;
+  if(revASheet){
+    const projB={};
+    revBSheet?.rowData.forEach(r=>{projB[r.key]=(projB[r.key]||0)+r.total;});
+    const projF={};
+    revFSheet?.rowData.forEach(r=>{projF[r.key]=(projF[r.key]||0)+r.total;});
+    const projCM={};
+    cmASheet?.rowData.forEach(r=>{projCM[r.key]=(projCM[r.key]||0)+r.total;});
+    
+    revASheet.rowData.sort((a,b)=>b.total-a.total).forEach(p=>{
+      const b=projB[p.key]||0,f=projF[p.key]||0,cm=projCM[p.key]||0;
+      const vb=b>0?((p.total-b)/b*100).toFixed(1):'N/A';
+      const cmP=p.total>0?(cm/p.total*100).toFixed(1):'N/A';
+      out+=`  ${p.key}|A:${p.total.toFixed(0)}|B:${b.toFixed(0)}|F:${f.toFixed(0)}|VB:${vb}%|CM:${cmP}%|${p.region}|${p.vert}\n`;
+    });
+  }
+  
+  return out;
+}
+
+(async()=>{
+  try{
+    const o1 = await parseAll('FY24-25_Finance_Data.xlsx','FY 2024-25');
+    console.log(o1.substring(0,4000));
+    console.log('P2:'+o1.substring(4000,8000));
+    console.log('P3:'+o1.substring(8000,12000));
+    console.log('P4:'+o1.substring(12000,16000));
+    const o2 = await parseAll('FY25-26_Finance_Data.xlsx','FY 2025-26');
+    console.log('FY26:'+o2.substring(0,4000));
+    console.log('FY26P2:'+o2.substring(4000,8000));
+    console.log('FY26P3:'+o2.substring(8000,12000));
+    console.log('FY26P4:'+o2.substring(12000,16000));
+    document.getElementById('out').textContent = o1+'\n\n'+o2;
+  }catch(e){console.error('ERR:'+e.message);}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minimal Data Load Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
+        .status { padding: 20px; margin: 20px 0; border-radius: 8px; }
+        .success { background: #d1fae5; color: #065f46; }
+        .error { background: #fee2e2; color: #991b1b; }
+        .info { background: #dbeafe; color: #1e40af; }
+        pre { background: white; padding: 15px; border-radius: 4px; overflow: auto; max-height: 400px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Minimal Dashboard Data Load Test</h1>
+    <div id="status" class="status info">⏳ Loading data...</div>
+    <div id="details"></div>
+    
+    <script>
+        console.log('=== Starting minimal test ===');
+        console.log('Current URL:', window.location.href);
+        console.log('Current time:', new Date().toISOString());
+        
+        const timestamp = new Date().getTime();
+        const jsonUrl = `sample_data.json?v=${timestamp}`;
+        
+        console.log('Attempting to fetch:', jsonUrl);
+        
+        fetch(jsonUrl)
+            .then(response => {
+                console.log('Response received:', response.status, response.statusText);
+                console.log('Response headers:', response.headers);
+                
+                const statusDiv = document.getElementById('status');
+                const detailsDiv = document.getElementById('details');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                statusDiv.className = 'status info';
+                statusDiv.innerHTML = '⏳ Response OK, parsing JSON...';
+                
+                return response.json();
+            })
+            .then(data => {
+                console.log('✅ Data parsed successfully');
+                console.log('Total entries:', data.length);
+                console.log('First entry:', data[0]);
+                
+                const statusDiv = document.getElementById('status');
+                const detailsDiv = document.getElementById('details');
+                
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = '✅ DATA LOADED SUCCESSFULLY!';
+                
+                // Find Maruti Suzuki Diversity
+                const marutiDiversity = data.find(entry => 
+                    entry['Project Name'] === 'Maruti Suzuki' && 
+                    entry['Performance Measure'] && 
+                    entry['Performance Measure'].toLowerCase() === 'diversity'
+                );
+                
+                let html = `
+                    <h2>📊 Data Summary</h2>
+                    <ul>
+                        <li><strong>Total Entries:</strong> ${data.length}</li>
+                        <li><strong>First Project:</strong> ${data[0]['Project Name']}</li>
+                        <li><strong>Data Keys:</strong> ${Object.keys(data[0]).length} fields</li>
+                    </ul>
+                `;
+                
+                if (marutiDiversity) {
+                    html += `
+                        <h2>✅ Maruti Suzuki Diversity Found!</h2>
+                        <pre>${JSON.stringify(marutiDiversity, null, 2)}</pre>
+                        <h3>Target Display:</h3>
+                        <p><strong>Stored Value:</strong> ${marutiDiversity.Target}</p>
+                        <p><strong>Display As:</strong> ${marutiDiversity.Target * 100}%</p>
+                    `;
+                } else {
+                    html += '<h2 style="color: red;">❌ Maruti Suzuki Diversity NOT found!</h2>';
+                }
+                
+                html += `
+                    <h2>📝 First 3 Entries:</h2>
+                    <pre>${JSON.stringify(data.slice(0, 3), null, 2)}</pre>
+                `;
+                
+                detailsDiv.innerHTML = html;
+            })
+            .catch(error => {
+                console.error('❌ Error:', error);
+                
+                const statusDiv = document.getElementById('status');
+                const detailsDiv = document.getElementById('details');
+                
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `❌ ERROR: ${error.message}`;
+                
+                detailsDiv.innerHTML = `
+                    <h2>🚨 Error Details</h2>
+                    <pre>${error.stack || error.message}</pre>
+                    
+                    <h2>🔧 Troubleshooting</h2>
+                    <ul>
+                        <li>Check that sample_data.json exists in the same directory</li>
+                        <li>Open browser console (F12) for more details</li>
+                        <li>Try opening: <a href="sample_data.json" target="_blank">sample_data.json</a> directly</li>
+                        <li>Check for CORS errors in console</li>
+                    </ul>
+                    
+                    <h2>📍 Direct Links</h2>
+                    <ul>
+                        <li><a href="https://rishab25276.github.io/SLA-DASHBOARD/sample_data.json" target="_blank">GitHub Pages JSON</a></li>
+                        <li><a href="sample_data.json" target="_blank">Relative Path JSON</a></li>
+                    </ul>
+                `;
+            });
+    </script>
+</body>
+</html>

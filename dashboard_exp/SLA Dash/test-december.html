@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>December Data Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body style="font-family: Arial; padding: 20px;">
+    <h1>🔍 December Data Verification</h1>
+    <div id="result"></div>
+    
+    <script>
+        async function testData() {
+            const result = document.getElementById('result');
+            result.innerHTML = '<p>Loading Excel file from GitHub Pages...</p>';
+            
+            try {
+                // Force fresh load with timestamp
+                const timestamp = new Date().getTime();
+                const response = await fetch(`https://businessexcellence.github.io/SLA-DASHBOARD/SLA_Monthly_Status_Summary_FINAL.xlsx?t=${timestamp}`, {
+                    cache: 'no-store'
+                });
+                
+                if (!response.ok) {
+                    result.innerHTML = '<p style="color: red;">❌ Failed to load file</p>';
+                    return;
+                }
+                
+                const arrayBuffer = await response.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+                const workbook = XLSX.read(data, {type: 'array'});
+                
+                const ws = workbook.Sheets['FY 25-26 Summary'];
+                const json = XLSX.utils.sheet_to_json(ws);
+                
+                // Check for December columns
+                const firstRow = json[0];
+                const hasDecMet = 'Dec_Met' in firstRow;
+                const hasDecNotMet = 'Dec_Not_Met' in firstRow;
+                
+                let html = '<h2>✅ File Loaded Successfully!</h2>';
+                html += `<p><strong>Total Projects:</strong> ${json.length}</p>`;
+                html += `<p><strong>December Met Column:</strong> ${hasDecMet ? '✅ YES' : '❌ NO'}</p>`;
+                html += `<p><strong>December Not Met Column:</strong> ${hasDecNotMet ? '✅ YES' : '❌ NO'}</p>`;
+                
+                if (hasDecMet) {
+                    html += '<h3>Sample December Data:</h3><table border="1" cellpadding="5"><tr><th>Project</th><th>Dec_Met</th><th>Dec_Not_Met</th></tr>';
+                    for (let i = 0; i < Math.min(5, json.length); i++) {
+                        const row = json[i];
+                        html += `<tr><td>${row.Project}</td><td>${row.Dec_Met || 0}</td><td>${row.Dec_Not_Met || 0}</td></tr>`;
+                    }
+                    html += '</table>';
+                    
+                    html += '<h2 style="color: green;">🎉 DECEMBER DATA IS WORKING!</h2>';
+                    html += '<p><a href="https://businessexcellence.github.io/SLA-DASHBOARD/" target="_blank">Open Dashboard</a></p>';
+                    html += '<p style="color: red;"><strong>IMPORTANT:</strong> Press Ctrl+Shift+R (or Cmd+Shift+R on Mac) when opening the dashboard!</p>';
+                } else {
+                    html += '<h2 style="color: red;">❌ December data NOT found</h2>';
+                }
+                
+                result.innerHTML = html;
+                
+            } catch (error) {
+                result.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
+            }
+        }
+        
+        testData();
+    </script>
+</body>
+</html>

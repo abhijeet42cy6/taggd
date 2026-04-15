@@ -13,9 +13,11 @@ import {
   AuthProvider,
   displayNameFromUser,
   firstAllowedNavPathForClient,
+  firstAllowedStaffNavPath,
   initialsFromUser,
   isRecruiterUser,
   navAllowedForRole,
+  staffVerticalNavEnforced,
   useAuth,
 } from "@/lib/auth";
 import { UserAvatarImg } from "@/components/UserAvatarImg";
@@ -200,8 +202,24 @@ function AppShell() {
   if (isRecruiter) {
     const allowed = navAllowedForRole(location.pathname, role, { effectiveRole, verticalAccess });
     if (!allowed) {
-      return <Navigate to="/tasks" replace />;
+      const fallback = firstAllowedStaffNavPath(role, { effectiveRole, verticalAccess });
+      return <Navigate to={fallback} replace />;
     }
+  }
+
+  if (
+    user &&
+    !isRecruiter &&
+    effectiveRole !== "client_user" &&
+    staffVerticalNavEnforced(role, effectiveRole) &&
+    !navAllowedForRole(location.pathname, role, { effectiveRole, verticalAccess })
+  ) {
+    return (
+      <Navigate
+        to={firstAllowedStaffNavPath(role, { effectiveRole, verticalAccess })}
+        replace
+      />
+    );
   }
 
   const filteredGroups: NavGroup[] = (isRecruiter ? RECRUITER_NAV_GROUPS : ALL_NAV_GROUPS)

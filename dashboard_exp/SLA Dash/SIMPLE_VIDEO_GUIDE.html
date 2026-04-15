@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAGGD Dashboard - Interactive Video Tutorial</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: white;
+        }
+        
+        .video-container {
+            max-width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .video-screen {
+            width: 90%;
+            max-width: 1200px;
+            aspect-ratio: 16/9;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .scene {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 60px;
+            text-align: center;
+            animation: fadeIn 0.5s;
+        }
+        
+        .scene.active {
+            display: flex;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        
+        .scene-title {
+            font-size: 3em;
+            font-weight: bold;
+            margin-bottom: 30px;
+            color: #667eea;
+        }
+        
+        .scene-content {
+            font-size: 1.5em;
+            color: #333;
+            line-height: 1.8;
+            max-width: 800px;
+        }
+        
+        .highlight-box {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }
+        
+        .big-number {
+            font-size: 5em;
+            font-weight: bold;
+            color: #667eea;
+            margin: 20px 0;
+        }
+        
+        .feature-list {
+            text-align: left;
+            margin: 20px auto;
+            max-width: 600px;
+        }
+        
+        .feature-item {
+            font-size: 1.3em;
+            padding: 15px;
+            margin: 10px 0;
+            background: #f8f9fa;
+            border-radius: 10px;
+            color: #333;
+        }
+        
+        .feature-item::before {
+            content: "✓ ";
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .controls {
+            margin-top: 30px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        
+        .control-btn {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .progress-bar {
+            width: 80%;
+            height: 8px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: white;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .audio-controls {
+            margin-top: 20px;
+        }
+        
+        .dashboard-iframe {
+            width: 100%;
+            height: 80%;
+            border: none;
+            border-radius: 10px;
+        }
+        
+        .scene-number {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <div class="video-screen">
+            <!-- Scene 1 -->
+            <div class="scene active" data-scene="1">
+                <div class="scene-number">Scene 1/6</div>
+                <div class="scene-title">🎬 TAGGD SLA Dashboard</div>
+                <div class="scene-content">
+                    <p style="font-size: 1.8em; margin-bottom: 30px;">Complete Tutorial in 5 Minutes</p>
+                    <div class="highlight-box">
+                        <p><strong>What You'll Learn:</strong></p>
+                        <div class="feature-list">
+                            <div class="feature-item">Navigate the dashboard interface</div>
+                            <div class="feature-item">View account performance with RAG status</div>
+                            <div class="feature-item">Use project drill-down for detailed metrics</div>
+                            <div class="feature-item">Export data and use advanced features</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Scene 2 -->
+            <div class="scene" data-scene="2">
+                <div class="scene-number">Scene 2/6</div>
+                <div class="scene-title">📊 Dashboard Overview</div>
+                <div class="scene-content">
+                    <div class="big-number">484</div>
+                    <p style="font-size: 2em; margin-bottom: 20px;">Performance Metrics Tracked</p>
+                    <div class="highlight-box">
+                        <p><strong>Key Features:</strong></p>
+                        <div class="feature-list">
+                            <div class="feature-item">FY Comparison View</div>
+                            <div class="feature-item">Project Analysis</div>
+                            <div class="feature-item">Regional Performance</div>
+                            <div class="feature-item">Real-time Data Updates</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Scene 3 -->
+            <div class="scene" data-scene="3">
+                <div class="scene-number">Scene 3/6</div>
+                <div class="scene-title">🚦 RAG Status System</div>
+                <div class="scene-content">
+                    <div class="feature-list" style="max-width: 700px;">
+                        <div class="feature-item" style="background: #d1fae5; border-left: 5px solid #10b981;">
+                            <strong style="color: #065f46;">🟢 GREEN</strong> - 75%+ compliance (Exceeding targets)
+                        </div>
+                        <div class="feature-item" style="background: #fef3c7; border-left: 5px solid #f59e0b;">
+                            <strong style="color: #92400e;">🟡 AMBER</strong> - 50-74% compliance (Meeting most targets)
+                        </div>
+                        <div class="feature-item" style="background: #fee2e2; border-left: 5px solid #ef4444;">
+                            <strong style="color: #991b1b;">🔴 RED</strong> - Below 50% (Needs attention)
+                        </div>
+                    </div>
+                    <p style="margin-top: 30px; font-size: 1.3em;">Performance at a glance with color-coded indicators</p>
+                </div>
+            </div>
+            
+            <!-- Scene 4 -->
+            <div class="scene" data-scene="4">
+                <div class="scene-number">Scene 4/6</div>
+                <div class="scene-title">🎯 Project Drill-Down</div>
+                <div class="scene-content">
+                    <p style="font-size: 2em; margin-bottom: 30px;"><strong>Most Powerful Feature!</strong></p>
+                    <div class="highlight-box" style="text-align: left;">
+                        <p style="font-size: 1.4em; margin-bottom: 20px;"><strong>Click any project to see:</strong></p>
+                        <div class="feature-list">
+                            <div class="feature-item">Performance Measure names</div>
+                            <div class="feature-item">Target values (70 Days, ER 15%, 60%)</div>
+                            <div class="feature-item">Monthly scores: Apr'25 → Oct'25</div>
+                            <div class="feature-item">Smart formatting: 40%, 8%, 0%, 46.43%</div>
+                            <div class="feature-item">Met/Not Met indicators (✓/✗)</div>
+                            <div class="feature-item">YTD (Year-to-Date) totals</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Scene 5 -->
+            <div class="scene" data-scene="5">
+                <div class="scene-number">Scene 5/6</div>
+                <div class="scene-title">📈 Example: Siemens - GBS</div>
+                <div class="scene-content">
+                    <div class="highlight-box" style="text-align: left;">
+                        <p style="font-size: 1.5em; margin-bottom: 20px;"><strong>Source Mix Performance:</strong></p>
+                        <div style="font-family: monospace; font-size: 1.2em; line-height: 2;">
+                            <div>Target: <strong style="color: #667eea;">ER 15%</strong></div>
+                            <div>Apr'25: <strong style="color: #10b981;">40.91%</strong> ✓ Met</div>
+                            <div>May'25: <strong style="color: #10b981;">16.67%</strong> ✓ Met</div>
+                            <div>Jul'25: <strong style="color: #ef4444;">0%</strong> ✗ Not Met</div>
+                            <div>Aug'25: <strong style="color: #ef4444;">8%</strong> ✗ Not Met</div>
+                            <div>Oct'25: <strong style="color: #ef4444;">0%</strong> ✗ Not Met</div>
+                            <div>YTD: <strong style="color: #10b981;">15%</strong> ✓ Met</div>
+                        </div>
+                    </div>
+                    <p style="margin-top: 20px; font-size: 1.2em;">All values match your Excel source exactly!</p>
+                </div>
+            </div>
+            
+            <!-- Scene 6 -->
+            <div class="scene" data-scene="6">
+                <div class="scene-number">Scene 6/6</div>
+                <div class="scene-title">🚀 Ready to Explore?</div>
+                <div class="scene-content">
+                    <p style="font-size: 2em; margin-bottom: 30px;">Open the Live Dashboard</p>
+                    <div class="highlight-box">
+                        <div class="feature-list">
+                            <div class="feature-item">Export to Excel or PowerPoint</div>
+                            <div class="feature-item">Use voice commands</div>
+                            <div class="feature-item">Upload new data anytime</div>
+                            <div class="feature-item">Real-time updates</div>
+                        </div>
+                    </div>
+                    <a href="https://3000-i06je7d51yb0robxe7bji-3844e1b6.sandbox.novita.ai/TAGGD_Dashboard_ENHANCED.html" 
+                       target="_blank" 
+                       style="display: inline-block; background: #667eea; color: white; padding: 20px 40px; text-decoration: none; border-radius: 50px; font-size: 1.5em; margin-top: 30px; font-weight: bold;">
+                        Open Dashboard →
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" onclick="previousScene()">⬅ Previous</button>
+            <button class="control-btn" onclick="toggleAudio()" id="audioBtn">▶ Play Audio</button>
+            <button class="control-btn" onclick="nextScene()">Next ➡</button>
+        </div>
+        
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressBar"></div>
+        </div>
+        
+        <div class="audio-controls">
+            <audio id="tutorialAudio" src="tutorial_narration.mp3" onended="onAudioEnd()"></audio>
+        </div>
+    </div>
+    
+    <script>
+        let currentScene = 1;
+        const totalScenes = 6;
+        const audio = document.getElementById('tutorialAudio');
+        const audioBtn = document.getElementById('audioBtn');
+        const progressBar = document.getElementById('progressBar');
+        
+        function showScene(sceneNum) {
+            document.querySelectorAll('.scene').forEach(s => s.classList.remove('active'));
+            document.querySelector(`[data-scene="${sceneNum}"]`).classList.add('active');
+            currentScene = sceneNum;
+            updateProgress();
+        }
+        
+        function nextScene() {
+            if (currentScene < totalScenes) {
+                showScene(currentScene + 1);
+            }
+        }
+        
+        function previousScene() {
+            if (currentScene > 1) {
+                showScene(currentScene - 1);
+            }
+        }
+        
+        function toggleAudio() {
+            if (audio.paused) {
+                audio.play();
+                audioBtn.textContent = '⏸ Pause Audio';
+            } else {
+                audio.pause();
+                audioBtn.textContent = '▶ Play Audio';
+            }
+        }
+        
+        function onAudioEnd() {
+            audioBtn.textContent = '▶ Play Audio';
+        }
+        
+        function updateProgress() {
+            const progress = (currentScene / totalScenes) * 100;
+            progressBar.style.width = progress + '%';
+        }
+        
+        // Auto-advance scenes based on audio timing (optional)
+        audio.addEventListener('timeupdate', function() {
+            const currentTime = audio.currentTime;
+            const duration = audio.duration;
+            
+            // Auto-advance based on narration timing
+            if (currentTime > 0 && currentTime < 30 && currentScene !== 1) {
+                showScene(1);
+            } else if (currentTime >= 30 && currentTime < 60 && currentScene !== 2) {
+                showScene(2);
+            } else if (currentTime >= 60 && currentTime < 90 && currentScene !== 3) {
+                showScene(3);
+            } else if (currentTime >= 90 && currentTime < 120 && currentScene !== 4) {
+                showScene(4);
+            } else if (currentTime >= 120 && currentTime < 150 && currentScene !== 5) {
+                showScene(5);
+            } else if (currentTime >= 150 && currentScene !== 6) {
+                showScene(6);
+            }
+        });
+        
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight') nextScene();
+            if (e.key === 'ArrowLeft') previousScene();
+            if (e.key === ' ') { e.preventDefault(); toggleAudio(); }
+        });
+        
+        updateProgress();
+    </script>
+</body>
+</html>

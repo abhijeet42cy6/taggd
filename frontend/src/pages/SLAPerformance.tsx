@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api, invalidateCache, queries } from "@/lib/api";
+import { isProjectHeadLike, useAuth } from "@/lib/auth";
 import { formatPercent } from "@/lib/utils";
 import {
   aggregatePeriod,
@@ -8,18 +9,42 @@ import {
   periodMonthSet,
   type FyMode,
 } from "@/lib/sla-fy";
-import { PlatformKpi, PlatformSection, PageHeader, StatusTag } from "@/components/platform/PlatformBlocks";
+import { StatusTag } from "@/components/platform/PlatformBlocks";
 import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
 import {
+  SlaBenchmarkGroupedBar,
   SlaComplianceBar,
+  SlaExecutiveDeltaBar,
+  SlaExecutiveMetPctBar,
+  SlaFyComparisonGroupedBar,
   SlaFyComparisonLineChart,
+  SlaFyPortfolioMetNotMetBar,
+  SlaMetNotMetDonut,
+  SlaNotReportedCountBar,
   SlaTimeSeriesChart,
   type SlaSeriesPoint,
 } from "@/components/platform/Charts";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { SlaMetricFormDialog } from "@/components/platform/SlaMetricFormDialog";
 import { slaRowsVm, slaStatsVm } from "@/lib/view-models/sla";
-import { Plus } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  BookOpen,
+  Building2,
+  Calendar,
+  CalendarDays,
+  LayoutGrid,
+  MapPin,
+  Menu,
+  Plus,
+  Sparkles,
+  Trophy,
+  Users,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import "@/styles/sla-dash-ui.css";
 
 // ─── Colour palette to match SlaTimeSeriesChart ────────────────────────────────
 const SERIES_COLORS = [
@@ -154,7 +179,49 @@ function penaltyLabel(metricNature: string | null | undefined): { label: string;
   return { label: "Non-Penalty", ok: true };
 }
 
+/** Indian FY quarter from calendar month in YYYY-MM. */
+function monthToIndianQuarter(ym: string): "Q1" | "Q2" | "Q3" | "Q4" | null {
+  if (!ym || ym.length < 7) return null;
+  const mo = parseInt(ym.slice(5, 7), 10);
+  if (Number.isNaN(mo)) return null;
+  if (mo >= 4 && mo <= 6) return "Q1";
+  if (mo >= 7 && mo <= 9) return "Q2";
+  if (mo >= 10) return "Q3";
+  if (mo >= 1 && mo <= 3) return "Q4";
+  return null;
+}
+
+type SlaDashView =
+  | "overview"
+  | "executive"
+  | "monthly"
+  | "quarterly"
+  | "yearly"
+  | "account"
+  | "region"
+  | "practice"
+  | "benchmarking"
+  | "notreported"
+  | "manual";
+
+const SL_NAV: { id: SlaDashView; label: string; icon: LucideIcon }[] = [
+  { id: "overview", label: "Overview", icon: LayoutGrid },
+  { id: "executive", label: "Executive View", icon: Sparkles },
+  { id: "monthly", label: "Monthly Performance", icon: Calendar },
+  { id: "quarterly", label: "Quarterly Performance", icon: CalendarDays },
+  { id: "yearly", label: "Year-over-Year", icon: ArrowLeftRight },
+  { id: "account", label: "Project Analysis", icon: Building2 },
+  { id: "region", label: "Regional Analysis", icon: MapPin },
+  { id: "practice", label: "Practice Head Analysis", icon: Users },
+  { id: "benchmarking", label: "Industry Benchmarking", icon: Trophy },
+  { id: "notreported", label: "Not Reported Analysis", icon: AlertTriangle },
+  { id: "manual", label: "User Manual", icon: BookOpen },
+];
+
 export function SLAPerformance() {
+  const { user } = useAuth();
+  const phLike = isProjectHeadLike(user);
+
   // Core data
   const [stats,      setStats]      = useState<any>(null);
   const [rows,       setRows]       = useState<any[]>([]);
@@ -199,6 +266,9 @@ export function SLAPerformance() {
   const [fyRegionFilter, setFyRegionFilter] = useState<string>("all");
 
   const [slaMetricDialogOpen, setSlaMetricDialogOpen] = useState(false);
+  const [slaView, setSlaView] = useState<SlaDashView>("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [regionChartKind, setRegionChartKind] = useState<"line" | "bar">("bar");
 
   const slaMetricOptions = useMemo(() => {
     const seen = new Set<number>();
@@ -267,6 +337,11 @@ export function SLAPerformance() {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    if (slaView === "notreported") setStatusFilter("not_reported");
+    else setStatusFilter((prev) => (prev === "not_reported" ? "all" : prev));
+  }, [slaView]);
 
   useEffect(() => {
     if (!drillAccount) {
@@ -499,6 +574,269 @@ export function SLAPerformance() {
     });
   }, [timeseries, accountMetaMap, p1Months, p2Months]);
 
+  const fyPracticeChartData = useMemo(() => {
+    const roll = new Map<string, { met1: number; nm1: number; met2: number; nm2: number }>();
+    for (const acc of timeseries) {
+      const ph = accountMetaMap.get(acc.account_name)?.practice_head || "Unknown";
+      if (!roll.has(ph)) roll.set(ph, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
+      const b = roll.get(ph)!;
+      for (const t of acc.timeline) {
+        if (p1Months.has(t.month)) {
+          b.met1 += t.met;
+          b.nm1 += t.not_met;
+        }
+        if (p2Months.has(t.month)) {
+          b.met2 += t.met;
+          b.nm2 += t.not_met;
+        }
+      }
+    }
+    return Array.from(roll.entries())
+      .map(([name, v]) => {
+        const t1 = v.met1 + v.nm1;
+        const t2 = v.met2 + v.nm2;
+        return {
+          name: name.length > 18 ? `${name.slice(0, 17)}…` : name,
+          p1: t1 > 0 ? Math.round((v.met1 / t1) * 1000) / 10 : null,
+          p2: t2 > 0 ? Math.round((v.met2 / t2) * 1000) / 10 : null,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [timeseries, p1Months, p2Months, accountMetaMap]);
+
+  const portfolioTrendAllMonths = useMemo((): SlaSeriesPoint[] => {
+    return allMonths.map((month) => {
+      let met = 0;
+      let nm = 0;
+      for (const acc of timeseries) {
+        const t = acc.timeline.find((x: any) => x.month === month);
+        if (t) {
+          met += t.met;
+          nm += t.not_met;
+        }
+      }
+      const denom = met + nm;
+      return { month, Portfolio: denom > 0 ? Math.round((met / denom) * 1000) / 10 : null };
+    });
+  }, [allMonths, timeseries]);
+
+  const quarterlyRollup = useMemo(() => {
+    const qs = ["Q1", "Q2", "Q3", "Q4"] as const;
+    const roll: Record<(typeof qs)[number], { met: number; nm: number }> = {
+      Q1: { met: 0, nm: 0 },
+      Q2: { met: 0, nm: 0 },
+      Q3: { met: 0, nm: 0 },
+      Q4: { met: 0, nm: 0 },
+    };
+    for (const acc of timeseries) {
+      for (const t of acc.timeline) {
+        const q = monthToIndianQuarter(t.month);
+        if (!q) continue;
+        roll[q].met += t.met;
+        roll[q].nm += t.not_met;
+      }
+    }
+    return qs.map((q) => {
+      const { met, nm } = roll[q];
+      const tot = met + nm;
+      return {
+        quarter: q,
+        met,
+        not_met: nm,
+        met_pct: tot > 0 ? Math.round((met / tot) * 1000) / 10 : null,
+      };
+    });
+  }, [timeseries]);
+
+  const quarterlyChartData = useMemo(
+    () =>
+      quarterlyRollup.map((r) => ({
+        month: r.quarter,
+        "Portfolio Met %": r.met_pct,
+      })) as SlaSeriesPoint[],
+    [quarterlyRollup],
+  );
+
+  const accountOverallMetPct = useMemo(() => {
+    const monthSet = new Set(allMonths);
+    return timeseries
+      .map((acc: any) => {
+        const a = aggregatePeriod(acc.timeline, monthSet);
+        return { account: acc.account_name as string, met_pct: a.met_pct };
+      })
+      .filter((x) => x.met_pct != null) as { account: string; met_pct: number }[];
+  }, [timeseries, allMonths]);
+
+  const executiveBest = useMemo(
+    () => [...accountOverallMetPct].sort((a, b) => b.met_pct - a.met_pct).slice(0, 5),
+    [accountOverallMetPct],
+  );
+  const executiveWorst = useMemo(
+    () => [...accountOverallMetPct].sort((a, b) => a.met_pct - b.met_pct).slice(0, 5),
+    [accountOverallMetPct],
+  );
+
+  const executiveImproved = useMemo(() => {
+    return [...fyComparisonTableRows]
+      .filter((r) => r.p1 != null && r.p2 != null)
+      .map((r) => ({ ...r, delta: (r.p2 ?? 0) - (r.p1 ?? 0) }))
+      .sort((a, b) => b.delta - a.delta)
+      .slice(0, 5);
+  }, [fyComparisonTableRows]);
+
+  const executiveDeclined = useMemo(() => {
+    return [...fyComparisonTableRows]
+      .filter((r) => r.p1 != null && r.p2 != null)
+      .map((r) => ({ ...r, delta: (r.p2 ?? 0) - (r.p1 ?? 0) }))
+      .sort((a, b) => a.delta - b.delta)
+      .slice(0, 5);
+  }, [fyComparisonTableRows]);
+
+  /** Portfolio met / not-met snapshot counts for the two FY windows (timeseries). */
+  const portfolioFySnapshots = useMemo(() => {
+    let p1m = 0;
+    let p1nm = 0;
+    let p2m = 0;
+    let p2nm = 0;
+    for (const acc of timeseries) {
+      for (const t of acc.timeline) {
+        if (p1Months.has(t.month)) {
+          p1m += t.met;
+          p1nm += t.not_met;
+        }
+        if (p2Months.has(t.month)) {
+          p2m += t.met;
+          p2nm += t.not_met;
+        }
+      }
+    }
+    const p2Tot = p2m + p2nm;
+    const p2_pct = p2Tot > 0 ? Math.round((p2m / p2Tot) * 1000) / 10 : null;
+    return {
+      bar: [
+        { period: formatPeriodLabelShort(fyMode, "p1"), met: p1m, notMet: p1nm },
+        { period: formatPeriodLabelShort(fyMode, "p2"), met: p2m, notMet: p2nm },
+      ],
+      p1: { met: p1m, notMet: p1nm },
+      p2: { met: p2m, notMet: p2nm },
+      p2_pct,
+    };
+  }, [timeseries, p1Months, p2Months, fyMode]);
+
+  /** Top accounts by snapshot volume — FY Met % line (HTML account trend). */
+  const accountTopFyTrendData = useMemo(() => {
+    const ranked = [...timeseries]
+      .map((acc: any) => ({
+        account: acc.account_name as string,
+        vol: acc.timeline.reduce(
+          (n: number, t: any) => n + t.met + t.not_met + (t.not_reported ?? 0),
+          0,
+        ),
+      }))
+      .sort((a, b) => b.vol - a.vol)
+      .slice(0, 10);
+    return ranked.map(({ account }) => {
+      const ts = timeseries.find((t: any) => t.account_name === account);
+      if (!ts) return { name: account, p1: null, p2: null };
+      const a1 = aggregatePeriod(ts.timeline, p1Months);
+      const a2 = aggregatePeriod(ts.timeline, p2Months);
+      const short = account.length > 14 ? `${account.slice(0, 13)}…` : account;
+      return { name: short, p1: a1.met_pct, p2: a2.met_pct };
+    });
+  }, [timeseries, p1Months, p2Months]);
+
+  const benchmarkVsPortfolioData = useMemo(() => {
+    const bench = portfolioFySnapshots.p2_pct;
+    if (bench == null) return [];
+    return [...fyComparisonTableRows]
+      .filter((r) => r.p2 != null)
+      .sort((a, b) => (b.p2 ?? 0) - (a.p2 ?? 0))
+      .slice(0, 10)
+      .map((r) => ({
+        name: r.account.length > 12 ? `${r.account.slice(0, 11)}…` : r.account,
+        client: r.p2 as number,
+        benchmark: bench,
+      }));
+  }, [fyComparisonTableRows, portfolioFySnapshots.p2_pct]);
+
+  const notReportedByAccount = useMemo(() => {
+    return timeseries
+      .map((acc: any) => {
+        const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
+        const name = acc.account_name as string;
+        const short = name.length > 12 ? `${name.slice(0, 11)}…` : name;
+        return { name: short, count: n };
+      })
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+  }, [timeseries]);
+
+  const notReportedByRegion = useMemo(() => {
+    const roll = new Map<string, number>();
+    for (const acc of timeseries) {
+      const region = accountMetaMap.get(acc.account_name)?.region || "Unknown";
+      const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
+      roll.set(region, (roll.get(region) ?? 0) + n);
+    }
+    return Array.from(roll.entries())
+      .map(([name, count]) => ({
+        name: name.length > 14 ? `${name.slice(0, 13)}…` : name,
+        count,
+      }))
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count);
+  }, [timeseries, accountMetaMap]);
+
+  const notReportedByPractice = useMemo(() => {
+    const roll = new Map<string, number>();
+    for (const acc of timeseries) {
+      const ph = accountMetaMap.get(acc.account_name)?.practice_head || "Unknown";
+      const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
+      roll.set(ph, (roll.get(ph) ?? 0) + n);
+    }
+    return Array.from(roll.entries())
+      .map(([name, count]) => ({
+        name: name.length > 16 ? `${name.slice(0, 15)}…` : name,
+        count,
+      }))
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count);
+  }, [timeseries, accountMetaMap]);
+
+  const notReportedMonthlySeries = useMemo(() => {
+    const byMonth = new Map<string, number>();
+    for (const acc of timeseries) {
+      for (const t of acc.timeline) {
+        const nr = t.not_reported ?? 0;
+        if (nr <= 0) continue;
+        byMonth.set(t.month, (byMonth.get(t.month) ?? 0) + nr);
+      }
+    }
+    return allMonths.map((m) => ({
+      name: formatMonthColHeader(m),
+      count: byMonth.get(m) ?? 0,
+    }));
+  }, [timeseries, allMonths]);
+
+  const notReportedMonthlyChartData = useMemo(() => {
+    const nz = notReportedMonthlySeries.filter((x) => x.count > 0);
+    if (nz.length) return nz.slice(-24);
+    return notReportedMonthlySeries.slice(-12);
+  }, [notReportedMonthlySeries]);
+
+  const notReportedSnapshotsTotal = useMemo(
+    () => timeseries.reduce((sum, acc: any) => sum + acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0), 0),
+    [timeseries],
+  );
+
+  const regionalRankP2 = useMemo(() => {
+    return [...fyRegionalChartData]
+      .filter((r) => r.p2 != null)
+      .map((r) => ({ name: r.name, p2: r.p2 as number }))
+      .sort((a, b) => b.p2 - a.p2);
+  }, [fyRegionalChartData]);
+
   const regionsForFilter = useMemo(() => {
     const s = new Set<string>();
     accountMetaMap.forEach((v) => s.add(v.region || "—"));
@@ -629,43 +967,322 @@ export function SLAPerformance() {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
+  const slaNavTitle = SL_NAV.find((x) => x.id === slaView)?.label ?? "SLA";
+
   return (
-    <div style={{ display: "grid", gap: 14 }}>
+    <>
+      <div className="sla-dash-scope">
+        <div className="sla-dash-app">
+          <nav className={`sla-dash-sidebar${sidebarCollapsed ? " collapsed" : ""}`} aria-label="SLA dashboard views">
+            <div className="sla-sidebar-brand">
+              <div className="sla-sidebar-brand-title">SLA / KPI</div>
+              <div className="sla-sidebar-brand-sub">Performance views</div>
+            </div>
+            <div className="sla-nav-section-title">Analysis</div>
+            {SL_NAV.map(({ id, label, icon: NavIcon }) => (
+              <button
+                key={id}
+                type="button"
+                className={`sla-nav-item${slaView === id ? " active" : ""}`}
+                onClick={() => setSlaView(id)}
+              >
+                <NavIcon className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="sla-nav-lbl">{label}</span>
+              </button>
+            ))}
+            <div className="sla-sidebar-foot">Data from /sla/stats, /sla/data, /sla/timeseries.</div>
+          </nav>
 
-      {/* HEADER */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <PageHeader title="SLA Performance" subtitle="Service quality compliance across all clients and metrics" />
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-0 bg-[var(--accent)] px-3 py-1.5 text-[10.5px] font-semibold text-[var(--accent-foreground)] shadow-sm transition-colors hover:bg-[var(--accent-hover)]"
-            onClick={() => setSlaMetricDialogOpen(true)}
-          >
-            <Plus className="shrink-0" size={14} strokeWidth={2.5} aria-hidden />
-            Add / edit SLA metric
-          </button>
-          <label className="platform-chip active" style={{ cursor: "pointer" }}>
-            ↑ Upload SLA
-            <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => onUpload(e.target.files?.[0])} />
-          </label>
+          <div className="sla-dash-main">
+            <header className="sla-dash-topbar">
+              <button
+                type="button"
+                className="sla-tb-toggle"
+                aria-label="Toggle sidebar"
+                onClick={() => setSidebarCollapsed((c) => !c)}
+              >
+                <Menu className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+              </button>
+              <div className="sla-tb-title">
+                <span>{slaNavTitle}</span>
+              </div>
+            </header>
+
+            <div className="sla-dash-hero">
+              <h1>Taggd SLA / KPI performance</h1>
+              <p>Portfolio compliance, trends, and account drill-downs — wired to your workspace SLA ingestion.</p>
+            </div>
+
+            <div className="sla-dash-toolbar">
+              <button
+                type="button"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-0 bg-[var(--accent)] px-3 py-1.5 text-[10.5px] font-semibold text-[var(--accent-foreground)] shadow-sm transition-colors hover:bg-[var(--accent-hover)]"
+                onClick={() => setSlaMetricDialogOpen(true)}
+              >
+                <Plus className="shrink-0" size={14} strokeWidth={2.5} aria-hidden />
+                Add / edit SLA metric
+              </button>
+              <label className="platform-chip active" style={{ cursor: "pointer" }}>
+                ↑ Upload SLA
+                <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => onUpload(e.target.files?.[0])} />
+              </label>
+            </div>
+
+            <div className="sla-dash-content">
+              {phLike ? (
+                <div className="sla-dash-card" style={{ marginBottom: 14 }}>
+                  <div className="sla-dash-card-hd">
+                    <div className="sla-dash-card-title">Your SLA KPI submissions</div>
+                    <div className="sla-dash-card-sub">Project heads — add or edit metric rows for your accounts.</div>
+                  </div>
+                  <div className="sla-dash-card-bd">
+                    <p className="text-[11px] font-mono text-muted-foreground max-w-2xl leading-relaxed">
+                      Saved values appear in the portfolio views and SLA table for everyone with SLA access.
+                    </p>
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="font-mono text-[11px]"
+                        onClick={() => setSlaMetricDialogOpen(true)}
+                      >
+                        <Plus className="mr-1.5 h-3.5 w-3.5" />
+                        Add / edit SLA metric
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {(slaView === "overview" || slaView === "executive") && (
+                <>
+                  {loading ? (
+                    <SkeletonKpiRow count={4} />
+                  ) : (
+                    <div className="sla-metric-grid">
+                      <div className="sla-metric-card">
+                        <div className="sla-metric-card-hd">Metrics met</div>
+                        <div className="sla-metric-card-body">
+                          <div className="sla-metric-val">{rows.length > 0 ? formatPercent(metPct) : "—"}</div>
+                          <div className="sla-metric-sub">
+                            {rows.length > 0 ? `${stats?.met_count ?? 0} of ${rows.length} metrics` : "Upload SLA data"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="sla-metric-card" style={{ borderTopColor: "var(--red)" }}>
+                        <div className="sla-metric-card-hd">Not met</div>
+                        <div className="sla-metric-card-body">
+                          <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notMetPct) : "—"}</div>
+                          <div className="sla-metric-sub">{rows.length > 0 ? `${stats?.not_met_count ?? 0} metrics` : "—"}</div>
+                        </div>
+                      </div>
+                      <div className="sla-metric-card" style={{ borderTopColor: "var(--amber)" }}>
+                        <div className="sla-metric-card-hd">Not reported</div>
+                        <div className="sla-metric-card-body">
+                          <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notReportedPct) : "—"}</div>
+                          <div className="sla-metric-sub">{rows.length > 0 ? `${notReportedCount} metrics` : "—"}</div>
+                        </div>
+                      </div>
+                      <div className="sla-metric-card" style={{ borderTopColor: "var(--accent2, #0d9488)" }}>
+                        <div className="sla-metric-card-hd">Total metrics</div>
+                        <div className="sla-metric-card-body">
+                          <div className="sla-metric-val">{stats?.total_metrics ?? (rows.length || "—")}</div>
+                          <div className="sla-metric-sub">
+                            {stats?.total_accounts ? `${stats.total_accounts} accounts` : "—"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {slaView === "executive" && (
+                <div className="sla-rank-grid" style={{ marginBottom: 14 }}>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">Top accounts (Met %)</div>
+                      <div className="sla-dash-card-sub">Across all months in the loaded timeseries.</div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      {executiveBest.length === 0 ? (
+                        <div className="sla-empty">No timeseries data.</div>
+                      ) : (
+                        <SlaExecutiveMetPctBar
+                          data={executiveBest.map((r) => ({
+                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
+                            value: r.met_pct,
+                          }))}
+                          height={132}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">Bottom accounts (Met %)</div>
+                      <div className="sla-dash-card-sub">Lowest portfolio Met % (reported met + not met only).</div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      {executiveWorst.length === 0 ? (
+                        <div className="sla-empty">No timeseries data.</div>
+                      ) : (
+                        <SlaExecutiveMetPctBar
+                          data={executiveWorst.map((r) => ({
+                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
+                            value: r.met_pct,
+                          }))}
+                          height={132}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">Most improved (FY)</div>
+                      <div className="sla-dash-card-sub">{formatPeriodLabelShort(fyMode, "p2")} vs {formatPeriodLabelShort(fyMode, "p1")}.</div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      {executiveImproved.length === 0 ? (
+                        <div className="sla-empty">Need both periods in data.</div>
+                      ) : (
+                        <SlaExecutiveDeltaBar
+                          data={executiveImproved.map((r) => ({
+                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
+                            delta: (r.p2 ?? 0) - (r.p1 ?? 0),
+                          }))}
+                          height={132}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">Most declined (FY)</div>
+                      <div className="sla-dash-card-sub">Largest drop in Met % between FY windows.</div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      {executiveDeclined.length === 0 ? (
+                        <div className="sla-empty">Need both periods in data.</div>
+                      ) : (
+                        <SlaExecutiveDeltaBar
+                          data={executiveDeclined.map((r) => ({
+                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
+                            delta: (r.p2 ?? 0) - (r.p1 ?? 0),
+                          }))}
+                          height={132}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">Regions — {formatPeriodLabelShort(fyMode, "p2")}</div>
+                      <div className="sla-dash-card-sub">Met % by region (rolled up).</div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      {regionalRankP2.length === 0 ? (
+                        <div className="sla-empty">No regional rollup.</div>
+                      ) : (
+                        <ul className="sla-rank-list">
+                          {regionalRankP2.slice(0, 3).map((r) => (
+                            <li key={`t-${r.name}`}>
+                              <span className="sla-rank-name">Top · {r.name}</span>
+                              <span className="sla-rank-val">{formatPercent(r.p2)}</span>
+                            </li>
+                          ))}
+                          {regionalRankP2.slice(-3).map((r) => (
+                            <li key={`b-${r.name}`}>
+                              <span className="sla-rank-name">Bottom · {r.name}</span>
+                              <span className="sla-rank-val">{formatPercent(r.p2)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {slaView === "overview" && (
+                <>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">FY portfolio — Met vs Not met (counts)</div>
+                      <div className="sla-dash-card-sub">
+                        Snapshot totals from time-series in each FY window (same presets as Year-over-Year).
+                      </div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10, alignItems: "center" }}>
+                        <span style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace" }}>FY basis:</span>
+                        <button
+                          type="button"
+                          className={`platform-chip${fyMode === "indian" ? " active" : ""}`}
+                          style={{ fontSize: 10.5, cursor: "pointer" }}
+                          onClick={() => setFyMode("indian")}
+                        >
+                          Indian FY
+                        </button>
+                        <button
+                          type="button"
+                          className={`platform-chip${fyMode === "calendar" ? " active" : ""}`}
+                          style={{ fontSize: 10.5, cursor: "pointer" }}
+                          onClick={() => setFyMode("calendar")}
+                        >
+                          Calendar years
+                        </button>
+                      </div>
+                      {portfolioFySnapshots.bar.every((b) => b.met + b.notMet === 0) ? (
+                        <div className="sla-empty">No snapshots in the configured FY windows.</div>
+                      ) : (
+                        <SlaFyPortfolioMetNotMetBar data={portfolioFySnapshots.bar} height={200} />
+                      )}
+                    </div>
+                  </div>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">Portfolio Met % — by month</div>
+                      <div className="sla-dash-card-sub">All accounts combined (met ÷ met + not met).</div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      {portfolioTrendAllMonths.length === 0 ? (
+                        <div className="sla-empty">No SLA time-series yet.</div>
+                      ) : (
+                        <div style={{ height: 260 }}>
+                          <SlaTimeSeriesChart data={portfolioTrendAllMonths} accounts={["Portfolio"]} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="sla-dash-card">
+                    <div className="sla-dash-card-hd">
+                      <div className="sla-dash-card-title">Compliance by account</div>
+                      <div className="sla-dash-card-sub">Met vs not met (latest metric rows).</div>
+                    </div>
+                    <div className="sla-dash-card-bd">
+                      {accountComplianceData.length === 0 ? (
+                        <div className="sla-empty">No SLA data yet.</div>
+                      ) : (
+                        <div style={{ width: "100%", minHeight: 220 }}>
+                          <SlaComplianceBar data={accountComplianceData} height={220} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+      {/* ─── TIME SERIES TREND (monthly view) ─────────────────────────────── */}
+      {(slaView === "monthly") && (
+      <>
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">SLA compliance trend — % met over time</div>
+          <div className="sla-dash-card-sub">Pick clients and month range; same chart as the legacy SLA tab.</div>
         </div>
-      </div>
-
-      {/* KPI RIBBON */}
-      {loading
-        ? <SkeletonKpiRow count={4} />
-        : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
-            <PlatformKpi label="Metrics Met"     value={rows.length > 0 ? formatPercent(metPct) : "—"}          accent="green" delta={rows.length > 0 ? `${stats?.met_count ?? 0} of ${rows.length} metrics` : "Upload SLA data"} />
-            <PlatformKpi label="Not Met"         value={rows.length > 0 ? formatPercent(notMetPct) : "—"}       accent="red"   delta={rows.length > 0 ? `${stats?.not_met_count ?? 0} metrics` : "—"} />
-            <PlatformKpi label="Not Reported"    value={rows.length > 0 ? formatPercent(notReportedPct) : "—"}  accent="amber" delta={rows.length > 0 ? `${notReportedCount} metrics` : "—"} />
-            <PlatformKpi label="Total Metrics"   value={stats?.total_metrics ?? (rows.length || "—")}           accent="blue"  delta={stats?.total_accounts ? `${stats.total_accounts} accounts` : "—"} />
-          </div>
-        )
-      }
-
-      {/* ─── TIME SERIES TREND ──────────────────────────────────────────────── */}
-      <PlatformSection title="SLA Compliance Trend — % Met Over Time">
+        <div className="sla-dash-card-bd">
         {/* Selected clients + Add / Search (no long client list) */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
           {selectedAccountsList.length === 0 && (
@@ -773,23 +1390,78 @@ export function SLAPerformance() {
         ) : (
           <SlaTimeSeriesChart data={trendChartData} accounts={chartAccountNames} />
         )}
-      </PlatformSection>
+        </div>
+      </div>
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">Compliance by account (met vs not met)</div>
+          <div className="sla-dash-card-sub">Stacked view of current metric rows.</div>
+        </div>
+        <div className="sla-dash-card-bd">
+          {accountComplianceData.length === 0 ? (
+            <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No SLA data yet</div>
+            </div>
+          ) : (
+            <div style={{ width: "100%", minHeight: 220 }}>
+              <SlaComplianceBar data={accountComplianceData} height={220} />
+            </div>
+          )}
+        </div>
+      </div>
+      </>
+      )}
 
-      {/* ─── COMPLIANCE BAR ─────────────────────────────────────────────────── */}
-      <PlatformSection title="Compliance by Account (Met vs Not Met)">
-        {accountComplianceData.length === 0 ? (
-          <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
-            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No SLA data yet</div>
+      {(slaView === "quarterly") && (
+        <>
+          <div className="sla-dash-card">
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">Quarterly portfolio Met %</div>
+              <div className="sla-dash-card-sub">Indian FY quarters — all accounts rolled up (met ÷ met + not met).</div>
+            </div>
+            <div className="sla-dash-card-bd">
+              <div className="platform-table-wrap" style={{ marginBottom: 14 }}>
+                <table className="platform-table" style={{ fontSize: 11 }}>
+                  <thead>
+                    <tr>
+                      <th>Quarter</th>
+                      <th>Met</th>
+                      <th>Not met</th>
+                      <th>Met %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quarterlyRollup.map((r) => (
+                      <tr key={r.quarter}>
+                        <td>{r.quarter}</td>
+                        <td>{r.met}</td>
+                        <td>{r.not_met}</td>
+                        <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.met_pct == null ? "—" : `${r.met_pct}%`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {quarterlyChartData.length === 0 ? (
+                <div className="sla-empty">No quarterly data.</div>
+              ) : (
+                <div style={{ height: 240 }}>
+                  <SlaTimeSeriesChart data={quarterlyChartData} accounts={["Portfolio Met %"]} />
+                </div>
+              )}
+            </div>
           </div>
-        ) : (
-          <div style={{ width: "100%", minHeight: 220 }}>
-            <SlaComplianceBar data={accountComplianceData} height={220} />
-          </div>
-        )}
-      </PlatformSection>
+        </>
+      )}
 
-      {/* ─── FY COMPARISON — CLIENTS ────────────────────────────────────────── */}
-      <PlatformSection title="FY comparison — Met % by client">
+      {(slaView === "yearly" || slaView === "account") && (
+      <>
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">FY comparison — Met % by client</div>
+          <div className="sla-dash-card-sub">Compare two FY windows; add clients with + Add.</div>
+        </div>
+        <div className="sla-dash-card-bd">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 10 }}>
           <span style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace" }}>Period:</span>
           <button
@@ -909,10 +1581,15 @@ export function SLAPerformance() {
             height={280}
           />
         )}
-      </PlatformSection>
+        </div>
+      </div>
 
-      {/* ─── ACCOUNT-WISE FY TABLE ─────────────────────────────────────────── */}
-      <PlatformSection title="Account-Wise FY Comparison">
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">Account-wise FY comparison</div>
+          <div className="sla-dash-card-sub">Click a row to open the account drill-down.</div>
+        </div>
+        <div className="sla-dash-card-bd">
         <div className="platform-table-wrap">
           <table className="platform-table" style={{ fontSize: 10 }}>
             <thead>
@@ -947,10 +1624,17 @@ export function SLAPerformance() {
             </tbody>
           </table>
         </div>
-      </PlatformSection>
+        </div>
+      </div>
 
-      {/* ─── REGIONAL FY COMPARISON ─────────────────────────────────────────── */}
-      <PlatformSection title="Regional FY comparison — Met %">
+      {slaView === "yearly" && (
+      <>
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">Regional FY comparison — Met %</div>
+          <div className="sla-dash-card-sub">Rolled up by region for the two FY windows.</div>
+        </div>
+        <div className="sla-dash-card-bd">
         {fyRegionalChartData.length === 0 ? (
           <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 11 }}>
             No regional data
@@ -963,10 +1647,241 @@ export function SLAPerformance() {
             height={280}
           />
         )}
-      </PlatformSection>
+        </div>
+      </div>
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">Portfolio mix — FY doughnuts</div>
+          <div className="sla-dash-card-sub">Met vs not-met snapshot counts per FY window (same denominator as Met %).</div>
+        </div>
+        <div className="sla-dash-card-bd">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: 16,
+              alignItems: "start",
+            }}
+          >
+            <SlaMetNotMetDonut
+              met={portfolioFySnapshots.p1.met}
+              notMet={portfolioFySnapshots.p1.notMet}
+              label={formatPeriodLabelShort(fyMode, "p1")}
+              height={172}
+            />
+            <SlaMetNotMetDonut
+              met={portfolioFySnapshots.p2.met}
+              notMet={portfolioFySnapshots.p2.notMet}
+              label={formatPeriodLabelShort(fyMode, "p2")}
+              height={172}
+            />
+          </div>
+        </div>
+      </div>
+      </>
+      )}
 
-      {/* ─── SLA TABLE ──────────────────────────────────────────────────────── */}
-      <PlatformSection title="SLA Performance Table">
+      {slaView === "account" && (
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">Top accounts — FY Met % trend</div>
+          <div className="sla-dash-card-sub">Ten clients with the most SLA snapshots in time-series (both FY windows).</div>
+        </div>
+        <div className="sla-dash-card-bd">
+          {accountTopFyTrendData.length === 0 ? (
+            <div className="sla-empty">No time-series accounts.</div>
+          ) : (
+            <SlaFyComparisonLineChart
+              data={accountTopFyTrendData}
+              labelP1={formatPeriodLabelShort(fyMode, "p1")}
+              labelP2={formatPeriodLabelShort(fyMode, "p2")}
+              height={280}
+            />
+          )}
+        </div>
+      </div>
+      )}
+      </>
+      )}
+
+      {(slaView === "region") && (
+        <div className="sla-dash-card">
+          <div className="sla-dash-card-hd">
+            <div className="sla-dash-card-title">Regional analysis</div>
+            <div className="sla-dash-card-sub">FY Met % by region — toggle line vs grouped bars (reference dashboard used bars).</div>
+          </div>
+          <div className="sla-dash-card-bd">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, alignItems: "center" }}>
+              <span style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace" }}>Chart:</span>
+              <button
+                type="button"
+                className={`platform-chip${regionChartKind === "bar" ? " active" : ""}`}
+                style={{ fontSize: 10.5, cursor: "pointer" }}
+                onClick={() => setRegionChartKind("bar")}
+              >
+                Grouped bars
+              </button>
+              <button
+                type="button"
+                className={`platform-chip${regionChartKind === "line" ? " active" : ""}`}
+                style={{ fontSize: 10.5, cursor: "pointer" }}
+                onClick={() => setRegionChartKind("line")}
+              >
+                Line
+              </button>
+            </div>
+            {fyRegionalChartData.length === 0 ? (
+              <div className="sla-empty">No regional data</div>
+            ) : regionChartKind === "bar" ? (
+              <SlaFyComparisonGroupedBar
+                data={fyRegionalChartData}
+                labelP1={formatPeriodLabelShort(fyMode, "p1")}
+                labelP2={formatPeriodLabelShort(fyMode, "p2")}
+                height={300}
+              />
+            ) : (
+              <SlaFyComparisonLineChart
+                data={fyRegionalChartData}
+                labelP1={formatPeriodLabelShort(fyMode, "p1")}
+                labelP2={formatPeriodLabelShort(fyMode, "p2")}
+                height={300}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {(slaView === "practice") && (
+        <div className="sla-dash-card">
+          <div className="sla-dash-card-hd">
+            <div className="sla-dash-card-title">Practice head analysis</div>
+            <div className="sla-dash-card-sub">Met % by practice head — FY {formatPeriodLabelShort(fyMode, "p1")} vs {formatPeriodLabelShort(fyMode, "p2")}.</div>
+          </div>
+          <div className="sla-dash-card-bd">
+            {fyPracticeChartData.length === 0 ? (
+              <div className="sla-empty">No practice-head rollup.</div>
+            ) : (
+              <SlaFyComparisonLineChart
+                data={fyPracticeChartData}
+                labelP1={formatPeriodLabelShort(fyMode, "p1")}
+                labelP2={formatPeriodLabelShort(fyMode, "p2")}
+                height={300}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {(slaView === "benchmarking") && (
+        <>
+          <div className="sla-dash-card">
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">Client vs portfolio benchmark</div>
+              <div className="sla-dash-card-sub">
+                Top clients by {formatPeriodLabelShort(fyMode, "p2")} Met % vs portfolio Met % in the same window (proxy until
+                external benchmark feeds exist).
+              </div>
+            </div>
+            <div className="sla-dash-card-bd">
+              {benchmarkVsPortfolioData.length === 0 ? (
+                <div className="sla-empty">Need FY time-series with Met % in period 2 and a non-empty portfolio rollup.</div>
+              ) : (
+                <SlaBenchmarkGroupedBar
+                  data={benchmarkVsPortfolioData}
+                  benchmarkLabel={`Portfolio ${formatPeriodLabelShort(fyMode, "p2")}`}
+                  height={280}
+                />
+              )}
+            </div>
+          </div>
+          <div className="sla-info-box" style={{ marginTop: 12 }}>
+            Replace the portfolio proxy with industry benchmarks when benchmark sheets or API feeds are connected.
+          </div>
+        </>
+      )}
+
+      {(slaView === "manual") && (
+        <div className="sla-info-box">
+          <strong>Using this dashboard:</strong> pick a view in the left rail. Upload SLA Excel from the toolbar or use{" "}
+          <strong>Add / edit SLA metric</strong> (role-gated). Click an account in the FY table or a client name in the SLA
+          table to open drill-downs. Monthly view supports multi-client trend lines; Year-over-Year uses the Indian FY or
+          calendar toggle.
+        </div>
+      )}
+
+      {slaView === "notreported" && (
+        <div className="sla-rank-grid" style={{ marginBottom: 14 }}>
+          <div className="sla-dash-card" style={{ gridColumn: "1 / -1" }}>
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">Not reported — summary</div>
+              <div className="sla-dash-card-sub">
+                {notReportedSnapshotsTotal} not-reported snapshots in time-series; {notReportedCount} metric rows marked not
+                reported in the table.
+              </div>
+            </div>
+          </div>
+          <div className="sla-dash-card">
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">By account (snapshots)</div>
+              <div className="sla-dash-card-sub">Sum of not-reported cells per client across all months.</div>
+            </div>
+            <div className="sla-dash-card-bd">
+              {notReportedByAccount.length === 0 ? (
+                <div className="sla-empty">No not-reported snapshots in time-series.</div>
+              ) : (
+                <SlaNotReportedCountBar data={notReportedByAccount} height={200} />
+              )}
+            </div>
+          </div>
+          <div className="sla-dash-card">
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">By region</div>
+              <div className="sla-dash-card-sub">Rolled from account → region metadata on SLA rows.</div>
+            </div>
+            <div className="sla-dash-card-bd">
+              {notReportedByRegion.length === 0 ? (
+                <div className="sla-empty">No regional not-reported volume.</div>
+              ) : (
+                <SlaNotReportedCountBar data={notReportedByRegion} height={200} />
+              )}
+            </div>
+          </div>
+          <div className="sla-dash-card">
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">By practice head</div>
+              <div className="sla-dash-card-sub">Same roll-up using latest practice head per account.</div>
+            </div>
+            <div className="sla-dash-card-bd">
+              {notReportedByPractice.length === 0 ? (
+                <div className="sla-empty">No practice-level not-reported volume.</div>
+              ) : (
+                <SlaNotReportedCountBar data={notReportedByPractice} height={200} />
+              )}
+            </div>
+          </div>
+          <div className="sla-dash-card">
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">Monthly trend</div>
+              <div className="sla-dash-card-sub">Portfolio not-reported snapshots by month.</div>
+            </div>
+            <div className="sla-dash-card-bd">
+              {notReportedMonthlyChartData.length === 0 ? (
+                <div className="sla-empty">No months in time-series.</div>
+              ) : (
+                <SlaNotReportedCountBar data={notReportedMonthlyChartData} height={200} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(slaView === "overview" || slaView === "account" || slaView === "notreported") && (
+      <div className="sla-dash-card">
+        <div className="sla-dash-card-hd">
+          <div className="sla-dash-card-title">SLA performance table</div>
+          <div className="sla-dash-card-sub">Metric-level rows — filter by client, period, and status.</div>
+        </div>
+        <div className="sla-dash-card-bd">
         {/* Filter bar */}
         <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
           <input
@@ -1089,9 +2004,15 @@ export function SLAPerformance() {
             </tbody>
           </table>
         </div>
-      </PlatformSection>
+        </div>
+      </div>
+      )}
 
-      {/* ─── METRIC DRILLDOWN DRAWER ─────────────────────────────────────────── */}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <PlatformDrawer open={Boolean(metric)} title="SLA Metric Drilldown" onClose={() => setMetric(null)}>
         {metric && (
           <div style={{ display: "grid", gap: 12 }}>
@@ -1428,6 +2349,6 @@ export function SLAPerformance() {
         metricOptions={slaMetricOptions}
         onSaved={reloadSla}
       />
-    </div>
+    </>
   );
 }

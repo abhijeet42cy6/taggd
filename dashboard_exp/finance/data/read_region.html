@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head><title>Region Totals</title></head>
+<body><pre id="out"></pre>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+async function readFile(path) {
+  const res = await fetch(path);
+  const ab  = await res.arrayBuffer();
+  return XLSX.read(ab, { type: 'array' });
+}
+function sheetToRows(wb, name) {
+  const ws = wb.Sheets[name];
+  if (!ws) return null;
+  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+}
+function sumRegions(rows) {
+  // Row 0 = header: FY,Project,Vertical,Region,Sub Region,Region Head,Practice Head, [month cols...]
+  // Data rows: index 1 onward
+  // Month columns: index 7 to 18 (12 months)
+  const regionTotals = {};
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const region = r[3] || '';
+    if (!region || region === 'Region') continue;
+    const monthSum = r.slice(7, 19).reduce((t, v) => t + (parseFloat(v) || 0), 0);
+    regionTotals[region] = (regionTotals[region] || 0) + monthSum;
+  }
+  return regionTotals;
+}
+function sumRegionsCM(rows) {
+  const regionTotals = {};
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const region = r[3] || '';
+    if (!region || region === 'Region') continue;
+    const monthSum = r.slice(7, 19).reduce((t, v) => t + (parseFloat(v) || 0), 0);
+    regionTotals[region] = (regionTotals[region] || 0) + monthSum;
+  }
+  return regionTotals;
+}
+
+async function main() {
+  const wb24 = await readFile('../data/FY2425.xlsx');
+  const wb25 = await readFile('../data/FY2526.xlsx');
+  let out = '';
+
+  // FY24-25
+  const ra24 = sheetToRows(wb24, 'Revenue_Actual');
+  const rb24 = sheetToRows(wb24, 'Revenue_Budget');
+  const ca24 = sheetToRows(wb24, 'CM_Actual');
+  const cb24 = sheetToRows(wb24, 'CM_Budget');
+
+  // FY25-26
+  const ra25 = sheetToRows(wb25, 'Revenue_Actual');
+  const rb25 = sheetToRows(wb25, 'Revenue_Budget');
+  const ca25 = sheetToRows(wb25, 'CM Actual');
+  const cb25 = sheetToRows(wb25, 'CM_Budget');
+
+  // Print header row to verify structure
+  out += '=== FY24-25 Revenue_Actual header ===\n';
+  out += JSON.stringify(ra24[0]) + '\n';
+  out += '=== FY24-25 Revenue_Actual row 1 ===\n';
+  out += JSON.stringify(ra24[1]) + '\n';
+  out += '=== FY25-26 Revenue_Actual header ===\n';
+  out += JSON.stringify(ra25[0]) + '\n';
+  out += '=== FY25-26 Revenue_Actual row 1 ===\n';
+  out += JSON.stringify(ra25[1]) + '\n';
+
+  // Compute region totals
+  const revA24 = sumRegions(ra24);
+  const revB24 = sumRegions(rb24);
+  const cmA24  = sumRegionsCM(ca24);
+  const cmB24  = sumRegionsCM(cb24);
+
+  const revA25 = sumRegions(ra25);
+  const revB25 = sumRegions(rb25);
+  const cmA25  = ca25 ? sumRegionsCM(ca25) : {};
+  const cmB25  = cb25 ? sumRegionsCM(cb25) : {};
+
+  out += '\n=== FY24-25 Revenue Actual by Region (₹ L) ===\n';
+  Object.entries(revA24).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  out += '\n=== FY24-25 Revenue Budget by Region (₹ L) ===\n';
+  Object.entries(revB24).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  out += '\n=== FY24-25 CM Actual by Region (₹ L) ===\n';
+  Object.entries(cmA24).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  out += '\n=== FY24-25 CM Budget by Region (₹ L) ===\n';
+  Object.entries(cmB24).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  out += '\n=== FY25-26 Revenue Actual by Region (₹ L) ===\n';
+  Object.entries(revA25).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  out += '\n=== FY25-26 Revenue Budget by Region (₹ L) ===\n';
+  Object.entries(revB25).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  out += '\n=== FY25-26 CM Actual by Region (₹ L) ===\n';
+  Object.entries(cmA25).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  out += '\n=== FY25-26 CM Budget by Region (₹ L) ===\n';
+  Object.entries(cmB25).sort().forEach(([r,v]) => out += `${r}: ${v.toFixed(2)}\n`);
+
+  // Grand totals
+  out += '\n=== GRAND TOTALS ===\n';
+  for (const region of ['South','West','North','New Sales']) {
+    out += `\n${region}:\n`;
+    out += `  FY24-25 RevA=${((revA24[region]||0)/100).toFixed(2)} Cr  RevB=${((revB24[region]||0)/100).toFixed(2)} Cr  CmA=${((cmA24[region]||0)/100).toFixed(2)} Cr  CmB=${((cmB24[region]||0)/100).toFixed(2)} Cr\n`;
+    out += `  FY25-26 RevA=${((revA25[region]||0)/100).toFixed(2)} Cr  RevB=${((revB25[region]||0)/100).toFixed(2)} Cr  CmA=${((cmA25[region]||0)/100).toFixed(2)} Cr  CmB=${((cmB25[region]||0)/100).toFixed(2)} Cr\n`;
+  }
+
+  document.getElementById('out').textContent = out;
+  console.log('RESULT:\n' + out);
+}
+main().catch(e => { console.error('ERR', e.message, e.stack); });
+</script>
+</body>
+</html>

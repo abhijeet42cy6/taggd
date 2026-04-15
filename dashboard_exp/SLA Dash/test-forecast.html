@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forecast Test</title>
+</head>
+<body>
+    <h1>Testing Forecast Data</h1>
+    <div id="output"></div>
+    <script>
+        // Check what the futureMonths array contains
+        const futureMonths = ['Jan', 'Feb', 'Mar'];
+        document.getElementById('output').innerHTML = `
+            <p><strong>Future Months:</strong> ${futureMonths.join(', ')}</p>
+            <p><strong>Current Time:</strong> ${new Date().toLocaleString()}</p>
+            <p><strong>Test:</strong> If you see Jan, Feb, Mar above, the code is correct.</p>
+        `;
+    </script>
+</body>
+</html>

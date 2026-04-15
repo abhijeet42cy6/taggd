@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head><title>Extract Latest Finance Data</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>body{font-family:monospace;font-size:11px;background:#fff;} #out{white-space:pre;overflow:auto;height:95vh;border:1px solid #ccc;padding:8px;}</style>
+</head>
+<body>
+<div id="out">Loading...</div>
+<script>
+const outEl = document.getElementById('out');
+const lines = [];
+function log(m) { lines.push(m); outEl.textContent = lines.join('\n'); console.log(m); }
+
+function extractMonthly(rows, nameCol, startCol, n) {
+  const totals = new Array(n).fill(0);
+  for (let r=1;r<rows.length;r++) {
+    const row=rows[r];
+    if(!row||row[nameCol]===undefined||row[nameCol]===null) continue;
+    const nm=String(row[nameCol]).trim().toLowerCase();
+    if(nm===''||nm==='total'||nm==='grand total') continue;
+    for(let c=0;c<n;c++) totals[c]+=parseFloat(row[startCol+c])||0;
+  }
+  return totals;
+}
+
+function extractByAccount(rows, nameCol, startCol, n) {
+  const acc={};
+  for(let r=1;r<rows.length;r++){
+    const row=rows[r];
+    if(!row||row[nameCol]===undefined||row[nameCol]===null) continue;
+    const nm=String(row[nameCol]).trim();
+    if(!nm||nm.toLowerCase()==='total'||nm.toLowerCase()==='grand total') continue;
+    if(!acc[nm]) acc[nm]=new Array(n).fill(0);
+    for(let c=0;c<n;c++) acc[nm][c]+=parseFloat(row[startCol+c])||0;
+  }
+  return acc;
+}
+
+function getSheet(wb, name) {
+  return wb.Sheets[name] || null;
+}
+function sheetRows(wb, name) {
+  const s = getSheet(wb, name);
+  if(!s) return [];
+  return XLSX.utils.sheet_to_json(s, {header:1, defval:null});
+}
+
+async function process() {
+  log('Loading FY2526_latest.xlsx...');
+  const r26 = await fetch('FY2526_latest.xlsx');
+  const ab26 = await r26.arrayBuffer();
+  const wb26 = XLSX.read(ab26, {type:'array'});
+  log('Sheets: ' + wb26.SheetNames.join(', '));
+
+  // Rev_Forecast monthly
+  {
+    const rows = sheetRows(wb26, 'Rev_Forecast');
+    if(rows.length) {
+      log('\n--- Rev_Forecast (FY25-26) ---');
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      log('H1: '+JSON.stringify((rows[1]||[]).slice(0,22)));
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>100) { log('startCol='+sc+': '+t.map(v=>v.toFixed(1)).join(',')+' | sum='+s.toFixed(1)); break; }
+      }
+    }
+  }
+
+  // Revenue_Actual monthly
+  {
+    const rows = sheetRows(wb26, 'Revenue_Actual');
+    if(rows.length) {
+      log('\n--- Revenue_Actual (FY25-26) ---');
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      log('H1: '+JSON.stringify((rows[1]||[]).slice(0,22)));
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>100) { log('startCol='+sc+': '+t.map(v=>v.toFixed(1)).join(',')+' | sum='+s.toFixed(1)); break; }
+      }
+    }
+  }
+
+  // Unbilled
+  {
+    const rows = sheetRows(wb26, 'Unbilled');
+    if(rows.length) {
+      log('\n--- Unbilled (FY25-26) ---');
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>0.01) { log('startCol='+sc+': '+t.map(v=>v.toFixed(2)).join(',')+' | sum='+s.toFixed(2));
+          const byAcc = extractByAccount(rows,1,sc,12);
+          log('By account:');
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': '+arr.map(v=>v.toFixed(2)).join(',')+' tot='+tot.toFixed(2));
+          }
+          break; 
+        }
+      }
+    } else log('No Unbilled sheet in FY25-26');
+  }
+
+  // Bad Debt
+  {
+    const rows = sheetRows(wb26, 'Bad Debt');
+    if(rows.length) {
+      log('\n--- Bad Debt (FY25-26) ---');
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>0.01) { log('startCol='+sc+': '+t.map(v=>v.toFixed(2)).join(',')+' | sum='+s.toFixed(2));
+          const byAcc = extractByAccount(rows,1,sc,12);
+          log('By account:');
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': '+arr.map(v=>v.toFixed(2)).join(',')+' tot='+tot.toFixed(2));
+          }
+          break; 
+        }
+      }
+    } else log('No Bad Debt sheet');
+  }
+
+  // Revenue_Adjustment
+  {
+    const rows = sheetRows(wb26, 'Revenue_Adjustment');
+    if(rows.length) {
+      log('\n--- Revenue_Adjustment (FY25-26) ---');
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>0.01) { log('startCol='+sc+': '+t.map(v=>v.toFixed(2)).join(',')+' | sum='+s.toFixed(2));
+          const byAcc = extractByAccount(rows,1,sc,12);
+          log('By account:');
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': '+arr.map(v=>v.toFixed(2)).join(',')+' tot='+tot.toFixed(2));
+          }
+          break; 
+        }
+      }
+    } else log('No Revenue_Adjustment sheet');
+  }
+
+  // Total Cost — for PPC
+  {
+    const rows = sheetRows(wb26, 'Total Cost');
+    if(rows.length) {
+      log('\n--- Total Cost (FY25-26) ---');
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      log('H1: '+JSON.stringify((rows[1]||[]).slice(0,22)));
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>100000) { log('startCol='+sc+': '+t.map(v=>Math.round(v)).join(',')+' | sum='+Math.round(s));
+          const byAcc = extractByAccount(rows,1,sc,12);
+          log('By account (TC):');
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': ['+arr.map(v=>Math.round(v)).join(',')+'] tot='+Math.round(tot));
+          }
+          break; 
+        }
+      }
+    }
+  }
+
+  // Headcount
+  {
+    const rows = sheetRows(wb26, 'Headcount_Overall');
+    if(rows.length) {
+      log('\n--- Headcount_Overall (FY25-26) ---');
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>10) { 
+          log('startCol='+sc+': '+t.map(v=>v.toFixed(2)).join(',')+' | sum='+s.toFixed(2));
+          const byAcc = extractByAccount(rows,1,sc,12);
+          log('HC By account:');
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': ['+arr.map(v=>+v.toFixed(2)).join(',')+'] tot='+tot.toFixed(2));
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // ===== FY2425 =====
+  log('\n\n===== FY24-25 =====');
+  const r25 = await fetch('FY2425_latest.xlsx');
+  const ab25 = await r25.arrayBuffer();
+  const wb25 = XLSX.read(ab25, {type:'array'});
+  log('FY24-25 Sheets: ' + wb25.SheetNames.join(', '));
+
+  // Total Cost FY24-25
+  {
+    const rows = sheetRows(wb25, 'Total Cost');
+    if(rows.length) {
+      log('\n--- Total Cost (FY24-25) ---');
+      log('H0: '+JSON.stringify((rows[0]||[]).slice(0,22)));
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>100000) { log('startCol='+sc+': '+t.map(v=>Math.round(v)).join(',')+' | sum='+Math.round(s));
+          const byAcc = extractByAccount(rows,1,sc,12);
+          log('By account (TC FY24-25):');
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': ['+arr.map(v=>Math.round(v)).join(',')+'] tot='+Math.round(tot));
+          }
+          break;
+        }
+      }
+    } else log('No Total Cost sheet in FY24-25');
+  }
+
+  // Headcount FY24-25
+  {
+    const rows = sheetRows(wb25, 'Actual_Headcount Overall');
+    if(rows.length) {
+      log('\n--- Headcount_Overall (FY24-25) ---');
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>10) { 
+          log('startCol='+sc+': '+t.map(v=>v.toFixed(2)).join(',')+' | sum='+s.toFixed(2));
+          const byAcc = extractByAccount(rows,1,sc,12);
+          log('HC By account (FY24-25):');
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': ['+arr.map(v=>+v.toFixed(2)).join(',')+'] tot='+tot.toFixed(2));
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Unbilled FY24-25
+  {
+    const rows = sheetRows(wb25, 'Unbilled');
+    if(rows.length) {
+      log('\n--- Unbilled (FY24-25) ---');
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>0.01) { log('startCol='+sc+': '+t.map(v=>v.toFixed(2)).join(','));
+          const byAcc=extractByAccount(rows,1,sc,12);
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': '+arr.map(v=>v.toFixed(2)).join(',')+' tot='+tot.toFixed(2));
+          }
+          break;
+        }
+      }
+    } else log('No Unbilled in FY24-25');
+  }
+
+  // Bad Debt FY24-25
+  {
+    const rows = sheetRows(wb25, 'Bad Debt');
+    if(rows.length) {
+      log('\n--- Bad Debt (FY24-25) ---');
+      for(let sc=5;sc<=9;sc++) {
+        const t=extractMonthly(rows,1,sc,12);
+        const s=t.reduce((a,b)=>a+b,0);
+        if(s>0.01) { log('startCol='+sc+': '+t.map(v=>v.toFixed(2)).join(','));
+          const byAcc=extractByAccount(rows,1,sc,12);
+          for(const [nm,arr] of Object.entries(byAcc)) {
+            const tot=arr.reduce((a,b)=>a+b,0);
+            if(tot>0) log('  '+nm+': '+arr.map(v=>v.toFixed(2)).join(',')+' tot='+tot.toFixed(2));
+          }
+          break;
+        }
+      }
+    } else log('No Bad Debt in FY24-25');
+  }
+
+  log('\n=== DONE ===');
+}
+process().catch(e=>log('ERROR: '+e.message+'\n'+e.stack));
+</script>
+</body>
+</html>

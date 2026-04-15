@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Read Full</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body><pre id="out">Loading...</pre>
+<script>
+async function run() {
+  const out = document.getElementById('out');
+  try {
+    const resp = await fetch('../source/FY24-25_Finance_Data.xlsx');
+    const ab   = await resp.arrayBuffer();
+    const wb   = XLSX.read(ab, { type: 'array' });
+
+    let result = '';
+    const MONTH_COLS   = [7,8,9,10,11,12,13,14,15,16,17,18];
+    const MONTH_LABELS = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+
+    ['Taggd_Source_Joiner', 'Non Taggd Source Joiner'].forEach(name => {
+      if (!wb.Sheets[name]) { result += `SHEET NOT FOUND: ${name}\n`; return; }
+      const ws  = wb.Sheets[name];
+      const arr = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+
+      const totals = MONTH_COLS.map(col => {
+        let sum = 0;
+        for (let r = 1; r < arr.length; r++) {
+          const v = parseFloat(arr[r][col]) || 0;
+          sum += v;
+        }
+        return Math.round(sum);
+      });
+
+      result += `\n===== ${name} =====\n`;
+      MONTH_LABELS.forEach((lbl, i) => { result += `  ${lbl}: ${totals[i]}\n`; });
+      result += `TOTAL: ${totals.reduce((a,b)=>a+b,0)}\n`;
+    });
+
+    out.textContent = result;
+    console.log('RESULT:', result);
+  } catch(e) {
+    console.error('ERR:', e.message, e.stack);
+  }
+}
+run();
+</script>
+</body>
+</html>

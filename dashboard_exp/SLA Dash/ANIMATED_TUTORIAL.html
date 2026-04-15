@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAGGD Dashboard - Animated Video Tutorial</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        
+        .video-player {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            background: #000;
+        }
+        
+        .slide {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 60px;
+            background-size: cover;
+            background-position: center;
+        }
+        
+        .slide.active {
+            opacity: 1;
+            z-index: 10;
+        }
+        
+        .slide-content {
+            max-width: 1200px;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 60px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .slide h1 {
+            font-size: 4em;
+            color: white;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 10px rgba(0,0,0,0.5);
+            animation: slideInDown 1s;
+        }
+        
+        .slide h2 {
+            font-size: 3em;
+            color: #667eea;
+            margin-bottom: 20px;
+            animation: slideInLeft 1s;
+        }
+        
+        .slide p {
+            font-size: 1.8em;
+            color: white;
+            line-height: 1.8;
+            margin-bottom: 20px;
+            animation: fadeIn 1.5s;
+        }
+        
+        .feature-box {
+            background: rgba(102, 126, 234, 0.2);
+            border: 3px solid #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            margin: 30px 0;
+            animation: zoomIn 1s;
+        }
+        
+        .big-stat {
+            font-size: 8em;
+            font-weight: bold;
+            color: #667eea;
+            text-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
+            animation: pulse 2s infinite;
+        }
+        
+        .rag-status {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+        
+        .rag-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px 50px;
+            border-radius: 15px;
+            min-width: 250px;
+            animation: bounceIn 1s;
+        }
+        
+        .rag-green {
+            border: 4px solid #10b981;
+            background: rgba(16, 185, 129, 0.2);
+        }
+        
+        .rag-amber {
+            border: 4px solid #f59e0b;
+            background: rgba(245, 158, 11, 0.2);
+        }
+        
+        .rag-red {
+            border: 4px solid #ef4444;
+            background: rgba(239, 68, 68, 0.2);
+        }
+        
+        .rag-icon {
+            font-size: 4em;
+            margin-bottom: 10px;
+        }
+        
+        .rag-title {
+            font-size: 2em;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 10px;
+        }
+        
+        .rag-desc {
+            font-size: 1.3em;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .data-table {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 30px;
+            animation: slideInUp 1s;
+            max-width: 1000px;
+        }
+        
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            border-bottom: 2px solid #e5e7eb;
+            font-size: 1.5em;
+        }
+        
+        .data-row:last-child {
+            border-bottom: none;
+        }
+        
+        .data-label {
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .data-value {
+            color: #333;
+            font-family: monospace;
+        }
+        
+        .data-value.met {
+            color: #10b981;
+        }
+        
+        .data-value.not-met {
+            color: #ef4444;
+        }
+        
+        .controls {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            gap: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px 40px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .control-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-size: 1.2em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+            background: #764ba2;
+            transform: scale(1.05);
+        }
+        
+        .progress-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.2);
+            z-index: 1000;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .slide-number {
+            position: fixed;
+            top: 30px;
+            right: 30px;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-size: 1.3em;
+            font-weight: bold;
+            z-index: 1000;
+        }
+        
+        @keyframes slideInDown {
+            from { opacity: 0; transform: translateY(-100px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-100px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        
+        @keyframes slideInUp {
+            from { opacity: 0; transform: translateY(100px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes zoomIn {
+            from { opacity: 0; transform: scale(0.5); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        
+        @keyframes bounceIn {
+            0% { opacity: 0; transform: scale(0.3); }
+            50% { transform: scale(1.05); }
+            70% { transform: scale(0.9); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .dashboard-iframe-wrapper {
+            width: 90%;
+            max-width: 1400px;
+            height: 80vh;
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            animation: zoomIn 1.5s;
+        }
+        
+        .dashboard-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="progress-bar">
+        <div class="progress-fill" id="progressBar"></div>
+    </div>
+    
+    <div class="slide-number" id="slideNumber">Slide 1 / 8</div>
+    
+    <div class="video-player">
+        <!-- Slide 1: Title -->
+        <div class="slide active" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="slide-content">
+                <h1>🎬 TAGGD SLA Dashboard</h1>
+                <p style="font-size: 2.5em; margin-top: 30px;">Complete Video Tutorial</p>
+                <p style="font-size: 1.5em; opacity: 0.9; margin-top: 20px;">
+                    Duration: 5 minutes | With Professional Audio Narration
+                </p>
+                <div class="feature-box" style="margin-top: 50px;">
+                    <p style="font-size: 1.8em; margin-bottom: 20px;">🎧 Audio narration is playing</p>
+                    <p style="font-size: 1.3em; opacity: 0.9;">Slides will advance automatically with the narration</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Slide 2: Dashboard Overview -->
+        <div class="slide" style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);">
+            <div class="slide-content">
+                <h2>📊 Dashboard Overview</h2>
+                <div class="big-stat">484</div>
+                <p style="font-size: 2.5em; margin-top: 20px;">Performance Metrics Tracked</p>
+                <div class="feature-box" style="margin-top: 40px;">
+                    <p style="font-size: 1.8em; margin-bottom: 30px;">Key Features:</p>
+                    <div style="text-align: left; max-width: 700px; margin: 0 auto;">
+                        <p>✓ FY Comparison View</p>
+                        <p>✓ Project Analysis & Drill-Down</p>
+                        <p>✓ Regional Performance Tracking</p>
+                        <p>✓ Real-Time Data Updates</p>
+                        <p>✓ Export to Excel & PowerPoint</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Slide 3: RAG Status System -->
+        <div class="slide" style="background: linear-gradient(135deg, #1f2937 0%, #374151 100%);">
+            <div class="slide-content">
+                <h2>🚦 RAG Status System</h2>
+                <p style="font-size: 1.8em; margin-top: 20px; margin-bottom: 40px;">
+                    Color-coded performance indicators at a glance
+                </p>
+                <div class="rag-status">
+                    <div class="rag-item rag-green">
+                        <div class="rag-icon">🟢</div>
+                        <div class="rag-title">GREEN</div>
+                        <div class="rag-desc">≥75% compliance</div>
+                        <div class="rag-desc" style="margin-top: 10px; font-size: 1.1em;">Exceeding Targets</div>
+                    </div>
+                    <div class="rag-item rag-amber">
+                        <div class="rag-icon">🟡</div>
+                        <div class="rag-title">AMBER</div>
+                        <div class="rag-desc">50-74% compliance</div>
+                        <div class="rag-desc" style="margin-top: 10px; font-size: 1.1em;">Meeting Most</div>
+                    </div>
+                    <div class="rag-item rag-red">
+                        <div class="rag-icon">🔴</div>
+                        <div class="rag-title">RED</div>
+                        <div class="rag-desc">&lt;50% compliance</div>
+                        <div class="rag-desc" style="margin-top: 10px; font-size: 1.1em;">Needs Attention</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Slide 4: Project Drill-Down Feature -->
+        <div class="slide" style="background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);">
+            <div class="slide-content">
+                <h2>🎯 Project Drill-Down</h2>
+                <p style="font-size: 2em; margin-top: 20px; color: #fbbf24;">⭐ Most Powerful Feature!</p>
+                <div class="feature-box" style="margin-top: 40px; text-align: left;">
+                    <p style="font-size: 2em; margin-bottom: 30px; text-align: center;">Click any project to see:</p>
+                    <div style="font-size: 1.6em; line-height: 2.2;">
+                        <p>✓ Performance Measure names</p>
+                        <p>✓ Penalty/Non-Penalty status (⚠️ / ✓)</p>
+                        <p>✓ Target values (70 Days, ER 15%, 60%)</p>
+                        <p>✓ Monthly scores: Apr'25 → Oct'25</p>
+                        <p>✓ Smart formatting: 40%, 8%, 0%, 46.43%</p>
+                        <p>✓ Met/Not Met indicators (✓ / ✗)</p>
+                        <p>✓ YTD (Year-to-Date) totals</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Slide 5: Example Data - Siemens GBS -->
+        <div class="slide" style="background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);">
+            <div class="slide-content">
+                <h2>📈 Example: Siemens - GBS</h2>
+                <p style="font-size: 1.8em; margin-top: 20px; margin-bottom: 30px;">Source Mix Performance</p>
+                <div class="data-table">
+                    <div class="data-row" style="background: #f3f4f6; font-size: 1.7em;">
+                        <div class="data-label">Target:</div>
+                        <div class="data-value" style="color: #667eea; font-weight: bold;">ER 15%</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">Apr'25:</div>
+                        <div class="data-value met">40.91% ✓ Met</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">May'25:</div>
+                        <div class="data-value met">16.67% ✓ Met</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">Jul'25:</div>
+                        <div class="data-value not-met">0% ✗ Not Met</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">Aug'25:</div>
+                        <div class="data-value not-met">8% ✗ Not Met</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">Oct'25:</div>
+                        <div class="data-value not-met">0% ✗ Not Met</div>
+                    </div>
+                    <div class="data-row" style="background: #e0e7ff;">
+                        <div class="data-label">YTD:</div>
+                        <div class="data-value met" style="font-size: 1.3em; font-weight: bold;">15% ✓ Met</div>
+                    </div>
+                </div>
+                <p style="font-size: 1.5em; margin-top: 30px; color: #fbbf24;">
+                    ✅ All values match Excel exactly!
+                </p>
+            </div>
+        </div>
+        
+        <!-- Slide 6: Smart Formatting -->
+        <div class="slide" style="background: linear-gradient(135deg, #be123c 0%, #e11d48 100%);">
+            <div class="slide-content">
+                <h2>✨ Smart Formatting</h2>
+                <p style="font-size: 1.8em; margin-top: 20px; margin-bottom: 40px;">
+                    Clean, professional percentage display
+                </p>
+                <div class="data-table">
+                    <div class="data-row">
+                        <div class="data-label">0.4 displays as:</div>
+                        <div class="data-value" style="color: #10b981; font-size: 1.5em;">40%</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">0.4643 displays as:</div>
+                        <div class="data-value" style="color: #10b981; font-size: 1.5em;">46.43%</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">0.08 displays as:</div>
+                        <div class="data-value" style="color: #10b981; font-size: 1.5em;">8%</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">0 displays as:</div>
+                        <div class="data-value" style="color: #10b981; font-size: 1.5em;">0%</div>
+                    </div>
+                    <div class="data-row">
+                        <div class="data-label">NOT as:</div>
+                        <div class="data-value" style="color: #ef4444; text-decoration: line-through;">40.00% or "-"</div>
+                    </div>
+                </div>
+                <p style="font-size: 1.5em; margin-top: 30px;">
+                    ✓ Removes unnecessary decimals<br>
+                    ✓ Keeps meaningful precision<br>
+                    ✓ Professional appearance
+                </p>
+            </div>
+        </div>
+        
+        <!-- Slide 7: Export & Features -->
+        <div class="slide" style="background: linear-gradient(135deg, #ea580c 0%, #dc2626 100%);">
+            <div class="slide-content">
+                <h2>🚀 Export & Advanced Features</h2>
+                <div class="feature-box" style="margin-top: 40px;">
+                    <p style="font-size: 2em; margin-bottom: 30px;">Additional Capabilities:</p>
+                    <div style="text-align: left; font-size: 1.6em; line-height: 2.2;">
+                        <p>📊 Export to Excel for detailed analysis</p>
+                        <p>📈 Generate PowerPoint presentations</p>
+                        <p>🎤 Voice commands: "Show Siemens", "Export to Excel"</p>
+                        <p>📁 Upload new data via Excel file</p>
+                        <p>🔄 Automatic data processing & validation</p>
+                        <p>📱 Responsive design for mobile & tablet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Slide 8: Live Dashboard -->
+        <div class="slide" style="background: #000;">
+            <div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                <h2 style="color: white; font-size: 3em; margin-bottom: 30px; animation: slideInDown 1s;">
+                    🎯 Ready to Explore?
+                </h2>
+                <p style="color: white; font-size: 2em; margin-bottom: 40px; animation: fadeIn 1.5s;">
+                    Click the button below to open the live dashboard
+                </p>
+                <div class="dashboard-iframe-wrapper">
+                    <iframe 
+                        class="dashboard-iframe" 
+                        src="https://3000-i06je7d51yb0robxe7bji-3844e1b6.sandbox.novita.ai/TAGGD_Dashboard_ENHANCED.html"
+                        loading="lazy">
+                    </iframe>
+                </div>
+                <a href="https://3000-i06je7d51yb0robxe7bji-3844e1b6.sandbox.novita.ai/TAGGD_Dashboard_ENHANCED.html" 
+                   target="_blank"
+                   style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px 60px; text-decoration: none; border-radius: 50px; font-size: 2em; font-weight: bold; margin-top: 30px; animation: bounceIn 2s;">
+                    Open Full Dashboard →
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button class="control-btn" onclick="previousSlide()">⬅ Previous</button>
+        <button class="control-btn" onclick="toggleAudio()" id="audioBtn">▶ Play Narration</button>
+        <button class="control-btn" onclick="nextSlide()">Next ➡</button>
+    </div>
+    
+    <audio id="narrationAudio" src="tutorial_narration.mp3"></audio>
+    
+    <script>
+        let currentSlide = 0;
+        const totalSlides = 8;
+        const audio = document.getElementById('narrationAudio');
+        const audioBtn = document.getElementById('audioBtn');
+        const progressBar = document.getElementById('progressBar');
+        const slideNumber = document.getElementById('slideNumber');
+        const slides = document.querySelectorAll('.slide');
+        
+        // Slide timing based on narration (in seconds)
+        const slideTiming = [
+            0,    // Slide 1: 0s
+            30,   // Slide 2: 30s
+            60,   // Slide 3: 60s
+            90,   // Slide 4: 90s
+            120,  // Slide 5: 120s
+            150,  // Slide 6: 150s
+            165,  // Slide 7: 165s
+            170   // Slide 8: 170s (final slide)
+        ];
+        
+        function showSlide(index) {
+            if (index < 0 || index >= totalSlides) return;
+            
+            slides.forEach(s => s.classList.remove('active'));
+            slides[index].classList.add('active');
+            currentSlide = index;
+            updateProgress();
+            slideNumber.textContent = `Slide ${index + 1} / ${totalSlides}`;
+        }
+        
+        function nextSlide() {
+            if (currentSlide < totalSlides - 1) {
+                showSlide(currentSlide + 1);
+            }
+        }
+        
+        function previousSlide() {
+            if (currentSlide > 0) {
+                showSlide(currentSlide - 1);
+            }
+        }
+        
+        function toggleAudio() {
+            if (audio.paused) {
+                audio.play();
+                audioBtn.textContent = '⏸ Pause';
+            } else {
+                audio.pause();
+                audioBtn.textContent = '▶ Play Narration';
+            }
+        }
+        
+        function updateProgress() {
+            const progress = ((currentSlide + 1) / totalSlides) * 100;
+            progressBar.style.width = progress + '%';
+        }
+        
+        // Auto-advance slides based on audio timing
+        audio.addEventListener('timeupdate', function() {
+            const currentTime = audio.currentTime;
+            
+            for (let i = slideTiming.length - 1; i >= 0; i--) {
+                if (currentTime >= slideTiming[i]) {
+                    if (currentSlide !== i) {
+                        showSlide(i);
+                    }
+                    break;
+                }
+            }
+        });
+        
+        // When audio ends
+        audio.addEventListener('ended', function() {
+            audioBtn.textContent = '▶ Play Narration';
+            showSlide(totalSlides - 1); // Show final slide
+        });
+        
+        // Keyboard controls
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight') nextSlide();
+            if (e.key === 'ArrowLeft') previousSlide();
+            if (e.key === ' ') { e.preventDefault(); toggleAudio(); }
+        });
+        
+        // Initialize
+        updateProgress();
+        
+        // Auto-start prompt
+        setTimeout(() => {
+            if (audio.paused) {
+                if (confirm('🎬 Ready to start the tutorial?\n\nClick OK to play the audio narration and auto-advance through slides.')) {
+                    toggleAudio();
+                }
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

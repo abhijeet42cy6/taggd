@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head><title>Excel Deep Reader</title></head>
+<body>
+<pre id="out" style="font-size:10px;white-space:pre-wrap;">Reading...</pre>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+function excelDateToStr(serial) {
+  if (typeof serial !== 'number') return serial;
+  const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  return d.toLocaleDateString('en-IN', {month:'short', year:'2-digit'});
+}
+
+async function readExcel(url, label) {
+  const resp = await fetch(url);
+  const ab = await resp.arrayBuffer();
+  const wb = XLSX.read(ab, {type:'array'});
+  let out = `\n===== ${label} =====\nSheets: ${wb.SheetNames.join(', ')}\n\n`;
+
+  wb.SheetNames.forEach(name => {
+    const ws = wb.Sheets[name];
+    const json = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+    if (!json.length) return;
+    
+    // Convert header row dates
+    const hdr = json[0].map(h => typeof h==='number' ? excelDateToStr(h) : h);
+    
+    out += `--- Sheet: ${name} ---\n`;
+    out += `Headers: ${JSON.stringify(hdr)}\n`;
+    // Print rows 1-5
+    json.slice(1,6).forEach((row,i) => {
+      out += `  Row${i+1}: ${JSON.stringify(row)}\n`;
+    });
+    out += `  ... (${json.length-1} data rows total)\n\n`;
+  });
+  return out;
+}
+
+(async () => {
+  let result = '';
+  result += await readExcel('../source/FY24-25_Finance_Data.xlsx','FY24-25');
+  result += await readExcel('../source/FY25-26_Finance_Data.xlsx','FY25-26');
+  document.getElementById('out').textContent = result;
+  console.log(result);
+})();
+</script>
+</body>
+</html>

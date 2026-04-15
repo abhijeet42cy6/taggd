@@ -1487,6 +1487,17 @@ export const queries = {
       )
       .then((r) => r.data),
 
+  revenueWeeklyMinePacks: (params: { limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return api
+      .get<{ items: RevenueWeeklySubmissionDto[]; total: number; limit: number; offset: number }>(
+        `/revenue-weekly-submissions/mine-packs${q ? `?${q}` : ""}`
+      )
+      .then((r) => r.data);
+  },
+
   revenueWeeklySubmissionQueue: (params: {
     status?: string;
     client_id?: number;

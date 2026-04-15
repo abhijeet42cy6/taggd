@@ -1,0 +1,21 @@
+TAGGD SLA DASHBOARD - 5 MINUTE TUTORIAL SCRIPT
+===============================================
+
+[CHAPTER 1: INTRODUCTION - 0:00-0:45]
+Hello and welcome to the TAGGD SLA Dashboard tutorial. This powerful analytics platform helps you monitor and analyze Service Level Agreement compliance across your organization. In the next five minutes, I'll guide you through the key features and show you how to get the most out of this dashboard.
+
+[CHAPTER 2: DASHBOARD OVERVIEW - 0:45-1:30]
+When you first open the dashboard, you'll see the main navigation menu on the left side. The dashboard is organized into several key views: FY Comparison, Project Analysis, Regional Performance, and Competitor Benchmarking. At the top, you have filters to customize your view by fiscal year, region, and compliance status.
+
+[CHAPTER 3: FY COMPARISON VIEW - 1:30-2:30]
+Let's start with the FY Comparison view. This is your overview screen showing year-over-year performance. You can see compliance percentages for the current fiscal year compared to the previous year. The color-coded RAG status - Red, Amber, and Green - helps you quickly identify which accounts need attention. Green means 75% or higher compliance, Amber is 50 to 74%, and Red is below 50%. You can click on any chart element to drill deeper into the data.
+
+[CHAPTER 4: PROJECT ANALYSIS & DRILL-DOWN - 2:30-3:30]
+Now, let's explore the Project Analysis view. Here you'll find the Account-Wise FY Comparison table. Simply click on any project name to open the detailed drill-down modal. This shows you every performance measure for that account, including targets, monthly scores from April through October, and year-to-date results. You can see penalty status, whether targets were met or not met, and actual values like days or percentages. This is where you can verify that all data matches your Excel source.
+
+[CHAPTER 5: REGIONAL & FILTERS - 3:30-4:15]
+The Regional Performance view breaks down compliance by region and practice head. You can filter data using the controls at the top - select specific regions like North, South, or East, choose fiscal years, and filter by RAG status. The filters work across all views, making it easy to focus on specific segments of your data.
+
+[CHAPTER 6: EXPORT & WRAP-UP - 4:15-5:00]
+Finally, you can export your analysis to PowerPoint using the export button. The dashboard also features voice commands - just click the microphone icon and say what you want to see. You can upload your own Excel file using the upload button if you need to refresh the data. That completes our five-minute overview of the TAGGD SLA Dashboard. Explore the different views, use the filters, and drill down into the data to gain valuable insights into your SLA compliance. Thank you for watching!
+

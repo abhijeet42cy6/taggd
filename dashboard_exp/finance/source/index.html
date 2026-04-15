@@ -1,0 +1,172 @@
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Finance Executive Dashboard</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+        <style>
+          body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+          .sidebar { width: 260px; }
+          .content { margin-left: 260px; }
+          @media (max-width: 768px) {
+            .sidebar { width: 100%; }
+            .content { margin-left: 0; }
+          }
+          
+          /* Compact styling (Issue #5) */
+          .chart-compact { height: 220px !important; }
+          .card-compact { padding: 12px !important; }
+          .table-compact td, .table-compact th { padding: 6px 8px !important; font-size: 12px !important; }
+          .grid-compact { gap: 12px !important; }
+          .kpi-card-3d { transition: transform 0.2s; }
+          .kpi-card-3d:hover { transform: scale(1.02); }
+          
+          /* Target Settings Modal (Issue #6) */
+          .modal { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: rgba(0,0,0,0.5); 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            z-index: 9999;
+          }
+          .modal.hidden { display: none; }
+          .modal-content { 
+            max-width: 600px; 
+            width: 90%; 
+            max-height: 90vh; 
+            overflow-y: auto;
+            animation: modalFadeIn 0.3s;
+          }
+          @keyframes modalFadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          
+          /* Settings Button */
+          .settings-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 999;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+          }
+        </style>
+    </head>
+    <body class="bg-gray-50">
+        <div id="app"></div>
+        
+        <!-- Target Settings Modal (Issue #6) -->
+        <div id="target-settings-modal" class="modal hidden">
+          <div class="modal-content bg-white rounded-lg shadow-2xl p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-2xl font-bold text-gray-900 flex items-center">
+                <i class="fas fa-bullseye text-blue-600 mr-3"></i>
+                Set Targets & Budgets
+              </h2>
+              <button onclick="closeTargetSettings()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times text-xl"></i>
+              </button>
+            </div>
+            
+            <form id="target-settings-form" onsubmit="saveTargetSettings(event); return false;">
+              <div class="grid grid-cols-2 gap-4">
+                <!-- Revenue Target -->
+                <div>
+                  <label class="block text-sm font-semibold mb-2 text-gray-700">Revenue Target (₹ Cr)</label>
+                  <input type="number" step="0.01" name="revenueTarget" id="revenueTarget" 
+                         class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="e.g., 13000" />
+                </div>
+                
+                <!-- CM Target % -->
+                <div>
+                  <label class="block text-sm font-semibold mb-2 text-gray-700">CM Target (%)</label>
+                  <input type="number" step="0.1" name="cmTargetPercent" id="cmTargetPercent" 
+                         class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="e.g., 40" />
+                </div>
+                
+                <!-- Productivity Target -->
+                <div>
+                  <label class="block text-sm font-semibold mb-2 text-gray-700">Productivity Target (₹ Lacs/HC/Mo)</label>
+                  <input type="number" step="0.01" name="productivityTarget" id="productivityTarget" 
+                         class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="e.g., 2.5" />
+                </div>
+                
+                <!-- PPC Budget -->
+                <div>
+                  <label class="block text-sm font-semibold mb-2 text-gray-700">PPC Budget (₹/person/month)</label>
+                  <input type="number" step="1" name="ppcBudget" id="ppcBudget" 
+                         class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="e.g., 100000" />
+                </div>
+                
+                <!-- Collection Target -->
+                <div>
+                  <label class="block text-sm font-semibold mb-2 text-gray-700">Collection Target (₹ Cr)</label>
+                  <input type="number" step="0.01" name="collectionTarget" id="collectionTarget" 
+                         class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="e.g., 12000" />
+                </div>
+                
+                <!-- Headcount Target -->
+                <div>
+                  <label class="block text-sm font-semibold mb-2 text-gray-700">Headcount Target</label>
+                  <input type="number" step="1" name="headcountTarget" id="headcountTarget" 
+                         class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="e.g., 600" />
+                </div>
+              </div>
+              
+              <div class="mt-6 flex justify-between items-center">
+                <button type="button" onclick="clearTargetSettings()" 
+                        class="px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition">
+                  <i class="fas fa-trash mr-2"></i>Clear All
+                </button>
+                <div class="flex gap-3">
+                  <button type="button" onclick="closeTargetSettings()" 
+                          class="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition">
+                    Cancel
+                  </button>
+                  <button type="submit" 
+                          class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-lg">
+                    <i class="fas fa-save mr-2"></i>Save Targets
+                  </button>
+                </div>
+              </div>
+            </form>
+            
+            <div class="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <p class="text-xs text-blue-800">
+                <i class="fas fa-info-circle mr-1"></i>
+                <strong>Note:</strong> These targets will be used when database values are not available. 
+                Values are stored locally in your browser.
+              </p>
+            </div>
+          </div>
+        </div>
+        
+        <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+        <!-- Phase 3: Chart.js for visualizations -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <!-- Phase 3: Chart.js Datalabels Plugin -->
+        <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+        <!-- Phase 3: SheetJS for XLSX export -->
+        <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+        <!-- Phase 3: jsPDF and html2canvas for PDF export -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+        <script src="/static/app.js"></script>
+    </body>
+    </html>
+  

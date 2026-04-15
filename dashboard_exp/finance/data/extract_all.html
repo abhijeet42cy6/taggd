@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head><title>Extract All Data</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out" style="font-size:10px;white-space:pre-wrap;overflow:auto;max-height:95vh;">Loading...</pre>
+<script>
+const out = document.getElementById('out');
+const lines = [];
+function log(m) { lines.push(m); out.textContent = lines.join('\n'); console.log(m); }
+
+function sheetToRows(wb, name) {
+  const ws = wb.Sheets[name];
+  if (!ws) { log('  !! Sheet not found: ' + name); return null; }
+  return XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+}
+
+// Extract monthly totals (sum all projects per month)
+// Structure: FY | Project | Vert | Region | SubReg | RegHead | PracHead | Apr | May | ... (12 months)
+function extractMonthTotals(rows, nameCol, monthStartCol, numMonths) {
+  if (!rows) return new Array(numMonths).fill(0);
+  const totals = new Array(numMonths).fill(0);
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row[nameCol]) continue;
+    const name = String(row[nameCol]).trim().toLowerCase();
+    if (name === 'total' || name === 'grand total') continue;
+    for (let c = 0; c < numMonths; c++) {
+      totals[c] += parseFloat(row[monthStartCol + c]) || 0;
+    }
+  }
+  return totals;
+}
+
+// Extract by-account rows (for unbilled/bad-debt account tables)
+function extractByAccount(rows, nameCol, monthStartCol, numMonths) {
+  if (!rows) return [];
+  const result = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row[nameCol]) continue;
+    const name = String(row[nameCol]).trim();
+    if (!name || name.toLowerCase() === 'total' || name.toLowerCase() === 'grand total') continue;
+    const vals = [];
+    for (let c = 0; c < numMonths; c++) {
+      vals.push(parseFloat(row[monthStartCol + c]) || 0);
+    }
+    const total = vals.reduce((a,b)=>a+b,0);
+    if (total > 0) result.push({ name, vals, total });
+  }
+  return result.sort((a,b) => b.total - a.total);
+}
+
+// FY24-25 TC sheet has a null column at index 13 (after Sep, before Oct)
+function extractTC2425(rows) {
+  if (!rows) return new Array(12).fill(0);
+  const byProj = {};
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row[1]) continue;
+    const name = String(row[1]).trim();
+    if (!name || name.toLowerCase() === 'total') continue;
+    // Apr-Sep at cols 7-12, Oct-Mar at cols 14-19
+    const vals = [
+      parseFloat(row[7])||0, parseFloat(row[8])||0, parseFloat(row[9])||0,
+      parseFloat(row[10])||0, parseFloat(row[11])||0, parseFloat(row[12])||0,
+      parseFloat(row[14])||0, parseFloat(row[15])||0, parseFloat(row[16])||0,
+      parseFloat(row[17])||0, parseFloat(row[18])||0, parseFloat(row[19])||0,
+    ];
+    if (byProj[name]) { for(let i=0;i<12;i++) byProj[name][i]+=vals[i]; }
+    else byProj[name] = vals;
+  }
+  // Sum all projects per month
+  const totals = new Array(12).fill(0);
+  for (const arr of Object.values(byProj)) {
+    for (let i=0;i<12;i++) totals[i]+=arr[i];
+  }
+  return { byProject: byProj, monthly: totals };
+}
+
+async function process() {
+  log('=== Loading FY25-26 ===');
+  const r26 = await fetch('FY2526_new.xlsx');
+  const ab26 = await r26.arrayBuffer();
+  const wb26 = XLSX.read(ab26, {type:'array'});
+  log('Sheets: ' + wb26.SheetNames.join(', '));
+
+  // Total Cost FY25-26
+  const tc26rows = sheetToRows(wb26, 'Total Cost');
+  log('\n-- FY25-26 Total Cost --');
+  log('Row 0: ' + JSON.stringify(tc26rows[0]));
+  log('Row 1: ' + JSON.stringify(tc26rows[1]));
+  const tc26byProj = {};
+  for (let r = 1; r < tc26rows.length; r++) {
+    const row = tc26rows[r];
+    if (!row || !row[1]) continue;
+    const name = String(row[1]).trim();
+    if (!name || name.toLowerCase() === 'total') continue;
+    const vals = [];
+    for (let c = 7; c <= 18; c++) vals.push(parseFloat(row[c])||0);
+    while(vals.length < 12) vals.push(0);
+    if (tc26byProj[name]) { for(let i=0;i<12;i++) tc26byProj[name][i]+=vals[i]; }
+    else tc26byProj[name] = vals;
+  }
+  const tc26monthly = new Array(12).fill(0);
+  for (const arr of Object.values(tc26byProj)) for(let i=0;i<12;i++) tc26monthly[i]+=arr[i];
+  log('TC26 monthly: ' + tc26monthly.map(v=>Math.round(v)).join(', '));
+  log('TC26 Honeywell: ' + JSON.stringify((tc26byProj['Honeywell']||[]).map(v=>Math.round(v))));
+
+  // Headcount Overall FY25-26
+  const hc26rows = sheetToRows(wb26, 'Headcount_Overall');
+  log('\n-- FY25-26 Headcount_Overall --');
+  log('Row 0: ' + JSON.stringify(hc26rows[0]));
+  const hc26monthly = extractMonthTotals(hc26rows, 1, 7, 12);
+  log('HC26 monthly: ' + hc26monthly.map(v=>+v.toFixed(2)).join(', '));
+  // PPC26
+  const ppc26 = tc26monthly.map((tc,i) => hc26monthly[i]>0 ? Math.round(tc/hc26monthly[i]) : 0);
+  log('PPC26 monthly: ' + ppc26.join(', '));
+
+  // Per-project HC FY25-26
+  const hc26byProj = {};
+  for (let r = 1; r < hc26rows.length; r++) {
+    const row = hc26rows[r];
+    if (!row || !row[1]) continue;
+    const name = String(row[1]).trim();
+    if (!name || name.toLowerCase() === 'total') continue;
+    const vals = [];
+    for (let c = 7; c <= 18; c++) vals.push(parseFloat(row[c])||0);
+    while(vals.length < 12) vals.push(0);
+    if (hc26byProj[name]) { for(let i=0;i<12;i++) hc26byProj[name][i]+=vals[i]; }
+    else hc26byProj[name] = vals;
+  }
+  log('HC26 Honeywell: ' + JSON.stringify((hc26byProj['Honeywell']||[]).map(v=>+v.toFixed(2))));
+  if (tc26byProj['Honeywell'] && hc26byProj['Honeywell'] && hc26byProj['Honeywell'][0]>0) {
+    log('Honeywell Apr25 PPC: ' + (tc26byProj['Honeywell'][0]/hc26byProj['Honeywell'][0]).toFixed(2));
+  }
+
+  // Revenue Forecast FY25-26
+  const revF26rows = sheetToRows(wb26, 'Rev_Forecast');
+  log('\n-- FY25-26 Rev_Forecast --');
+  log('Row 0: ' + JSON.stringify(revF26rows[0]));
+  const revF26 = extractMonthTotals(revF26rows, 1, 7, 12);
+  log('RevF26: ' + revF26.map(v=>v.toFixed(2)).join(', '));
+
+  // Revenue Actual FY25-26
+  const revA26rows = sheetToRows(wb26, 'Revenue_Actual');
+  log('\n-- FY25-26 Revenue_Actual --');
+  log('Row 0: ' + JSON.stringify(revA26rows[0]));
+  const revA26 = extractMonthTotals(revA26rows, 1, 7, 12);
+  log('RevA26: ' + revA26.map(v=>v.toFixed(2)).join(', '));
+
+  // Rev Adjustment FY25-26
+  const revAdj26rows = sheetToRows(wb26, 'Revenue_Adjustment');
+  log('\n-- FY25-26 Revenue_Adjustment --');
+  if (revAdj26rows) {
+    log('Row 0: ' + JSON.stringify(revAdj26rows[0]));
+    log('Row 1: ' + JSON.stringify(revAdj26rows[1]));
+    const revAdj26 = extractMonthTotals(revAdj26rows, 1, 7, 12);
+    log('RevAdj26: ' + revAdj26.map(v=>v.toFixed(2)).join(', '));
+    log('RevAdj26 Total: ' + revAdj26.reduce((a,b)=>a+b,0).toFixed(2));
+  }
+
+  // Unbilled FY25-26 (by account)
+  const ub26rows = sheetToRows(wb26, 'Unbilled');
+  log('\n-- FY25-26 Unbilled --');
+  if (ub26rows) {
+    log('Row 0: ' + JSON.stringify(ub26rows[0]));
+    const ub26Monthly = extractMonthTotals(ub26rows, 1, 7, 12);
+    log('UB26 monthly: ' + ub26Monthly.map(v=>v.toFixed(2)).join(', '));
+    const ub26Accounts = extractByAccount(ub26rows, 1, 7, 12);
+    log('UB26 top accounts: ' + JSON.stringify(ub26Accounts.slice(0,5).map(a=>({name:a.name,total:a.total.toFixed(2)}))));
+    // Full account data
+    for (const a of ub26Accounts) {
+      log('UB26|' + a.name + '|' + a.vals.map(v=>v.toFixed(2)).join(',') + '|total:' + a.total.toFixed(2));
+    }
+  }
+
+  // Bad Debt FY25-26 (by account)
+  const bd26rows = sheetToRows(wb26, 'Bad Debt');
+  log('\n-- FY25-26 Bad Debt --');
+  if (bd26rows) {
+    log('Row 0: ' + JSON.stringify(bd26rows[0]));
+    const bd26Monthly = extractMonthTotals(bd26rows, 1, 7, 12);
+    log('BD26 monthly: ' + bd26Monthly.map(v=>v.toFixed(2)).join(', '));
+    const bd26Accounts = extractByAccount(bd26rows, 1, 7, 12);
+    for (const a of bd26Accounts) {
+      log('BD26|' + a.name + '|' + a.vals.map(v=>v.toFixed(2)).join(',') + '|total:' + a.total.toFixed(2));
+    }
+  }
+
+  log('\n=== Loading FY24-25 ===');
+  const r25 = await fetch('FY2425_new.xlsx');
+  const ab25 = await r25.arrayBuffer();
+  const wb25 = XLSX.read(ab25, {type:'array'});
+  log('Sheets: ' + wb25.SheetNames.join(', '));
+
+  // Total Cost FY24-25 (null column at index 13)
+  const tc25rows = sheetToRows(wb25, 'Total Cost');
+  log('\n-- FY24-25 Total Cost --');
+  log('Row 0: ' + JSON.stringify(tc25rows[0]));
+  const { byProject: tc25byProj, monthly: tc25monthly } = extractTC2425(tc25rows);
+  log('TC25 monthly: ' + tc25monthly.map(v=>Math.round(v)).join(', '));
+
+  // HC FY24-25
+  const hc25rows = sheetToRows(wb25, 'Actual_Headcount Overall');
+  log('\n-- FY24-25 Actual_Headcount Overall --');
+  const hc25monthly = extractMonthTotals(hc25rows, 1, 7, 12);
+  log('HC25 monthly: ' + hc25monthly.map(v=>+v.toFixed(2)).join(', '));
+  const ppc25 = tc25monthly.map((tc,i) => hc25monthly[i]>0 ? Math.round(tc/hc25monthly[i]) : 0);
+  log('PPC25 monthly: ' + ppc25.join(', '));
+
+  // Rev Forecast FY24-25
+  const revF25rows = sheetToRows(wb25, 'Rev_Forecast');
+  log('\n-- FY24-25 Rev_Forecast --');
+  if (revF25rows) {
+    log('Row 0: ' + JSON.stringify(revF25rows[0]));
+    const revF25 = extractMonthTotals(revF25rows, 1, 7, 12);
+    log('RevF25: ' + revF25.map(v=>v.toFixed(2)).join(', '));
+  }
+
+  // Rev Adjustment FY24-25
+  const revAdj25rows = sheetToRows(wb25, 'Rev_Adjustment');
+  log('\n-- FY24-25 Rev_Adjustment --');
+  if (revAdj25rows) {
+    log('Row 0: ' + JSON.stringify(revAdj25rows[0]));
+    const revAdj25 = extractMonthTotals(revAdj25rows, 1, 7, 12);
+    log('RevAdj25: ' + revAdj25.map(v=>v.toFixed(2)).join(', '));
+    log('RevAdj25 Total: ' + revAdj25.reduce((a,b)=>a+b,0).toFixed(2));
+  }
+
+  // Unbilled FY24-25
+  const ub25rows = sheetToRows(wb25, 'Unbilled');
+  log('\n-- FY24-25 Unbilled --');
+  if (ub25rows) {
+    const ub25Monthly = extractMonthTotals(ub25rows, 1, 7, 12);
+    log('UB25 monthly: ' + ub25Monthly.map(v=>v.toFixed(2)).join(', '));
+    const ub25Accounts = extractByAccount(ub25rows, 1, 7, 12);
+    for (const a of ub25Accounts) {
+      log('UB25|' + a.name + '|' + a.vals.map(v=>v.toFixed(2)).join(',') + '|total:' + a.total.toFixed(2));
+    }
+  }
+
+  // Bad Debt FY24-25
+  const bd25rows = sheetToRows(wb25, 'Bad Debt');
+  log('\n-- FY24-25 Bad Debt --');
+  if (bd25rows) {
+    const bd25Monthly = extractMonthTotals(bd25rows, 1, 7, 12);
+    log('BD25 monthly: ' + bd25Monthly.map(v=>v.toFixed(2)).join(', '));
+    const bd25Accounts = extractByAccount(bd25rows, 1, 7, 12);
+    for (const a of bd25Accounts) {
+      log('BD25|' + a.name + '|' + a.vals.map(v=>v.toFixed(2)).join(',') + '|total:' + a.total.toFixed(2));
+    }
+  }
+
+  // FY25-26 per-project TC (all projects)
+  log('\n===== FY25-26 PER-PROJECT TC =====');
+  for (const [name, arr] of Object.entries(tc26byProj)) {
+    log('TC26|' + name + '|' + arr.map(v=>Math.round(v)).join(','));
+  }
+  log('\n===== FY25-26 PER-PROJECT HC =====');
+  for (const [name, arr] of Object.entries(hc26byProj)) {
+    log('HC26|' + name + '|' + arr.map(v=>+v.toFixed(2)).join(','));
+  }
+
+  log('\n===== FY24-25 PER-PROJECT TC =====');
+  for (const [name, arr] of Object.entries(tc25byProj)) {
+    log('TC25|' + name + '|' + arr.map(v=>Math.round(v)).join(','));
+  }
+
+  log('\nDone!');
+}
+
+process().catch(e => log('ERROR: ' + e.message + '\n' + e.stack));
+</script>
+</body>
+</html>

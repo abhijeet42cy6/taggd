@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Rev Productivity Deep Dive</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    // ── FY25-26: Read BOTH Rev_Productivity_Actual AND Headcount_WL1 ──
+    {
+      const resp = await fetch('FY25-26_Finance_Data.xlsx');
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+
+      // 1. Rev_Productivity_Actual — print ALL rows (first 10)
+      const prodWS = wb.Sheets['Rev_Productivity_Actual'];
+      const prodRows = XLSX.utils.sheet_to_json(prodWS, { header:1, defval:0 });
+      log += '=== FY25-26 Rev_Productivity_Actual — first 10 rows ===\n';
+      prodRows.slice(0,10).forEach((r,i) => log += 'Row '+i+': '+JSON.stringify(r)+'\n');
+
+      // 2. Headcount_WL1 — print ALL rows (first 10) to see if it's per-project
+      const wl1WS = wb.Sheets['Headcount_WL1'];
+      const wl1Rows = XLSX.utils.sheet_to_json(wl1WS, { header:1, defval:0 });
+      log += '\n=== FY25-26 Headcount_WL1 — first 10 rows ===\n';
+      wl1Rows.slice(0,10).forEach((r,i) => log += 'Row '+i+': '+JSON.stringify(r)+'\n');
+
+      // 3. Revenue_Actual — print first 5 rows
+      const revWS = wb.Sheets['Revenue_Actual'];
+      const revRows = XLSX.utils.sheet_to_json(revWS, { header:1, defval:0 });
+      log += '\n=== FY25-26 Revenue_Actual — first 5 rows ===\n';
+      revRows.slice(0,5).forEach((r,i) => log += 'Row '+i+': '+JSON.stringify(r)+'\n');
+
+      // 4. WL1 monthly totals
+      log += '\n=== FY25-26 WL1 monthly TOTALS ===\n';
+      const MONTHS = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+      const wl1Totals = new Array(12).fill(0);
+      wl1Rows.slice(1).forEach(r => {
+        const name = String(r[1]||'').trim();
+        if (!name) return;
+        for (let i=0;i<12;i++) {
+          const v = typeof r[7+i]==='number'?r[7+i]:0;
+          wl1Totals[i] += v;
+        }
+      });
+      MONTHS.forEach((m,i) => log += m+': '+wl1Totals[i].toFixed(2)+'\n');
+
+      // 5. Check: does RevA/WL1_monthly = source productivity?
+      log += '\n=== Cross-check: RevA_total / WL1_total per month ===\n';
+      const revTotals = new Array(12).fill(0);
+      revRows.slice(1).forEach(r => {
+        const name = String(r[1]||'').trim();
+        if (!name) return;
+        for (let i=0;i<12;i++) {
+          const v = typeof r[7+i]==='number'?r[7+i]:0;
+          revTotals[i] += v;
+        }
+      });
+      const prodTotals = new Array(12).fill(0);
+      prodRows.slice(1).forEach(r => {
+        const name = String(r[1]||'').trim();
+        if (!name) return;
+        for (let i=0;i<12;i++) {
+          const v = typeof r[7+i]==='number'?r[7+i]:0;
+          prodTotals[i] += v;
+        }
+      });
+      MONTHS.forEach((m,i) => {
+        const calc = wl1Totals[i]>0 ? revTotals[i]/wl1Totals[i] : 0;
+        log += m+': RevA='+revTotals[i].toFixed(2)+' WL1='+wl1Totals[i].toFixed(2)+' calc='+calc.toFixed(4)+' source='+prodTotals[i].toFixed(4)+'\n';
+      });
+
+      // 6. Check Honeywell specifically
+      log += '\n=== Honeywell April 25: RevA / WL1 ===\n';
+      const honRevRow = revRows.find(r => String(r[1]).includes('Honeywell'));
+      const honWL1Row = wl1Rows.find(r => String(r[1]).includes('Honeywell'));
+      const honProdRow = prodRows.find(r => String(r[1]).includes('Honeywell'));
+      if (honRevRow && honWL1Row) {
+        log += 'Honeywell RevA Apr25: '+honRevRow[7]+'\n';
+        log += 'Honeywell WL1  Apr25: '+honWL1Row[7]+'\n';
+        log += 'Honeywell Prod Apr25: '+(honWL1Row[7]>0?honRevRow[7]/honWL1Row[7]:0).toFixed(4)+'\n';
+        log += 'Honeywell Prod source Apr25: '+(honProdRow?honProdRow[7]:'N/A')+'\n';
+      }
+    }
+
+    // ── FY24-25: Check Headcount_WL1 ──
+    {
+      const resp = await fetch('FY24-25_Finance_Data.xlsx');
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+
+      const wl1WS = wb.Sheets['Actual Headcount WL1'] || wb.Sheets['Headcount_WL1'] || wb.Sheets['Actual_Headcount WL1'];
+      log += '\n=== FY24-25 WL1 sheet name search ===\n';
+      log += 'Available: '+wb.SheetNames.join(', ')+'\n';
+      const wlSheetName = wb.SheetNames.find(s => /wl1|wl 1/i.test(s));
+      log += 'Found: '+wlSheetName+'\n';
+      
+      if (wlSheetName) {
+        const ws = wb.Sheets[wlSheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+        log += 'First 5 rows:\n';
+        rows.slice(0,5).forEach((r,i) => log += 'Row '+i+': '+JSON.stringify(r)+'\n');
+        
+        const MONTHS = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+        const totals = new Array(12).fill(0);
+        rows.slice(1).forEach(r => {
+          const name = String(r[1]||'').trim();
+          if (!name) return;
+          for (let i=0;i<12;i++) {
+            const v = typeof r[7+i]==='number'?r[7+i]:0;
+            totals[i] += v;
+          }
+        });
+        log += 'Monthly WL1 totals:\n';
+        MONTHS.forEach((m,i) => log += m+': '+totals[i].toFixed(2)+'\n');
+      }
+    }
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR:'+e.message+'\n'+e.stack);
+    document.getElementById('out').textContent='ERROR:'+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

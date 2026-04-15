@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html><head><title>Full Monthly Data</title></head>
+<body><pre id="out"></pre>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+function excelDate(serial) {
+  if (typeof serial !== 'number' || serial < 40000) return serial;
+  const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return mn[d.getMonth()] + d.getFullYear().toString().slice(-2);
+}
+async function parseEx(url) {
+  const ab = await (await fetch(url)).arrayBuffer();
+  const wb = XLSX.read(ab,{type:'array'});
+  const sheets={};
+  wb.SheetNames.forEach(name=>{
+    const ws=wb.Sheets[name];
+    const json=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:true});
+    if(!json.length)return;
+    const hdr=(json[0]||[]).map(h=>h===null?'':typeof h==='number'&&h>40000?excelDate(h):String(h).trim());
+    let fmi=-1;
+    for(let i=0;i<hdr.length;i++){if(/^(Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Jan|Feb|Mar)\d{2}$/.test(hdr[i])){fmi=i;break;}}
+    const mCols=fmi>=0?hdr.slice(fmi):[];
+    const rows=json.slice(1).filter(r=>r&&(r[1]||r[0]));
+    const mt={};
+    mCols.forEach((m,i)=>{mt[m]=rows.reduce((t,r)=>{const v=r[fmi+i];return t+((v!==null&&!isNaN(Number(v)))?Number(v):0);},0);});
+    const avgNZ={};
+    mCols.forEach((m,i)=>{let s=0,c=0;rows.forEach(r=>{const v=r[fmi+i];if(v!==null&&Number(v)>0){s+=Number(v);c++;}});avgNZ[m]=c?s/c:0;});
+    sheets[name]={hdr,fmi,mCols,mt,avgNZ,rows,sum:Object.values(mt).reduce((t,v)=>t+v,0)};
+  });
+  return sheets;
+}
+function s(sh,name){const n=sh[name];return n?Object.values(n.mt).reduce((t,v)=>t+v,0):0;}
+function latestNZ(sh,name){
+  const n=sh[name];if(!n)return{v:0,m:''};
+  for(let i=n.mCols.length-1;i>=0;i--){if(n.mt[n.mCols[i]]>0)return{v:n.mt[n.mCols[i]],m:n.mCols[i]};}
+  return{v:0,m:''};
+}
+(async()=>{
+  const [s24,s25]=await Promise.all([parseEx('FY24-25_Finance_Data.xlsx'),parseEx('FY25-26_Finance_Data.xlsx')]);
+  let out='';
+  
+  // FY24-25 monthly
+  const sh=s24;
+  const mCols=sh['Revenue_Actual']?.mCols||sh['Revenue_Budget']?.mCols||[];
+  out+='=== FY24-25 MONTHLY ===\n';
+  out+='Month,RevA,RevB,RevF,CmA,CmAPct,CmB,CmBPct,CollA,CollT,HCov,HCwl1,HCapp,Taggd,NonT,PPCavg,Ub,Bd,RevAdj,RevProd\n';
+  mCols.forEach(m=>{
+    const ra=sh['Revenue_Actual']?.mt[m]||0;
+    const rb=sh['Revenue_Budget']?.mt[m]||0;
+    const rf=sh['Rev_Forecast']?.mt[m]||0;
+    const ca=sh['CM_Actual']?.mt[m]||0;
+    const cb=sh['CM_Budget']?.mt[m]||0;
+    const hc=sh['Actual_Headcount Overall']?.mt[m]||0;
+    const wl=sh['Actual Headcount WL1']?.mt[m]||0;
+    const ap=sh['Approved_Headcount']?.mt[m]||0;
+    const tg=sh['Taggd_Source_Joiner']?.mt[m]||0;
+    const nt=sh['Non Taggd Source Joiner']?.mt[m]||0;
+    const pp=sh['Actual_PPC']?.avgNZ[m]||0;
+    const u=sh['Unbilled']?.mt[m]||0;
+    const bd=sh['Bad Debt']?.mt[m]||0;
+    const cA=sh['Revenue_Collected']?.mt[m]||0;
+    const cT=sh['Collection Target']?.mt[m]||0;
+    const radj=sh['Rev_Adjustment']?.mt[m]||0;
+    const rprod=sh['Target_Rev_Productivity']?.mt[m]||0;
+    out+=`${m},${ra.toFixed(2)},${rb.toFixed(2)},${rf.toFixed(2)},${ca.toFixed(2)},${ra>0?(ca/ra*100).toFixed(4):0},${cb.toFixed(2)},${rb>0?(cb/rb*100).toFixed(4):0},${cA.toFixed(2)},${cT.toFixed(2)},${hc.toFixed(2)},${wl.toFixed(2)},${ap.toFixed(2)},${tg.toFixed(0)},${nt.toFixed(0)},${pp.toFixed(0)},${u.toFixed(2)},${bd.toFixed(2)},${radj.toFixed(2)},${rprod.toFixed(4)}\n`;
+  });
+  
+  // FY24-25 totals
+  const revA24=mCols.reduce((t,m)=>t+(sh['Revenue_Actual']?.mt[m]||0),0);
+  const revB24=mCols.reduce((t,m)=>t+(sh['Revenue_Budget']?.mt[m]||0),0);
+  const revF24=mCols.reduce((t,m)=>t+(sh['Rev_Forecast']?.mt[m]||0),0);
+  const cmA24=mCols.reduce((t,m)=>t+(sh['CM_Actual']?.mt[m]||0),0);
+  const cmB24=mCols.reduce((t,m)=>t+(sh['CM_Budget']?.mt[m]||0),0);
+  out+=`TOTALS24,${revA24.toFixed(2)},${revB24.toFixed(2)},${revF24.toFixed(2)},${cmA24.toFixed(2)},${revA24>0?(cmA24/revA24*100).toFixed(4):0},${cmB24.toFixed(2)},${revB24>0?(cmB24/revB24*100).toFixed(4):0}\n`;
+  
+  const sh2=s25;
+  const mCols2=sh2['Revenue_Actual']?.mCols||sh2['Revenue_Budget']?.mCols||[];
+  out+='\n=== FY25-26 MONTHLY ===\n';
+  out+='Month,RevA,RevB,RevF,CmA,CmAPct,CmB,CmBPct,CollA,CollT,HCov,HCwl1,HCapp,Taggd,NonT,PPCavg,Ub,Bd,RevAdj,RevProdA\n';
+  mCols2.forEach(m=>{
+    const ra=sh2['Revenue_Actual']?.mt[m]||0;
+    const rb=sh2['Revenue_Budget']?.mt[m]||0;
+    const rf=sh2['Rev_Forecast']?.mt[m]||0;
+    const ca=sh2['CM Actual']?.mt[m]||0;
+    const cb=sh2['CM_Budget']?.mt[m]||0;
+    const hc=sh2['Headcount_Overall']?.mt[m]||0;
+    const wl=sh2['Headcount_WL1']?.mt[m]||0;
+    const ap=sh2['Headcount_Approved']?.mt[m]||0;
+    const tg=sh2['Taggd_Source_Joiner']?.mt[m]||0;
+    const nt=sh2['Non Taggd_Source_Joiner']?.mt[m]||0;
+    const pp=sh2['PPC_Actual']?.avgNZ[m]||0;
+    const u=sh2['Unbilled']?.mt[m]||0;
+    const bd=sh2['Bad Debt']?.mt[m]||0;
+    const cA=sh2['Actual_Collection']?.mt[m]||0;
+    const cT=sh2['Target_Collection']?.mt[m]||0;
+    const radj=sh2['Revenue_Adjustment']?.mt[m]||0;
+    const rprod=sh2['Rev_Productivity_Actual']?.mt[m]||0;
+    out+=`${m},${ra.toFixed(2)},${rb.toFixed(2)},${rf.toFixed(2)},${ca.toFixed(2)},${ra>0?(ca/ra*100).toFixed(4):0},${cb.toFixed(2)},${rb>0?(cb/rb*100).toFixed(4):0},${cA.toFixed(2)},${cT.toFixed(2)},${hc.toFixed(2)},${wl.toFixed(2)},${ap.toFixed(2)},${tg.toFixed(0)},${nt.toFixed(0)},${pp.toFixed(0)},${u.toFixed(2)},${bd.toFixed(2)},${radj.toFixed(2)},${rprod.toFixed(4)}\n`;
+  });
+  
+  const revA25=mCols2.reduce((t,m)=>t+(sh2['Revenue_Actual']?.mt[m]||0),0);
+  const revB25=mCols2.reduce((t,m)=>t+(sh2['Revenue_Budget']?.mt[m]||0),0);
+  const revF25=mCols2.reduce((t,m)=>t+(sh2['Rev_Forecast']?.mt[m]||0),0);
+  const cmA25=mCols2.reduce((t,m)=>t+(sh2['CM Actual']?.mt[m]||0),0);
+  const cmB25=mCols2.reduce((t,m)=>t+(sh2['CM_Budget']?.mt[m]||0),0);
+  const cA25=mCols2.reduce((t,m)=>t+(sh2['Actual_Collection']?.mt[m]||0),0);
+  const cT25=mCols2.reduce((t,m)=>t+(sh2['Target_Collection']?.mt[m]||0),0);
+  const tg25=mCols2.reduce((t,m)=>t+(sh2['Taggd_Source_Joiner']?.mt[m]||0),0);
+  const nt25=mCols2.reduce((t,m)=>t+(sh2['Non Taggd_Source_Joiner']?.mt[m]||0),0);
+  out+=`TOTALS25,${revA25.toFixed(2)},${revB25.toFixed(2)},${revF25.toFixed(2)},${cmA25.toFixed(2)},${revA25>0?(cmA25/revA25*100).toFixed(4):0},${cmB25.toFixed(2)},${revB25>0?(cmB25/revB25*100).toFixed(4):0},${cA25.toFixed(2)},${cT25.toFixed(2)},Taggd:${tg25},NonT:${nt25},Total:${tg25+nt25},Mix:${(tg25/(tg25+nt25)*100).toFixed(2)}%\n`;
+
+  // FY25-26 project data  
+  out+='\n=== FY25-26 PROJECTS (RevA|RevB|RevF|CmA|CmB|VarBud|CM%|Region|Vertical) ===\n';
+  const ra25=sh2['Revenue_Actual'];
+  const rb25=sh2['Revenue_Budget'];
+  const rf25=sh2['Rev_Forecast'];
+  const cm25=sh2['CM Actual'];
+  const cmb25=sh2['CM_Budget'];
+  if(ra25){
+    const projMap={};
+    ra25.rows.forEach(r=>{
+      const k=r[1];if(!k)return;
+      if(!projMap[k])projMap[k]={ra:0,rb:0,rf:0,ca:0,cb:0,reg:r[3]||'',vert:r[2]||''};
+      for(let i=ra25.fmi;i<r.length;i++)projMap[k].ra+=Number(r[i])||0;
+    });
+    rb25?.rows.forEach(r=>{const k=r[1];if(!k||!projMap[k])return;for(let i=rb25.fmi;i<r.length;i++)projMap[k].rb+=Number(r[i])||0;});
+    rf25?.rows.forEach(r=>{const k=r[1];if(!k||!projMap[k])return;for(let i=rf25.fmi;i<r.length;i++)projMap[k].rf+=Number(r[i])||0;});
+    cm25?.rows.forEach(r=>{const k=r[1];if(!k||!projMap[k])return;for(let i=cm25.fmi;i<r.length;i++)projMap[k].ca+=Number(r[i])||0;});
+    cmb25?.rows.forEach(r=>{const k=r[1];if(!k||!projMap[k])return;for(let i=cmb25.fmi;i<r.length;i++)projMap[k].cb+=Number(r[i])||0;});
+    Object.entries(projMap).sort((a,b)=>b[1].ra-a[1].ra).forEach(([n,d])=>{
+      const vb=d.rb>0?((d.ra-d.rb)/d.rb*100).toFixed(1):'N/A';
+      const cmp=d.ra>0?(d.ca/d.ra*100).toFixed(1):'N/A';
+      out+=`${n}|${d.ra.toFixed(1)}|${d.rb.toFixed(1)}|${d.rf.toFixed(1)}|${d.ca.toFixed(1)}|${d.cb.toFixed(1)}|${vb}%|${cmp}%|${d.reg}|${d.vert}\n`;
+    });
+  }
+  
+  // FY24-25 project data
+  out+='\n=== FY24-25 PROJECTS ===\n';
+  const ra24=sh['Revenue_Actual'];
+  if(ra24){
+    const projMap={};
+    ra24.rows.forEach(r=>{const k=r[1];if(!k)return;if(!projMap[k])projMap[k]={ra:0,rb:0,rf:0,ca:0,reg:r[3]||'',vert:r[2]||''};for(let i=ra24.fmi;i<r.length;i++)projMap[k].ra+=Number(r[i])||0;});
+    sh['Revenue_Budget']?.rows.forEach(r=>{const k=r[1];if(!k||!projMap[k])return;for(let i=sh['Revenue_Budget'].fmi;i<r.length;i++)projMap[k].rb+=Number(r[i])||0;});
+    sh['Rev_Forecast']?.rows.forEach(r=>{const k=r[1];if(!k||!projMap[k])return;for(let i=sh['Rev_Forecast'].fmi;i<r.length;i++)projMap[k].rf+=Number(r[i])||0;});
+    sh['CM_Actual']?.rows.forEach(r=>{const k=r[1];if(!k||!projMap[k])return;for(let i=sh['CM_Actual'].fmi;i<r.length;i++)projMap[k].ca+=Number(r[i])||0;});
+    Object.entries(projMap).sort((a,b)=>b[1].ra-a[1].ra).forEach(([n,d])=>{
+      const vb=d.rb>0?((d.ra-d.rb)/d.rb*100).toFixed(1):'N/A';
+      const cmp=d.ra>0?(d.ca/d.ra*100).toFixed(1):'N/A';
+      out+=`${n}|${d.ra.toFixed(1)}|${d.rb.toFixed(1)}|${d.rf.toFixed(1)}|${d.ca.toFixed(1)}|${vb}%|${cmp}%|${d.reg}|${d.vert}\n`;
+    });
+  }
+
+  document.getElementById('out').textContent=out;
+  const chunks=Math.ceil(out.length/3500);
+  for(let i=0;i<chunks;i++)console.log(`CHUNK${i}:${out.substring(i*3500,(i+1)*3500)}`);
+})();
+</script></body></html>

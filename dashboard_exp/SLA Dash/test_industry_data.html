@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Industry Data Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <h1>Industry Type Data Test</h1>
+    <div id="results"></div>
+
+    <script>
+        async function testIndustryData() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<p>Loading Excel file...</p>';
+
+            try {
+                // Fetch Excel file
+                const response = await fetch('/public/SLA_Monthly_Status_Summary_FINAL.xlsx');
+                if (!response.ok) {
+                    results.innerHTML = '<p style="color: red;">❌ Failed to load Excel file (404)</p>';
+                    return;
+                }
+
+                const arrayBuffer = await response.arrayBuffer();
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+                // Load sheets
+                const fy24_25 = XLSX.utils.sheet_to_json(workbook.Sheets['FY 24-25 Summary']);
+                const fy25_26 = XLSX.utils.sheet_to_json(workbook.Sheets['FY 25-26 Summary']);
+
+                // Extract industry types
+                function getIndustryType(row) {
+                    return (row['Industry Type '] || row['Industry Type'] || row['IndustryType'] || 'Unknown').toString().trim();
+                }
+
+                const fy24Industries = fy24_25.map(row => getIndustryType(row));
+                const fy25Industries = fy25_26.map(row => getIndustryType(row));
+                const uniqueIndustries = new Set([...fy24Industries, ...fy25Industries]);
+
+                // Display results
+                let html = `
+                    <h2>✅ Test Results</h2>
+                    <p><strong>FY 24-25 Rows:</strong> ${fy24_25.length}</p>
+                    <p><strong>FY 25-26 Rows:</strong> ${fy25_26.length}</p>
+                    <p><strong>Unique Industries:</strong> ${uniqueIndustries.size}</p>
+                    
+                    <h3>Sample FY24-25 Industries (first 10):</h3>
+                    <ul>${fy24Industries.slice(0, 10).map(i => `<li>${i}</li>`).join('')}</ul>
+                    
+                    <h3>Sample FY25-26 Industries (first 10):</h3>
+                    <ul>${fy25Industries.slice(0, 10).map(i => `<li>${i}</li>`).join('')}</ul>
+                    
+                    <h3>All Unique Industries (sorted):</h3>
+                    <ol>${Array.from(uniqueIndustries).sort().map(i => `<li>${i}</li>`).join('')}</ol>
+                `;
+
+                results.innerHTML = html;
+
+            } catch (error) {
+                results.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
+                console.error(error);
+            }
+        }
+
+        // Run test on page load
+        window.addEventListener('load', testIndustryData);
+    </script>
+</body>
+</html>

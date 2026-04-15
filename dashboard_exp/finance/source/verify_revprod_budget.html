@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>RevProd Budget Check</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    // FY24-25 revB/wl1 per month
+    const revB24 = [623.39, 872.75, 997.43, 771.22, 1079.71, 1233.95, 869.16, 1216.83, 1390.72, 986.18, 1380.65, 1578.01];
+    const wl1_24 = [531, 510, 503, 478, 467, 486, 459, 462, 460, 459, 455, 452];
+    const revB25 = [738.52, 982.47, 1104.48, 854.84, 1119.32, 1251.53, 891.14, 1144.01, 1270.39, 991.86, 1259.11, 1392.65];
+    const wl1_25 = [462, 439, 433, 398, 401, 418, 412, 407, 407, 419, 0, 0];
+    const mo = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+
+    log += '=== RevB / WL1 per month ===\n';
+    log += 'Month | FY24-25 Budget | WL1 | BudgetProd | FY25-26 Budget | WL1 | BudgetProd\n';
+    for (let i=0;i<12;i++) {
+      const b24 = wl1_24[i]>0 ? revB24[i]/wl1_24[i] : 0;
+      const b25 = wl1_25[i]>0 ? revB25[i]/wl1_25[i] : 0;
+      log += mo[i].padEnd(5)+' | '+revB24[i].toFixed(2).padStart(12)+' | '+
+        wl1_24[i].toString().padStart(3)+' | '+b24.toFixed(4).padStart(10)+' | '+
+        revB25[i].toFixed(2).padStart(12)+' | '+(wl1_25[i]||'N/A').toString().padStart(3)+
+        ' | '+(b25>0?b25.toFixed(4):'N/A').padStart(10)+'\n';
+    }
+
+    // Current stored values
+    const stored24 = [101.08, 113.29, 96.16, 92.94, 105.11, 118.13, 96.99, 109.61, 104.63, 101.07, 129.67, 108.22];
+    log += '\nStored FY24-25 revProdB (from target sheet sum): '+JSON.stringify(stored24)+'\n';
+    log += 'These are wrong - should be revB/wl1 per month\n\n';
+    
+    log += 'Correct FY24-25 revProdB (revB/wl1):\n';
+    const correct24 = revB24.map((r,i)=>wl1_24[i]>0?+(r/wl1_24[i]).toFixed(4):0);
+    log += JSON.stringify(correct24)+'\n\n';
+    log += 'Correct FY25-26 revProdB (revB/wl1, 0 where no wl1):\n';
+    const correct25 = revB25.map((r,i)=>wl1_25[i]>0?+(r/wl1_25[i]).toFixed(4):0);
+    log += JSON.stringify(correct25)+'\n\n';
+
+    // But wait: FY25-26 has no actual WL1 budget — using same actual WL1 as denominator
+    // This is reasonable since WL1 budget = approved HC which changes
+    // The formula is: Budget Rev Productivity = Budget RevA / Actual WL1 (same period)
+    // OR: Budget RevA / Budget WL1 (if available)
+    log += 'NOTE: Using Actual WL1 as denominator for both Actual and Budget productivity\n';
+    log += 'This gives a fair comparison of how much revenue per recruiter was planned vs actual\n';
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error(e.message);
+  }
+}
+run();
+</script>
+</body>
+</html>

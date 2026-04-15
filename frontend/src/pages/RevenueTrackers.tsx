@@ -6,8 +6,9 @@ import {
   type RevenueForecastWeeklyRow,
   type RevenueVisibilitySnapshotRow,
   type RevenueWeeklyPackResponse,
+  type RevenueWeeklySubmissionDto,
 } from "@/lib/api";
-import { canPracticeSubmitBilling, useAuth } from "@/lib/auth";
+import { canPracticeSubmitBilling, isProjectHeadLike, useAuth } from "@/lib/auth";
 import { formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { PageHeader, PlatformSection, Tabs } from "@/components/platform/PlatformBlocks";
 import {
@@ -114,6 +115,83 @@ type KpiProps = {
   accent?: "default" | "amber" | "teal";
 };
 
+function MyWeeklyPacksPanel({
+  loading,
+  rows,
+  onRefresh,
+  onOpenRow,
+}: {
+  loading: boolean;
+  rows: RevenueWeeklySubmissionDto[];
+  onRefresh: () => void;
+  onOpenRow: (projectId: number, weekStart: string) => void;
+}) {
+  return (
+    <PlatformSection
+      title="My weekly packs"
+      headerRight={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="font-mono text-[11px]"
+          onClick={onRefresh}
+          disabled={loading}
+        >
+          <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
+          Refresh
+        </Button>
+      }
+    >
+      <p className="text-[11px] text-muted-foreground font-mono mb-3 max-w-2xl leading-relaxed">
+        Draft and submitted packs for your assigned projects. Open a row to return to the workspace with that account and
+        governance week pre-selected.
+      </p>
+      <div className="platform-table-wrap">
+        <table className="platform-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Week (Mon)</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td>{r.account_name || `Project ${r.project_id}`}</td>
+                <td>{r.week_start_date ?? "—"}</td>
+                <td>{r.status}</td>
+                <td className="text-[10px] font-mono">{r.updated_at ?? "—"}</td>
+                <td>
+                  {r.week_start_date ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="font-mono text-[10px] h-7"
+                      onClick={() => onOpenRow(r.project_id, r.week_start_date!)}
+                    >
+                      Open in workspace
+                    </Button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length && !loading ? (
+          <div className="p-4 text-muted-foreground text-xs font-mono">
+            No packs yet. In Workspace, pick a project and governance week, then save a weekly forecast to create a draft pack.
+          </div>
+        ) : null}
+      </div>
+    </PlatformSection>
+  );
+}
+
 function KpiTile({ icon, label, value, sub, accent = "default" }: KpiProps) {
   return (
     <div
@@ -177,6 +255,12 @@ export function RevenueTrackers() {
   const pid = projectFilter ? Number(projectFilter) : undefined;
   const governancePid = pid ?? projects[0]?.id;
 
+  const ph = isProjectHeadLike(user);
+  const [revenuePageTab, setRevenuePageTab] = useState<"workspace" | "my_packs">("workspace");
+  const [minePacks, setMinePacks] = useState<RevenueWeeklySubmissionDto[]>([]);
+  const [minePacksLoading, setMinePacksLoading] = useState(false);
+  const [forecastWizard, setForecastWizard] = useState<{ projectId: number; week: string } | null>(null);
+
   const reload = useCallback(async () => {
     setErr(null);
     invalidateCache("revenue-trackers/");
@@ -213,6 +297,22 @@ export function RevenueTrackers() {
       setLoading(false);
     })();
   }, [reload]);
+
+  const loadMinePacks = useCallback(async () => {
+    setMinePacksLoading(true);
+    try {
+      const r = await queries.revenueWeeklyMinePacks();
+      setMinePacks(r.items ?? []);
+    } catch {
+      setMinePacks([]);
+    } finally {
+      setMinePacksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (ph && revenuePageTab === "my_packs") void loadMinePacks();
+  }, [ph, revenuePageTab, loadMinePacks]);
 
   const asOfDates = useMemo(() => {
     const s = new Set<string>();
@@ -405,7 +505,11 @@ export function RevenueTrackers() {
       >
         <PageHeader
           title="Revenue trackers"
-          subtitle="Use the tabs below to switch between pipeline visibility and TAGGD forecast — dashboards, tables, and add/update in each area"
+          subtitle={
+            ph
+              ? "Workspace: pick project + governance week, then forecast and visibility feed one weekly pack. My weekly packs lists every pack in your scope."
+              : "Use the tabs below to switch between pipeline visibility and TAGGD forecast — dashboards, tables, and add/update in each area"
+          }
         />
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           {lastRefresh ? (
@@ -427,6 +531,30 @@ export function RevenueTrackers() {
         </div>
       </div>
 
+      {ph ? (
+        <div style={{ marginBottom: 4 }}>
+          <Tabs
+            tabs={["Workspace", "My weekly packs"]}
+            active={revenuePageTab === "workspace" ? "Workspace" : "My weekly packs"}
+            onChange={(t) => setRevenuePageTab(t === "Workspace" ? "workspace" : "my_packs")}
+          />
+        </div>
+      ) : null}
+
+      {ph && revenuePageTab === "my_packs" ? (
+        <MyWeeklyPacksPanel
+          loading={minePacksLoading}
+          rows={minePacks}
+          onRefresh={() => void loadMinePacks()}
+          onOpenRow={(projectId, week) => {
+            setProjectFilter(String(projectId));
+            setGovernanceWeek(week);
+            setRevenuePageTab("workspace");
+            setMainTab("Revenue forecast");
+          }}
+        />
+      ) : (
+        <>
       <div style={{ marginBottom: 4 }}>
         <Tabs
           tabs={["Revenue visibility", "Revenue forecast"]}
@@ -436,6 +564,110 @@ export function RevenueTrackers() {
       </div>
 
       {governancePid ? (
+        ph ? (
+          <PlatformSection title="Weekly pack — where your numbers go">
+            <p className="text-[11px] text-muted-foreground font-mono mb-3 max-w-3xl leading-relaxed">
+              Everything below saves against <strong className="text-foreground">one governance week</strong> for the{" "}
+              <strong className="text-foreground">project in Scope</strong>. Saving the weekly forecast creates or updates the
+              draft pack; linking visibility to the same week attaches the second half. When you submit, finance sees the
+              combined pack for that week.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-start">
+              <div className="flex flex-wrap gap-3 items-end text-[11px] font-mono">
+                <label className="flex flex-col gap-1 text-muted-foreground">
+                  Governance week (Mon)
+                  <input
+                    className="platform-search h-9 text-xs min-w-[140px]"
+                    value={governanceWeek}
+                    onChange={(e) => setGovernanceWeek(e.target.value)}
+                  />
+                </label>
+                <div className="rounded-md border border-border/60 bg-muted/15 px-3 py-2 min-w-[200px]">
+                  <div className="text-[10px] uppercase text-muted-foreground">Pack status</div>
+                  <div className="text-sm mt-1">
+                    {weeklyPack?.submission?.status ? (
+                      <span className="text-primary">{weeklyPack.submission.status}</span>
+                    ) : (
+                      <span className="text-muted-foreground">No draft yet — add forecast for this week</span>
+                    )}
+                  </div>
+                  {weeklyPack?.submission?.approved_by?.email ? (
+                    <div className="text-[10px] text-muted-foreground mt-1">
+                      Approved by {weeklyPack.submission.approved_by.email}{" "}
+                      {weeklyPack.submission.approved_at ? `· ${weeklyPack.submission.approved_at}` : ""}
+                    </div>
+                  ) : null}
+                  {weeklyPack?.submission?.submitted_by?.email && weeklyPack.submission.status !== "draft" ? (
+                    <div className="text-[10px] text-muted-foreground mt-1">
+                      Submitted by {weeklyPack.submission.submitted_by.email}
+                    </div>
+                  ) : null}
+                  {weeklyPack?.submission?.review_notes ? (
+                    <div className="text-[10px] text-amber-600 mt-2 max-w-md">{weeklyPack.submission.review_notes}</div>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-1 text-muted-foreground text-[10px]">
+                  <span>Forecast in pack: {weeklyPack?.forecast ? "✓" : "—"}</span>
+                  <span>Visibility in pack: {weeklyPack?.visibility ? "✓" : "—"}</span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 min-w-[200px]">
+                <div className="text-[10px] uppercase text-muted-foreground font-mono">Next steps</div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="font-mono text-[11px] justify-start h-8"
+                  disabled={!governancePid}
+                  onClick={() => {
+                    if (!governancePid) return;
+                    setEditForecastRow(null);
+                    setForecastWizard({ projectId: governancePid, week: governanceWeek });
+                    setForecastModalOpen(true);
+                  }}
+                >
+                  <PencilLine className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                  1 · Forecast for this week
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="font-mono text-[11px] justify-start h-8"
+                  disabled={!governancePid}
+                  onClick={() => {
+                    setEditVisibilityRow(null);
+                    setMainTab("Revenue visibility");
+                    setVisibilityModalOpen(true);
+                  }}
+                >
+                  <PencilLine className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                  2 · Visibility (same week)
+                </Button>
+                {weeklyPack?.submission &&
+                ["draft", "changes_requested", "rejected"].includes(String(weeklyPack.submission.status)) &&
+                canPracticeSubmitBilling(user) ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="text-xs font-mono h-8"
+                    onClick={async () => {
+                      try {
+                        await queries.revenueWeeklySubmissionSubmit(weeklyPack.submission!.id);
+                        await reload();
+                        void loadMinePacks();
+                      } catch (e: unknown) {
+                        window.alert(e instanceof Error ? e.message : String(e));
+                      }
+                    }}
+                  >
+                    3 · Submit pack to finance
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </PlatformSection>
+        ) : (
         <PlatformSection title="Weekly pack (forecast + visibility)">
           <div className="flex flex-wrap gap-3 items-end text-[11px] font-mono">
             <label className="flex flex-col gap-1 text-muted-foreground">
@@ -500,6 +732,7 @@ export function RevenueTrackers() {
             finance sees both. Approved packs lock edits until finance requests changes.
           </p>
         </PlatformSection>
+        )
       ) : null}
 
       <div
@@ -797,6 +1030,7 @@ export function RevenueTrackers() {
               variant="secondary"
               className="font-mono text-[11px]"
               onClick={() => {
+                setForecastWizard(null);
                 setEditForecastRow(null);
                 setForecastModalOpen(true);
               }}
@@ -891,6 +1125,7 @@ export function RevenueTrackers() {
                             fontFamily: "'DM Mono',monospace",
                           }}
                           onClick={() => {
+                            setForecastWizard(null);
                             setEditForecastRow(r);
                             setForecastModalOpen(true);
                           }}
@@ -921,16 +1156,24 @@ export function RevenueTrackers() {
         </PlatformSection>
       </section>
       ) : null}
+      </>
+      )}
 
       <ForecastFormDialog
         open={forecastModalOpen}
         onOpenChange={(o) => {
           setForecastModalOpen(o);
-          if (!o) setEditForecastRow(null);
+          if (!o) {
+            setEditForecastRow(null);
+            setForecastWizard(null);
+          }
         }}
         projects={projects}
         defaultProjectId={pid}
         initialRow={editForecastRow}
+        wizardWeekStart={forecastWizard?.week ?? null}
+        wizardProjectId={forecastWizard?.projectId ?? null}
+        governanceFieldsLocked={!!forecastWizard}
         onSaved={reload}
       />
       <VisibilityFormDialog
@@ -956,6 +1199,9 @@ function ForecastFormDialog({
   projects,
   defaultProjectId,
   initialRow,
+  wizardWeekStart,
+  wizardProjectId,
+  governanceFieldsLocked,
   onSaved,
 }: {
   open: boolean;
@@ -963,6 +1209,9 @@ function ForecastFormDialog({
   projects: Project[];
   defaultProjectId?: number;
   initialRow: RevenueForecastWeeklyRow | null;
+  wizardWeekStart?: string | null;
+  wizardProjectId?: number | null;
+  governanceFieldsLocked?: boolean;
   onSaved: () => void;
 }) {
   const [projectId, setProjectId] = useState<number>(defaultProjectId ?? projects[0]?.id ?? 0);
@@ -1042,9 +1291,12 @@ function ForecastFormDialog({
     if (initialRow) fillFromRow(initialRow);
     else {
       resetEmpty();
-      if (defaultProjectId) setProjectId(defaultProjectId);
+      const wPid = wizardProjectId != null && wizardProjectId > 0 ? wizardProjectId : null;
+      if (wPid) setProjectId(wPid);
+      else if (defaultProjectId) setProjectId(defaultProjectId);
+      if (wizardWeekStart) setWeekStart(wizardWeekStart);
     }
-  }, [open, initialRow, fillFromRow, resetEmpty, defaultProjectId]);
+  }, [open, initialRow, fillFromRow, resetEmpty, defaultProjectId, wizardWeekStart, wizardProjectId]);
 
   const inputStyle: React.CSSProperties = {
     width: "100%",
@@ -1111,14 +1363,22 @@ function ForecastFormDialog({
         <DialogHeader>
           <DialogTitle className="font-[family-name:var(--font-syne)] text-lg">Weekly revenue forecast</DialogTitle>
           <DialogDescription className="text-xs font-mono text-[var(--text-muted)]">
-            Amounts in ₹ Lakhs · same project + week start replaces an existing row
+            {governanceFieldsLocked
+              ? "Project and week match your weekly pack — amounts in ₹ Lakhs; save updates the draft pack for this week."
+              : "Amounts in ₹ Lakhs · same project + week start replaces an existing row"}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit}>
           <div style={gridForm}>
             <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
               Project
-              <select value={projectId || ""} onChange={(e) => setProjectId(Number(e.target.value))} required style={inputStyle}>
+              <select
+                value={projectId || ""}
+                onChange={(e) => setProjectId(Number(e.target.value))}
+                required
+                style={inputStyle}
+                disabled={!!governanceFieldsLocked}
+              >
                 <option value="">—</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -1129,7 +1389,12 @@ function ForecastFormDialog({
             </label>
             <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
               Week start
-              <input style={inputStyle} value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
+              <input
+                style={inputStyle}
+                value={weekStart}
+                onChange={(e) => setWeekStart(e.target.value)}
+                disabled={!!governanceFieldsLocked}
+              />
             </label>
             <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
               Month anchor

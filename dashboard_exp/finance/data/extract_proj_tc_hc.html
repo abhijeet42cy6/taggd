@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head><title>Extract Per-Project Monthly TC and HC</title></head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+function excelDateToMonthLabel(serial) {
+  const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getUTCMonth()] + '-' + String(d.getUTCFullYear()).slice(2);
+}
+
+async function extractProjectData(url, fyLabel) {
+  const resp = await fetch(url);
+  const ab   = await resp.arrayBuffer();
+  const wb   = XLSX.read(ab, { type: 'array' });
+
+  // ── Total Cost sheet ──────────────────────────────────────
+  const tcWs  = wb.Sheets['Total Cost'];
+  const tcRaw = XLSX.utils.sheet_to_json(tcWs, { header: 1, defval: null });
+  const tcHeader = tcRaw[0];
+  // Month columns start at index 7
+  const monthSerials = tcHeader.slice(7).filter(v => v !== null && typeof v === 'number');
+  const monthLabels  = monthSerials.map(s => excelDateToMonthLabel(s));
+  const monthColIdxs = monthSerials.map(s => tcHeader.indexOf(s));
+
+  console.log(`\n[${fyLabel}] Months: ${monthLabels.join(', ')}`);
+
+  // Build per-project TC map
+  const tcMap = {};
+  for (let r = 1; r < tcRaw.length; r++) {
+    const row = tcRaw[r];
+    if (!row || !row[1]) continue;
+    const name = row[1].toString().trim();
+    tcMap[name] = monthColIdxs.map(ci => {
+      const v = row[ci];
+      return (typeof v === 'number' && !isNaN(v)) ? Math.round(v) : 0;
+    });
+  }
+
+  // ── Overall Headcount sheet ───────────────────────────────
+  const hcNames = ['Actual_Headcount Overall','Actual Headcount Overall','Headcount_Overall','Headcount Overall'];
+  const hcSheetName = hcNames.find(n => wb.SheetNames.includes(n));
+  const hcWs  = wb.Sheets[hcSheetName];
+  const hcRaw = XLSX.utils.sheet_to_json(hcWs, { header: 1, defval: null });
+  const hcHeader = hcRaw[0];
+
+  // Match HC month columns by serial value
+  const hcMonthColIdxs = monthSerials.map(s => hcHeader.indexOf(s));
+
+  // Build per-project HC map
+  const hcMap = {};
+  for (let r = 1; r < hcRaw.length; r++) {
+    const row = hcRaw[r];
+    if (!row || !row[1]) continue;
+    const name = row[1].toString().trim();
+    hcMap[name] = hcMonthColIdxs.map(ci => {
+      if (ci < 0) return 0;
+      const v = row[ci];
+      return (typeof v === 'number' && !isNaN(v)) ? v : 0;
+    });
+  }
+
+  // ── Verify Honeywell ──────────────────────────────────────
+  const hwTC = tcMap['Honeywell'] || [];
+  const hwHC = hcMap['Honeywell'] || [];
+  console.log(`\n[${fyLabel}] Honeywell TC: [${hwTC.join(', ')}]`);
+  console.log(`[${fyLabel}] Honeywell HC: [${hwHC.map(v=>v.toFixed(2)).join(', ')}]`);
+  if (hwTC.length && hwHC.length) {
+    const ppc0 = hwHC[0] > 0 ? hwTC[0] / hwHC[0] : 0;
+    console.log(`[${fyLabel}] Honeywell Apr PPC: ₹${ppc0.toFixed(2)} (TC=${hwTC[0]}, HC=${hwHC[0].toFixed(2)})`);
+    console.log(`Expected: ₹98,182.27 if TC=6381847.6, HC=65`);
+  }
+
+  // ── Print all projects ────────────────────────────────────
+  const allNames = [...new Set([...Object.keys(tcMap), ...Object.keys(hcMap)])].sort();
+  console.log(`\n[${fyLabel}] Total unique projects: TC=${Object.keys(tcMap).length}, HC=${Object.keys(hcMap).length}`);
+  console.log(`\n[${fyLabel}] ALL PROJECT DATA (for data.js):`);
+  for (const name of allNames) {
+    const tc = (tcMap[name] || monthSerials.map(()=>0));
+    const hc = (hcMap[name] || monthSerials.map(()=>0));
+    // Only output if either TC or HC has any non-zero value
+    if (tc.some(v=>v>0) || hc.some(v=>v>0)) {
+      console.log(`PROJ|${fyLabel}|${name}|TC=[${tc.join(',')}]|HC=[${hc.map(v=>parseFloat(v.toFixed(4))).join(',')}]`);
+    }
+  }
+
+  return { tcMap, hcMap, monthLabels };
+}
+
+(async () => {
+  try {
+    await extractProjectData('FY2425_v2.xlsx', 'FY24-25');
+    await extractProjectData('FY2526_v2.xlsx', 'FY25-26');
+    console.log('\nEXTRACTION DONE');
+  } catch(e) {
+    console.error('Error:', e.message, e.stack);
+  }
+})();
+</script>
+</body>
+</html>

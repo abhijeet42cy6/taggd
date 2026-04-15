@@ -257,7 +257,6 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
-    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -278,7 +277,6 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance",
     "/revenue-trackers",
     "/billing",
-    "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
     "/wfm",
@@ -337,9 +335,21 @@ export function isRecruiterUser(user: AuthUser | null | undefined): boolean {
 /** Post-login or “go home” path from resolved `/auth/me` user. */
 export function homePathAfterAuth(user: AuthUser | null | undefined): string {
   if (!user) return "/";
-  if (isRecruiterUser(user)) return RECRUITER_LANDING_PATH;
+  if (isRecruiterUser(user)) {
+    const opts = { effectiveRole: user.effectiveRole, verticalAccess: user.verticalAccess };
+    if (staffVerticalNavEnforced(user.role, user.effectiveRole) && !navAllowedForRole(RECRUITER_LANDING_PATH, user.role, opts)) {
+      return firstAllowedStaffNavPath(user.role, opts);
+    }
+    return RECRUITER_LANDING_PATH;
+  }
   const er = (user.effectiveRole ?? user.role).toLowerCase();
   if (er === "client_user") return firstAllowedNavPathForClient(user.verticalAccess);
+  if (staffVerticalNavEnforced(user.role, user.effectiveRole)) {
+    return firstAllowedStaffNavPath(user.role, {
+      effectiveRole: user.effectiveRole,
+      verticalAccess: user.verticalAccess,
+    });
+  }
   return "/";
 }
 
@@ -369,6 +379,71 @@ export type NavAllowedOpts = {
   effectiveRole?: string;
   verticalAccess?: string[] | null;
 };
+
+/**
+ * Longest-prefix wins. Paths omitted here are not gated by the module checklist (e.g. /, /profile, /activity, /agent).
+ * Keys match backend `VERTICAL_KEYS` / AdminUsers `VERTICAL_MODULES`.
+ */
+const STAFF_PATH_VERTICAL_PREFIXES: [string, string][] = [
+  ["/client-contracts", "contracts"],
+  ["/candidate-store", "candidates"],
+  ["/revenue-trackers", "revenue_forecast"],
+  ["/finance-validation", "finance_validation"],
+  ["/revenue-governance", "revenue_kpi_governance"],
+  ["/vendor-licenses", "vendor_licenses"],
+  ["/sla-performance", "sla"],
+  ["/data-operations", "data_operations"],
+  ["/admin/users", "admin_users"],
+  ["/portfolio", "portfolio"],
+  ["/transitions", "transitions"],
+  ["/requisitions", "requisitions"],
+  ["/candidates", "candidates"],
+  ["/clients", "clients"],
+  ["/meetings", "meetings"],
+  ["/ingestion", "ingestion"],
+  ["/finance", "finance"],
+  ["/billing", "revenue_billing"],
+  ["/wfm", "wfm"],
+  ["/tasks", "tasks"],
+];
+
+function verticalKeyForStaffPath(pathname: string): string | null {
+  for (const [prefix, key] of STAFF_PATH_VERTICAL_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return key;
+  }
+  return null;
+}
+
+/** When true, non-null `vertical_access` from `/auth/me` filters nav + gated APIs (executive, operations, etc.). */
+export function staffVerticalNavEnforced(storedRole: string | undefined, effectiveRole: string | undefined): boolean {
+  if (isPlatformAdminRole(storedRole) || isPlatformAdminRole(effectiveRole)) return false;
+  const er = (effectiveRole ?? storedRole ?? "").toLowerCase();
+  return (
+    er === "operations" ||
+    er === "executive" ||
+    er === "project_head" ||
+    er === "manager" ||
+    er === "recruiter"
+  );
+}
+
+function staffVerticalPathAllowed(pathname: string, verticalAccess: string[] | null | undefined): boolean {
+  const vk = verticalKeyForStaffPath(pathname);
+  if (vk == null) return true;
+  if (verticalAccess == null) return true;
+  if (verticalAccess.length === 0) return false;
+  const set = new Set(verticalAccess.map((x) => String(x).toLowerCase()));
+  return set.has(vk.toLowerCase());
+}
+
+/** First route the user may open (sidebar + deep links); `/profile` is the final fallback. */
+export function firstAllowedStaffNavPath(role: string, opts?: NavAllowedOpts): string {
+  for (const p of CLIENT_NAV_PRIORITY) {
+    if (navAllowedForRole(p, role, opts)) return p;
+  }
+  if (navAllowedForRole("/profile", role, opts)) return "/profile";
+  return "/profile";
+}
 
 export function clientPortalNavPaths(verticalAccess: string[] | null | undefined): string[] {
   const keys = verticalAccess?.filter(Boolean) ?? [];
@@ -483,26 +558,23 @@ export function navAllowedForRole(pathname: string, role: string, opts?: NavAllo
     if (pathname.startsWith("/clients/") && paths.includes("/clients")) return true;
     return false;
   }
+  if (isPlatformAdminRole(role) || isPlatformAdminRole(opts?.effectiveRole ?? "")) {
+    const key = navRoleKey(opts?.effectiveRole ?? role);
+    const allowed = ROLE_NAV_PATHS[key] ?? ROLE_NAV_PATHS.manager;
+    if (allowed.includes(pathname)) return true;
+    if (pathname.startsWith("/clients/") && allowed.includes("/clients")) return true;
+    return false;
+  }
   const key = navRoleKey(opts?.effectiveRole ?? role);
   const allowed = ROLE_NAV_PATHS[key] ?? ROLE_NAV_PATHS.manager;
-  if (pathname === "/finance-validation") {
-    if (!allowed.includes(pathname)) return false;
-    if (er === "operations") {
-      const va = opts?.verticalAccess ?? [];
-      return va.some((x) => String(x).toLowerCase() === "finance_validation");
-    }
-    return true;
+  if (allowed.includes(pathname)) {
+    if (!staffVerticalNavEnforced(role, opts?.effectiveRole)) return true;
+    return staffVerticalPathAllowed(pathname, opts?.verticalAccess);
   }
-  if (pathname === "/revenue-governance") {
-    if (!allowed.includes(pathname)) return false;
-    if (er === "operations" || er === "client_user") {
-      const va = opts?.verticalAccess ?? [];
-      return va.some((x) => String(x).toLowerCase() === "revenue_kpi_governance");
-    }
-    return true;
+  if (pathname.startsWith("/clients/") && allowed.includes("/clients")) {
+    if (!staffVerticalNavEnforced(role, opts?.effectiveRole)) return true;
+    return staffVerticalPathAllowed(pathname, opts?.verticalAccess);
   }
-  if (allowed.includes(pathname)) return true;
-  if (pathname.startsWith("/clients/") && allowed.includes("/clients")) return true;
   return false;
 }
 
@@ -520,4 +592,11 @@ export function canAccessRevenueGovernance(user: AuthUser | null | undefined): b
     effectiveRole: user.effectiveRole,
     verticalAccess: user.verticalAccess,
   });
+}
+
+/** Practice-side project lead (legacy `manager` maps to project_head on the backend). */
+export function isProjectHeadLike(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  const er = (user.effectiveRole ?? user.role).toLowerCase();
+  return er === "project_head" || er === "manager";
 }

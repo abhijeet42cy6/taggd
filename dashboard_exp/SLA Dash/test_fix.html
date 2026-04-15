@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Fix Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .status { padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        pre { background: white; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Dashboard Data Fix Test</h1>
+    <div id="results"></div>
+
+    <script>
+        const results = document.getElementById('results');
+        
+        function addResult(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.innerHTML = message;
+            results.appendChild(div);
+        }
+
+        addResult('🔍 <b>Starting comprehensive test...</b>');
+
+        // Test 1: Check if sample_data.json is accessible
+        fetch('sample_data.json')
+            .then(response => {
+                addResult(`✅ <b>Test 1: JSON File Access</b><br>Status: ${response.status} ${response.statusText}<br>Content-Type: ${response.headers.get('content-type')}`, 'success');
+                return response.json();
+            })
+            .then(data => {
+                addResult(`✅ <b>Test 2: JSON Parse</b><br>Total entries: ${data.length}<br>First project: ${data[0]['Project Name']}`, 'success');
+                
+                // Test 3: Find Maruti Suzuki Diversity
+                const maruti = data.find(row => 
+                    row['Project Name'] === 'Maruti Suzuki' && 
+                    row['Performance Measure'].toLowerCase().includes('diversity')
+                );
+                
+                if (maruti) {
+                    addResult(`✅ <b>Test 3: Maruti Suzuki Diversity Found</b><br>Target: ${maruti.Target}<br>Region: ${maruti.Region}<br>Penalty: ${maruti.Penalty}`, 'success');
+                    addResult(`<pre>${JSON.stringify(maruti, null, 2)}</pre>`, 'info');
+                } else {
+                    addResult(`❌ <b>Test 3: Maruti Suzuki Diversity NOT FOUND</b>`, 'error');
+                }
+                
+                // Test 4: Show sample of data structure
+                addResult(`<b>Sample Data Keys:</b><br>${Object.keys(data[0]).join(', ')}`, 'info');
+                
+            })
+            .catch(error => {
+                addResult(`❌ <b>ERROR Loading Data:</b><br>${error.message}<br><br><b>Possible causes:</b><br>1. File not found on server<br>2. CORS issue<br>3. Invalid JSON format`, 'error');
+            });
+
+        // Test 5: Check what the dashboard HTML is trying to load
+        addResult(`<b>Current URL:</b> ${window.location.href}<br><b>Expected JSON path:</b> ${window.location.origin}${window.location.pathname.replace('test_fix.html', 'sample_data.json')}`, 'info');
+    </script>
+</body>
+</html>

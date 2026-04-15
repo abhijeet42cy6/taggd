@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head><title>Extract Remaining Data</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out" style="font-size:10px;white-space:pre-wrap;overflow:auto;max-height:95vh;">Loading...</pre>
+<script>
+const out = document.getElementById('out');
+const lines = [];
+function log(m) { lines.push(m); out.textContent = lines.join('\n'); console.log(m); }
+
+function extractTC2425(rows) {
+  if (!rows) return {};
+  const byProj = {};
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row[1]) continue;
+    const name = String(row[1]).trim();
+    if (!name || name.toLowerCase() === 'total') continue;
+    const vals = [
+      parseFloat(row[7])||0, parseFloat(row[8])||0, parseFloat(row[9])||0,
+      parseFloat(row[10])||0, parseFloat(row[11])||0, parseFloat(row[12])||0,
+      parseFloat(row[14])||0, parseFloat(row[15])||0, parseFloat(row[16])||0,
+      parseFloat(row[17])||0, parseFloat(row[18])||0, parseFloat(row[19])||0,
+    ];
+    if (byProj[name]) { for(let i=0;i<12;i++) byProj[name][i]+=vals[i]; }
+    else byProj[name] = vals;
+  }
+  return byProj;
+}
+
+function extractMonthTotals(rows, nameCol, monthStartCol, numMonths) {
+  if (!rows) return new Array(numMonths).fill(0);
+  const totals = new Array(numMonths).fill(0);
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row[nameCol]) continue;
+    const name = String(row[nameCol]).trim().toLowerCase();
+    if (name === 'total' || name === 'grand total') continue;
+    for (let c = 0; c < numMonths; c++) {
+      totals[c] += parseFloat(row[monthStartCol + c]) || 0;
+    }
+  }
+  return totals;
+}
+
+async function process() {
+  // FY25-26 remaining TC projects
+  const r26 = await fetch('FY2526_new.xlsx');
+  const ab26 = await r26.arrayBuffer();
+  const wb26 = XLSX.read(ab26, {type:'array'});
+
+  const tc26rows = wb26.Sheets['Total Cost'] ? 
+    XLSX.utils.sheet_to_json(wb26.Sheets['Total Cost'], {header:1,defval:null}) : [];
+  const tc26byProj = {};
+  for (let r = 1; r < tc26rows.length; r++) {
+    const row = tc26rows[r];
+    if (!row || !row[1]) continue;
+    const name = String(row[1]).trim();
+    if (!name || name.toLowerCase() === 'total') continue;
+    const vals = [];
+    for (let c = 7; c <= 18; c++) vals.push(parseFloat(row[c])||0);
+    while(vals.length < 12) vals.push(0);
+    if (tc26byProj[name]) { for(let i=0;i<12;i++) tc26byProj[name][i]+=vals[i]; }
+    else tc26byProj[name] = vals;
+  }
+
+  const hc26rows = wb26.Sheets['Headcount_Overall'] ?
+    XLSX.utils.sheet_to_json(wb26.Sheets['Headcount_Overall'], {header:1,defval:null}) : [];
+  const hc26byProj = {};
+  for (let r = 1; r < hc26rows.length; r++) {
+    const row = hc26rows[r];
+    if (!row || !row[1]) continue;
+    const name = String(row[1]).trim();
+    if (!name || name.toLowerCase() === 'total') continue;
+    const vals = [];
+    for (let c = 7; c <= 18; c++) vals.push(parseFloat(row[c])||0);
+    while(vals.length < 12) vals.push(0);
+    if (hc26byProj[name]) { for(let i=0;i<12;i++) hc26byProj[name][i]+=vals[i]; }
+    else hc26byProj[name] = vals;
+  }
+
+  // Output remaining FY25-26 TC (after Honeywell..SBI Card from prev run)
+  log('===== FY25-26 PER-PROJECT TC (continued) =====');
+  const tc26Names = Object.keys(tc26byProj);
+  const startFrom = tc26Names.indexOf('SBI Card') + 1;
+  for (let i = startFrom; i < tc26Names.length; i++) {
+    const name = tc26Names[i];
+    log('TC26|' + name + '|' + tc26byProj[name].map(v=>Math.round(v)).join(','));
+  }
+
+  log('\n===== FY25-26 PER-PROJECT HC (all) =====');
+  for (const [name, arr] of Object.entries(hc26byProj)) {
+    log('HC26|' + name + '|' + arr.map(v=>+v.toFixed(2)).join(','));
+  }
+
+  // FY24-25 TC per project
+  const r25 = await fetch('FY2425_new.xlsx');
+  const ab25 = await r25.arrayBuffer();
+  const wb25 = XLSX.read(ab25, {type:'array'});
+
+  const tc25rows = wb25.Sheets['Total Cost'] ?
+    XLSX.utils.sheet_to_json(wb25.Sheets['Total Cost'], {header:1,defval:null}) : [];
+  const tc25byProj = extractTC2425(tc25rows);
+
+  log('\n===== FY24-25 PER-PROJECT TC (all) =====');
+  for (const [name, arr] of Object.entries(tc25byProj)) {
+    log('TC25|' + name + '|' + arr.map(v=>Math.round(v)).join(','));
+  }
+
+  const hc25rows = wb25.Sheets['Actual_Headcount Overall'] ?
+    XLSX.utils.sheet_to_json(wb25.Sheets['Actual_Headcount Overall'], {header:1,defval:null}) : [];
+  const hc25byProj = {};
+  for (let r = 1; r < hc25rows.length; r++) {
+    const row = hc25rows[r];
+    if (!row || !row[1]) continue;
+    const name = String(row[1]).trim();
+    if (!name || name.toLowerCase() === 'total') continue;
+    const vals = [];
+    for (let c = 7; c <= 18; c++) vals.push(parseFloat(row[c])||0);
+    while(vals.length < 12) vals.push(0);
+    if (hc25byProj[name]) { for(let i=0;i<12;i++) hc25byProj[name][i]+=vals[i]; }
+    else hc25byProj[name] = vals;
+  }
+  log('\n===== FY24-25 PER-PROJECT HC (all) =====');
+  for (const [name, arr] of Object.entries(hc25byProj)) {
+    log('HC25|' + name + '|' + arr.map(v=>+v.toFixed(2)).join(','));
+  }
+
+  // Verify totals
+  const totTC26 = new Array(12).fill(0);
+  for (const arr of Object.values(tc26byProj)) for(let i=0;i<12;i++) totTC26[i]+=arr[i];
+  log('\nFY25-26 TC sum monthly: ' + totTC26.map(v=>Math.round(v)).join(','));
+
+  const totHC26 = new Array(12).fill(0);
+  for (const arr of Object.values(hc26byProj)) for(let i=0;i<12;i++) totHC26[i]+=arr[i];
+  log('FY25-26 HC sum monthly: ' + totHC26.map(v=>+v.toFixed(2)).join(','));
+
+  const ppc26check = totTC26.map((tc,i) => totHC26[i]>0 ? Math.round(tc/totHC26[i]) : 0);
+  log('FY25-26 PPC check: ' + ppc26check.join(','));
+
+  // Rev Adj per month for data.js
+  const revAdj26rows = wb26.Sheets['Revenue_Adjustment'] ?
+    XLSX.utils.sheet_to_json(wb26.Sheets['Revenue_Adjustment'], {header:1,defval:null}) : [];
+  const revAdj26 = extractMonthTotals(revAdj26rows, 1, 7, 12);
+  log('\nRevAdj26 (monthly ₹L): ' + revAdj26.map(v=>+v.toFixed(2)).join(', '));
+
+  const revAdj25rows = wb25.Sheets['Rev_Adjustment'] ?
+    XLSX.utils.sheet_to_json(wb25.Sheets['Rev_Adjustment'], {header:1,defval:null}) : [];
+  const revAdj25 = extractMonthTotals(revAdj25rows, 1, 7, 12);
+  log('RevAdj25 (monthly ₹L): ' + revAdj25.map(v=>+v.toFixed(2)).join(', '));
+
+  // Rev Adj by account for table
+  function extractByAccount(rows, nameCol, sc, nm) {
+    if (!rows) return [];
+    const result = [];
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || !row[nameCol]) continue;
+      const name = String(row[nameCol]).trim();
+      if (!name || name.toLowerCase() === 'total' || name.toLowerCase() === 'grand total') continue;
+      const vals = [];
+      for (let c = 0; c < nm; c++) vals.push(parseFloat(row[sc + c]) || 0);
+      const total = vals.reduce((a,b)=>a+b,0);
+      if (total > 0) result.push({ name, vals, total });
+    }
+    return result.sort((a,b) => b.total - a.total);
+  }
+
+  log('\n-- RevAdj26 by account --');
+  const revAdj26Accounts = extractByAccount(revAdj26rows, 1, 7, 12);
+  for (const a of revAdj26Accounts) {
+    log('RevAdj26|' + a.name + '|' + a.vals.map(v=>+v.toFixed(2)).join(',') + '|total:' + a.total.toFixed(2));
+  }
+
+  log('\nDone!');
+}
+
+process().catch(e => log('ERROR: ' + e.message + '\n' + e.stack));
+</script>
+</body>
+</html>

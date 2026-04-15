@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Collections Summary</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    async function readSheet(file, sheetName) {
+      const resp = await fetch(file);
+      const buf  = await resp.arrayBuffer();
+      const wb   = XLSX.read(buf, { type:'array', cellDates:false });
+      // find sheet by partial name match
+      const sn = wb.SheetNames.find(s => s.toLowerCase().includes(sheetName.toLowerCase())) || sheetName;
+      const ws = wb.Sheets[sn];
+      if (!ws) return { name: sn, totals: new Array(12).fill(0), found: false };
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:0 });
+      const totals = new Array(12).fill(0);
+      rows.slice(1).forEach(r => {
+        const name = String(r[1]||r[0]||'').trim();
+        if (!name) return;
+        for (let i=0;i<12;i++) {
+          const v = typeof r[7+i]==='number' ? r[7+i] : 0;
+          totals[i] += v;
+        }
+      });
+      return { name: sn, totals, found: true };
+    }
+
+    // FY24-25
+    const MONTHS24 = ['Apr24','May24','Jun24','Jul24','Aug24','Sep24','Oct24','Nov24','Dec24','Jan25','Feb25','Mar25'];
+    const MONTHS25 = ['Apr25','May25','Jun25','Jul25','Aug25','Sep25','Oct25','Nov25','Dec25','Jan26','Feb26','Mar26'];
+
+    const collA24 = await readSheet('FY24-25_Finance_Data.xlsx', 'Revenue_Collected');
+    const collT24 = await readSheet('FY24-25_Finance_Data.xlsx', 'Collection Target');
+    const collA25 = await readSheet('FY25-26_Finance_Data.xlsx', 'Actual_Collection');
+    const collT25 = await readSheet('FY25-26_Finance_Data.xlsx', 'Target_Collection');
+
+    function printSheet(label, months, data, jsStored) {
+      log += '\n--- ' + label + ' (sheet: ' + data.name + ') ---\n';
+      let excelTotal = 0, jsTotal = 0;
+      months.forEach((m, i) => {
+        const ev = data.totals[i];
+        const jv = jsStored ? jsStored[i] : null;
+        const diff = jv !== null ? ev - jv : null;
+        excelTotal += ev;
+        if (jv !== null) jsTotal += jv;
+        log += m + ': Excel=' + ev.toFixed(2) +
+          (jv !== null ? '  js=' + jv.toFixed(2) + '  diff=' + diff.toFixed(2) + (Math.abs(diff) > 1 ? ' *** MISMATCH' : '') : '') + '\n';
+      });
+      log += 'TOTAL Excel: ' + excelTotal.toFixed(2) + ' L = ₹' + (excelTotal/100).toFixed(2) + ' Cr\n';
+      if (jsStored) log += 'TOTAL js   : ' + jsTotal.toFixed(2) + ' L = ₹' + (jsTotal/100).toFixed(2) + ' Cr\n';
+    }
+
+    // Stored values in js/data.js
+    const js_collA24 = [946.37, 758.93, 1073.20, 779.78, 782.54, 768.34, 881.05, 892.40, 950.00, 825.00, 630.00, 717.04];
+    const js_collT24 = [1444.87, 1209.70, 1507.47, 1142.32, 1066.33, 1201.04, 1134.12, 1216.83, 1390.72, 986.18, 1380.65, 1578.01];
+    const js_collA25 = [879.72, 832.36, 1046.94, 794.16, 838.86, 993.51, 856.21, 936.73, 1063.28, 915.44, 0, 0];
+    const js_collT25 = [1206.84, 1124.38, 1307.62, 952.08, 1009.46, 1164.87, 928.00, 1044.12, 1271.42, 1165.35, 0, 0];
+
+    log += '==========================================\n';
+    log += 'FY24-25 COLLECTIONS VERIFICATION\n';
+    log += '==========================================';
+    printSheet('FY24-25 Collection Actual (Revenue_Collected)', MONTHS24, collA24, js_collA24);
+    printSheet('FY24-25 Collection Target', MONTHS24, collT24, js_collT24);
+
+    log += '\n==========================================\n';
+    log += 'FY25-26 COLLECTIONS VERIFICATION\n';
+    log += '==========================================';
+    printSheet('FY25-26 Collection Actual (Actual_Collection)', MONTHS25, collA25, js_collA25);
+    printSheet('FY25-26 Collection Target', MONTHS25, collT25, js_collT25);
+
+    // Dashboard currently shows for FY25-26 (all months up to Jan26 = 10 months):
+    const ytd10_A25 = collA25.totals.slice(0,10).reduce((s,v)=>s+v,0);
+    const ytd10_T25 = collT25.totals.slice(0,10).reduce((s,v)=>s+v,0);
+    log += '\n==========================================\n';
+    log += 'DASHBOARD DISPLAY CHECK (FY25-26 YTD Apr-Jan = 10 months)\n';
+    log += '==========================================\n';
+    log += 'Actual YTD (Excel): ' + ytd10_A25.toFixed(2) + ' L = ₹' + (ytd10_A25/100).toFixed(2) + ' Cr\n';
+    log += 'Target YTD (Excel): ' + ytd10_T25.toFixed(2) + ' L = ₹' + (ytd10_T25/100).toFixed(2) + ' Cr\n';
+    log += 'Attainment: ' + (ytd10_T25>0 ? (ytd10_A25/ytd10_T25*100).toFixed(1) : 'N/A') + '%\n';
+    log += '\nDashboard shows: Actual ₹81.57 Cr, Target ₹111.74 Cr, Attainment 73%\n';
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR: ' + e.message + '\n' + e.stack);
+    document.getElementById('out').textContent = 'ERROR: ' + e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

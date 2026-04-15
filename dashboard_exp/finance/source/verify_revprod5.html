@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Rev Prod Correct Formula</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<pre id="out">Loading...</pre>
+<script>
+async function run() {
+  try {
+    let log = '';
+
+    // The CORRECT formula per user:
+    // Rev Productivity = Total RevA / Total WL1 / numMonths
+    // For Apr only: RevA[Apr] / WL1[Apr] / 1
+    // For Q1 (Apr-Jun): sum(RevA[0..2]) / avg(WL1[0..2]) / 3   OR sum(RevA) / sum(WL1) 
+    //   => actually: sum(RevA[0..2]) / sum(WL1[0..2]) gives L/rec across Q1
+    //   => to get per month: sum(RevA[0..2]) / sum(WL1[0..2]) ... NO
+    //   => correct: sum(RevA) / avg(WL1) / numMonths = sum(RevA) / (sum(WL1)/n) / n = sum(RevA)/sum(WL1)
+    //   => Simpler: sum(RevA) / sum(WL1) = ₹L per recruiter-month (aggregated)
+
+    // FY24-25 data
+    const revA24 = [639.72, 710.79, 714.58, 684.24, 701.91, 853.35, 625.97, 765.04, 839.46, 731.29, 534.71, 676.20];
+    const wl1_24 = [531, 510, 503, 478, 467, 486, 459, 462, 460, 459, 455, 452];
+    const mo = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
+
+    // FY25-26 data
+    const revA25 = [711.06, 813.29, 875.52, 744.83, 865.00, 991.31, 688.72, 901.18, 1043.64, 854.20, 917.30, 0];
+    const wl1_25 = [462, 439, 433, 398, 401, 418, 412, 407, 407, 419, 0, 0];
+
+    log += '=====================================================\n';
+    log += 'CORRECT FORMULA: RevA / WL1 per month (₹L/Rec/Mo)\n';
+    log += '=====================================================\n\n';
+
+    // Monthly productivity: RevA[i] / WL1[i]
+    log += 'Month | FY24-25 RevA | WL1 | Prod | FY25-26 RevA | WL1 | Prod | YoY%\n';
+    log += '------+-------------+-----+------+-------------+-----+------+------\n';
+    for (let i=0;i<12;i++) {
+      const p24 = wl1_24[i]>0 ? revA24[i]/wl1_24[i] : 0;
+      const p25 = wl1_25[i]>0&&revA25[i]>0 ? revA25[i]/wl1_25[i] : 0;
+      const yoy = p24>0&&p25>0 ? ((p25-p24)/p24*100) : null;
+      log += mo[i].padEnd(5)+' | '+
+        (revA24[i].toFixed(2)).padStart(11)+' | '+wl1_24[i].toString().padStart(3)+' | '+
+        p24.toFixed(2).padStart(4)+' | '+
+        (revA25[i]>0?revA25[i].toFixed(2):'  —  ').padStart(11)+' | '+
+        (wl1_25[i]>0?wl1_25[i].toString():'  0').padStart(3)+' | '+
+        (p25>0?p25.toFixed(2):'  —  ').padStart(4)+' | '+
+        (yoy!==null?(yoy>=0?'+':'')+yoy.toFixed(1)+'%':'  N/A')+'\n';
+    }
+
+    // Period summaries
+    log += '\n=========================================\n';
+    log += 'PERIOD SUMMARIES: sum(RevA) / sum(WL1)\n';
+    log += '=========================================\n';
+
+    function periodProd(revA, wl1, idxs) {
+      const sumR = idxs.reduce((s,i)=>s+(revA[i]||0),0);
+      const sumW = idxs.reduce((s,i)=>s+(wl1[i]||0),0);
+      const n = idxs.filter(i=>(revA[i]||0)>0&&(wl1[i]||0)>0).length;
+      return { sumR, sumW, prod: sumW>0&&n>0 ? sumR/sumW : 0, n };
+    }
+
+    const periods = [
+      { label:'Apr (M1)',      idxs:[0] },
+      { label:'Q1 (Apr-Jun)',  idxs:[0,1,2] },
+      { label:'Q2 (Jul-Sep)',  idxs:[3,4,5] },
+      { label:'Q3 (Oct-Dec)',  idxs:[6,7,8] },
+      { label:'Q4 (Jan-Mar)',  idxs:[9,10,11] },
+      { label:'H1 (Apr-Sep)',  idxs:[0,1,2,3,4,5] },
+      { label:'H2 (Oct-Mar)',  idxs:[6,7,8,9,10,11] },
+      { label:'FY Full',       idxs:[0,1,2,3,4,5,6,7,8,9,10,11] },
+      { label:'YTD (Apr-Jan)', idxs:[0,1,2,3,4,5,6,7,8,9] },
+      { label:'YTD (Apr-Feb)', idxs:[0,1,2,3,4,5,6,7,8,9,10] },
+    ];
+
+    log += '\nPeriod        | FY24-25 Prod | FY25-26 Prod | YoY%\n';
+    log += '--------------+-------------+-------------+------\n';
+    periods.forEach(p => {
+      const r24 = periodProd(revA24, wl1_24, p.idxs);
+      // FY25-26: only use months with actual data (revA>0 and wl1>0)
+      const validIdxs25 = p.idxs.filter(i=>revA25[i]>0&&wl1_25[i]>0);
+      const r25 = periodProd(revA25, wl1_25, validIdxs25);
+      const yoy = r24.prod>0&&r25.prod>0 ? ((r25.prod-r24.prod)/r24.prod*100) : null;
+      log += p.label.padEnd(14)+' | '+
+        r24.prod.toFixed(3).padStart(11)+' | '+
+        (r25.prod>0?r25.prod.toFixed(3).padStart(11):'    —      ')+' | '+
+        (yoy!==null?(yoy>=0?'+':'')+yoy.toFixed(1)+'%':'  N/A')+'\n';
+    });
+
+    log += '\nNOTE: Formula = sum(RevA) / sum(WL1) = ₹L per recruiter-month\n';
+    log += 'This equals sum(RevA) / avg(WL1) / numMonths — same result.\n\n';
+    
+    log += '=== What to store in revProdA arrays ===\n';
+    log += 'FY24-25 monthly [RevA/WL1]:\n';
+    const prod24 = revA24.map((r,i)=>wl1_24[i]>0?(r/wl1_24[i]):0);
+    log += JSON.stringify(prod24.map(v=>Math.round(v*10000)/10000))+'\n\n';
+    log += 'FY25-26 monthly [RevA/WL1]:\n';
+    const prod25 = revA25.map((r,i)=>wl1_25[i]>0&&r>0?(r/wl1_25[i]):0);
+    log += JSON.stringify(prod25.map(v=>Math.round(v*10000)/10000))+'\n';
+
+    document.getElementById('out').textContent = log;
+    console.log(log);
+  } catch(e) {
+    console.error('ERROR:'+e.message);
+    document.getElementById('out').textContent='ERROR:'+e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>
