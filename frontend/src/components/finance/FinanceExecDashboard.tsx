@@ -4,17 +4,16 @@ import {
   CategoryScale,
   LinearScale,
   BarElement,
-  LineElement,
   PointElement,
   Title,
   Tooltip,
   Legend,
   Filler,
+  type TooltipItem,
 } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
-import { Bar, Line } from "react-chartjs-2";
-import { Menu, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Bar } from "react-chartjs-2";
+import { Menu } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { financeStatsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import "@/styles/finance-exec-dashboard.css";
@@ -23,7 +22,6 @@ ChartJS.register(
   CategoryScale,
   LinearScale,
   BarElement,
-  LineElement,
   PointElement,
   Title,
   Tooltip,
@@ -180,6 +178,8 @@ export function FinanceExecDashboard({
   const [region, setRegion] = useState<string>("");
   const [vertical, setVertical] = useState<string>("");
   const [account, setAccount] = useState<string>("");
+  /** Expense & CM chart: aggregated series only (avoids hundreds of ledger points on one axis). */
+  const [cmExpenseView, setCmExpenseView] = useState<"month" | "accounts">("month");
 
   useEffect(() => {
     const id = "finance-dashboard-fa";
@@ -252,6 +252,43 @@ export function FinanceExecDashboard({
     displayStats && displayStats.revenue_actual_inr > 0
       ? ((displayStats.total_cm_inr ?? 0) / displayStats.revenue_actual_inr) * 100
       : null;
+
+  const cmPctMonthlySeries = useMemo(() => {
+    const agg: Record<string, { cm: number; rev: number }> = {};
+    for (const r of filteredRows) {
+      const m = rowFyMonthAbbr(r.month ?? "");
+      if (!m) continue;
+      if (!agg[m]) agg[m] = { cm: 0, rev: 0 };
+      agg[m].cm += r.cm_actual_inr ?? 0;
+      agg[m].rev += r.rev_actual_inr ?? 0;
+    }
+    const out: { label: string; pct: number }[] = [];
+    for (const m of FY_MONTHS) {
+      const a = agg[m];
+      if (!a || a.rev <= 0) continue;
+      out.push({ label: m, pct: (a.cm / a.rev) * 100 });
+    }
+    return out;
+  }, [filteredRows]);
+
+  const cmPctByAccountSeries = useMemo(() => {
+    const agg: Record<string, { cm: number; rev: number }> = {};
+    for (const r of filteredRows) {
+      const name = cleanDimensionLabel(r.account_name) || "—";
+      if (!agg[name]) agg[name] = { cm: 0, rev: 0 };
+      agg[name].cm += r.cm_actual_inr ?? 0;
+      agg[name].rev += r.rev_actual_inr ?? 0;
+    }
+    return Object.entries(agg)
+      .map(([name, v]) => ({
+        name,
+        pct: v.rev > 0 ? (v.cm / v.rev) * 100 : 0,
+        rev: v.rev,
+      }))
+      .filter((x) => x.rev > 0)
+      .sort((a, b) => b.rev - a.rev)
+      .slice(0, 10);
+  }, [filteredRows]);
 
   const revProdWeighted = useMemo(() => {
     let sumW = 0;
@@ -331,11 +368,6 @@ export function FinanceExecDashboard({
     }),
     []
   );
-
-  const pageTitle = useMemo(() => {
-    const n = NAV.find((x) => x.id === page);
-    return n?.label ?? "Finance";
-  }, [page]);
 
   const renderContent = () => {
     if (loading) {
@@ -427,7 +459,7 @@ export function FinanceExecDashboard({
             />
           </div>
 
-          <div className="card g1" style={{ marginTop: 18 }}>
+          <div className="card g1">
             <div className="card-hd">
               <div>
                 <div className="card-title">Budget vs Actual (Monthly) — ₹ Lakhs</div>
@@ -448,7 +480,7 @@ export function FinanceExecDashboard({
           </div>
 
           {waterfallItems.length > 0 ? (
-            <div className="card g1" style={{ marginTop: 18 }}>
+            <div className="card g1">
               <div className="card-hd">
                 <div className="card-title">Forecast bridge (₹ Cr)</div>
               </div>
@@ -546,35 +578,101 @@ export function FinanceExecDashboard({
     }
 
     if (page === "expense") {
+      const monthData = cmPctMonthlySeries;
+      const accountData = cmPctByAccountSeries;
+      const showMonth = cmExpenseView === "month";
+      const labels = showMonth
+        ? monthData.map((p) => p.label)
+        : accountData.map((p) => (p.name.length > 16 ? `${p.name.slice(0, 14)}…` : p.name));
+      const values = showMonth ? monthData.map((p) => p.pct) : accountData.map((p) => p.pct);
+      const datasetLabel = showMonth ? "CM % (revenue-weighted by month)" : "CM % (revenue-weighted, top accounts)";
+      const cmBarOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: "top" as const, labels: { boxWidth: 10, font: { size: 11 } } },
+          datalabels: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (item: TooltipItem<"bar">) => {
+                const y = item.parsed.y;
+                if (y == null || Number.isNaN(y)) return "";
+                return ` ${Number(y).toFixed(2)}% CM`;
+              },
+            },
+          },
+        },
+        scales: {
+          y: {
+            min: 0,
+            max: 100,
+            title: { display: true, text: "CM %" },
+            ticks: { font: { size: 10 } },
+            grid: { color: "rgba(0,0,0,0.06)" },
+          },
+          x: {
+            ticks: {
+              maxRotation: showMonth ? 0 : 35,
+              minRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: showMonth ? 14 : 12,
+              font: { size: 10 },
+            },
+            grid: { display: false },
+          },
+        },
+      };
+
       return (
         <div className="card g1">
           <div className="card-hd">
-            <div className="card-title">CM % by row</div>
+            <div>
+              <div className="card-title">Contribution margin</div>
+              <div className="card-sub">
+                Revenue-weighted CM % (Σ CM ÷ Σ revenue). Respects period, vertical, account, and practice filters above — pick
+                an account to drill in.
+              </div>
+            </div>
+            <div className="fin-cm-chart-toggle">
+              <span className="fin-cm-chart-toggle__lbl">View</span>
+              <button
+                type="button"
+                className={`btn btn-outline${showMonth ? " active" : ""}`}
+                onClick={() => setCmExpenseView("month")}
+              >
+                By month
+              </button>
+              <button
+                type="button"
+                className={`btn btn-outline${!showMonth ? " active" : ""}`}
+                onClick={() => setCmExpenseView("accounts")}
+              >
+                Top accounts
+              </button>
+            </div>
           </div>
-          <div className="card-body" style={{ height: 300 }}>
-            {filteredRows.length ? (
-              <Line
+          <div className="card-body" style={{ height: 320 }}>
+            {filteredRows.length === 0 ? (
+              <div className="kpi-tile-no-data">No rows for these filters.</div>
+            ) : labels.length === 0 ? (
+              <div className="kpi-tile-no-data">No CM / revenue totals to chart for this slice.</div>
+            ) : (
+              <Bar
                 data={{
-                  labels: filteredRows.map((r) => `${r.month}`.slice(0, 8)),
+                  labels,
                   datasets: [
                     {
-                      label: "CM %",
-                      data: filteredRows.map((r) => r.cm_pct ?? 0),
-                      borderColor: "#10B981",
-                      backgroundColor: "rgba(16,185,129,0.15)",
-                      fill: true,
-                      tension: 0.25,
+                      label: datasetLabel,
+                      data: values,
+                      backgroundColor: "rgba(16,185,129,0.55)",
+                      borderColor: "#059669",
+                      borderWidth: 1,
+                      borderRadius: 5,
                     },
                   ],
                 }}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: { legend: { display: false } },
-                }}
+                options={cmBarOptions}
               />
-            ) : (
-              <div className="kpi-tile-no-data">No data</div>
             )}
           </div>
         </div>
@@ -683,28 +781,22 @@ export function FinanceExecDashboard({
     <div className="finance-exec-scope">
       <div className={`fin-dash-app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <nav className={`fin-dash-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
-          <a className="sb-logo" href="/finance" onClick={(e) => e.preventDefault()}>
-            <img className="sb-logo-img" src="/finance-dashboard/images/taggd-logo.png" alt="Taggd" />
-            {!sidebarCollapsed ? (
-              <div className="logo-text">
-                Finance <span>Command</span>
-              </div>
-            ) : null}
-          </a>
-          <div className="nav-section">
-            <div className="nav-group">Dashboard views</div>
+          <div className="fin-dash-nav-section">
+            <div className="platform-nav-group-title">Dashboard views</div>
             {NAV.map((item) => (
               <a
                 key={item.id}
                 href="#"
-                className={`nav-item ${page === item.id ? "active" : ""}`}
+                className={`platform-nav-item${page === item.id ? " active" : ""}`}
                 onClick={(e) => {
                   e.preventDefault();
                   setPage(item.id);
                 }}
               >
                 <i className={`fas ${item.icon}`} aria-hidden />
-                <span className="nav-lbl">{item.label}</span>
+                <span className="nav-lbl" style={{ flex: 1, minWidth: 0 }}>
+                  {item.label}
+                </span>
               </a>
             ))}
           </div>
@@ -725,14 +817,8 @@ export function FinanceExecDashboard({
             >
               <Menu className="fin-dash-tb-toggle-icon" strokeWidth={2} aria-hidden />
             </button>
-            <div className="tb-title" id="page-title">
-              {pageTitle.includes(" ") ? (
-                <>
-                  {pageTitle.slice(0, pageTitle.lastIndexOf(" "))} <span>{pageTitle.slice(pageTitle.lastIndexOf(" ") + 1)}</span>
-                </>
-              ) : (
-                pageTitle
-              )}
+            <div className="tb-title platform-page-title" id="page-title">
+              Finance <span>Command</span>
             </div>
             <div className="tb-fy">
               <span className="tb-fy-btn active">Live FY</span>
@@ -753,13 +839,10 @@ export function FinanceExecDashboard({
           </header>
 
           <div className="fin-dash-filterbar">
-            <div className="fb-row">
-              <div className="fb-group">
-                <span className="fb-label">
-                  <i className="fas fa-calendar-week" aria-hidden />
-                  Period:
-                </span>
-                <div className="fb-pills">
+            <div className="dashboard-filter-bar">
+              <div className="dashboard-filter-field fin-filter-period" style={{ flex: "1 1 260px", minWidth: 200 }}>
+                <span className="dashboard-filter-label">Period</span>
+                <div className="fin-period-strip">
                   {(["ALL", "Q1", "Q2", "Q3", "Q4"] as const).map((q) => (
                     <div
                       key={q}
@@ -774,13 +857,13 @@ export function FinanceExecDashboard({
                   ))}
                 </div>
               </div>
-              <div className="fb-div" />
-              <div className="fb-group">
-                <span className="fb-label">
-                  <i className="fas fa-layer-group" aria-hidden />
-                  Vertical:
-                </span>
-                <select className="fb-sel" value={vertical} onChange={(e) => setVertical(e.target.value)} style={{ minWidth: 140 }}>
+              <label className="dashboard-filter-field" style={{ minWidth: 130 }}>
+                <span className="dashboard-filter-label">Vertical</span>
+                <select
+                  className="dashboard-filter-select"
+                  value={vertical}
+                  onChange={(e) => setVertical(e.target.value)}
+                >
                   <option value="">All</option>
                   {verticalOptions.map((v) => (
                     <option key={v} value={v}>
@@ -788,13 +871,10 @@ export function FinanceExecDashboard({
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="fb-group">
-                <span className="fb-label">
-                  <i className="fas fa-building" aria-hidden />
-                  Account:
-                </span>
-                <select className="fb-sel" value={account} onChange={(e) => setAccount(e.target.value)} style={{ minWidth: 160 }}>
+              </label>
+              <label className="dashboard-filter-field" style={{ minWidth: 160, flex: "1 1 140px" }}>
+                <span className="dashboard-filter-label">Account</span>
+                <select className="dashboard-filter-select" value={account} onChange={(e) => setAccount(e.target.value)}>
                   <option value="">All</option>
                   {accountOptions.map((a) => (
                     <option key={a} value={a}>
@@ -802,13 +882,10 @@ export function FinanceExecDashboard({
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="fb-group">
-                <span className="fb-label">
-                  <i className="fas fa-user-tie" aria-hidden />
-                  Practice / Region head:
-                </span>
-                <select className="fb-sel" value={region} onChange={(e) => setRegion(e.target.value)} style={{ minWidth: 140 }}>
+              </label>
+              <label className="dashboard-filter-field" style={{ minWidth: 160, flex: "1 1 160px" }}>
+                <span className="dashboard-filter-label">Practice / Region head</span>
+                <select className="dashboard-filter-select" value={region} onChange={(e) => setRegion(e.target.value)}>
                   <option value="">All</option>
                   {regionOptions.map((x) => (
                     <option key={x} value={x}>
@@ -816,11 +893,10 @@ export function FinanceExecDashboard({
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="fb-div" />
+              </label>
               <button
                 type="button"
-                className="fb-reset"
+                className="dashboard-filter-reset"
                 onClick={() => {
                   setQuarter("ALL");
                   setVertical("");
@@ -828,17 +904,17 @@ export function FinanceExecDashboard({
                   setRegion("");
                 }}
               >
-                <i className="fas fa-rotate-left" aria-hidden /> Reset
+                Reset
               </button>
             </div>
           </div>
 
           <div className="fin-dash-content">
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, alignItems: "center" }}>
-              <Button type="button" size="sm" className="font-mono text-[11px]" onClick={onOpenLedgerDialog}>
-                <Plus className="mr-1 h-3.5 w-3.5" />
+            <div className="fin-dash-inline-actions">
+              <button type="button" className="btn btn-primary" onClick={onOpenLedgerDialog}>
+                <i className="fas fa-plus" aria-hidden />
                 Add / edit finance data
-              </Button>
+              </button>
               <label className="btn btn-outline" style={{ cursor: "pointer", margin: 0 }}>
                 ↑ Upload Finance
                 <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => onUpload(e.target.files?.[0])} />

@@ -8,7 +8,7 @@ import {
   type RevenueBillingPatch,
 } from "@/lib/api";
 import { canPracticeSubmitBilling, useAuth } from "@/lib/auth";
-import { formatLargeCurrency } from "@/lib/utils";
+import { cn, formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import {
   Dialog,
@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Plus, PencilLine, Trash2, Search, FilterX } from "lucide-react";
+import { RefreshCw, Plus, PencilLine, Trash2, FilterX } from "lucide-react";
 
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
@@ -82,7 +82,43 @@ function rowMatchesBillingTableFilters(
   }
   return true;
 }
-import { cn } from "@/lib/utils";
+
+const selectFilterStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 6,
+  border: "1px solid var(--border)",
+  background: "var(--bg2)",
+  color: "var(--text)",
+  fontSize: 11,
+  fontFamily: "'DM Mono',monospace",
+};
+
+function formatWorkflowLabel(raw: string | null | undefined): string {
+  const s = (raw || "draft").trim();
+  if (!s) return "Draft";
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function BillingWorkflowCell({ row }: { row: RevenueBillingRow }) {
+  const raw = (row.workflow?.validation_status || "draft").toLowerCase();
+  const label = formatWorkflowLabel(row.workflow?.validation_status || "draft");
+  if (raw === "fully_approved") {
+    return <span className="platform-badge green">{label}</span>;
+  }
+  if (raw === "rejected") {
+    return <span className="platform-badge red">{label}</span>;
+  }
+  if (raw === "submitted" || raw === "under_review") {
+    return <span className="platform-badge blue">{label}</span>;
+  }
+  if (raw === "cfo_pending") {
+    return <span className="platform-badge teal">{label}</span>;
+  }
+  if (raw === "disputed") {
+    return <span className="platform-badge amber">{label}</span>;
+  }
+  return <span className="platform-badge grey">{label}</span>;
+}
 
 type Draft = Record<string, string>;
 
@@ -631,7 +667,7 @@ export function Billing() {
         )}
       </PlatformSection>
 
-      <PlatformSection title="Billing rows">
+      <PlatformSection title="All billing rows" action="Refresh" onAction={() => void reload()}>
         {loading ? (
           <div className="text-sm text-muted-foreground font-mono py-8 text-center">Loading…</div>
         ) : rows.length === 0 ? (
@@ -651,198 +687,186 @@ export function Billing() {
           </div>
         ) : (
           <>
-            <div className="mb-4 flex flex-col gap-3 rounded-lg border border-border/50 bg-muted/20 p-3 sm:flex-row sm:flex-wrap sm:items-end">
-              <div className="space-y-1 min-w-[180px] flex-1 sm:max-w-[280px]">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono flex items-center gap-1.5">
-                  <Search className="h-3 w-3 opacity-70" />
-                  Search
-                </span>
-                <Input
-                  value={tableSearch}
-                  onChange={(e) => setTableSearch(e.target.value)}
-                  placeholder="ID, account, PM, invoice, FY…"
-                  className="h-9 text-xs font-mono"
-                />
-              </div>
-              <div className="space-y-1 min-w-[140px]">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Fiscal year</span>
-                <Select value={tableFy} onValueChange={setTableFy}>
-                  <SelectTrigger className="h-9 text-xs w-full sm:w-[160px]">
-                    <SelectValue placeholder="All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">
-                      All years
-                    </SelectItem>
-                    {hasEmptyFy && (
-                      <SelectItem value={FY_NONE} className="text-xs text-muted-foreground">
-                        No FY set
-                      </SelectItem>
-                    )}
-                    {distinctFiscalYears.map((y) => (
-                      <SelectItem key={y} value={y} className="text-xs font-mono">
-                        {y}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1 min-w-[140px]">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">PM</span>
-                <Select value={tablePm} onValueChange={setTablePm}>
-                  <SelectTrigger className="h-9 text-xs w-full sm:w-[180px]">
-                    <SelectValue placeholder="All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">
-                      All PMs
-                    </SelectItem>
-                    {hasEmptyPm && (
-                      <SelectItem value={PM_NONE} className="text-xs text-muted-foreground">
-                        No PM set
-                      </SelectItem>
-                    )}
-                    {distinctPMs.map((name) => (
-                      <SelectItem key={name} value={name} className="text-xs">
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1 min-w-[140px]">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Invoice</span>
-                <Select value={tableInvoice} onValueChange={(v) => setTableInvoice(v as "all" | "has" | "none")}>
-                  <SelectTrigger className="h-9 text-xs w-full sm:w-[150px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">
-                      All
-                    </SelectItem>
-                    <SelectItem value="has" className="text-xs">
-                      Has invoice #
-                    </SelectItem>
-                    <SelectItem value="none" className="text-xs">
-                      No invoice
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-                <span className="text-[10px] text-muted-foreground font-mono whitespace-nowrap">
-                  {tableFiltersActive
-                    ? `${filteredRows.length} of ${rows.length} shown`
-                    : `${rows.length} loaded`}
-                  {total > rows.length ? ` · ${total} total` : ""}
-                </span>
-                {tableFiltersActive && (
-                  <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={clearTableFilters}>
-                    <FilterX className="h-3.5 w-3.5" />
-                    Clear table filters
-                  </Button>
-                )}
-              </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
+              <input
+                className="platform-search"
+                placeholder="Search ID, account, PM, invoice, FY, PRJ…"
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+                style={{ flex: "1 1 220px", maxWidth: 400, minWidth: 180 }}
+              />
+              <select value={tableFy} onChange={(e) => setTableFy(e.target.value)} style={{ ...selectFilterStyle, minWidth: 140 }}>
+                <option value="all">All years</option>
+                {hasEmptyFy ? (
+                  <option value={FY_NONE}>No FY set</option>
+                ) : null}
+                {distinctFiscalYears.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+              <select value={tablePm} onChange={(e) => setTablePm(e.target.value)} style={{ ...selectFilterStyle, minWidth: 160 }}>
+                <option value="all">All PMs</option>
+                {hasEmptyPm ? (
+                  <option value={PM_NONE}>No PM set</option>
+                ) : null}
+                {distinctPMs.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={tableInvoice}
+                onChange={(e) => setTableInvoice(e.target.value as "all" | "has" | "none")}
+                style={{ ...selectFilterStyle, minWidth: 130 }}
+              >
+                <option value="all">All invoices</option>
+                <option value="has">Has invoice #</option>
+                <option value="none">No invoice</option>
+              </select>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginLeft: "auto" }}>
+                {tableFiltersActive ? `${filteredRows.length} of ${rows.length} shown` : `${rows.length} loaded`}
+                {total > rows.length ? ` · ${total} total` : ""}
+              </span>
+              {tableFiltersActive ? (
+                <button
+                  type="button"
+                  className="platform-dialog__btn"
+                  style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", display: "inline-flex", alignItems: "center", gap: 6 }}
+                  onClick={clearTableFilters}
+                >
+                  <FilterX className="h-3 w-3" />
+                  Clear filters
+                </button>
+              ) : null}
             </div>
 
             {filteredRows.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-8 text-center rounded-lg border border-dashed border-border/60 bg-muted/10">
+              <div className="text-sm text-muted-foreground py-8 text-center">
                 No rows match these filters.{" "}
-                <button type="button" className="text-primary underline-offset-2 hover:underline font-mono text-xs" onClick={clearTableFilters}>
-                  Clear table filters
+                <button
+                  type="button"
+                  className="text-primary underline-offset-2 hover:underline font-mono text-xs bg-transparent border-0 cursor-pointer p-0"
+                  onClick={clearTableFilters}
+                >
+                  Clear filters
                 </button>
               </div>
             ) : (
-          <div className="overflow-x-auto rounded-lg border border-border/50">
-            <table className="w-full text-left text-[11px]">
-              <thead>
-                <tr className="border-b border-border bg-muted/30 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                  <th className="px-3 py-2 whitespace-nowrap">ID</th>
-                  <th className="px-3 py-2 whitespace-nowrap">Project</th>
-                  <th className="px-3 py-2 whitespace-nowrap">Update</th>
-                  <th className="px-3 py-2 whitespace-nowrap">FY</th>
-                  <th className="px-3 py-2 whitespace-nowrap">PM</th>
-                  <th className="px-3 py-2 text-right whitespace-nowrap">Net rev</th>
-                  <th className="px-3 py-2 text-right whitespace-nowrap">MMF</th>
-                  <th className="px-3 py-2 whitespace-nowrap">Invoice</th>
-                  <th className="px-3 py-2 whitespace-nowrap">Workflow</th>
-                  <th className="px-3 py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((r) => (
-                  <tr key={r.id} className="border-b border-border/40 hover:bg-muted/10">
-                    <td className="px-3 py-2 font-mono text-primary">{r.id}</td>
-                    <td className="px-3 py-2 max-w-[180px] truncate" title={r.account_name}>
-                      <span className="font-mono text-[10px] text-muted-foreground">PRJ-{r.project_id}</span>
-                      <br />
-                      <span className="text-foreground">{r.account_name || "—"}</span>
-                    </td>
-                    <td className="px-3 py-2 font-mono whitespace-nowrap">{r.update_date || "—"}</td>
-                    <td className="px-3 py-2">{r.fiscal_year_label || "—"}</td>
-                    <td className="px-3 py-2 max-w-[120px] truncate" title={r.project_manager || ""}>
-                      {r.project_manager || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono whitespace-nowrap">
-                      {r.net_revenue_inr != null ? formatLargeCurrency(r.net_revenue_inr) : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono whitespace-nowrap">
-                      {r.mmf_inr != null ? formatLargeCurrency(r.mmf_inr) : "—"}
-                    </td>
-                    <td className="px-3 py-2 font-mono max-w-[100px] truncate" title={r.invoice_number || ""}>
-                      {r.invoice_number || "—"}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[10px] max-w-[100px]">
-                      {r.workflow?.validation_status ?? "draft"}
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
-                      {canSubmitBilling(r) && canPracticeSubmitBilling(user) ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-[10px] mr-1"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleSubmitForFinance(r);
+              <div className="platform-table-wrap" style={{ overflowX: "auto" }}>
+                <table className="platform-table" style={{ minWidth: 980 }}>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Project</th>
+                      <th>Update</th>
+                      <th>FY</th>
+                      <th>PM</th>
+                      <th style={{ textAlign: "right" }}>Net rev</th>
+                      <th style={{ textAlign: "right" }}>MMF</th>
+                      <th>Invoice</th>
+                      <th>Workflow</th>
+                      <th style={{ textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRows.map((r) => (
+                      <tr key={r.id} className="hover:bg-muted/20">
+                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>{r.id}</td>
+                        <td style={{ maxWidth: 200 }}>
+                          <div style={{ fontWeight: 600, fontSize: 11 }}>{r.account_name || "—"}</div>
+                          <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                            PRJ-{r.project_id}
+                          </div>
+                        </td>
+                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{r.update_date?.slice(0, 10) || "—"}</td>
+                        <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.fiscal_year_label || "—"}</td>
+                        <td
+                          style={{
+                            fontSize: 10,
+                            color: "var(--text-muted)",
+                            maxWidth: 120,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
                           }}
-                          title="Submit to finance for validation"
+                          title={r.project_manager || ""}
                         >
-                          Submit
-                        </Button>
-                      ) : null}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2"
-                        disabled={billingRowLocked(r)}
-                        onClick={() => openEdit(r)}
-                        title={billingRowLocked(r) ? "Locked under finance workflow" : "Edit"}
-                      >
-                        <PencilLine className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-destructive hover:text-destructive"
-                        disabled={billingRowLocked(r)}
-                        onClick={() => void handleDelete(r.id)}
-                        title={billingRowLocked(r) ? "Locked" : "Delete"}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                          {r.project_manager || "—"}
+                        </td>
+                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, textAlign: "right" }}>
+                          {r.net_revenue_inr != null ? formatLargeCurrency(r.net_revenue_inr) : "—"}
+                        </td>
+                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, textAlign: "right" }}>
+                          {r.mmf_inr != null ? formatLargeCurrency(r.mmf_inr) : "—"}
+                        </td>
+                        <td
+                          style={{
+                            fontFamily: "'DM Mono',monospace",
+                            fontSize: 10,
+                            maxWidth: 120,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            color: r.invoice_number ? "var(--accent)" : "var(--text-muted)",
+                          }}
+                          title={r.invoice_number || ""}
+                        >
+                          {r.invoice_number || "—"}
+                        </td>
+                        <td>
+                          <BillingWorkflowCell row={r} />
+                        </td>
+                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                          {canSubmitBilling(r) && canPracticeSubmitBilling(user) ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[10px] mr-1"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleSubmitForFinance(r);
+                              }}
+                              title="Submit to finance for validation"
+                            >
+                              Submit
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            disabled={billingRowLocked(r)}
+                            onClick={() => openEdit(r)}
+                            title={billingRowLocked(r) ? "Locked under finance workflow" : "Edit"}
+                          >
+                            <PencilLine className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-destructive hover:text-destructive"
+                            disabled={billingRowLocked(r)}
+                            onClick={() => void handleDelete(r.id)}
+                            title={billingRowLocked(r) ? "Locked" : "Delete"}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </>
         )}
       </PlatformSection>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-h-[90vh] w-full max-w-[min(72rem,calc(100vw-2rem))] flex flex-col overflow-hidden p-6 sm:p-8">
           <DialogHeader>
             <DialogTitle className="font-syne text-lg">
               {editId === null ? "New billing row" : `Edit billing #${editId}`}

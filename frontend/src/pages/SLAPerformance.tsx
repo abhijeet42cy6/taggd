@@ -27,23 +27,9 @@ import {
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { SlaMetricFormDialog } from "@/components/platform/SlaMetricFormDialog";
 import { slaRowsVm, slaStatsVm } from "@/lib/view-models/sla";
-import {
-  AlertTriangle,
-  ArrowLeftRight,
-  BookOpen,
-  Building2,
-  Calendar,
-  CalendarDays,
-  LayoutGrid,
-  MapPin,
-  Menu,
-  Plus,
-  Sparkles,
-  Trophy,
-  Users,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Menu, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import "@/styles/finance-exec-dashboard.css";
 import "@/styles/sla-dash-ui.css";
 
 // ─── Colour palette to match SlaTimeSeriesChart ────────────────────────────────
@@ -204,18 +190,18 @@ type SlaDashView =
   | "notreported"
   | "manual";
 
-const SL_NAV: { id: SlaDashView; label: string; icon: LucideIcon }[] = [
-  { id: "overview", label: "Overview", icon: LayoutGrid },
-  { id: "executive", label: "Executive View", icon: Sparkles },
-  { id: "monthly", label: "Monthly Performance", icon: Calendar },
-  { id: "quarterly", label: "Quarterly Performance", icon: CalendarDays },
-  { id: "yearly", label: "Year-over-Year", icon: ArrowLeftRight },
-  { id: "account", label: "Project Analysis", icon: Building2 },
-  { id: "region", label: "Regional Analysis", icon: MapPin },
-  { id: "practice", label: "Practice Head Analysis", icon: Users },
-  { id: "benchmarking", label: "Industry Benchmarking", icon: Trophy },
-  { id: "notreported", label: "Not Reported Analysis", icon: AlertTriangle },
-  { id: "manual", label: "User Manual", icon: BookOpen },
+const SL_NAV: { id: SlaDashView; label: string; icon: string }[] = [
+  { id: "overview", label: "Overview", icon: "fa-gauge-high" },
+  { id: "executive", label: "Executive View", icon: "fa-wand-magic-sparkles" },
+  { id: "monthly", label: "Monthly Performance", icon: "fa-calendar" },
+  { id: "quarterly", label: "Quarterly Performance", icon: "fa-calendar-week" },
+  { id: "yearly", label: "Year-over-Year", icon: "fa-right-left" },
+  { id: "account", label: "Project Analysis", icon: "fa-building" },
+  { id: "region", label: "Regional Analysis", icon: "fa-map-location-dot" },
+  { id: "practice", label: "Practice Head Analysis", icon: "fa-users" },
+  { id: "benchmarking", label: "Industry Benchmarking", icon: "fa-trophy" },
+  { id: "notreported", label: "Not Reported Analysis", icon: "fa-triangle-exclamation" },
+  { id: "manual", label: "User Manual", icon: "fa-book-open" },
 ];
 
 export function SLAPerformance() {
@@ -362,6 +348,20 @@ export function SLAPerformance() {
       cancelled = true;
     };
   }, [drillAccount]);
+
+  useEffect(() => {
+    const id = "sla-kpi-dashboard-fa";
+    if (document.getElementById(id)) return;
+    const l = document.createElement("link");
+    l.id = id;
+    l.rel = "stylesheet";
+    l.href = "/finance-dashboard/css/fontawesome.min.css";
+    document.head.appendChild(l);
+    return () => {
+      const x = document.getElementById(id);
+      if (x) x.remove();
+    };
+  }, []);
 
   const onUpload = async (file?: File | null) => {
     if (!file) return;
@@ -971,64 +971,71 @@ export function SLAPerformance() {
 
   return (
     <>
-      <div className="sla-dash-scope">
-        <div className="sla-dash-app">
-          <nav className={`sla-dash-sidebar${sidebarCollapsed ? " collapsed" : ""}`} aria-label="SLA dashboard views">
-            <div className="sla-sidebar-brand">
-              <div className="sla-sidebar-brand-title">SLA / KPI</div>
-              <div className="sla-sidebar-brand-sub">Performance views</div>
+      <div className="finance-exec-scope sla-kpi-fin-bridge">
+        <div className={`fin-dash-app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+          <nav className={`fin-dash-sidebar ${sidebarCollapsed ? "collapsed" : ""}`} aria-label="SLA dashboard views">
+            <div className="fin-dash-nav-section">
+              <div className="platform-nav-group-title">Dashboard views</div>
+              {SL_NAV.map((item) => (
+                <a
+                  key={item.id}
+                  href="#"
+                  className={`platform-nav-item${slaView === item.id ? " active" : ""}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setSlaView(item.id);
+                  }}
+                >
+                  <i className={`fas ${item.icon}`} aria-hidden />
+                  <span className="nav-lbl" style={{ flex: 1, minWidth: 0 }}>
+                    {item.label}
+                  </span>
+                </a>
+              ))}
             </div>
-            <div className="sla-nav-section-title">Analysis</div>
-            {SL_NAV.map(({ id, label, icon: NavIcon }) => (
-              <button
-                key={id}
-                type="button"
-                className={`sla-nav-item${slaView === id ? " active" : ""}`}
-                onClick={() => setSlaView(id)}
-              >
-                <NavIcon className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="sla-nav-lbl">{label}</span>
-              </button>
-            ))}
-            <div className="sla-sidebar-foot">Data from /sla/stats, /sla/data, /sla/timeseries.</div>
+            <div className="sb-foot">
+              <div className="sb-foot-title">Taggd</div>
+              <div className="sb-foot-sub">SLA & KPI performance</div>
+              <p className="sla-kpi-foot-note">Data from /sla/stats, /sla/data, /sla/timeseries.</p>
+            </div>
           </nav>
 
-          <div className="sla-dash-main">
-            <header className="sla-dash-topbar">
+          <div className="fin-dash-main">
+            <header className="fin-dash-topbar sla-kpi-topbar">
               <button
                 type="button"
-                className="sla-tb-toggle"
-                aria-label="Toggle sidebar"
+                className="fin-dash-tb-toggle self-center"
+                title="Toggle sidebar"
+                aria-label="Toggle SLA sidebar"
                 onClick={() => setSidebarCollapsed((c) => !c)}
               >
-                <Menu className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+                <Menu className="fin-dash-tb-toggle-icon" strokeWidth={2} aria-hidden />
               </button>
-              <div className="sla-tb-title">
-                <span>{slaNavTitle}</span>
+              <div className="sla-kpi-topbar-heading">
+                <div className="tb-title platform-page-title" id="sla-page-title">
+                  SLA <span>KPI</span>
+                </div>
+                <div className="sla-kpi-page-subtitle" aria-label="Page summary">
+                  <span className="sla-kpi-page-subtitle-lead">Taggd SLA / KPI performance</span>
+                  <span className="sla-kpi-page-subtitle-desc">
+                    Portfolio compliance, trends, and account drill-downs — wired to your workspace SLA ingestion.
+                  </span>
+                </div>
               </div>
+              <span className="sr-only">Current view: {slaNavTitle}</span>
             </header>
 
-            <div className="sla-dash-hero">
-              <h1>Taggd SLA / KPI performance</h1>
-              <p>Portfolio compliance, trends, and account drill-downs — wired to your workspace SLA ingestion.</p>
-            </div>
-
-            <div className="sla-dash-toolbar">
-              <button
-                type="button"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-0 bg-[var(--accent)] px-3 py-1.5 text-[10.5px] font-semibold text-[var(--accent-foreground)] shadow-sm transition-colors hover:bg-[var(--accent-hover)]"
-                onClick={() => setSlaMetricDialogOpen(true)}
-              >
-                <Plus className="shrink-0" size={14} strokeWidth={2.5} aria-hidden />
-                Add / edit SLA metric
-              </button>
-              <label className="platform-chip active" style={{ cursor: "pointer" }}>
-                ↑ Upload SLA
-                <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => onUpload(e.target.files?.[0])} />
-              </label>
-            </div>
-
-            <div className="sla-dash-content">
+            <div className="fin-dash-content">
+              <div className="fin-dash-inline-actions">
+                <button type="button" className="btn btn-primary" onClick={() => setSlaMetricDialogOpen(true)}>
+                  <i className="fas fa-plus" aria-hidden />
+                  Add / edit SLA metric
+                </button>
+                <label className="btn btn-outline" style={{ cursor: "pointer", margin: 0 }}>
+                  ↑ Upload SLA
+                  <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => onUpload(e.target.files?.[0])} />
+                </label>
+              </div>
               {phLike ? (
                 <div className="sla-dash-card" style={{ marginBottom: 14 }}>
                   <div className="sla-dash-card-hd">
@@ -1070,21 +1077,21 @@ export function SLAPerformance() {
                           </div>
                         </div>
                       </div>
-                      <div className="sla-metric-card" style={{ borderTopColor: "var(--red)" }}>
+                      <div className="sla-metric-card">
                         <div className="sla-metric-card-hd">Not met</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notMetPct) : "—"}</div>
                           <div className="sla-metric-sub">{rows.length > 0 ? `${stats?.not_met_count ?? 0} metrics` : "—"}</div>
                         </div>
                       </div>
-                      <div className="sla-metric-card" style={{ borderTopColor: "var(--amber)" }}>
+                      <div className="sla-metric-card">
                         <div className="sla-metric-card-hd">Not reported</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notReportedPct) : "—"}</div>
                           <div className="sla-metric-sub">{rows.length > 0 ? `${notReportedCount} metrics` : "—"}</div>
                         </div>
                       </div>
-                      <div className="sla-metric-card" style={{ borderTopColor: "var(--accent2, #0d9488)" }}>
+                      <div className="sla-metric-card">
                         <div className="sla-metric-card-hd">Total metrics</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{stats?.total_metrics ?? (rows.length || "—")}</div>

@@ -13,12 +13,13 @@ from datetime import date
 from typing import Any
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, false, or_
 
 # DB models imported via backend package
 from backend.db.database import (
     Project,
     Record,
+    User,
     MetricDefinition,
     SLAPerformance,
     WFMHRBenchmark,
@@ -26,6 +27,19 @@ from backend.db.database import (
     FinanceMonthlyLedger,
     FinanceCashFlow,
     FinanceEfficiencyKPI,
+)
+from backend.auth.deps import allowed_project_ids
+from backend.auth.profile import (
+    ROLE_RECRUITER,
+    UserAccessProfile,
+    effective_role,
+    profile_may_access_vertical,
+    resolve_user_profile,
+)
+from backend.auth.scope import (
+    apply_project_scope,
+    apply_recruiter_record_scope,
+    assert_project_access,
 )
 
 _MAX_ROWS = 20   # default cap for detail lists
@@ -42,6 +56,35 @@ def _parse_yyyy_mm(s: str) -> tuple[int, int] | None:
 
 def _meta(scope: str, row_count: int, truncated: bool = False) -> dict:
     return {"query_scope": scope, "row_count": row_count, "truncated": truncated}
+
+
+def _profile(db: Session, user: User) -> UserAccessProfile:
+    return resolve_user_profile(user, db)
+
+
+def _vertical_gate(profile: UserAccessProfile, vertical_key: str) -> str | None:
+    if not profile_may_access_vertical(profile, vertical_key):
+        return (
+            f"Your administrator has not enabled the '{vertical_key}' module for your account "
+            "(Users & access → vertical access)."
+        )
+    return None
+
+
+def _any_project_intel_module(profile: UserAccessProfile) -> bool:
+    """Project-level discovery / summary needs at least one relevant module."""
+    for k in ("clients", "requisitions", "portfolio", "sla", "wfm", "finance"):
+        if profile_may_access_vertical(profile, k):
+            return True
+    return False
+
+
+def _scoped_project_ids(user: User, db: Session) -> set[int] | None:
+    """None = org-wide (admin / unrestricted executive); set = restrict to these ids."""
+    ids = allowed_project_ids(user, db)
+    if ids is None:
+        return None
+    return set(ids)
 
 
 def _ser(obj: Any) -> Any:
@@ -89,12 +132,21 @@ def _project_brief_dict(p: Project) -> dict:
     }
 
 
-def resolve_client(db: Session, name: str) -> dict:
+def resolve_client(db: Session, user: User, name: str) -> dict:
     """
     Find projects matching the given client/account name.
     Returns project metadata including charge code, heads, region, category.
     """
+    profile = _profile(db, user)
+    if not _any_project_intel_module(profile):
+        return {
+            "data": [],
+            "meta": _meta("resolve_client (no modules)", 0),
+            "error": "No data modules are enabled for your account — ask an administrator to grant at least one of: clients, requisitions, portfolio, SLA, WFM, or finance.",
+        }
+
     q = db.query(Project).filter(Project.account_name.isnot(None))
+    q = apply_project_scope(q, user, db, Project)
 
     # Exact match first
     exact = q.filter(func.lower(Project.account_name) == name.lower().strip()).all()
@@ -114,10 +166,19 @@ def resolve_client(db: Session, name: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # TOOL 2 — get_project_summary
 # ─────────────────────────────────────────────────────────────────────────────
-def get_project_summary(db: Session, project_id: int) -> dict:
+def get_project_summary(db: Session, user: User, project_id: int) -> dict:
     """
     Returns project metadata, record KPIs, and logic explanation.
     """
+    profile = _profile(db, user)
+    if not _any_project_intel_module(profile):
+        return {
+            "data": None,
+            "meta": _meta("get_project_summary (no modules)", 0),
+            "error": "No data modules are enabled for your account.",
+        }
+    assert_project_access(user, db, project_id)
+
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return {"data": None, "meta": _meta(f"project_id={project_id}", 0)}
@@ -180,6 +241,7 @@ def get_project_summary(db: Session, project_id: int) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 def search_records(
     db: Session,
+    user: User,
     project_id: int,
     global_status: str | None = None,
     department: str | None = None,
@@ -193,8 +255,15 @@ def search_records(
     """
     Search/filter requisition records for a project with optional filters.
     """
+    profile = _profile(db, user)
+    if err := _vertical_gate(profile, "requisitions"):
+        return {"data": [], "meta": _meta("search_records (vertical)", 0), "error": err}
+    assert_project_access(user, db, project_id)
+
     limit = min(limit, 50)  # hard cap
     q = db.query(Record).filter(Record.project_id == project_id)
+    if effective_role(user) == ROLE_RECRUITER:
+        q = apply_recruiter_record_scope(q, user, db)
 
     if global_status:
         q = q.filter(func.lower(Record.global_status) == global_status.lower())
@@ -258,13 +327,21 @@ def search_records(
 # ─────────────────────────────────────────────────────────────────────────────
 # TOOL 4 — get_record_by_id
 # ─────────────────────────────────────────────────────────────────────────────
-def get_record_by_id(db: Session, record_id: int) -> dict:
+def get_record_by_id(db: Session, user: User, record_id: int) -> dict:
     """
     Fetch a single requisition record by its DB id. Returns all fields.
     """
-    r = db.query(Record).filter(Record.id == record_id).first()
+    profile = _profile(db, user)
+    if err := _vertical_gate(profile, "requisitions"):
+        return {"data": None, "meta": _meta("get_record_by_id (vertical)", 0), "error": err}
+
+    rq = db.query(Record).filter(Record.id == record_id)
+    if effective_role(user) == ROLE_RECRUITER:
+        rq = apply_recruiter_record_scope(rq, user, db)
+    r = rq.first()
     if not r:
         return {"data": None, "meta": _meta(f"record_id={record_id}", 0)}
+    assert_project_access(user, db, r.project_id)
 
     project = db.query(Project.account_name).filter(Project.id == r.project_id).scalar()
     data = {
@@ -295,15 +372,27 @@ def get_record_by_id(db: Session, record_id: int) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # TOOL 5 — aggregate_records
 # ─────────────────────────────────────────────────────────────────────────────
-def aggregate_records(db: Session, project_id: int) -> dict:
+def aggregate_records(db: Session, user: User, project_id: int) -> dict:
     """
     Return aggregated KPIs for a project: status counts, revenue totals,
     ageing buckets, department breakdown, top hiring managers.
     """
+    profile = _profile(db, user)
+    if err := _vertical_gate(profile, "requisitions"):
+        return {"data": None, "meta": _meta("aggregate_records (vertical)", 0), "error": err}
+    assert_project_access(user, db, project_id)
+
+    def scoped_records() -> Any:
+        q = db.query(Record).filter(Record.project_id == project_id)
+        if effective_role(user) == ROLE_RECRUITER:
+            q = apply_recruiter_record_scope(q, user, db)
+        return q
+
+    base = scoped_records()
+
     # Status breakdown
     status_rows = (
-        db.query(Record.global_status, func.count(Record.id))
-        .filter(Record.project_id == project_id)
+        base.with_entities(Record.global_status, func.count(Record.id))
         .group_by(Record.global_status)
         .all()
     )
@@ -312,19 +401,20 @@ def aggregate_records(db: Session, project_id: int) -> dict:
 
     # Revenue
     rev = (
-        db.query(
+        scoped_records()
+        .with_entities(
             func.sum(func.json_extract(Record.revenue_results, "$.revenue")),
             func.sum(func.json_extract(Record.revenue_results, "$.opening_fee")),
             func.sum(func.json_extract(Record.revenue_results, "$.closing_fee")),
         )
-        .filter(Record.project_id == project_id)
         .first()
     )
 
     # Department breakdown (top 8)
     dept_rows = (
-        db.query(Record.department, func.count(Record.id))
-        .filter(Record.project_id == project_id, Record.department.isnot(None))
+        scoped_records()
+        .filter(Record.department.isnot(None))
+        .with_entities(Record.department, func.count(Record.id))
         .group_by(Record.department)
         .order_by(func.count(Record.id).desc())
         .limit(8)
@@ -333,8 +423,9 @@ def aggregate_records(db: Session, project_id: int) -> dict:
 
     # Hiring manager breakdown (top 5)
     hm_rows = (
-        db.query(Record.hiring_manager, func.count(Record.id))
-        .filter(Record.project_id == project_id, Record.hiring_manager.isnot(None))
+        scoped_records()
+        .filter(Record.hiring_manager.isnot(None))
+        .with_entities(Record.hiring_manager, func.count(Record.id))
         .group_by(Record.hiring_manager)
         .order_by(func.count(Record.id).desc())
         .limit(5)
@@ -344,12 +435,12 @@ def aggregate_records(db: Session, project_id: int) -> dict:
     # Ageing buckets (days open = today - creation_date for non-CLOSED)
     today = datetime.datetime.utcnow()
     ageing_data = (
-        db.query(Record.creation_date)
+        scoped_records()
         .filter(
-            Record.project_id == project_id,
             Record.global_status != "CLOSED",
             Record.creation_date.isnot(None),
         )
+        .with_entities(Record.creation_date)
         .all()
     )
     buckets = {"0-30": 0, "31-60": 0, "61-90": 0, "90+": 0}
@@ -391,6 +482,7 @@ def aggregate_records(db: Session, project_id: int) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 def get_sla_metrics(
     db: Session,
+    user: User,
     project_id: int,
     metric_label: str | None = None,
     month_from: str | None = None,
@@ -400,6 +492,11 @@ def get_sla_metrics(
     """
     Return SLA metric definitions and their time-series performance for a project.
     """
+    profile = _profile(db, user)
+    if err := _vertical_gate(profile, "sla"):
+        return {"data": [], "meta": _meta("get_sla_metrics (vertical)", 0), "error": err}
+    assert_project_access(user, db, project_id)
+
     limit = min(limit, 100)
     # Metric definitions
     defs_q = db.query(MetricDefinition).filter(MetricDefinition.project_id == project_id)
@@ -469,10 +566,15 @@ def get_sla_metrics(
 # ─────────────────────────────────────────────────────────────────────────────
 # TOOL 7 — get_wfm_snapshot
 # ─────────────────────────────────────────────────────────────────────────────
-def get_wfm_snapshot(db: Session, project_id: int) -> dict:
+def get_wfm_snapshot(db: Session, user: User, project_id: int) -> dict:
     """
     Return WFM benchmarks and resource gaps for a project.
     """
+    profile = _profile(db, user)
+    if err := _vertical_gate(profile, "wfm"):
+        return {"data": None, "meta": _meta("get_wfm_snapshot (vertical)", 0), "error": err}
+    assert_project_access(user, db, project_id)
+
     benchmarks = (
         db.query(WFMHRBenchmark)
         .filter(WFMHRBenchmark.project_id == project_id)
@@ -529,6 +631,7 @@ def get_wfm_snapshot(db: Session, project_id: int) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 def get_finance_ledger(
     db: Session,
+    user: User,
     project_id: int,
     metric_category: str | None = None,
     month_from: str | None = None,
@@ -537,6 +640,11 @@ def get_finance_ledger(
     """
     Return finance monthly ledger rows (budget / actual / forecast) for a project.
     """
+    profile = _profile(db, user)
+    if err := _vertical_gate(profile, "finance"):
+        return {"data": None, "meta": _meta("get_finance_ledger (vertical)", 0), "error": err}
+    assert_project_access(user, db, project_id)
+
     q = db.query(FinanceMonthlyLedger).filter(FinanceMonthlyLedger.project_id == project_id)
     if metric_category:
         q = q.filter(FinanceMonthlyLedger.metric_category.ilike(f"%{metric_category}%"))
@@ -588,11 +696,16 @@ def get_finance_ledger(
 # ─────────────────────────────────────────────────────────────────────────────
 # TOOL 9 — get_budget_forecast
 # ─────────────────────────────────────────────────────────────────────────────
-def get_budget_forecast(db: Session, project_id: int) -> dict:
+def get_budget_forecast(db: Session, user: User, project_id: int) -> dict:
     """
     Return project-level budgets (quarterly Revenue ledger) and planning forecast lines
     (`Revenue_MMF`, `Forecast_Joiners`, etc.) from `finance_monthly_ledger`.
     """
+    profile = _profile(db, user)
+    if err := _vertical_gate(profile, "finance"):
+        return {"data": None, "meta": _meta("get_budget_forecast (vertical)", 0), "error": err}
+    assert_project_access(user, db, project_id)
+
     from backend.core.finance_planning_categories import PLANNING_FORECAST_CATEGORIES
 
     rev_rows = (
@@ -656,84 +769,133 @@ def get_budget_forecast(db: Session, project_id: int) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # TOOL 10 — portfolio_overview
 # ─────────────────────────────────────────────────────────────────────────────
-def portfolio_overview(db: Session) -> dict:
+def portfolio_overview(db: Session, user: User) -> dict:
     """
-    Return a portfolio-wide snapshot: total clients, reqs by status, total revenue,
-    top clients by revenue, SLA summary, WFM summary.
+    Return a portfolio-wide snapshot scoped to the user's assigned projects
+    and to vertical modules enabled by an administrator.
     """
-    # Project count
-    total_projects = db.query(func.count(Project.id)).scalar() or 0
-    total_accounts = db.query(func.count(func.distinct(Project.account_name))).scalar() or 0
+    profile = _profile(db, user)
+    ids = _scoped_project_ids(user, db)
 
-    # Record KPIs
-    status_rows = (
-        db.query(Record.global_status, func.count(Record.id))
-        .group_by(Record.global_status)
-        .all()
-    )
-    status_map = {s: c for s, c in status_rows}
-    total_records = sum(status_map.values())
+    if not _any_project_intel_module(profile):
+        return {
+            "data": None,
+            "meta": _meta("portfolio (no modules)", 0),
+            "error": "No data modules are enabled for your account.",
+        }
 
-    revenue_total = (
-        db.query(func.sum(func.json_extract(Record.revenue_results, "$.revenue")))
-        .scalar() or 0.0
-    )
+    if ids is not None and len(ids) == 0:
+        return {
+            "data": {
+                "projects": {"total_projects": 0, "unique_accounts": 0},
+                "requisitions": None,
+                "revenue": None,
+                "sla": None,
+                "wfm": None,
+                "scope_notes": ["No project assignments — an administrator must assign projects to your user."],
+            },
+            "meta": _meta("portfolio-empty-assignments", 0),
+        }
 
-    # Top 8 clients by revenue (via project)
-    top_clients = (
-        db.query(
-            Project.account_name,
-            func.sum(func.json_extract(Record.revenue_results, "$.revenue")).label("rev"),
-            func.count(Record.id).label("reqs"),
+    notes: list[str] = []
+    data: dict[str, Any] = {}
+
+    if profile_may_access_vertical(profile, "clients") or profile_may_access_vertical(profile, "portfolio"):
+        pq = db.query(Project)
+        if ids is not None:
+            pq = pq.filter(Project.id.in_(ids))
+        total_projects = pq.with_entities(func.count(Project.id)).scalar() or 0
+        total_accounts = pq.with_entities(func.count(func.distinct(Project.account_name))).scalar() or 0
+        data["projects"] = {"total_projects": total_projects, "unique_accounts": total_accounts}
+    else:
+        data["projects"] = None
+        notes.append("Project counts omitted — enable Clients or Portfolio in Users & access.")
+
+    if profile_may_access_vertical(profile, "requisitions"):
+        rq = db.query(Record)
+        if ids is not None:
+            rq = rq.filter(Record.project_id.in_(ids))
+        if effective_role(user) == ROLE_RECRUITER:
+            rq = apply_recruiter_record_scope(rq, user, db)
+
+        status_rows = rq.with_entities(Record.global_status, func.count(Record.id)).group_by(Record.global_status).all()
+        status_map = {s: c for s, c in status_rows}
+        total_records = sum(status_map.values())
+        revenue_total = rq.with_entities(func.sum(func.json_extract(Record.revenue_results, "$.revenue"))).scalar() or 0.0
+
+        top_q = (
+            db.query(
+                Project.account_name,
+                func.sum(func.json_extract(Record.revenue_results, "$.revenue")).label("rev"),
+                func.count(Record.id).label("reqs"),
+            )
+            .select_from(Record)
+            .join(Project, Record.project_id == Project.id)
         )
-        .join(Record, Record.project_id == Project.id)
-        .group_by(Project.account_name)
-        .order_by(func.sum(func.json_extract(Record.revenue_results, "$.revenue")).desc())
-        .limit(8)
-        .all()
-    )
+        if ids is not None:
+            top_q = top_q.filter(Record.project_id.in_(ids))
+        if effective_role(user) == ROLE_RECRUITER:
+            top_q = apply_recruiter_record_scope(top_q, user, db)
+        top_clients = (
+            top_q.group_by(Project.account_name)
+            .order_by(func.sum(func.json_extract(Record.revenue_results, "$.revenue")).desc())
+            .limit(8)
+            .all()
+        )
 
-    # SLA summary
-    sla_rag = (
-        db.query(SLAPerformance.rag_status, func.count(SLAPerformance.id))
-        .group_by(SLAPerformance.rag_status)
-        .all()
-    )
-    sla_map = {s: c for s, c in sla_rag}
-
-    # WFM summary
-    wfm_agg = db.query(
-        func.sum(WFMHRBenchmark.ideal_hc),
-        func.sum(WFMHRBenchmark.actual_hc_total),
-    ).first()
-
-    data = {
-        "projects": {"total_projects": total_projects, "unique_accounts": total_accounts},
-        "requisitions": {
+        data["requisitions"] = {
             "total": total_records,
             "by_global_status": status_map,
-            "fill_rate_pct": round(
-                status_map.get("CLOSED", 0) / total_records * 100, 1
-            ) if total_records > 0 else 0.0,
-        },
-        "revenue": {
+            "fill_rate_pct": round(status_map.get("CLOSED", 0) / total_records * 100, 1) if total_records > 0 else 0.0,
+        }
+        data["revenue"] = {
             "total_revenue_inr": round(float(revenue_total), 2),
             "top_clients_by_revenue": [
                 {"account": r[0], "revenue_inr": round(float(r[1] or 0), 2), "total_reqs": r[2]}
                 for r in top_clients
             ],
-        },
-        "sla": {
+        }
+    else:
+        data["requisitions"] = None
+        data["revenue"] = None
+        notes.append("Requisition and revenue rollups omitted — enable Requisitions in Users & access.")
+
+    if profile_may_access_vertical(profile, "sla"):
+        sla_q = (
+            db.query(SLAPerformance.rag_status, func.count(SLAPerformance.id))
+            .join(MetricDefinition, SLAPerformance.definition_id == MetricDefinition.id)
+        )
+        if ids is not None:
+            sla_q = sla_q.filter(MetricDefinition.project_id.in_(ids))
+        sla_rag = sla_q.group_by(SLAPerformance.rag_status).all()
+        sla_map = {s: c for s, c in sla_rag}
+        data["sla"] = {
             "rag_distribution": sla_map,
             "met_count": sla_map.get("Met", 0),
             "not_met_count": sla_map.get("Not Met", 0) + sla_map.get("NOT MET", 0),
-        },
-        "wfm": {
+        }
+    else:
+        data["sla"] = None
+        notes.append("SLA summary omitted — enable SLA in Users & access.")
+
+    if profile_may_access_vertical(profile, "wfm"):
+        wq = db.query(func.sum(WFMHRBenchmark.ideal_hc), func.sum(WFMHRBenchmark.actual_hc_total))
+        if ids is not None:
+            wq = wq.filter(WFMHRBenchmark.project_id.in_(ids))
+        wfm_agg = wq.first()
+        data["wfm"] = {
             "total_ideal_hc": float(wfm_agg[0] or 0),
             "total_actual_hc": float(wfm_agg[1] or 0),
-        },
-    }
-    return {"data": data, "meta": _meta("portfolio-wide", total_records)}
+        }
+    else:
+        data["wfm"] = None
+        notes.append("WFM summary omitted — enable WFM in Users & access.")
+
+    if notes:
+        data["scope_notes"] = notes
+
+    row_hint = (data.get("requisitions") or {}).get("total") if isinstance(data.get("requisitions"), dict) else 0
+    return {"data": data, "meta": _meta("portfolio-scoped", int(row_hint or 0))}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -753,16 +915,15 @@ TOOL_REGISTRY: dict[str, Any] = {
 }
 
 
-def execute_tool(name: str, args: dict, db: Session) -> dict:
+def execute_tool(name: str, args: dict, db: Session, user: User) -> dict:
     """
-    Dispatch a tool call by name. Injects `db` automatically.
+    Dispatch a tool call by name. Passes authenticated user for project + module scoping.
     Returns a JSON-safe result dict.
     """
     fn = TOOL_REGISTRY.get(name)
     if not fn:
         return {"error": f"Unknown tool: {name}", "data": None, "meta": {}}
     try:
-        result = fn(db=db, **args)
-        return result
+        return fn(db, user, **args)
     except Exception as exc:
         return {"error": str(exc), "data": None, "meta": {"query_scope": name}}

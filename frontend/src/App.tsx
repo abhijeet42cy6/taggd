@@ -136,10 +136,10 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "My profile", path: "/profile" },
       { label: "Tasks", path: "/tasks" },
+      { label: "Assistant", path: "/agent" },
       { label: "Data Operations", path: "/data-operations" },
       { label: "Ingestion Center", path: "/ingestion" },
       { label: "Activity log", path: "/activity" },
-      /* Agent: route kept below; hidden from nav for all roles */
       { label: "Users & access", path: "/admin/users" },
     ],
   },

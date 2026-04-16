@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.auth.profile import ROLE_CLIENT_USER, VERTICAL_KEYS, effective_role
-from backend.db.database import User, UserProjectAssignment, get_db
+from backend.auth.profile import ROLE_CLIENT_USER, ROLE_PROJECT_HEAD, VERTICAL_KEYS, effective_role
+from backend.db.database import Project, User, UserProjectAssignment, get_db
 from backend.auth.security import hash_password
 from backend.auth.deps import require_roles
 
@@ -186,6 +186,12 @@ def set_user_projects(
             status_code=400,
             detail="client_user must be assigned to at least one project",
         )
+    prev_ids = {
+        r[0]
+        for r in db.query(UserProjectAssignment.project_id)
+        .filter(UserProjectAssignment.user_id == user_id)
+        .all()
+    }
     db.query(UserProjectAssignment).filter(UserProjectAssignment.user_id == user_id).delete(
         synchronize_session=False
     )
@@ -195,5 +201,20 @@ def set_user_projects(
             continue
         seen.add(pid)
         db.add(UserProjectAssignment(user_id=user_id, project_id=pid))
+
+    removed = prev_ids - seen
+    added = seen - prev_ids
+    for pid in removed:
+        p = db.query(Project).filter(Project.id == pid).first()
+        if p and p.project_head_user_id == user_id:
+            p.project_head_user_id = None
+    if effective_role(u) == ROLE_PROJECT_HEAD and added:
+        for pid in added:
+            p = db.query(Project).filter(Project.id == pid).first()
+            if not p:
+                continue
+            if p.project_head_user_id is None or p.project_head_user_id == user_id:
+                p.project_head_user_id = user_id
+
     db.commit()
     return {"user_id": user_id, "project_ids": sorted(seen)}

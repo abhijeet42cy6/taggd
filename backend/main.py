@@ -41,6 +41,7 @@ from .core.ingestion_audit import log_ingestion_event, list_ingestion_events_for
 from .core.activity_log import activity_log_to_dict, list_activity_for_user, log_activity
 from .core.column_mapping_normalize import build_column_mapping_v2
 from .core.record_field_synonyms import merge_llm_and_heuristic_record_fields
+from .core.project_head_resolution import assigned_project_heads_by_project, resolve_project_head_label
 from .core.budget_forecast_ledger import (
     ingest_budget_forecast_workbook,
     update_budget_quarters,
@@ -3007,7 +3008,9 @@ async def get_finance_data(
     revenue_ledgers = (
         apply_project_scope(
             db.query(FinanceMonthlyLedger)
-            .options(joinedload(FinanceMonthlyLedger.project))
+            .options(
+                joinedload(FinanceMonthlyLedger.project).joinedload(Project.project_head_user),
+            )
             .filter(FinanceMonthlyLedger.metric_category == "Revenue"),
             user,
             db,
@@ -3041,6 +3044,9 @@ async def get_finance_data(
         key=lambda r: r["reporting_month"] or datetime.datetime.min,
         reverse=True,
     )
+
+    _finance_project_ids = sorted({r["project_id"] for r in revenue_rows if r.get("project_id")})
+    _assign_heads_map = assigned_project_heads_by_project(db, _finance_project_ids)
 
     # CM keyed by (project_id, month); max() merges any legacy duplicate CM rows
     cm_rows = (
@@ -3182,12 +3188,14 @@ async def get_finance_data(
             rev_prod_ach_pct = round((float(revenue_productivity) / float(trpr)) * 100, 2)
         mu_at = km.get("metrics_updated_at")
         mu_uid = km.get("metrics_updated_by_user_id")
+        _ph_assigned = _assign_heads_map.get(row["project_id"], []) if project else []
+        _project_head_label = resolve_project_head_label(project, _ph_assigned) if project else None
         res.append({
             "id": row["id"],
             "project_id": row["project_id"],
             "account_name": project.account_name if project else "Unknown",
             "vertical": project.vertical if project else "N/A",
-            "project_head": (project.project_head or None) if project else None,
+            "project_head": _project_head_label,
             "practice_head": (project.practice_head or None) if project else None,
             "month": row["reporting_month"].strftime("%b-%y") if row["reporting_month"] else "N/A",
             "month_sort": row["reporting_month"].isoformat() if row["reporting_month"] else "",
@@ -3331,7 +3339,7 @@ def agent_chat(
 
     # Run agent
     try:
-        result = agent.chat(messages=messages, db=db)
+        result = agent.chat(messages=messages, db=db, user=_user)
     except Exception as exc:
         import traceback as _tb
         print(_tb.format_exc())

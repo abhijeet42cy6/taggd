@@ -216,7 +216,11 @@ def list_queue(
         assert_project_access(user, db, project_id)
         q = q.filter(RevenueWeeklySubmission.project_id == project_id)
     if status and str(status).strip():
-        q = q.filter(RevenueWeeklySubmission.status == str(status).strip())
+        st = str(status).strip().lower()
+        if st == "needs_review":
+            q = q.filter(RevenueWeeklySubmission.status.in_([ST_SUBMITTED, ST_UNDER_REVIEW]))
+        else:
+            q = q.filter(RevenueWeeklySubmission.status == st)
     q = q.options(
         joinedload(RevenueWeeklySubmission.submitted_by),
         joinedload(RevenueWeeklySubmission.approved_by),

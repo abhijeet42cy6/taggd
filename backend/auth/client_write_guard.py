@@ -17,6 +17,8 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _CLIENT_USER_WRITE_ALLOWLIST: tuple[tuple[str, FrozenSet[str]], ...] = (
     ("/auth/me/profile", frozenset({"PATCH"})),
     ("/auth/me/avatar", frozenset({"POST", "DELETE"})),
+    # Assistant is stateless aside from in-memory session; DB access is scoped in agent tools.
+    ("/agent/chat", frozenset({"POST"})),
 )
 
 

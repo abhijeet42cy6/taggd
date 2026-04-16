@@ -19,6 +19,7 @@ import google.generativeai as genai
 from sqlalchemy.orm import Session
 
 from backend.agent_tools.tools import execute_tool
+from backend.db.database import User
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SYSTEM PROMPT
@@ -55,6 +56,8 @@ You can query the live database to answer questions about:
 ## Scope and limits
 - You are read-only — you can explain, analyse, and surface data, but cannot modify records.
 - If asked to make changes, explain that write operations are out of scope for this agent.
+- The user's administrator controls which **projects** and **data modules** (finance, SLA, WFM, requisitions, etc.) they may see.
+  Tool results may be empty, partial, or include `scope_notes` / `error` when a question is outside that access — explain that clearly instead of guessing.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -218,6 +221,7 @@ class AnalysisAgent:
         self,
         messages: list[dict],  # [{role: "user"|"assistant", content: str}, ...]
         db: Session,
+        user: User,
     ) -> dict:
         """
         Run one full agent turn.
@@ -255,7 +259,7 @@ class AnalysisAgent:
                 tool_args = dict(fc.args)
                 tool_calls_log.append({"tool": tool_name, "args": tool_args})
 
-                result = execute_tool(tool_name, tool_args, db)
+                result = execute_tool(tool_name, tool_args, db, user)
                 fn_parts.append(
                     genai.protos.Part(
                         function_response=genai.protos.FunctionResponse(

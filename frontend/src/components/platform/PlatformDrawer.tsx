@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 type PlatformDrawerProps = {
   open: boolean;
@@ -27,10 +28,24 @@ export function PlatformDrawer({
   headerActions,
   footer,
 }: PlatformDrawerProps) {
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open]);
+
   if (!open) return null;
-  return (
+
+  const shell = (
     <>
-      <div className="platform-drawer-overlay" onClick={onClose} />
+      <div
+        className="platform-drawer-overlay"
+        onClick={onClose}
+        aria-hidden
+      />
       <aside
         className={`platform-drawer${footer ? " platform-drawer--footer" : ""}${className ? ` ${className}` : ""}`}
         style={{
@@ -39,6 +54,8 @@ export function PlatformDrawer({
           maxWidth: "100vw",
           boxSizing: "border-box",
         }}
+        role="dialog"
+        aria-modal="true"
       >
         <div className="platform-drawer-head">
           <div className="platform-drawer-head-row">
@@ -59,5 +76,7 @@ export function PlatformDrawer({
       </aside>
     </>
   );
+
+  return createPortal(shell, document.body);
 }
 

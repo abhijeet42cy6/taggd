@@ -124,6 +124,7 @@ class Project(Base, AuditMixin):
     # SBU / engagement label (e.g. TATA Motors); finance rows often key off account_name — keep both aligned in ingest
     engagement_name = Column(String, nullable=True, index=True)
     project_head_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_head_user = relationship("User", foreign_keys=[project_head_user_id])
     client = relationship("Client", back_populates="projects")
     
     # Enhanced Enterprise Metadata

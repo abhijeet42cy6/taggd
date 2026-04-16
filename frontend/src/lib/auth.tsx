@@ -554,6 +554,8 @@ export function navAllowedForRole(pathname: string, role: string, opts?: NavAllo
     if (pathname === "/no-access") return true;
     const paths = clientPortalNavPaths(opts?.verticalAccess);
     if (paths.length === 0) return pathname === "/no-access";
+    /* Assistant shares the portal session; backend tools enforce project + vertical scope. */
+    if (pathname === "/agent" && paths.length > 0) return true;
     if (paths.includes(pathname)) return true;
     if (pathname.startsWith("/clients/") && paths.includes("/clients")) return true;
     return false;
