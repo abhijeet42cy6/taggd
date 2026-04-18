@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import datetime
+import mimetypes
+import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -12,7 +15,7 @@ from sqlalchemy.orm import Session
 from backend.auth.deps import get_current_user
 from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
-from backend.db.database import Project, ProjectContract, User, get_db
+from backend.db.database import Client, Project, ProjectContract, User, get_db
 
 router = APIRouter(
     prefix="/contracts",
@@ -31,6 +34,30 @@ def _contract_to_dict(c: ProjectContract) -> dict[str, Any]:
     for col in ProjectContract.__table__.columns:
         out[col.name] = dval(getattr(c, col.name, None))
     return out
+
+
+ALLOWED_PIPELINE_STAGES = frozenset(
+    {
+        "discovery",
+        "meetings_in_process",
+        "terms_settlement",
+        "legal_review",
+        "signed",
+        "active_client",
+        "lapsed",
+        "cancelled",
+    }
+)
+
+REALISE_PIPELINE_STAGES = frozenset({"signed", "active_client"})
+
+
+def _normalize_pipeline_stage(s: Optional[str]) -> Optional[str]:
+    if s is None or not str(s).strip():
+        return None
+    v = str(s).strip().lower().replace(" ", "_").replace("-", "_")
+    aliases = {"mom": "meetings_in_process", "meetings": "meetings_in_process"}
+    return aliases.get(v, v)
 
 
 class ProjectContractCreate(BaseModel):
@@ -67,6 +94,9 @@ class ProjectContractCreate(BaseModel):
     internal_signoff: Optional[str] = None
     revenue_run_rate_inr: Optional[float] = None
     practice_head_snapshot: Optional[str] = None
+    pipeline_stage: Optional[str] = None
+    # When project has no client, or only a prospect client: create/rename prospect legal client.
+    prospect_client_official_name: Optional[str] = None
 
 
 class ProjectContractPatch(BaseModel):
@@ -102,6 +132,7 @@ class ProjectContractPatch(BaseModel):
     internal_signoff: Optional[str] = None
     revenue_run_rate_inr: Optional[float] = None
     practice_head_snapshot: Optional[str] = None
+    pipeline_stage: Optional[str] = None
 
 
 def _parse_date(s: Optional[str]) -> Optional[datetime.date]:
@@ -211,7 +242,38 @@ def create_contract(
     except AttributeError:
         payload = body.dict(exclude_unset=True)
     payload.pop("project_id", None)
+    prospect_name = (payload.pop("prospect_client_official_name", None) or "").strip()
+    raw_stage = payload.pop("pipeline_stage", None)
+    pipeline_st = _normalize_pipeline_stage(raw_stage)
+    if raw_stage is not None and str(raw_stage).strip() and pipeline_st is None:
+        raise HTTPException(status_code=400, detail="Invalid pipeline_stage")
+    if pipeline_st and pipeline_st not in ALLOWED_PIPELINE_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="pipeline_stage must be one of: " + ", ".join(sorted(ALLOWED_PIPELINE_STAGES)),
+        )
+
+    if prospect_name:
+        if proj.client_id is None:
+            nc = Client(official_name=prospect_name[:500], lifecycle_state="prospect")
+            db.add(nc)
+            db.flush()
+            proj.client_id = nc.id
+        else:
+            oc = db.query(Client).filter(Client.id == proj.client_id).first()
+            st = (getattr(oc, "lifecycle_state", None) or "active").lower() if oc else "active"
+            if oc and st == "prospect":
+                oc.official_name = prospect_name[:500]
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Project already linked to an active client. Create a prospect with POST /clients "
+                    "(lifecycle_state=prospect) and PATCH /projects/{id} with client_id, then create the contract.",
+                )
+        db.flush()
+
     c = ProjectContract(project_id=body.project_id, client_id=proj.client_id)
+    c.pipeline_stage = pipeline_st or "discovery"
     _apply_contract_fields(c, payload)
     db.add(c)
     db.commit()
@@ -243,6 +305,14 @@ def patch_contract(
         data = body.model_dump(exclude_unset=True)
     except AttributeError:
         data = body.dict(exclude_unset=True)
+    if "pipeline_stage" in data and data["pipeline_stage"] is not None:
+        ps = _normalize_pipeline_stage(data["pipeline_stage"])
+        if ps is None or ps not in ALLOWED_PIPELINE_STAGES:
+            raise HTTPException(
+                status_code=400,
+                detail="pipeline_stage must be one of: " + ", ".join(sorted(ALLOWED_PIPELINE_STAGES)),
+            )
+        data["pipeline_stage"] = ps
     _apply_contract_fields(c, data)
     db.commit()
     db.refresh(c)
@@ -256,6 +326,112 @@ def patch_contract(
         resource_id=str(contract_id),
     )
     return _contract_to_dict(c)
+
+
+@router.post("/{contract_id}/realise-client")
+def realise_contract_client(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Set linked legal client from prospect → active when pipeline is signed or active_client."""
+    c = db.query(ProjectContract).filter(ProjectContract.id == contract_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    assert_project_access(user, db, c.project_id)
+    stage = (getattr(c, "pipeline_stage", None) or "").strip().lower()
+    if stage not in REALISE_PIPELINE_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Set pipeline_stage to signed or active_client before realising the client.",
+        )
+    proj = db.query(Project).filter(Project.id == c.project_id).first()
+    if not proj or not proj.client_id:
+        raise HTTPException(status_code=400, detail="No legal client linked to this project")
+    cl = db.query(Client).filter(Client.id == proj.client_id).first()
+    if not cl:
+        raise HTTPException(status_code=400, detail="Client row missing")
+    if (getattr(cl, "lifecycle_state", None) or "active") == "active":
+        return {"status": "noop", "client_id": cl.id, "lifecycle_state": "active"}
+    cl.lifecycle_state = "active"
+    db.commit()
+    db.refresh(cl)
+    log_activity(
+        db,
+        user=user,
+        action="update",
+        resource_type="client",
+        summary=f"Client realised from contract CNT-{contract_id} (CLI-{cl.id})",
+        project_id=c.project_id,
+        resource_id=str(cl.id),
+        meta={"via_contract_id": contract_id},
+    )
+    return {"status": "ok", "client_id": cl.id, "lifecycle_state": cl.lifecycle_state}
+
+
+@router.post("/{contract_id}/upload-msa")
+async def upload_msa_document(
+    contract_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload and persist an MSA / contract document file for a contract."""
+    from backend.core.msa_storage import save_msa_file, msa_reference_tag
+
+    c = db.query(ProjectContract).filter(ProjectContract.id == contract_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    assert_project_access(user, db, c.project_id)
+
+    raw = await file.read()
+    try:
+        filename = save_msa_file(contract_id, raw, file.filename or "upload")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    ref = msa_reference_tag(filename)
+    c.sow_msa_reference = ref
+    db.commit()
+    db.refresh(c)
+    log_activity(
+        db,
+        user=user,
+        action="upload",
+        resource_type="project_contract",
+        summary=f"MSA document uploaded for CNT-{contract_id}",
+        project_id=c.project_id,
+        resource_id=str(contract_id),
+        meta={"filename": filename},
+    )
+    return {"status": "ok", "filename": filename, "sow_msa_reference": ref}
+
+
+@router.get("/{contract_id}/msa-document")
+async def serve_msa_document(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Serve the stored MSA / contract document for download."""
+    from backend.core.msa_storage import resolve_msa_path, is_msa_reference, extract_filename
+
+    c = db.query(ProjectContract).filter(ProjectContract.id == contract_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    assert_project_access(user, db, c.project_id)
+
+    ref = (getattr(c, "sow_msa_reference", None) or "").strip()
+    if not is_msa_reference(ref):
+        raise HTTPException(status_code=404, detail="No stored document — sow_msa_reference is a plain text ref.")
+
+    filename = extract_filename(ref)
+    path = resolve_msa_path(filename)
+    if not path:
+        raise HTTPException(status_code=404, detail="Document file not found on disk")
+
+    mt = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=mt, filename=os.path.basename(filename))
 
 
 @router.delete("/{contract_id}")

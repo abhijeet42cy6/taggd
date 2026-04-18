@@ -108,6 +108,13 @@ class Client(Base, AuditMixin):
     id = Column(Integer, primary_key=True, index=True)
     official_name = Column(String, nullable=False, index=True)
     short_code = Column(String, nullable=True, index=True)
+    # prospect = pre-close / commercial pursuit; active = realised operating client
+    lifecycle_state = Column(String(16), nullable=False, default="active", index=True)
+    # Optional org-chart labels (BU / SBU / SBG / SBE) for rollups and directory
+    hierarchy_tag_bu = Column(String(255), nullable=True)
+    hierarchy_tag_sbu = Column(String(255), nullable=True)
+    hierarchy_tag_sbg = Column(String(255), nullable=True)
+    hierarchy_tag_sbe = Column(String(255), nullable=True)
 
     projects = relationship("Project", back_populates="client")
 
@@ -121,11 +128,26 @@ class Project(Base, AuditMixin):
     contract_sheet = Column(String)
 
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # Client > BU > SBU: BU rows have parent_project_id NULL; SBU rows point at a BU project in the same client.
+    parent_project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    # business_unit | sub_business_unit (NULL treated as sub_business_unit for legacy rows)
+    org_unit_kind = Column(String(32), nullable=True, index=True)
+    # Per-project org labels (optional; may inherit meaning from parent client tags in UI)
+    hierarchy_tag_bu = Column(String(255), nullable=True)
+    hierarchy_tag_sbu = Column(String(255), nullable=True)
+    hierarchy_tag_sbg = Column(String(255), nullable=True)
+    hierarchy_tag_sbe = Column(String(255), nullable=True)
     # SBU / engagement label (e.g. TATA Motors); finance rows often key off account_name — keep both aligned in ingest
     engagement_name = Column(String, nullable=True, index=True)
     project_head_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     project_head_user = relationship("User", foreign_keys=[project_head_user_id])
     client = relationship("Client", back_populates="projects")
+    parent_project = relationship(
+        "Project",
+        remote_side=[id],
+        foreign_keys=[parent_project_id],
+        backref="child_projects",
+    )
     
     # Enhanced Enterprise Metadata
     account_name = Column(String, index=True)
@@ -215,6 +237,8 @@ class ProjectTransition(Base):
 
     rpo_solution_deck_url = Column(Text, nullable=True)
     transition_document_url = Column(Text, nullable=True)
+    # Uploaded files metadata: [{ "filename", "original_name", "uploaded_at" }, ...]
+    resource_attachments_json = Column(JSON, nullable=True)
 
     dead_days = Column(Integer, nullable=True)
     ageing_days = Column(Integer, nullable=True)
@@ -275,6 +299,8 @@ class ProjectContract(Base, AuditMixin):
     internal_signoff = Column(String, nullable=True)
     revenue_run_rate_inr = Column(Float, nullable=True)
     practice_head_snapshot = Column(String, nullable=True)
+    # Commercial closing pipeline (distinct from renewal-oriented contract_status strings).
+    pipeline_stage = Column(String(48), nullable=True, index=True)
 
     project = relationship("Project", back_populates="contracts")
     client = relationship("Client", backref="project_contracts")
@@ -1261,6 +1287,25 @@ def _ensure_finance_efficiency_taggd_joiners_column():
         logging.warning("finance_efficiency_kpis taggd_joiners migration: %s", e)
 
 
+def _ensure_project_transition_resource_attachments_column():
+    """SQLite: JSON list of uploaded transition resource files."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(project_transitions)")).fetchall()
+            cols = {r[1] for r in rows}
+            if cols and "resource_attachments_json" not in cols:
+                conn.execute(
+                    text("ALTER TABLE project_transitions ADD COLUMN resource_attachments_json TEXT"),
+                )
+                conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("project_transitions resource_attachments_json migration: %s", e)
+
+
 def _ensure_projects_project_head_column():
     """SQLite: add project_head for RPO scorecard / directory."""
     from sqlalchemy import text
@@ -1461,7 +1506,7 @@ def ensure_project_client(db: Session, project: Project) -> Client:
         fn = (project.filename or "").strip()
         label = os.path.basename(fn) if fn else f"Project {project.id}"
     label = (label or f"Project {project.id}")[:500]
-    c = Client(official_name=label)
+    c = Client(official_name=label, lifecycle_state="active")
     db.add(c)
     db.flush()
     project.client_id = c.id
@@ -1479,7 +1524,7 @@ def backfill_client_project_links(db: Session) -> int:
             fn = (p.filename or "").strip()
             label = os.path.basename(fn) if fn else f"Project {p.id}"
         label = (label or f"Project {p.id}")[:500]
-        c = Client(official_name=label)
+        c = Client(official_name=label, lifecycle_state="active")
         db.add(c)
         db.flush()
         p.client_id = c.id
@@ -1511,6 +1556,77 @@ def _ensure_clients_and_project_client_columns():
         import logging
 
         logging.warning("clients/project client_id migration: %s", e)
+
+
+def _ensure_client_lifecycle_and_project_hierarchy_columns():
+    """SQLite: client lifecycle_state; project parent_project_id + org_unit_kind; contract pipeline_stage."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            cli = {r[1] for r in conn.execute(text("PRAGMA table_info(clients)")).fetchall()}
+            if cli and "lifecycle_state" not in cli:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN lifecycle_state VARCHAR(16) DEFAULT 'active'"))
+                conn.execute(text("UPDATE clients SET lifecycle_state = 'active' WHERE lifecycle_state IS NULL"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_clients_lifecycle_state ON clients (lifecycle_state)"))
+            proj = {r[1] for r in conn.execute(text("PRAGMA table_info(projects)")).fetchall()}
+            if proj:
+                if "parent_project_id" not in proj:
+                    conn.execute(text("ALTER TABLE projects ADD COLUMN parent_project_id INTEGER"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_projects_parent_project_id ON projects (parent_project_id)"))
+                if "org_unit_kind" not in proj:
+                    conn.execute(text("ALTER TABLE projects ADD COLUMN org_unit_kind VARCHAR(32)"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_projects_org_unit_kind ON projects (org_unit_kind)"))
+            pcon = {r[1] for r in conn.execute(text("PRAGMA table_info(project_contracts)")).fetchall()}
+            if pcon and "pipeline_stage" not in pcon:
+                conn.execute(text("ALTER TABLE project_contracts ADD COLUMN pipeline_stage VARCHAR(48)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_project_contracts_pipeline_stage ON project_contracts (pipeline_stage)"))
+            pcon2 = {r[1] for r in conn.execute(text("PRAGMA table_info(project_contracts)")).fetchall()}
+            if pcon2 and "pipeline_stage" in pcon2:
+                conn.execute(
+                    text(
+                        "UPDATE project_contracts SET pipeline_stage = 'discovery' "
+                        "WHERE pipeline_stage IS NULL OR TRIM(COALESCE(pipeline_stage, '')) = ''"
+                    )
+                )
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("client lifecycle / project hierarchy / pipeline_stage migration: %s", e)
+
+
+def _ensure_client_project_hierarchy_tag_columns():
+    """SQLite: BU/SBU/SBG/SBE tag columns on clients and projects."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            cli = {r[1] for r in conn.execute(text("PRAGMA table_info(clients)")).fetchall()}
+            if cli:
+                for col in (
+                    "hierarchy_tag_bu",
+                    "hierarchy_tag_sbu",
+                    "hierarchy_tag_sbg",
+                    "hierarchy_tag_sbe",
+                ):
+                    if col not in cli:
+                        conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col} VARCHAR(255)"))
+            proj = {r[1] for r in conn.execute(text("PRAGMA table_info(projects)")).fetchall()}
+            if proj:
+                for col in (
+                    "hierarchy_tag_bu",
+                    "hierarchy_tag_sbu",
+                    "hierarchy_tag_sbg",
+                    "hierarchy_tag_sbe",
+                ):
+                    if col not in proj:
+                        conn.execute(text(f"ALTER TABLE projects ADD COLUMN {col} VARCHAR(255)"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("client/project hierarchy_tag migration: %s", e)
 
 
 def backfill_sla_period_starts(db: Session):
@@ -1551,6 +1667,8 @@ def init_db():
 
         logging.warning("legacy project_budgets/project_forecasts migration: %s", e)
     _ensure_clients_and_project_client_columns()
+    _ensure_client_lifecycle_and_project_hierarchy_columns()
+    _ensure_client_project_hierarchy_tag_columns()
     _ensure_records_rpo_columns()
     _ensure_candidates_profile_columns()
     _ensure_projects_project_head_column()
@@ -1558,6 +1676,7 @@ def init_db():
     _ensure_finance_ledger_cash_metrics_audit_columns()
     _ensure_finance_efficiency_scorecard_columns()
     _ensure_project_enterprise_columns()
+    _ensure_project_transition_resource_attachments_column()
     _ensure_sla_period_start_column()
     _ensure_finance_efficiency_wl1_column()
     _ensure_finance_efficiency_taggd_joiners_column()

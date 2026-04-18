@@ -1,0 +1,1215 @@
+/**
+ * New contract side panel — light “white” theme from dashboard_exp/new_contract_ui.html
+ * All rules scoped under .new-contract-sheet to avoid app bleed.
+ */
+.new-contract-sheet *,
+.new-contract-sheet *::before,
+.new-contract-sheet *::after {
+  box-sizing: border-box;
+}
+
+.new-contract-sheet {
+  --ncp-bg: #f7f6f3;
+  --ncp-surface: #ffffff;
+  --ncp-surface-hover: #f7f6f3;
+  --ncp-border: rgba(55, 53, 47, 0.09);
+  --ncp-border-focus: rgba(55, 53, 47, 0.3);
+  --ncp-text-primary: #191817;
+  --ncp-text-secondary: rgba(55, 53, 47, 0.65);
+  --ncp-text-muted: rgba(55, 53, 47, 0.4);
+  --ncp-accent: #e16f3d;
+  --ncp-accent-soft: rgba(225, 111, 61, 0.08);
+  --ncp-accent-mid: rgba(225, 111, 61, 0.18);
+  --ncp-green: #2ecc71;
+  --ncp-green-soft: rgba(46, 204, 113, 0.1);
+  --ncp-amber: #f59e0b;
+  --ncp-amber-soft: rgba(245, 158, 11, 0.1);
+  --ncp-blue: #3884ff;
+  --ncp-blue-soft: rgba(56, 132, 255, 0.08);
+  --ncp-radius-pill: 100px;
+  --ncp-font: "DM Sans", system-ui, sans-serif;
+  --ncp-mono: "DM Mono", ui-monospace, monospace;
+  --ncp-radius: 6px;
+  --ncp-radius-lg: 10px;
+  --ncp-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --ncp-shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-family: var(--ncp-font);
+  color: var(--ncp-text-primary);
+  background: var(--ncp-bg);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.new-contract-sheet .ncp-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 22px 100px;
+}
+
+.new-contract-sheet .ncp-page {
+  width: 100%;
+  max-width: 100%;
+  animation: ncp-fadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes ncp-fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.new-contract-sheet .ncp-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.new-contract-sheet .ncp-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--ncp-mono);
+  color: var(--ncp-text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.new-contract-sheet .ncp-breadcrumb-sep {
+  opacity: 0.4;
+}
+
+.new-contract-sheet .ncp-h1 {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--ncp-text-primary);
+  line-height: 1.2;
+}
+
+.new-contract-sheet .ncp-subtitle {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--ncp-text-secondary);
+  line-height: 1.55;
+  max-width: 520px;
+}
+
+.new-contract-sheet .ncp-close-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--ncp-border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  color: var(--ncp-text-secondary);
+  font-size: 16px;
+}
+.new-contract-sheet .ncp-close-btn:hover {
+  background: var(--ncp-border-focus);
+}
+
+.new-contract-sheet .ncp-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 24px;
+  border-radius: var(--ncp-radius-lg);
+  background: var(--ncp-surface);
+  border: 1px solid var(--ncp-border);
+  padding: 4px;
+  overflow: hidden;
+}
+
+.new-contract-sheet .ncp-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 10px;
+  border-radius: var(--ncp-radius);
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ncp-text-muted);
+  white-space: nowrap;
+  border: none;
+  background: transparent;
+  font-family: var(--ncp-font);
+}
+.new-contract-sheet .ncp-step.ncp-active {
+  background: var(--ncp-accent);
+  color: #fff;
+  font-weight: 500;
+}
+.new-contract-sheet .ncp-step.ncp-done {
+  color: var(--ncp-text-secondary);
+}
+.new-contract-sheet .ncp-step.ncp-done .ncp-step-num {
+  background: var(--ncp-green);
+  color: #fff;
+}
+.new-contract-sheet .ncp-step-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ncp-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--ncp-mono);
+  flex-shrink: 0;
+}
+.new-contract-sheet .ncp-step.ncp-active .ncp-step-num {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.new-contract-sheet .ncp-panel {
+  display: none;
+  animation: ncp-fadeIn 0.25s ease both;
+}
+.new-contract-sheet .ncp-panel.ncp-panel-active {
+  display: block;
+}
+@keyframes ncp-fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.new-contract-sheet .ncp-section {
+  background: var(--ncp-surface);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius-lg);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+.new-contract-sheet .ncp-section:focus-within {
+  box-shadow: var(--ncp-shadow);
+  border-color: var(--ncp-border-focus);
+}
+.new-contract-sheet .ncp-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px 10px;
+  cursor: pointer;
+  user-select: none;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.new-contract-sheet .ncp-section-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ncp-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.new-contract-sheet .ncp-section-icon.ncp-orange {
+  background: var(--ncp-accent-soft);
+}
+.new-contract-sheet .ncp-section-icon.ncp-blue {
+  background: rgba(56, 132, 255, 0.08);
+}
+.new-contract-sheet .ncp-section-icon.ncp-green {
+  background: var(--ncp-green-soft);
+}
+.new-contract-sheet .ncp-section-icon.ncp-amber {
+  background: var(--ncp-amber-soft);
+}
+.new-contract-sheet .ncp-section-icon.ncp-accent {
+  background: var(--ncp-accent-soft);
+}
+.new-contract-sheet .ncp-section-icon.ncp-red {
+  background: rgba(239, 68, 68, 0.08);
+}
+.new-contract-sheet .ncp-section-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ncp-text-primary);
+}
+.new-contract-sheet .ncp-section-desc {
+  font-size: 12px;
+  color: var(--ncp-text-muted);
+  margin-top: 1px;
+}
+.new-contract-sheet .ncp-section-toggle {
+  margin-left: auto;
+  color: var(--ncp-text-muted);
+  font-size: 13px;
+  transition: transform 0.2s;
+}
+.new-contract-sheet .ncp-section.ncp-collapsed .ncp-section-toggle {
+  transform: rotate(-90deg);
+}
+.new-contract-sheet .ncp-section-body {
+  padding: 0 18px 16px;
+  overflow: hidden;
+}
+.new-contract-sheet .ncp-section.ncp-collapsed .ncp-section-body {
+  max-height: 0 !important;
+  padding-bottom: 0;
+}
+
+.new-contract-sheet .ncp-prop-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+  align-items: center;
+  min-height: 36px;
+  border-radius: var(--ncp-radius);
+  padding: 4px 0;
+  gap: 12px;
+}
+.new-contract-sheet .ncp-prop-row + .ncp-prop-row {
+  border-top: 1px solid var(--ncp-border);
+}
+.new-contract-sheet .ncp-prop-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--ncp-text-secondary);
+  padding: 6px 8px;
+  border-radius: var(--ncp-radius);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.new-contract-sheet .ncp-prop-row:hover .ncp-prop-label {
+  background: var(--ncp-surface-hover);
+}
+.new-contract-sheet .ncp-prop-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: var(--ncp-font);
+  font-size: 14px;
+  color: var(--ncp-text-primary);
+  padding: 7px 10px;
+  border-radius: var(--ncp-radius);
+  outline: none;
+  transition: background 0.12s;
+  line-height: 1.4;
+}
+.new-contract-sheet .ncp-prop-input:hover {
+  background: var(--ncp-surface-hover);
+}
+.new-contract-sheet .ncp-prop-input:focus {
+  background: var(--ncp-accent-soft);
+}
+.new-contract-sheet .ncp-prop-input::placeholder {
+  color: var(--ncp-text-muted);
+}
+.new-contract-sheet select.ncp-prop-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+.new-contract-sheet .ncp-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 100px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  font-family: var(--ncp-font);
+  outline: none;
+  appearance: none;
+  transition: filter 0.15s;
+}
+.new-contract-sheet .ncp-status-pill:hover {
+  filter: brightness(0.94);
+}
+.new-contract-sheet .ncp-status-pill.ncp-st-active {
+  background: var(--ncp-green-soft);
+  color: #1a7a47;
+}
+.new-contract-sheet .ncp-status-pill.ncp-st-pending {
+  background: var(--ncp-amber-soft);
+  color: #92600a;
+}
+.new-contract-sheet .ncp-status-pill.ncp-st-inactive {
+  background: var(--ncp-border);
+  color: var(--ncp-text-secondary);
+}
+
+.new-contract-sheet .ncp-computed-field {
+  background: var(--ncp-accent-soft);
+  border: 1px solid var(--ncp-accent-mid);
+  border-radius: var(--ncp-radius);
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--ncp-text-primary);
+  font-family: var(--ncp-mono);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+.new-contract-sheet .ncp-computed-label {
+  font-size: 11px;
+  color: var(--ncp-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--ncp-mono);
+}
+
+.new-contract-sheet .ncp-date-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 4px 0 8px;
+}
+.new-contract-sheet .ncp-date-cell {
+  background: var(--ncp-surface-hover);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius);
+  padding: 10px 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.new-contract-sheet .ncp-date-cell:focus-within {
+  border-color: var(--ncp-accent);
+  box-shadow: 0 0 0 3px var(--ncp-accent-soft);
+}
+.new-contract-sheet .ncp-date-cell label {
+  display: block;
+  font-size: 11px;
+  color: var(--ncp-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--ncp-mono);
+  margin-bottom: 4px;
+}
+.new-contract-sheet .ncp-date-cell input[type="date"] {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: var(--ncp-font);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ncp-text-primary);
+  outline: none;
+  cursor: pointer;
+}
+
+.new-contract-sheet .ncp-commercial-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding-top: 4px;
+}
+.new-contract-sheet .ncp-amount-wrap {
+  background: var(--ncp-surface-hover);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius);
+  padding: 10px 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.new-contract-sheet .ncp-amount-wrap:focus-within {
+  border-color: var(--ncp-accent);
+  box-shadow: 0 0 0 3px var(--ncp-accent-soft);
+}
+.new-contract-sheet .ncp-amount-wrap label {
+  display: block;
+  font-size: 11px;
+  color: var(--ncp-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--ncp-mono);
+  margin-bottom: 4px;
+}
+.new-contract-sheet .ncp-amount-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.new-contract-sheet .ncp-currency-badge {
+  font-size: 12px;
+  font-family: var(--ncp-mono);
+  color: var(--ncp-text-muted);
+  font-weight: 500;
+  background: var(--ncp-border);
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.new-contract-sheet .ncp-amount-wrap input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: var(--ncp-mono);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ncp-text-primary);
+  outline: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.new-contract-sheet .ncp-project-wrap {
+  position: relative;
+  margin-bottom: 8px;
+}
+.new-contract-sheet .ncp-project-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--ncp-surface);
+  border: 1.5px dashed var(--ncp-border-focus);
+  border-radius: var(--ncp-radius-lg);
+  cursor: pointer;
+  font-family: var(--ncp-font);
+  font-size: 14px;
+  color: var(--ncp-text-muted);
+  transition: all 0.15s;
+  text-align: left;
+}
+.new-contract-sheet .ncp-project-btn:hover {
+  border-color: var(--ncp-accent);
+  background: var(--ncp-accent-soft);
+  color: var(--ncp-accent);
+}
+.new-contract-sheet .ncp-project-btn.ncp-selected {
+  border-style: solid;
+  border-color: var(--ncp-accent);
+  background: var(--ncp-accent-soft);
+  color: var(--ncp-text-primary);
+  font-weight: 500;
+}
+.new-contract-sheet .ncp-project-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ncp-radius);
+  background: var(--ncp-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+  color: white;
+  font-weight: 600;
+  font-family: var(--ncp-mono);
+}
+.new-contract-sheet .ncp-project-meta {
+  flex: 1;
+  min-width: 0;
+}
+.new-contract-sheet .ncp-project-meta strong {
+  display: block;
+  font-size: 14px;
+}
+.new-contract-sheet .ncp-project-meta span {
+  font-size: 12px;
+  color: var(--ncp-text-secondary);
+  font-weight: 400;
+}
+.new-contract-sheet .ncp-project-dd {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--ncp-surface);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius-lg);
+  box-shadow: var(--ncp-shadow-lg);
+  z-index: 50;
+  overflow: hidden;
+}
+.new-contract-sheet .ncp-project-dd.ncp-open {
+  display: block;
+}
+/* Portaled to document.body — escape overflow: hidden on section / scroll parents */
+.new-contract-sheet .ncp-project-dd.ncp-project-dd--portal {
+  position: relative;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: block;
+}
+
+/* Scrollable list inside portaled dropdowns — wheel/touch stopPropagation in TSX; isolate overscroll */
+.new-contract-sheet .ncp-dd-scroll {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+.new-contract-sheet .ncp-project-search {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ncp-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.new-contract-sheet .ncp-project-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: var(--ncp-font);
+  font-size: 13px;
+  color: var(--ncp-text-primary);
+  outline: none;
+}
+.new-contract-sheet .ncp-project-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+  font-size: 13px;
+  border: none;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.new-contract-sheet .ncp-project-opt:hover {
+  background: var(--ncp-surface-hover);
+}
+.new-contract-sheet .ncp-proj-ico {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ncp-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+  background: var(--ncp-accent);
+}
+
+.new-contract-sheet .ncp-req-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ncp-accent);
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+.new-contract-sheet .ncp-hint {
+  font-size: 11.5px;
+  color: var(--ncp-text-muted);
+  padding: 4px 0 6px;
+  line-height: 1.45;
+}
+
+.new-contract-sheet .ncp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px 20px;
+  margin-top: auto;
+  border-top: 1px solid var(--ncp-border);
+  background: var(--ncp-surface);
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.new-contract-sheet .ncp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 18px;
+  border-radius: var(--ncp-radius);
+  font-family: var(--ncp-font);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.new-contract-sheet .ncp-btn-ghost {
+  background: transparent;
+  color: var(--ncp-text-secondary);
+  border: 1px solid var(--ncp-border);
+}
+.new-contract-sheet .ncp-btn-ghost:hover {
+  background: var(--ncp-surface-hover);
+  border-color: var(--ncp-border-focus);
+}
+.new-contract-sheet .ncp-btn-primary {
+  background: var(--ncp-accent);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(225, 111, 61, 0.3);
+}
+.new-contract-sheet .ncp-btn-primary:hover:not(:disabled) {
+  background: #c85f30;
+  box-shadow: 0 2px 8px rgba(225, 111, 61, 0.4);
+  transform: translateY(-1px);
+}
+.new-contract-sheet .ncp-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+.new-contract-sheet .ncp-btn-secondary {
+  background: var(--ncp-surface);
+  color: var(--ncp-text-primary);
+  border: 1px solid var(--ncp-border);
+}
+.new-contract-sheet .ncp-btn-secondary:hover {
+  background: var(--ncp-surface-hover);
+}
+
+.new-contract-sheet textarea.ncp-prop-input {
+  resize: vertical;
+  min-height: 56px;
+  font-family: var(--ncp-font);
+}
+
+/* Prop row is a 2-col grid (label | field). Lone textarea = no label cell → span full row width. */
+.new-contract-sheet .ncp-prop-row:has(> textarea.ncp-prop-input:only-child) {
+  align-items: flex-start;
+}
+.new-contract-sheet .ncp-prop-row > textarea.ncp-prop-input:only-child {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+}
+
+.new-contract-sheet kbd.ncp-kbd {
+  display: inline-block;
+  background: var(--ncp-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: var(--ncp-mono);
+  color: var(--ncp-text-muted);
+}
+
+.new-contract-sheet .ncp-flow-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.new-contract-sheet .ncp-flow-pill {
+  border: 1px solid var(--ncp-border);
+  background: var(--ncp-surface);
+  color: var(--ncp-text-secondary);
+  /* Match .ncp-h1: DM Sans via --ncp-font (not --ncp-mono) */
+  font-family: var(--ncp-font);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.new-contract-sheet .ncp-flow-pill.ncp-flow-pill--active {
+  border-color: var(--ncp-accent-mid);
+  background: var(--ncp-accent-soft);
+  color: var(--ncp-accent);
+  font-weight: 500;
+}
+
+.new-contract-sheet .ncp-stack-card {
+  background: var(--ncp-surface);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius-lg);
+  padding: 12px 14px 14px;
+  margin-bottom: 14px;
+  box-shadow: var(--ncp-shadow);
+}
+.new-contract-sheet .ncp-stack-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ncp-border);
+}
+.new-contract-sheet .ncp-stack-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--ncp-mono);
+  color: var(--ncp-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.new-contract-sheet .ncp-tag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin: 10px 0;
+}
+.new-contract-sheet .ncp-micro-label {
+  display: block;
+  font-size: 9px;
+  font-family: var(--ncp-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ncp-text-muted);
+  margin-bottom: 4px;
+}
+
+/* ── User Picker Dropdown ─────────────────────────────────────────────── */
+.new-contract-sheet .ncp-user-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.new-contract-sheet .ncp-user-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--ncp-surface-hover);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius-lg);
+  cursor: pointer;
+  font-family: var(--ncp-font);
+  font-size: 13px;
+  color: var(--ncp-text-muted);
+  transition: all 0.15s;
+  text-align: left;
+}
+.new-contract-sheet .ncp-user-btn:hover {
+  border-color: var(--ncp-accent);
+  background: var(--ncp-accent-soft);
+}
+.new-contract-sheet .ncp-user-btn.ncp-selected {
+  border-color: var(--ncp-accent);
+  background: var(--ncp-accent-soft);
+  color: var(--ncp-text-primary);
+}
+.new-contract-sheet .ncp-user-ico {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+  font-family: var(--ncp-mono);
+  letter-spacing: 0.02em;
+}
+.new-contract-sheet .ncp-user-meta {
+  flex: 1;
+  min-width: 0;
+}
+.new-contract-sheet .ncp-user-meta strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-contract-sheet .ncp-user-meta span {
+  font-size: 11px;
+  color: var(--ncp-text-muted);
+}
+.new-contract-sheet .ncp-user-dd {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--ncp-surface);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius-lg);
+  box-shadow: var(--ncp-shadow-lg);
+  z-index: 60;
+  overflow: hidden;
+}
+.new-contract-sheet .ncp-user-dd.ncp-open {
+  display: block;
+}
+/* Portaled to document.body — escape overflow:hidden on section / scroll parents */
+.new-contract-sheet .ncp-user-dd.ncp-user-dd--portal {
+  position: relative;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: block;
+}
+
+/* ── File Upload Zone ─────────────────────────────────────────────────── */
+.new-contract-sheet .ncp-upload-zone {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px;
+  background: var(--ncp-surface-hover);
+  border: 2px dashed var(--ncp-border-focus);
+  border-radius: var(--ncp-radius-lg);
+  cursor: pointer;
+  font-family: var(--ncp-font);
+  font-size: 13px;
+  color: var(--ncp-text-muted);
+  transition: all 0.15s;
+  text-align: center;
+}
+.new-contract-sheet .ncp-upload-zone:hover {
+  border-color: var(--ncp-accent);
+  background: var(--ncp-accent-soft);
+  color: var(--ncp-accent);
+}
+.new-contract-sheet .ncp-file-selected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, #22c55e 10%, var(--ncp-surface));
+  border: 1px solid color-mix(in srgb, #22c55e 35%, var(--ncp-border));
+  border-radius: var(--ncp-radius);
+  font-size: 13px;
+}
+.new-contract-sheet .ncp-file-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--ncp-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-contract-sheet .ncp-file-size {
+  font-size: 11px;
+  color: var(--ncp-text-muted);
+  font-family: var(--ncp-mono);
+  flex-shrink: 0;
+}
+.new-contract-sheet .ncp-file-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ncp-text-muted);
+  padding: 2px 5px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.new-contract-sheet .ncp-file-remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+/* ── Duplicate Warning ────────────────────────────────────────────────── */
+.new-contract-sheet .ncp-dup-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, #f59e0b 10%, var(--ncp-surface));
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--ncp-border));
+  border-radius: var(--ncp-radius);
+  font-size: 12.5px;
+  color: #92400e;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+.new-contract-sheet .ncp-dup-warn > span:first-child {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ════════════════════════════════════════
+   AGENDA TAG PICKER
+════════════════════════════════════════ */
+.new-contract-sheet .ncp-agenda-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Category tab strip ── */
+.new-contract-sheet .ncp-agenda-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.new-contract-sheet .ncp-agenda-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: var(--ncp-radius-pill);
+  border: 1px solid var(--ncp-border);
+  background: var(--ncp-surface);
+  color: var(--ncp-text-secondary);
+  font-size: 12px;
+  font-family: var(--ncp-font);
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  white-space: nowrap;
+  outline: none;
+  line-height: 1.4;
+}
+.new-contract-sheet .ncp-agenda-cat:hover {
+  background: var(--ncp-surface-hover);
+  color: var(--ncp-text-primary);
+}
+
+/* Active per-category colour variants */
+.new-contract-sheet .ncp-agenda-cat.cat-accent.cat-on {
+  border-width: 1.5px;
+  border-color: var(--ncp-accent-mid);
+  background: var(--ncp-accent-soft);
+  color: var(--ncp-accent);
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-cat.cat-blue.cat-on {
+  border-width: 1.5px;
+  border-color: rgba(56, 132, 255, 0.28);
+  background: var(--ncp-blue-soft);
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-cat.cat-green.cat-on {
+  border-width: 1.5px;
+  border-color: rgba(46, 204, 113, 0.28);
+  background: var(--ncp-green-soft);
+  color: #1a7a47;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-cat.cat-amber.cat-on {
+  border-width: 1.5px;
+  border-color: rgba(245, 158, 11, 0.28);
+  background: var(--ncp-amber-soft);
+  color: #92600a;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-cat.cat-indigo.cat-on {
+  border-width: 1.5px;
+  border-color: rgba(99, 102, 241, 0.28);
+  background: rgba(99, 102, 241, 0.08);
+  color: #4338ca;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-cat.cat-teal.cat-on {
+  border-width: 1.5px;
+  border-color: rgba(20, 184, 166, 0.28);
+  background: rgba(20, 184, 166, 0.08);
+  color: #0f766e;
+  font-weight: 600;
+}
+
+/* Dot indicator shown when category has selections */
+.new-contract-sheet .ncp-agenda-cat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* Count badge inside active category tab */
+.new-contract-sheet .ncp-agenda-cat-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--ncp-radius-pill);
+  font-size: 10px;
+  font-family: var(--ncp-mono);
+  font-weight: 700;
+  line-height: 1;
+  background: currentColor;
+  color: inherit;
+}
+/* Inner text gets white color via a nested span */
+.new-contract-sheet .ncp-agenda-cat-count > span {
+  color: #fff;
+  mix-blend-mode: normal;
+}
+
+/* ── Tag chip grid ── */
+.new-contract-sheet .ncp-agenda-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px;
+  background: var(--ncp-surface);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius-lg);
+  min-height: 72px;
+  transition: border-color 0.15s;
+}
+
+.new-contract-sheet .ncp-agenda-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: var(--ncp-radius-pill);
+  border: 1px solid var(--ncp-border);
+  background: var(--ncp-surface-hover);
+  color: var(--ncp-text-secondary);
+  font-size: 12px;
+  font-family: var(--ncp-font);
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  outline: none;
+  line-height: 1.4;
+}
+.new-contract-sheet .ncp-agenda-tag:hover {
+  border-color: var(--ncp-border-focus);
+  color: var(--ncp-text-primary);
+  background: var(--ncp-surface);
+}
+
+/* Selected chip states — one per category colour */
+.new-contract-sheet .ncp-agenda-tag.sel-accent {
+  border-width: 1.5px;
+  border-color: var(--ncp-accent-mid);
+  background: var(--ncp-accent-soft);
+  color: var(--ncp-accent);
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-tag.sel-blue {
+  border-width: 1.5px;
+  border-color: rgba(56, 132, 255, 0.28);
+  background: var(--ncp-blue-soft);
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-tag.sel-green {
+  border-width: 1.5px;
+  border-color: rgba(46, 204, 113, 0.28);
+  background: var(--ncp-green-soft);
+  color: #1a7a47;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-tag.sel-amber {
+  border-width: 1.5px;
+  border-color: rgba(245, 158, 11, 0.28);
+  background: var(--ncp-amber-soft);
+  color: #92600a;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-tag.sel-indigo {
+  border-width: 1.5px;
+  border-color: rgba(99, 102, 241, 0.28);
+  background: rgba(99, 102, 241, 0.08);
+  color: #4338ca;
+  font-weight: 600;
+}
+.new-contract-sheet .ncp-agenda-tag.sel-teal {
+  border-width: 1.5px;
+  border-color: rgba(20, 184, 166, 0.28);
+  background: rgba(20, 184, 166, 0.08);
+  color: #0f766e;
+  font-weight: 600;
+}
+
+/* Dot inside selected chip */
+.new-contract-sheet .ncp-agenda-tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+/* ── Selected summary bar ── */
+.new-contract-sheet .ncp-agenda-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px;
+  background: var(--ncp-accent-soft);
+  border: 1px solid var(--ncp-accent-mid);
+  border-radius: var(--ncp-radius);
+}
+
+.new-contract-sheet .ncp-agenda-summary-label {
+  font-size: 10px;
+  color: var(--ncp-text-muted);
+  font-family: var(--ncp-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  align-self: center;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+/* Chips inside summary bar */
+.new-contract-sheet .ncp-agenda-sel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--ncp-radius-pill);
+  font-size: 11.5px;
+  font-family: var(--ncp-font);
+}
+
+.new-contract-sheet .ncp-agenda-dismiss {
+  opacity: 0.45;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0 0 0 1px;
+  color: inherit;
+  transition: opacity 0.1s;
+}
+.new-contract-sheet .ncp-agenda-dismiss:hover {
+  opacity: 1;
+}

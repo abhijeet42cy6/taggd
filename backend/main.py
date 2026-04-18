@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import time
+import uuid
 import datetime
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request, Query
@@ -160,16 +161,89 @@ class ProjectMetadataPatch(BaseModel):
     category: Optional[str] = None
     vertical: Optional[str] = None
     practice: Optional[str] = None
+    # Client > BU > SBU: BU has no parent; SBU parent_project_id → BU in same legal client.
+    parent_project_id: Optional[int] = None
+    org_unit_kind: Optional[str] = None
+    hierarchy_tag_bu: Optional[str] = None
+    hierarchy_tag_sbu: Optional[str] = None
+    hierarchy_tag_sbg: Optional[str] = None
+    hierarchy_tag_sbe: Optional[str] = None
+
+
+ORG_UNIT_BUSINESS = "business_unit"
+ORG_UNIT_SBU = "sub_business_unit"
+
+
+def _hierarchy_tag_val(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    t = str(raw).strip()
+    return t[:255] if t else None
+
+
+def _validate_project_parent(db: Session, project: Project, new_parent_id: Optional[int]) -> None:
+    """Ensure parent is same-client BU and does not create a cycle."""
+    if new_parent_id is None:
+        return
+    if new_parent_id == project.id:
+        raise HTTPException(status_code=400, detail="Project cannot be its own parent")
+    parent = db.query(Project).filter(Project.id == new_parent_id).first()
+    if not parent:
+        raise HTTPException(status_code=400, detail="parent_project_id not found")
+    if project.client_id != parent.client_id:
+        raise HTTPException(status_code=400, detail="Parent project must belong to the same legal client")
+    pok = (parent.org_unit_kind or ORG_UNIT_SBU).strip().lower()
+    if pok != ORG_UNIT_BUSINESS:
+        raise HTTPException(
+            status_code=400,
+            detail="Parent must be a business unit (set its org_unit_kind to business_unit first)",
+        )
+    cur: Optional[int] = new_parent_id
+    for _ in range(128):
+        if cur is None:
+            break
+        if cur == project.id:
+            raise HTTPException(status_code=400, detail="Cannot set parent: would create a cycle")
+        ap = db.query(Project).filter(Project.id == cur).first()
+        if not ap:
+            break
+        cur = ap.parent_project_id
 
 
 class ClientCreateBody(BaseModel):
     official_name: str
     short_code: Optional[str] = None
+    lifecycle_state: Optional[str] = "active"
+    hierarchy_tag_bu: Optional[str] = None
+    hierarchy_tag_sbu: Optional[str] = None
+    hierarchy_tag_sbg: Optional[str] = None
+    hierarchy_tag_sbe: Optional[str] = None
 
 
 class ClientPatchBody(BaseModel):
     official_name: Optional[str] = None
     short_code: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+    hierarchy_tag_bu: Optional[str] = None
+    hierarchy_tag_sbu: Optional[str] = None
+    hierarchy_tag_sbg: Optional[str] = None
+    hierarchy_tag_sbe: Optional[str] = None
+
+
+class ClientProjectCreateBody(BaseModel):
+    """Create an empty directory project under a legal client (no Excel ingest)."""
+
+    engagement_name: str
+    account_name: Optional[str] = None
+    org_unit_kind: Optional[str] = None
+    parent_project_id: Optional[int] = None
+    project_head_user_id: Optional[int] = None
+    practice_head: Optional[str] = None
+    project_head: Optional[str] = None
+    hierarchy_tag_bu: Optional[str] = None
+    hierarchy_tag_sbu: Optional[str] = None
+    hierarchy_tag_sbg: Optional[str] = None
+    hierarchy_tag_sbe: Optional[str] = None
 
 
 def _serialize_record_row(r: Record, today: datetime.datetime) -> dict:
@@ -1048,6 +1122,18 @@ def patch_project_metadata(
         uid = data["project_head_user_id"]
         if not db.query(User).filter(User.id == uid, User.is_active.is_(True)).first():
             raise HTTPException(status_code=400, detail=f"Invalid or inactive user id: {uid}")
+    if "org_unit_kind" in data and data["org_unit_kind"] is not None:
+        ok = str(data["org_unit_kind"]).strip().lower()
+        if ok not in ("", ORG_UNIT_BUSINESS, ORG_UNIT_SBU):
+            raise HTTPException(
+                status_code=400,
+                detail=f"org_unit_kind must be {ORG_UNIT_BUSINESS!r} or {ORG_UNIT_SBU!r}",
+            )
+        data["org_unit_kind"] = ok or None
+    if data.get("org_unit_kind") == ORG_UNIT_BUSINESS:
+        data["parent_project_id"] = None
+    elif "parent_project_id" in data:
+        _validate_project_parent(db, project, data["parent_project_id"])
     for key, val in data.items():
         if hasattr(project, key):
             setattr(project, key, val)
@@ -1143,7 +1229,18 @@ def create_client(
     name = (body.official_name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="official_name is required")
-    c = Client(official_name=name[:500], short_code=(body.short_code or "").strip() or None)
+    ls = (body.lifecycle_state or "active").strip().lower()
+    if ls not in ("active", "prospect"):
+        raise HTTPException(status_code=400, detail="lifecycle_state must be active or prospect")
+    c = Client(
+        official_name=name[:500],
+        short_code=(body.short_code or "").strip() or None,
+        lifecycle_state=ls,
+        hierarchy_tag_bu=_hierarchy_tag_val(body.hierarchy_tag_bu),
+        hierarchy_tag_sbu=_hierarchy_tag_val(body.hierarchy_tag_sbu),
+        hierarchy_tag_sbg=_hierarchy_tag_val(body.hierarchy_tag_sbg),
+        hierarchy_tag_sbe=_hierarchy_tag_val(body.hierarchy_tag_sbe),
+    )
     db.add(c)
     db.commit()
     db.refresh(c)
@@ -1157,7 +1254,16 @@ def create_client(
         resource_id=str(c.id),
         meta={"official_name": c.official_name},
     )
-    return {"id": c.id, "official_name": c.official_name, "short_code": c.short_code}
+    return {
+        "id": c.id,
+        "official_name": c.official_name,
+        "short_code": c.short_code,
+        "lifecycle_state": c.lifecycle_state,
+        "hierarchy_tag_bu": getattr(c, "hierarchy_tag_bu", None),
+        "hierarchy_tag_sbu": getattr(c, "hierarchy_tag_sbu", None),
+        "hierarchy_tag_sbg": getattr(c, "hierarchy_tag_sbg", None),
+        "hierarchy_tag_sbe": getattr(c, "hierarchy_tag_sbe", None),
+    }
 
 
 @app.get("/clients")
@@ -1201,6 +1307,11 @@ def list_clients_grouped(
                 "id": cid,
                 "official_name": cl.official_name if cl else "",
                 "short_code": cl.short_code if cl else None,
+                "lifecycle_state": getattr(cl, "lifecycle_state", None) or "active",
+                "hierarchy_tag_bu": getattr(cl, "hierarchy_tag_bu", None) if cl else None,
+                "hierarchy_tag_sbu": getattr(cl, "hierarchy_tag_sbu", None) if cl else None,
+                "hierarchy_tag_sbg": getattr(cl, "hierarchy_tag_sbg", None) if cl else None,
+                "hierarchy_tag_sbe": getattr(cl, "hierarchy_tag_sbe", None) if cl else None,
                 "projects": [],
             }
         d = {c.name: clean(getattr(p, c.name)) for c in p.__table__.columns}
@@ -1253,6 +1364,11 @@ def get_client_detail(
         "id": c.id,
         "official_name": c.official_name,
         "short_code": c.short_code,
+        "lifecycle_state": getattr(c, "lifecycle_state", None) or "active",
+        "hierarchy_tag_bu": getattr(c, "hierarchy_tag_bu", None),
+        "hierarchy_tag_sbu": getattr(c, "hierarchy_tag_sbu", None),
+        "hierarchy_tag_sbg": getattr(c, "hierarchy_tag_sbg", None),
+        "hierarchy_tag_sbe": getattr(c, "hierarchy_tag_sbe", None),
         "projects": plist,
     }
 
@@ -1279,6 +1395,14 @@ def patch_client(
         c.official_name = on[:500]
     if "short_code" in data:
         c.short_code = (str(data["short_code"]).strip() if data["short_code"] else None) or None
+    if "lifecycle_state" in data and data["lifecycle_state"] is not None:
+        ls = str(data["lifecycle_state"]).strip().lower()
+        if ls not in ("active", "prospect"):
+            raise HTTPException(status_code=400, detail="lifecycle_state must be active or prospect")
+        c.lifecycle_state = ls
+    for tag_key in ("hierarchy_tag_bu", "hierarchy_tag_sbu", "hierarchy_tag_sbg", "hierarchy_tag_sbe"):
+        if tag_key in data:
+            setattr(c, tag_key, _hierarchy_tag_val(data.get(tag_key)))
     db.commit()
     db.refresh(c)
     log_activity(
@@ -1291,7 +1415,129 @@ def patch_client(
         resource_id=str(client_id),
         meta={"fields": list(data.keys())},
     )
-    return {"id": c.id, "official_name": c.official_name, "short_code": c.short_code}
+    return {
+        "id": c.id,
+        "official_name": c.official_name,
+        "short_code": c.short_code,
+        "lifecycle_state": c.lifecycle_state,
+        "hierarchy_tag_bu": getattr(c, "hierarchy_tag_bu", None),
+        "hierarchy_tag_sbu": getattr(c, "hierarchy_tag_sbu", None),
+        "hierarchy_tag_sbg": getattr(c, "hierarchy_tag_sbg", None),
+        "hierarchy_tag_sbe": getattr(c, "hierarchy_tag_sbe", None),
+    }
+
+
+def _upsert_user_project_assignment(db: Session, user_id: int, project_id: int) -> None:
+    ex = (
+        db.query(UserProjectAssignment)
+        .filter(UserProjectAssignment.user_id == user_id, UserProjectAssignment.project_id == project_id)
+        .first()
+    )
+    if not ex:
+        db.add(UserProjectAssignment(user_id=user_id, project_id=project_id))
+
+
+@app.post("/clients/{client_id}/projects")
+def create_project_under_client(
+    client_id: int,
+    body: ClientProjectCreateBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a directory-only project (PRJ) under a legal client; grants scoped creator + optional project head access."""
+    assert_client_access(user, db, client_id)
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Client not found")
+    en = (body.engagement_name or "").strip()
+    if not en:
+        raise HTTPException(status_code=400, detail="engagement_name is required")
+    raw_kind = (body.org_unit_kind or ORG_UNIT_SBU or "").strip().lower()
+    if raw_kind in ("", "sbu", "sub_business_unit"):
+        org_kind = ORG_UNIT_SBU
+    elif raw_kind in ("bu", "business", "business_unit"):
+        org_kind = ORG_UNIT_BUSINESS
+    else:
+        org_kind = ORG_UNIT_SBU
+    parent_id = body.parent_project_id
+    if org_kind == ORG_UNIT_BUSINESS:
+        parent_id = None
+    acct = (body.account_name or "").strip() or en
+    fn = f"dir:{client_id}:{uuid.uuid4().hex[:20]}"
+    p = Project(
+        filename=fn[:240],
+        client_id=client_id,
+        engagement_name=en[:500],
+        account_name=acct[:500],
+        org_unit_kind=org_kind,
+        parent_project_id=parent_id,
+        hierarchy_tag_bu=_hierarchy_tag_val(body.hierarchy_tag_bu),
+        hierarchy_tag_sbu=_hierarchy_tag_val(body.hierarchy_tag_sbu),
+        hierarchy_tag_sbg=_hierarchy_tag_val(body.hierarchy_tag_sbg),
+        hierarchy_tag_sbe=_hierarchy_tag_val(body.hierarchy_tag_sbe),
+        tracker_sheet="",
+        contract_sheet="",
+        source_filename="manual",
+        uploaded_by=(user.email or str(user.id))[:200],
+    )
+    uid = body.project_head_user_id
+    head_user: Optional[User] = None
+    if uid is not None:
+        head_user = db.query(User).filter(User.id == uid, User.is_active.is_(True)).first()
+        if not head_user:
+            raise HTTPException(status_code=400, detail=f"Invalid or inactive user id: {uid}")
+        p.project_head_user_id = uid
+        p.project_head = (head_user.email or str(uid))[:500]
+    ph_in = (body.practice_head or "").strip()
+    if ph_in:
+        p.practice_head = ph_in[:500]
+    elif head_user and (head_user.email or "").strip():
+        p.practice_head = (head_user.email or "").strip()[:500]
+    ph_label = (body.project_head or "").strip()
+    if ph_label and not p.project_head:
+        p.project_head = ph_label[:500]
+
+    db.add(p)
+    db.flush()
+    if parent_id is not None:
+        _validate_project_parent(db, p, parent_id)
+
+    ids = allowed_project_ids(user, db)
+    if ids is not None:
+        _upsert_user_project_assignment(db, user.id, p.id)
+    if uid is not None:
+        _upsert_user_project_assignment(db, uid, p.id)
+
+    db.commit()
+    db.refresh(p)
+    log_activity(
+        db,
+        user=user,
+        action="create",
+        resource_type="project",
+        summary=f"Project created under CLI-{client_id}: {p.engagement_name}",
+        project_id=p.id,
+        resource_id=str(p.id),
+        meta={"client_id": client_id, "engagement_name": p.engagement_name},
+    )
+    import math
+    from sqlalchemy.orm import joinedload
+
+    proj = db.query(Project).options(joinedload(Project.client)).filter(Project.id == p.id).first()
+
+    def clean(v):
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            return v.isoformat()
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+
+    d = {col.name: clean(getattr(proj, col.name)) for col in proj.__table__.columns}
+    if proj.client_id and proj.client:
+        d["client_official_name"] = proj.client.official_name
+    else:
+        d["client_official_name"] = None
+    return d
 
 @app.get("/projects/{project_id}")
 def get_project(

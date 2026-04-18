@@ -106,7 +106,7 @@ def _find_or_create_client(db: Session, official_name: Optional[str]) -> Optiona
     c = db.query(Client).filter(func.lower(Client.official_name) == n.lower()).first()
     if c:
         return c
-    c = Client(official_name=n[:500])
+    c = Client(official_name=n[:500], lifecycle_state="active")
     db.add(c)
     db.flush()
     return c

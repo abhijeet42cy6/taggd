@@ -22,3 +22,6 @@ user_avatars/
 
 # Candidate CV uploads (server-local)
 uploads/candidate_cvs/
+
+# Transition tracker uploads (server-local)
+transition_documents/

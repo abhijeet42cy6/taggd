@@ -7,14 +7,14 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
-from sqlalchemy import exists, or_
+from sqlalchemy import exists, func, or_
 from sqlalchemy.orm import Session
 
 from backend.auth.deps import allowed_project_ids, get_current_user, is_platform_admin
 from backend.auth.profile import ROLE_EXECUTIVE, ROLE_PROJECT_HEAD, effective_role
 from backend.auth.scope import assert_project_access
 from backend.core.activity_log import log_activity
-from backend.db.database import Task, TaskAssignee, User, UserProjectAssignment, get_db
+from backend.db.database import Project, Task, TaskAssignee, User, UserProjectAssignment, get_db
 
 router = APIRouter(
     prefix="/tasks",
@@ -173,9 +173,31 @@ class TaskPatch(BaseModel):
 def list_assignable_users(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    project_id: Optional[int] = Query(
+        None,
+        description="When set, only users assigned to this project (plus project head), subject to caller access.",
+    ),
 ):
     """Users the current operator may assign tasks to (scoped for project heads / legacy managers)."""
     q = db.query(User).filter(User.is_active.is_(True)).order_by(User.email)
+
+    if project_id is not None:
+        assert_project_access(user, db, project_id)
+        uids = (
+            db.query(UserProjectAssignment.user_id)
+            .filter(UserProjectAssignment.project_id == project_id)
+            .distinct()
+            .all()
+        )
+        id_set = {r[0] for r in uids}
+        proj = db.query(Project).filter(Project.id == project_id).first()
+        if proj is not None and proj.project_head_user_id is not None:
+            id_set.add(proj.project_head_user_id)
+        if not id_set:
+            return []
+        rows = q.filter(User.id.in_(id_set)).all()
+        return [{"id": u.id, "email": u.email, "role": u.role} for u in rows]
+
     if is_platform_admin(user):
         rows = q.all()
     else:
@@ -205,11 +227,17 @@ def list_tasks(
     project_id: Optional[int] = Query(None),
     mine: bool = Query(False),
     overdue: bool = Query(False),
+    task_category: Optional[str] = Query(None, description="Exact match on task_category"),
+    linked_resource_type: Optional[str] = Query(None, description="Exact match on linked_resource_type"),
 ):
     q = db.query(Task)
     q = _apply_task_scope(q, user, db)
     if status:
         q = q.filter(Task.status == status.strip().lower())
+    if task_category is not None and str(task_category).strip():
+        q = q.filter(func.lower(Task.task_category) == str(task_category).strip().lower())
+    if linked_resource_type is not None and str(linked_resource_type).strip():
+        q = q.filter(func.lower(Task.linked_resource_type) == str(linked_resource_type).strip().lower())
     if project_id is not None:
         q = q.filter(Task.project_id == project_id)
     if mine:

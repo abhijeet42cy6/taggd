@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   queries,
   type RevenueForecastWeeklyRow,
@@ -146,6 +147,15 @@ function VisibilityBody({ row }: { row: RevenueVisibilitySnapshotRow }) {
 export function RevenueGovernance() {
   const { user } = useAuth();
   const allowed = canAccessRevenueGovernance(user);
+  const [searchParams] = useSearchParams();
+  const submissionFromUrl = useMemo(() => {
+    const s = searchParams.get("submission");
+    if (!s) return null;
+    const n = parseInt(s, 10);
+    return Number.isNaN(n) ? null : n;
+  }, [searchParams]);
+  const openedSubmissionRef = useRef<number | null>(null);
+
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("needs_review");
   const [rows, setRows] = useState<RevenueWeeklySubmissionDto[]>([]);
   const [total, setTotal] = useState(0);
@@ -198,6 +208,12 @@ export function RevenueGovernance() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (submissionFromUrl != null) {
+      setQueueFilter("all");
+    }
+  }, [submissionFromUrl]);
+
   const openRow = async (r: RevenueWeeklySubmissionDto) => {
     setSel(r);
     setDrawer(true);
@@ -216,6 +232,16 @@ export function RevenueGovernance() {
       setPackLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (submissionFromUrl == null || loading) return;
+    if (openedSubmissionRef.current === submissionFromUrl) return;
+    const r = rows.find((x) => x.id === submissionFromUrl);
+    if (r) {
+      openedSubmissionRef.current = submissionFromUrl;
+      void openRow(r);
+    }
+  }, [submissionFromUrl, rows, loading]);
 
   const run = async (fn: () => Promise<unknown>) => {
     if (!sel) return;

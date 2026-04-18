@@ -156,6 +156,7 @@ def ingest_contract_workbook_file(
             c = ProjectContract(
                 project_id=proj.id,
                 client_id=proj.client_id,
+                pipeline_stage="discovery",
                 customer_name=customer_s,
                 account_type=_norm(str(cell(ri, "Account Type"))) if cell(ri, "Account Type") is not None and not pd.isna(cell(ri, "Account Type")) else None,
                 contract_start_date=_parse_excel_date(cell(ri, "Date of Signing")),

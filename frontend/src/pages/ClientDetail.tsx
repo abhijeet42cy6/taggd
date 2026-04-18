@@ -148,6 +148,99 @@ function httpDetail(e: unknown): string {
   return "";
 }
 
+function orgUnitLabel(k: string | null | undefined): string {
+  if (k === "business_unit") return "BU";
+  if (!k || k === "sub_business_unit") return "SBU";
+  return k;
+}
+
+function ProjectHierarchyEditor({
+  project,
+  siblingProjects,
+  onSaved,
+}: {
+  project: Project;
+  siblingProjects: Project[];
+  onSaved: () => void | Promise<void>;
+}) {
+  const buOptions = siblingProjects.filter(
+    (b) => b.id !== project.id && (b.org_unit_kind || "sub_business_unit") === "business_unit",
+  );
+  const [parentId, setParentId] = useState(() =>
+    project.parent_project_id != null ? String(project.parent_project_id) : "",
+  );
+  const [kind, setKind] = useState(() => project.org_unit_kind || "sub_business_unit");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setParentId(project.parent_project_id != null ? String(project.parent_project_id) : "");
+    setKind(project.org_unit_kind || "sub_business_unit");
+  }, [project.id, project.parent_project_id, project.org_unit_kind]);
+
+  async function saveHierarchy() {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const isBu = kind === "business_unit";
+      await queries.patchProjectMetadata(project.id, {
+        org_unit_kind: kind,
+        parent_project_id: isBu ? null : parentId ? parseInt(parentId, 10) : null,
+      });
+      await onSaved();
+      setMsg("Saved");
+    } catch (e: unknown) {
+      setMsg(httpDetail(e) || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)" }}>
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginBottom: 8 }}>
+        Org hierarchy (Client → BU → SBU)
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "end" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
+          <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Unit type</span>
+          <select className="platform-search" value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: "100%" }}>
+            <option value="business_unit">Business unit (BU)</option>
+            <option value="sub_business_unit">Sub-business unit (SBU)</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
+          <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Parent BU</span>
+          <select
+            className="platform-search"
+            value={parentId}
+            onChange={(e) => setParentId(e.target.value)}
+            disabled={kind === "business_unit"}
+            style={{ width: "100%", opacity: kind === "business_unit" ? 0.5 : 1 }}
+          >
+            <option value="">— None (top-level) —</option>
+            {buOptions.map((b) => (
+              <option key={b.id} value={b.id}>
+                PRJ-{b.id} · {(b.engagement_name || b.account_name || b.filename || "").slice(0, 36)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10, alignItems: "center" }}>
+        <button type="button" className="platform-dialog__btn platform-dialog__btn--primary" style={{ fontSize: 10 }} onClick={() => void saveHierarchy()} disabled={saving}>
+          {saving ? "Saving…" : "Save hierarchy"}
+        </button>
+        <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
+          Current: {orgUnitLabel(project.org_unit_kind)}
+          {project.parent_project_id != null ? ` · parent PRJ-${project.parent_project_id}` : ""}
+        </span>
+        {msg && <span style={{ fontSize: 10, color: msg === "Saved" ? "var(--green)" : "var(--red)" }}>{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
 function RevenueLogicCard({
   project,
   onProjectsRefresh,
@@ -700,6 +793,7 @@ export function ClientDetail() {
             id: g.id,
             officialName: g.official_name,
             shortCode: g.short_code,
+            lifecycleState: g.lifecycle_state ?? "active",
             client: g.official_name,
             projects: g.projects,
             projectIds: g.projects.map((p) => p.id),
@@ -755,6 +849,7 @@ export function ClientDetail() {
           id: g.id,
           officialName: g.official_name,
           shortCode: g.short_code,
+          lifecycleState: g.lifecycle_state ?? "active",
           client: g.official_name,
           projects: g.projects,
           projectIds: g.projects.map((p) => p.id),
@@ -1442,6 +1537,18 @@ export function ClientDetail() {
                   <div>
                     <KvRow label="Legal client" value={displayClientName} />
                     {clientVm && clientVm.id >= 0 && (
+                      <KvRow
+                        label="Client lifecycle"
+                        value={
+                          clientVm.lifecycleState === "prospect" ? (
+                            <span className="platform-badge amber">Prospect</span>
+                          ) : (
+                            <span className="platform-badge green">Active</span>
+                          )
+                        }
+                      />
+                    )}
+                    {clientVm && clientVm.id >= 0 && (
                       <KvRow label="Client ID" value={`CLI-${clientVm.id}`} />
                     )}
                     <KvRow label="Charge code" value={clientVm?.projects[0]?.charge_code ?? "—"} />
@@ -1499,6 +1606,9 @@ export function ClientDetail() {
                   <KvRow label="Contract Sheet" value={p.contract_sheet || "—"} />
                   <KvRow label="Region" value={p.region || "—"} />
                   <KvRow label="Vertical" value={p.vertical || "—"} />
+                  {numericClientId != null && numericClientId > 0 && (
+                    <ProjectHierarchyEditor project={p} siblingProjects={clientVm?.projects ?? []} onSaved={refreshProjects} />
+                  )}
                   {p.column_mapping && columnMappingEntryCount(p.column_mapping) > 0 && (
                     <details style={{ marginTop: 10 }}>
                       <summary style={{

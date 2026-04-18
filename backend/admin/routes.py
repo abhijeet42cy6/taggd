@@ -36,6 +36,7 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=6)
     role: str
     vertical_access: Optional[List[str]] = None
+    manager_user_id: Optional[int] = None
 
 
 class UserPatch(BaseModel):
@@ -97,6 +98,11 @@ def create_user(
         role=role,
         is_active=True,
     )
+    if body.manager_user_id is not None:
+        mid = int(body.manager_user_id)
+        if not db.query(User).filter(User.id == mid).first():
+            raise HTTPException(status_code=400, detail="manager_user_id not found")
+        u.manager_user_id = mid
     if body.vertical_access is not None:
         keys = [str(x).strip().lower() for x in body.vertical_access if str(x).strip()]
         unknown = [k for k in keys if k not in VERTICAL_KEYS]

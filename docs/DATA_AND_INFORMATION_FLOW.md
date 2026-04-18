@@ -89,7 +89,7 @@ sequenceDiagram
 
 ### 2.4 Vertical modules (`require_vertical`)
 
-Routers declare `dependencies=[Depends(require_vertical("finance"))]` etc. (`backend/auth/verticals.py`). Allowed keys align with `VERTICAL_KEYS` in `backend/auth/profile.py` (e.g. `finance`, `sla`, `wfm`, `candidates`, `contracts`, `meetings`, `revenue_billing`, `finance_validation`, `vendor_licenses`, `tasks`, `transitions`, …). `**client_user`** must have a non-empty allow-list that includes the module; `**operations**` / staff use `vertical_access_json` when set.
+Routers declare `dependencies=[Depends(require_vertical("finance"))]` etc. (`backend/auth/verticals.py`). Allowed keys align with `VERTICAL_KEYS` in `backend/auth/profile.py` (e.g. `finance`, `sla`, `wfm`, `candidates`, `contracts`, `meetings`, `revenue_billing`, `finance_validation`, `vendor_licenses`, `tasks`, `transitions`, …). `**client_user`** must have a non-empty allow-list that includes the module; `**operations`** / staff use `vertical_access_json` when set.
 
 ### 2.5 Client portal guards
 
@@ -292,7 +292,7 @@ Many **legacy** high-traffic routes remain on `**main.py`** under `/api/...` (st
 
 ## 8. Frontend routes and API wiring
 
-`frontend/src/App.tsx` registers authenticated routes under `RequireAuth` → `AppShell`. Nav groups: `**RECRUITER_NAV_GROUPS**` vs `**ALL_NAV_GROUPS**`, filtered by `navAllowedForRole`.
+`frontend/src/App.tsx` registers authenticated routes under `RequireAuth` → `AppShell`. Nav groups: `**RECRUITER_NAV_GROUPS`** vs `**ALL_NAV_GROUPS**`, filtered by `navAllowedForRole`.
 
 ### 8.1 Route → primary backend dependencies
 
@@ -331,7 +331,7 @@ Many **legacy** high-traffic routes remain on `**main.py`** under `/api/...` (st
 
 ### 8.2 Axios path convention
 
-- `**api`** instance: `baseURL = "/api"` → `api.get("/projects")` hits `**/api/projects**`.
+- `**api`** instance: `baseURL = "/api"` → `api.get("/projects")` hits `**/api/projects`**.
 - `**adminApi**`: `/api/admin/...`
 - `**authProfileApi**`: `/api/auth/me/...`
 - **Budget-forecast helpers** in `api.ts` intentionally call `**/api/api/budget-forecast/...`** so a reverse proxy that strips one `/api` still reaches FastAPI’s `/api/budget-forecast/...` (see inline comment in `api.ts`).
@@ -384,10 +384,10 @@ flowchart TB
 - **Tracker upload:** Excel → agents → Python logic on `Project` → row-level `**records`** with `revenue_results` JSON.
 - **Finance upload:** Excel → row per account/month → `**finance_monthly_ledger`** (+ cashflow + KPI tables) → dedupe.
 - **Budget/forecast template:** Excel → match projects → ledger `**Revenue` budget** + planning `**metric_category`** rows.
-- **SLA / WFM uploads:** Excel → `**metric_definitions` / `sla_performances`** or `**wfm_***` tables.
-- **Billing UI:** User edits `**taggd_revenue_billing`**; validation `**finance_billing_workflow**` drives state machine + receipts + events.
-- **Weekly governance:** `**revenue_weekly_submission`** groups `**revenue_forecast_weekly**` + `**revenue_visibility_snapshot**` rows for approval.
-- **Dashboard:** Aggregated `**GET`** queries join `projects` + `records` + finance/SLA/WFM tables under `**apply_project_scope**`.
+- **SLA / WFM uploads:** Excel → `**metric_definitions` / `sla_performances`** or `**wfm_*`** tables.
+- **Billing UI:** User edits `**taggd_revenue_billing`**; validation `**finance_billing_workflow`** drives state machine + receipts + events.
+- **Weekly governance:** `**revenue_weekly_submission`** groups `**revenue_forecast_weekly`** + `**revenue_visibility_snapshot**` rows for approval.
+- **Dashboard:** Aggregated `**GET`** queries join `projects` + `records` + finance/SLA/WFM tables under `**apply_project_scope`**.
 
 ---
 
@@ -404,7 +404,7 @@ This file is descriptive; for security reviews, trace each sensitive router with
 
 ## 12. In-app “Tasks” vs analysis workflow
 
-- **Operational tasks (database):** `platform_tasks` + `task_assignees` (`backend/db/database.py`), API `backend/routers/tasks.py` under `**/api/tasks`**, UI `**/tasks**`. These are cross-cutting work items with optional `project_id`, status, due date, and multiple assignees (`user_id` FKs).
+- **Operational tasks (database):** `platform_tasks` + `task_assignees` (`backend/db/database.py`), API `backend/routers/tasks.py` under `**/api/tasks`**, UI `**/tasks`**. These are cross-cutting work items with optional `project_id`, status, due date, and multiple assignees (`user_id` FKs).
 - **Documentation analysis:** This document was assembled using structured exploration of the repo (auth, ingest routers, `App.tsx`, `api.ts`) so headings match real modules; always re-verify line-level behavior in Git before audits.
 
 ---
@@ -418,6 +418,6 @@ This file is descriptive; for security reviews, trace each sensitive router with
 | **Project scope**     | Set of `project_id`s from `user_project_assignments`; `None` means all projects (admin).                             |
 | **Fingerprint**       | Stable hash on `records` for delta sync across tracker uploads.                                                      |
 | `**revenue_results`** | JSON on each `Record` holding computed fees/revenue from synthesized logic.                                          |
-| `**metric_category**` | On `finance_monthly_ledger`; coarse values for finance master + finer values for budget/forecast planning lines.     |
+| `**metric_category`** | On `finance_monthly_ledger`; coarse values for finance master + finer values for budget/forecast planning lines.     |
 
 

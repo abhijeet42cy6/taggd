@@ -33,7 +33,7 @@ def assert_project_access(user: User, db: Session, project_id: int) -> None:
 
 
 def assert_client_access(user: User, db: Session, client_id: int) -> None:
-    """User must have at least one assigned project under this client."""
+    """Full-access users, scoped users with any project on this client, or bootstrap when client has no projects yet."""
     ids = allowed_project_ids(user, db)
     if ids is None:
         return
@@ -42,8 +42,12 @@ def assert_client_access(user: User, db: Session, client_id: int) -> None:
         .filter(Project.client_id == client_id, Project.id.in_(ids))
         .first()
     )
-    if not ok:
-        raise HTTPException(status_code=403, detail="Access denied for this client")
+    if ok:
+        return
+    nproj = db.query(func.count(Project.id)).filter(Project.client_id == client_id).scalar() or 0
+    if nproj == 0:
+        return
+    raise HTTPException(status_code=403, detail="Access denied for this client")
 
 
 def account_accessible(user: User, db: Session, account_name: str) -> bool:

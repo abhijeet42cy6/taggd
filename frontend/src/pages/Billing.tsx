@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   invalidateCache,
   queries,
@@ -7,21 +8,15 @@ import {
   type RevenueBillingCreate,
   type RevenueBillingPatch,
 } from "@/lib/api";
+import {
+  UserPickerDropdown,
+  type PlatformUserLite,
+} from "@/components/platform/NewContractOrgFlow";
 import { canPracticeSubmitBilling, useAuth } from "@/lib/auth";
 import { cn, formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -30,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RefreshCw, Plus, PencilLine, Trash2, FilterX } from "lucide-react";
+import "@/styles/new-contract-panel.css";
 
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
@@ -328,137 +324,472 @@ function draftToPatchDelta(baseline: Draft, current: Draft): RevenueBillingPatch
   return body;
 }
 
-function FormGrid({
+const BILLING_TABS = [
+  { icon: "◇", label: "Project" },
+  { icon: "₹", label: "Revenue" },
+  { icon: "👥", label: "Joiners" },
+  { icon: "📄", label: "Invoice" },
+  { icon: "📝", label: "Notes" },
+] as const;
+
+function BillingFormNCP({
   draft,
   setDraft,
   projectLocked,
   projects,
+  assignableUsers,
+  tab,
+  setTab,
 }: {
   draft: Draft;
   setDraft: React.Dispatch<React.SetStateAction<Draft>>;
   projectLocked: boolean;
   projects: Project[];
+  assignableUsers: PlatformUserLite[];
+  tab: number;
+  setTab: (n: number) => void;
 }) {
+  const [projDdOpen, setProjDdOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState("");
+  const [approverUserId, setApproverUserId] = useState("");
+  const [pmUserId, setPmUserId] = useState("");
+  const [projDdRect, setProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const projWrapRef = useRef<HTMLDivElement>(null);
+  const projBtnRef = useRef<HTMLButtonElement>(null);
+  const projPortalRef = useRef<HTMLDivElement>(null);
+
+  // Sync pickers with draft text (email) when assignable list loads
+  useEffect(() => {
+    const an = (draft.approver_name || "").trim().toLowerCase();
+    if (!assignableUsers.length || !an) {
+      setApproverUserId("");
+      return;
+    }
+    const match = assignableUsers.find((u) => u.email.toLowerCase() === an);
+    setApproverUserId(match ? String(match.id) : "");
+  }, [assignableUsers, draft.approver_name]);
+
+  useEffect(() => {
+    const pm = (draft.project_manager || "").trim().toLowerCase();
+    if (!assignableUsers.length || !pm) {
+      setPmUserId("");
+      return;
+    }
+    const match = assignableUsers.find((u) => u.email.toLowerCase() === pm);
+    setPmUserId(match ? String(match.id) : "");
+  }, [assignableUsers, draft.project_manager]);
+
+  useLayoutEffect(() => {
+    if (!projDdOpen) {
+      setProjDdRect(null);
+      return;
+    }
+    const measure = () => {
+      const btn = projBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (projBtnRef.current) ro.observe(projBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [projDdOpen]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (projWrapRef.current?.contains(t) || projPortalRef.current?.contains(t)) return;
+      setProjDdOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
+
   const set = (k: string, v: string) => setDraft((prev) => ({ ...prev, [k]: v }));
 
-  const field = (
-    key: string,
-    label: string,
-    opts?: { type?: string; className?: string; disabled?: boolean }
-  ) => (
-    <div key={key} className={cn("space-y-1.5", opts?.className)}>
-      <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</Label>
-      <Input
-        type={opts?.type ?? "text"}
+  const selectedProject = useMemo(() => {
+    const pid = parseInt(draft.project_id, 10);
+    return Number.isFinite(pid) && pid > 0 ? projects.find((p) => p.id === pid) ?? null : null;
+  }, [draft.project_id, projects]);
+
+  const filteredProjects = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = `prj-${p.id} ${p.account_name || p.filename || ""}`.toLowerCase();
+      return lab.includes(q);
+    });
+  }, [projects, projSearch]);
+
+  const pr = (label: string, key: string, extra?: React.InputHTMLAttributes<HTMLInputElement>) => (
+    <div className="ncp-prop-row">
+      <div className="ncp-prop-label">{label}</div>
+      <input
+        className="ncp-prop-input"
         value={draft[key] ?? ""}
         onChange={(e) => set(key, e.target.value)}
-        disabled={opts?.disabled}
-        className="h-8 text-xs font-mono"
+        {...extra}
       />
     </div>
   );
 
-  return (
-    <div className="space-y-8 max-h-[min(70vh,640px)] overflow-y-auto pr-2">
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Project & period</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Project</Label>
-            <Select
-              value={draft.project_id}
-              onValueChange={(v) => set("project_id", v)}
-              disabled={projectLocked}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)} className="text-xs font-mono">
-                    PRJ-{p.id} · {p.account_name || p.filename || "—"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {field("update_date", "Update date (YYYY-MM-DD)")}
-          {field("fiscal_year_label", "Fiscal year label (e.g. FY 2025-26)")}
-          {field("project_manager", "Project manager")}
+  const dateGrid = (cells: Array<{ label: string; key: string }>) => (
+    <div className="ncp-date-grid" style={{ borderTop: "none" }}>
+      {cells.map(({ label, key }) => (
+        <div key={key} className="ncp-date-cell">
+          <label>{label}</label>
+          <input
+            type="date"
+            value={draft[key] ?? ""}
+            onChange={(e) => set(key, e.target.value)}
+          />
         </div>
-      </div>
+      ))}
+    </div>
+  );
 
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Revenue & MMF</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {field("revenue_booked_inr", "Revenue booked (INR)")}
-          {field("mmf_inr", "MMF (INR)")}
-          {field("net_revenue_inr", "Net revenue (INR)")}
-          {field("rph_inr", "RPH (INR)")}
-          {field("pct_of_target", "% of target")}
-        </div>
-      </div>
-
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Openings & joiners</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {field("opening_req", "Opening req (count)", { type: "number" })}
-          {field("opening_fee_inr", "Opening fee (INR)")}
-          {field("total_joiners", "Total joiners", { type: "number" })}
-          {field("taggd_joiner", "Taggd joiner (count)", { type: "number" })}
-          {field("taggd_joiner_fee_inr", "Taggd joiner fee (INR)")}
-          {field("total_joining_fee_inr", "Total joining fee (INR)")}
-        </div>
-      </div>
-
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">ER/IJP/Other & campus</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {field("er_ijp_other_count", "ER/IJP/Other (count)", { type: "number" })}
-          {field("er_ijp_other_fee_inr", "ER/IJP/Other fee (INR)")}
-          {field("campus_count", "Campus (count)", { type: "number" })}
-          {field("campus_fee_inr", "Campus fee (INR)")}
-        </div>
-      </div>
-
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Adjustments</h4>
-        <div className="grid grid-cols-1 gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Adjustment reason</Label>
-            <Textarea
-              value={draft.adjustment_reason ?? ""}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => set("adjustment_reason", e.target.value)}
-              className="text-xs min-h-[56px]"
-            />
-          </div>
-          {field("adjustment_amt_inr", "Adjustment amount (INR)")}
-        </div>
-      </div>
-
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Invoice & collection</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {field("invoice_number", "Invoice number")}
-          {field("invoice_amount_inr", "Invoice amount (INR)")}
-          {field("invoice_raised_date", "Invoice raised (YYYY-MM-DD)")}
-          {field("payment_due_date", "Payment due (YYYY-MM-DD)")}
-          {field("actual_payment_received_date", "Payment received (YYYY-MM-DD)")}
-          {field("collection_received_inr", "Collection received (INR)")}
-          {field("approver_name", "Approver name")}
-          {field("attachment_ref", "Attachment (URL / ref)")}
-        </div>
-      </div>
-
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Notes</h4>
-        <Textarea
-          value={draft.notes ?? ""}
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => set("notes", e.target.value)}
-          className="text-xs min-h-[72px]"
+  const amtField = (label: string, key: string, symbol = "₹", isCount = false) => (
+    <div className="ncp-amount-wrap">
+      <label>{label}</label>
+      <div className="ncp-amount-row">
+        <span className="ncp-currency-badge">{symbol}</span>
+        <input
+          type="text"
+          inputMode={isCount ? "numeric" : "decimal"}
+          placeholder="0"
+          value={draft[key] ?? ""}
+          onChange={(e) => set(key, e.target.value)}
         />
       </div>
     </div>
+  );
+
+  const section = (
+    icon: React.ReactNode,
+    colorCls: string,
+    label: string,
+    desc: string,
+    body: React.ReactNode,
+  ) => (
+    <div className="ncp-section" style={{ marginBottom: 12 }}>
+      <div className="ncp-section-header" style={{ cursor: "default" }}>
+        <div className={cn("ncp-section-icon", colorCls)}>{icon}</div>
+        <div>
+          <div className="ncp-section-label">{label}</div>
+          <div className="ncp-section-desc">{desc}</div>
+        </div>
+      </div>
+      <div className="ncp-section-body" style={{ maxHeight: 520 }}>
+        {body}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {/* ── Tabs ─────────────────────────────────────────── */}
+      <div className="ncp-steps" role="tablist" style={{ marginBottom: 18 }}>
+        {BILLING_TABS.map(({ icon, label }, i) => (
+          <button
+            key={label}
+            type="button"
+            role="tab"
+            aria-selected={tab === i}
+            className={cn("ncp-step", tab === i && "ncp-active")}
+            onClick={() => setTab(i)}
+          >
+            <span
+              className="ncp-step-num"
+              style={{
+                fontSize: 14,
+                background: tab === i ? "rgba(255,255,255,0.22)" : "var(--ncp-border)",
+              }}
+            >
+              {i < tab ? "✓" : icon}
+            </span>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab 0: Project & Period ─────────────────────── */}
+      <div className={cn("ncp-panel", tab === 0 && "ncp-panel-active")}>
+        {section(
+          "◇",
+          "ncp-orange",
+          "Project & period",
+          "Linked project and reporting period",
+          <>
+            <div ref={projWrapRef} className="ncp-project-wrap" style={{ borderTop: "none" }}>
+              <button
+                ref={projBtnRef}
+                type="button"
+                className={cn("ncp-project-btn", selectedProject && "ncp-selected")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!projectLocked) setProjDdOpen((o) => !o);
+                }}
+                disabled={projectLocked}
+              >
+                {selectedProject ? (
+                  <>
+                    <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)" }}>
+                      PRJ-{selectedProject.id}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)" }}>
+                      {selectedProject.account_name || selectedProject.filename || "—"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>＋</span>
+                    <span>Search or select a project (PRJ-···)</span>
+                  </>
+                )}
+                {!projectLocked && (
+                  <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)" }}>▾</span>
+                )}
+              </button>
+              {projDdOpen &&
+                projDdRect &&
+                createPortal(
+                  <div
+                    ref={projPortalRef}
+                    className="new-contract-sheet"
+                    style={{
+                      position: "fixed",
+                      top: projDdRect.top,
+                      left: projDdRect.left,
+                      width: projDdRect.width,
+                      zIndex: 200,
+                      pointerEvents: "auto",
+                      minHeight: 0,
+                      height: "auto",
+                      display: "block",
+                      background: "transparent",
+                    }}
+                  >
+                    <div
+                      className="ncp-project-dd ncp-open ncp-project-dd--portal"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="ncp-project-search">
+                        <span style={{ opacity: 0.5 }}>🔍</span>
+                        <input
+                          type="search"
+                          placeholder="Search projects…"
+                          value={projSearch}
+                          onChange={(e) => setProjSearch(e.target.value)}
+                          autoFocus
+                        />
+                      </div>
+                      <div
+                        className="ncp-dd-scroll"
+                        onWheel={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                      >
+                        {filteredProjects.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            className={cn("ncp-project-opt", String(p.id) === draft.project_id && "ncp-selected")}
+                            onClick={() => {
+                              set("project_id", String(p.id));
+                              setProjDdOpen(false);
+                              setProjSearch("");
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontFamily: "var(--ncp-mono)",
+                                fontSize: 11,
+                                color: "var(--ncp-accent)",
+                                minWidth: 52,
+                              }}
+                            >
+                              PRJ-{p.id}
+                            </span>
+                            <span>{p.account_name || p.filename || `Project ${p.id}`}</span>
+                          </button>
+                        ))}
+                        {filteredProjects.length === 0 && (
+                          <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--ncp-text-muted)" }}>
+                            No projects match "{projSearch}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>,
+                  document.body,
+                )}
+            </div>
+            {pr("Update date", "update_date", { placeholder: "YYYY-MM-DD" })}
+            {pr("Fiscal year", "fiscal_year_label", { placeholder: "e.g. FY 2025-26" })}
+            <div className="ncp-prop-row">
+              <div className="ncp-prop-label">Project manager</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <UserPickerDropdown
+                  value={pmUserId}
+                  onChange={(v) => {
+                    setPmUserId(v);
+                    const u = assignableUsers.find((x) => String(x.id) === v);
+                    set("project_manager", u ? u.email : "");
+                  }}
+                  users={assignableUsers}
+                  placeholder={selectedProject ? "— Optional —" : "Select a project first"}
+                />
+              </div>
+            </div>
+          </>,
+        )}
+      </div>
+
+      {/* ── Tab 1: Revenue & MMF ───────────────────────── */}
+      <div className={cn("ncp-panel", tab === 1 && "ncp-panel-active")}>
+        {section(
+          "₹",
+          "ncp-green",
+          "Revenue & MMF",
+          "Booking, MMF deduction, net revenue and productivity",
+          <>
+            <div className="ncp-commercial-row" style={{ borderTop: "none", padding: "12px" }}>
+              {amtField("Revenue booked", "revenue_booked_inr")}
+              {amtField("MMF", "mmf_inr")}
+            </div>
+            {pr("Net revenue (INR)", "net_revenue_inr", { inputMode: "decimal", placeholder: "0" })}
+            <div className="ncp-commercial-row" style={{ padding: "0 12px 12px" }}>
+              {amtField("RPH", "rph_inr")}
+              {amtField("% of target", "pct_of_target", "%")}
+            </div>
+          </>,
+        )}
+      </div>
+
+      {/* ── Tab 2: Openings & Joiners ──────────────────── */}
+      <div className={cn("ncp-panel", tab === 2 && "ncp-panel-active")}>
+        {section(
+          "👥",
+          "ncp-blue",
+          "Openings",
+          "Opening requisitions and fees",
+          <>
+            {pr("Opening req (count)", "opening_req", { inputMode: "numeric", placeholder: "0", style: { borderTopWidth: 0 } })}
+            {pr("Opening fee (INR)", "opening_fee_inr", { inputMode: "decimal", placeholder: "0" })}
+          </>,
+        )}
+        {section(
+          "⬥",
+          "ncp-amber",
+          "Joiners",
+          "Taggd, ER/IJP/Other and campus",
+          <>
+            {pr("Total joiners", "total_joiners", { inputMode: "numeric", placeholder: "0", style: { borderTopWidth: 0 } })}
+            {pr("Taggd joiners", "taggd_joiner", { inputMode: "numeric", placeholder: "0" })}
+            {pr("Taggd joiner fee (INR)", "taggd_joiner_fee_inr", { inputMode: "decimal", placeholder: "0" })}
+            {pr("Total joining fee (INR)", "total_joining_fee_inr", { inputMode: "decimal", placeholder: "0" })}
+            {pr("ER/IJP/Other (count)", "er_ijp_other_count", { inputMode: "numeric", placeholder: "0" })}
+            {pr("ER/IJP/Other fee (INR)", "er_ijp_other_fee_inr", { inputMode: "decimal", placeholder: "0" })}
+            {pr("Campus (count)", "campus_count", { inputMode: "numeric", placeholder: "0" })}
+            {pr("Campus fee (INR)", "campus_fee_inr", { inputMode: "decimal", placeholder: "0" })}
+          </>,
+        )}
+      </div>
+
+      {/* ── Tab 3: Invoice & Collection ────────────────── */}
+      <div className={cn("ncp-panel", tab === 3 && "ncp-panel-active")}>
+        {section(
+          "📄",
+          "ncp-blue",
+          "Invoice",
+          "Invoice details, payment tracking and approvals",
+          <>
+            <div className="ncp-commercial-row" style={{ borderTop: "none", padding: "12px" }}>
+              {amtField("Invoice amount", "invoice_amount_inr")}
+              {amtField("Collection received", "collection_received_inr")}
+            </div>
+            {pr("Invoice number", "invoice_number", { placeholder: "INV-XXXX" })}
+            {/* Date grid: raised + due */}
+            {dateGrid([
+              { label: "Invoice raised date", key: "invoice_raised_date" },
+              { label: "Payment due date", key: "payment_due_date" },
+            ])}
+            {/* Standalone: payment received */}
+            <div className="ncp-date-grid">
+              <div className="ncp-date-cell">
+                <label>Payment received date</label>
+                <input
+                  type="date"
+                  value={draft.actual_payment_received_date ?? ""}
+                  onChange={(e) => set("actual_payment_received_date", e.target.value)}
+                />
+              </div>
+            </div>
+            {/* Approver — platform user picker */}
+            <div className="ncp-prop-row">
+              <div className="ncp-prop-label">Approver</div>
+              <div style={{ flex: 1 }}>
+                <UserPickerDropdown
+                  value={approverUserId}
+                  onChange={(v) => {
+                    setApproverUserId(v);
+                    const u = assignableUsers.find((x) => String(x.id) === v);
+                    set("approver_name", u ? u.email : "");
+                  }}
+                  users={assignableUsers}
+                  placeholder={selectedProject ? "— Not assigned —" : "Select a project first"}
+                />
+              </div>
+            </div>
+            {pr("Attachment (URL / ref)", "attachment_ref", { placeholder: "URL or file reference" })}
+          </>,
+        )}
+        {section(
+          "⚖",
+          "ncp-amber",
+          "Adjustments",
+          "Revenue adjustments and reason",
+          <>
+            <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+              <div className="ncp-prop-label">Reason</div>
+              <textarea
+                className="ncp-prop-input"
+                rows={2}
+                placeholder="Describe the adjustment…"
+                value={draft.adjustment_reason ?? ""}
+                onChange={(e) => set("adjustment_reason", e.target.value)}
+              />
+            </div>
+            {pr("Adjustment amount (INR)", "adjustment_amt_inr", { inputMode: "decimal", placeholder: "0" })}
+          </>,
+        )}
+      </div>
+
+      {/* ── Tab 4: Notes ───────────────────────────────── */}
+      <div className={cn("ncp-panel", tab === 4 && "ncp-panel-active")}>
+        {section(
+          "📝",
+          "ncp-blue",
+          "Notes",
+          "Free-form notes for this billing row",
+          <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+            <textarea
+              className="ncp-prop-input"
+              rows={8}
+              placeholder="Any notes, context, or commentary…"
+              value={draft.notes ?? ""}
+              onChange={(e) => set("notes", e.target.value)}
+            />
+          </div>,
+        )}
+      </div>
+    </>
   );
 }
 
@@ -476,6 +807,8 @@ export function Billing() {
   const [editId, setEditId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft(0));
   const [baselineDraft, setBaselineDraft] = useState<Draft | null>(null);
+  const [billingTab, setBillingTab] = useState(0);
+  const [assignableUsers, setAssignableUsers] = useState<PlatformUserLite[]>([]);
 
   /** Client-side filters for the loaded table (API still uses project + limit). */
   const [tableSearch, setTableSearch] = useState("");
@@ -504,6 +837,30 @@ export function Billing() {
   useEffect(() => {
     void queries.projects().then(setProjects).catch(() => setProjects([]));
   }, []);
+
+  useEffect(() => {
+    if (!dialogOpen) {
+      setAssignableUsers([]);
+      return;
+    }
+    const n = parseInt(draft.project_id, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      setAssignableUsers([]);
+      return;
+    }
+    let cancelled = false;
+    void queries
+      .taskAssignableUsers({ project_id: n })
+      .then((list) => {
+        if (!cancelled) setAssignableUsers(list);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignableUsers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dialogOpen, draft.project_id]);
 
   useEffect(() => {
     setLoading(true);
@@ -563,10 +920,10 @@ export function Billing() {
   }
 
   function openCreate() {
-    const id = defaultProjectId || projects[0]?.id || 0;
     setEditId(null);
     setBaselineDraft(null);
-    setDraft(emptyDraft(id));
+    setDraft(emptyDraft(0));
+    setBillingTab(0);
     setDialogOpen(true);
   }
 
@@ -575,6 +932,7 @@ export function Billing() {
     setEditId(r.id);
     setBaselineDraft({ ...d });
     setDraft(d);
+    setBillingTab(0);
     setDialogOpen(true);
   }
 
@@ -865,32 +1223,124 @@ export function Billing() {
         )}
       </PlatformSection>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] w-full max-w-[min(72rem,calc(100vw-2rem))] flex flex-col overflow-hidden p-6 sm:p-8">
-          <DialogHeader>
-            <DialogTitle className="font-syne text-lg">
-              {editId === null ? "New billing row" : `Edit billing #${editId}`}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              All amounts are INR. Dates use YYYY-MM-DD. Only project is required to create; add other fields when ready.
-            </DialogDescription>
-          </DialogHeader>
-          <FormGrid
-            draft={draft}
-            setDraft={setDraft}
-            projectLocked={editId !== null}
-            projects={projects}
-          />
-          <DialogFooter className="gap-2 sm:gap-0 border-t border-border pt-4 mt-2">
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button onClick={() => void handleSave()} disabled={saving || !draft.project_id}>
-              {saving ? "Saving…" : editId === null ? "Create" : "Save changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <Sheet open={dialogOpen} onOpenChange={setDialogOpen}>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className={cn(
+            "flex h-full max-h-[100dvh] flex-col gap-0 border-l p-0",
+            "data-[side=right]:w-full data-[side=right]:max-w-[calc(100vw-1rem)]",
+            "sm:data-[side=right]:w-[min(calc(100vw-2rem),52rem)] sm:data-[side=right]:max-w-[min(calc(100vw-2rem),52rem)]",
+            "bg-[#f7f6f3] shadow-xl",
+          )}
+        >
+          <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+            {/* ── Scrollable content ──────────────────────── */}
+            <div className="ncp-scroll min-h-0 flex-1">
+              <div className="ncp-page">
+                {/* Header */}
+                <div className="ncp-header">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="ncp-breadcrumb">
+                      <span>Billing</span>
+                      <span className="ncp-breadcrumb-sep">›</span>
+                      {editId !== null ? (
+                        <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 10 }}>
+                          BIL-{editId}
+                        </span>
+                      ) : (
+                        <span>New row</span>
+                      )}
+                    </div>
+                    <h1 className="ncp-h1">
+                      {editId === null ? "New billing row" : `Edit billing #${editId}`}
+                    </h1>
+                    <p className="ncp-subtitle" style={{ marginTop: 4 }}>
+                      All amounts are INR. Only project is required to create.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ncp-close-btn"
+                    aria-label="Close"
+                    onClick={() => setDialogOpen(false)}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Form tabs + panels */}
+                <BillingFormNCP
+                  draft={draft}
+                  setDraft={setDraft}
+                  projectLocked={editId !== null}
+                  projects={projects}
+                  assignableUsers={assignableUsers}
+                  tab={billingTab}
+                  setTab={setBillingTab}
+                />
+
+                {/* Error */}
+                {err && (
+                  <div
+                    style={{
+                      margin: "0 0 12px",
+                      padding: "10px 14px",
+                      background: "rgba(239,68,68,0.07)",
+                      border: "1px solid rgba(239,68,68,0.25)",
+                      borderRadius: "var(--ncp-radius)",
+                      fontSize: 12,
+                      color: "#b91c1c",
+                    }}
+                  >
+                    {err}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Footer ─────────────────────────────────── */}
+            <div className="ncp-footer">
+              <button
+                type="button"
+                className="ncp-btn ncp-btn-ghost"
+                onClick={() => setDialogOpen(false)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {billingTab > 0 && (
+                  <button
+                    type="button"
+                    className="ncp-btn ncp-btn-ghost"
+                    onClick={() => setBillingTab((t) => t - 1)}
+                  >
+                    ← Back
+                  </button>
+                )}
+                {billingTab < BILLING_TABS.length - 1 ? (
+                  <button
+                    type="button"
+                    className="ncp-btn ncp-btn-secondary"
+                    onClick={() => setBillingTab((t) => t + 1)}
+                  >
+                    Next →
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="ncp-btn ncp-btn-primary"
+                  disabled={saving || !draft.project_id}
+                  onClick={() => void handleSave()}
+                >
+                  {saving ? "Saving…" : editId === null ? "Create row ✓" : "Save changes ✓"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

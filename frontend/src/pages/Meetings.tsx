@@ -1,21 +1,58 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { queries, type MeetingRow, type Project, type MeetingActionItemRow } from "@/lib/api";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
+import {
+  queries,
+  adminApi,
+  type MeetingRow,
+  type Project,
+  type MeetingActionItemRow,
+} from "@/lib/api";
 import { PageHeader, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import {
+  UserPickerDropdown,
+  type PlatformUserLite,
+} from "@/components/platform/NewContractOrgFlow";
+import "@/styles/new-contract-panel.css";
+
+// ─── Domain constants ─────────────────────────────────────────────────────────
+
+const MEETING_TYPES = [
+  "QBR",
+  "Monthly Review",
+  "Weekly Sync",
+  "Kick-off",
+  "Governance Call",
+  "Steering Committee",
+  "Ad-hoc",
+  "Other",
+];
+const MEETING_MODES = ["Video", "In-person", "Hybrid", "Phone"];
+const MEETING_STATUSES = ["Scheduled", "Completed", "Cancelled"];
+const MOM_STATUSES = ["Draft", "Shared", "Approved"];
+const ACTION_STATUSES = ["Open", "In Progress", "Done", "Cancelled"];
+
+const MTG_TABS = [
+  { icon: "🗓", label: "Overview" },
+  { icon: "👥", label: "Attendees" },
+  { icon: "💬", label: "Discussion" },
+  { icon: "✅", label: "Actions" },
+] as const;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type ExtContact = { name: string; designation: string; email: string; phone: string };
-
 const emptyContact = (): ExtContact => ({ name: "", designation: "", email: "", phone: "" });
-
 const emptyAction = (): Omit<MeetingActionItemRow, "id"> => ({
   description: "",
   owner: "",
@@ -33,23 +70,880 @@ function sortMeetings(rows: MeetingRow[]): MeetingRow[] {
   });
 }
 
+// ─── MultiUserPicker ──────────────────────────────────────────────────────────
+
+function MultiUserPicker({
+  selectedIds,
+  onChange,
+  users,
+}: {
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+  users: PlatformUserLite[];
+}) {
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+  const [ddRect, setDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open) { setDdRect(null); return; }
+    const measure = () => {
+      const b = btnRef.current;
+      if (!b) return;
+      const r = b.getBoundingClientRect();
+      setDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (btnRef.current) ro.observe(btnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
+  }, [open]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || portalRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q
+      ? users.filter((u) => u.email.toLowerCase().includes(q) || u.role.toLowerCase().includes(q))
+      : users;
+  }, [users, search]);
+
+  const selected = users.filter((u) => selectedIds.includes(String(u.id)));
+
+  function toggle(id: string) {
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+  }
+
+  function userColor(email: string) {
+    const colors = ["#6366f1","#e16f3d","#14b8a6","#f59e0b","#3884ff","#2ecc71","#ec4899"];
+    let h = 0; for (const c of email) h = (h * 31 + c.charCodeAt(0)) & 0xfffffff;
+    return colors[Math.abs(h) % colors.length];
+  }
+  function initials(email: string) {
+    const [a = "", b = ""] = email.split("@")[0].split(/[._-]/);
+    return (a[0] + (b[0] || a[1] || "")).toUpperCase() || "?";
+  }
+
+  const panel = (
+    <div
+      className="ncp-user-dd ncp-open ncp-user-dd--portal"
+      onClick={(e) => e.stopPropagation()}
+      style={{ maxHeight: 320, display: "flex", flexDirection: "column" }}
+    >
+      <div className="ncp-project-search">
+        <span style={{ opacity: 0.5 }}>🔍</span>
+        <input
+          type="search"
+          placeholder="Search users…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          autoFocus
+        />
+      </div>
+      <div
+        className="ncp-dd-scroll"
+        onWheel={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
+        {filtered.map((u) => {
+          const checked = selectedIds.includes(String(u.id));
+          return (
+            <button
+              key={u.id}
+              type="button"
+              className="ncp-project-opt"
+              onClick={() => toggle(String(u.id))}
+              style={{ display: "flex", alignItems: "center", gap: 10 }}
+            >
+              <span className="ncp-user-ico" style={{ background: userColor(u.email) }}>
+                {initials(u.email)}
+              </span>
+              <div style={{ flex: 1, textAlign: "left" }}>
+                <div style={{ fontWeight: 500, color: "var(--ncp-text-primary)" }}>{u.email}</div>
+                <div style={{ fontSize: 11, color: "var(--ncp-text-muted)", fontFamily: "var(--ncp-mono)" }}>{u.role}</div>
+              </div>
+              {checked && <span style={{ color: "var(--ncp-accent)", fontSize: 14, fontWeight: 700 }}>✓</span>}
+            </button>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--ncp-text-muted)" }}>No users match "{search}"</div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div ref={wrapRef} style={{ flex: 1, minWidth: 0 }}>
+      {/* Chips + trigger */}
+      <div
+        ref={btnRef}
+        className="ncp-multi-user-btn"
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+          padding: "8px 12px",
+          border: "1px solid var(--ncp-border)",
+          borderRadius: "var(--ncp-radius-lg)",
+          background: "var(--ncp-surface-hover)",
+          cursor: "pointer",
+          minHeight: 40,
+          alignItems: "center",
+        }}
+      >
+        {selected.length === 0 && (
+          <span style={{ fontSize: 13, color: "var(--ncp-text-muted)" }}>👤 — None selected —</span>
+        )}
+        {selected.map((u) => (
+          <span
+            key={u.id}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              background: "var(--ncp-accent-soft)",
+              border: "1px solid var(--ncp-accent-mid)",
+              borderRadius: 100,
+              padding: "2px 8px 2px 4px",
+              fontSize: 12,
+              fontFamily: "var(--ncp-font)",
+              color: "var(--ncp-text-primary)",
+            }}
+          >
+            <span
+              style={{
+                width: 18, height: 18, borderRadius: "50%", display: "inline-flex",
+                alignItems: "center", justifyContent: "center",
+                background: userColor(u.email), color: "#fff",
+                fontSize: 9, fontWeight: 700, fontFamily: "var(--ncp-mono)",
+              }}
+            >
+              {initials(u.email)}
+            </span>
+            {u.email.split("@")[0]}
+            <span
+              style={{ cursor: "pointer", opacity: 0.5, fontSize: 14, lineHeight: 1 }}
+              onClick={(e) => { e.stopPropagation(); toggle(String(u.id)); }}
+            >
+              ×
+            </span>
+          </span>
+        ))}
+        <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)", fontSize: 12 }}>▾</span>
+      </div>
+      {open && ddRect && createPortal(
+        <div
+          ref={portalRef}
+          className="new-contract-sheet"
+          style={{ position: "fixed", top: ddRect.top, left: ddRect.left, width: ddRect.width, zIndex: 200, pointerEvents: "auto", minHeight: 0, height: "auto", display: "block", background: "transparent" }}
+        >
+          {panel}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+// ─── Agenda tag taxonomy ──────────────────────────────────────────────────────
+
+const AGENDA_TAXONOMY: Record<string, string[]> = {
+  "Pipeline & Delivery": [
+    "Hiring pipeline review",
+    "Open requisitions update",
+    "Joiner / offer status",
+    "Backfill & attrition review",
+    "Recruiter productivity",
+    "Campus delivery review",
+  ],
+  "SLA & Performance": [
+    "SLA scorecard review",
+    "TAT & quality metrics",
+    "Candidate conversion rates",
+    "ER / IJP performance",
+    "Sourcing mix analysis",
+    "Quality of hire review",
+  ],
+  "Commercial & Finance": [
+    "Revenue & billing review",
+    "Invoice & payment status",
+    "MMF / fee discussion",
+    "Contract renewal",
+    "Commercial terms update",
+    "Budget vs actuals",
+  ],
+  "Account Governance": [
+    "Client feedback",
+    "Escalation & risk",
+    "Relationship health check",
+    "Stakeholder alignment",
+    "Account expansion",
+    "Satisfaction review",
+  ],
+  "Planning & Strategy": [
+    "Quarterly planning",
+    "Annual target setting",
+    "New mandate discussion",
+    "Process improvement",
+    "Technology & systems",
+    "Team structure / capacity",
+  ],
+  "Compliance & Actions": [
+    "Action item review",
+    "MoM sign-off",
+    "Audit / compliance",
+    "Onboarding / transitions",
+    "SOP review",
+    "Data quality review",
+  ],
+};
+
+const ALL_AGENDA_TAGS = Object.values(AGENDA_TAXONOMY).flat();
+
+/** CSS class colour variant per category (matches ncp-agenda-cat.cat-* in stylesheet) */
+const CATEGORY_COLOR_CLASS: Record<string, string> = {
+  "Pipeline & Delivery":  "cat-accent",
+  "SLA & Performance":    "cat-blue",
+  "Commercial & Finance": "cat-green",
+  "Account Governance":   "cat-amber",
+  "Planning & Strategy":  "cat-indigo",
+  "Compliance & Actions": "cat-teal",
+};
+
+/** Selected chip colour class (matches ncp-agenda-tag.sel-* in stylesheet) */
+const CATEGORY_SEL_CLASS: Record<string, string> = {
+  "Pipeline & Delivery":  "sel-accent",
+  "SLA & Performance":    "sel-blue",
+  "Commercial & Finance": "sel-green",
+  "Account Governance":   "sel-amber",
+  "Planning & Strategy":  "sel-indigo",
+  "Compliance & Actions": "sel-teal",
+};
+
+function parseAgenda(raw: string): { selected: string[]; custom: string } {
+  if (!raw.trim()) return { selected: [], custom: "" };
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const selected: string[] = [];
+  const custom: string[] = [];
+  for (const p of parts) {
+    if (ALL_AGENDA_TAGS.includes(p)) selected.push(p);
+    else custom.push(p);
+  }
+  return { selected, custom: custom.join(", ") };
+}
+
+function serializeAgenda(selected: string[], custom: string): string {
+  const extra = custom.split(",").map((s) => s.trim()).filter((s) => s && !ALL_AGENDA_TAGS.includes(s));
+  return [...selected, ...extra].join(", ");
+}
+
+// ─── AgendaTagPicker ──────────────────────────────────────────────────────────
+
+function AgendaTagPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { selected: initSel, custom: initCustom } = useMemo(() => parseAgenda(value), []);
+
+  const [selected, setSelected] = useState<string[]>(initSel);
+  const [custom, setCustom] = useState(initCustom);
+  const [activeCategory, setActiveCategory] = useState<string>(Object.keys(AGENDA_TAXONOMY)[0]);
+
+  useEffect(() => {
+    onChange(serializeAgenda(selected, custom));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, custom]);
+
+  function toggle(tag: string) {
+    setSelected((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+    );
+  }
+
+  const categories = Object.keys(AGENDA_TAXONOMY);
+  const tags = AGENDA_TAXONOMY[activeCategory] ?? [];
+
+  return (
+    <div className="ncp-agenda-wrap">
+
+      {/* ── Category tab strip ─────────────────────── */}
+      <div className="ncp-agenda-cats">
+        {categories.map((cat) => {
+          const count = (AGENDA_TAXONOMY[cat] ?? []).filter((t) => selected.includes(t)).length;
+          const isActive = cat === activeCategory;
+          const colorCls = CATEGORY_COLOR_CLASS[cat] ?? "cat-accent";
+          return (
+            <button
+              key={cat}
+              type="button"
+              className={cn("ncp-agenda-cat", colorCls, isActive && "cat-on")}
+              onClick={() => setActiveCategory(cat)}
+            >
+              {count > 0 && <span className="ncp-agenda-cat-dot" />}
+              {cat}
+              {count > 0 && (
+                <span className="ncp-agenda-cat-count">
+                  <span>{count}</span>
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Tag chip grid for active category ──────── */}
+      <div className="ncp-agenda-tags">
+        {tags.map((tag) => {
+          const on = selected.includes(tag);
+          const selCls = CATEGORY_SEL_CLASS[activeCategory] ?? "sel-accent";
+          return (
+            <button
+              key={tag}
+              type="button"
+              className={cn("ncp-agenda-tag", on && selCls)}
+              onClick={() => toggle(tag)}
+            >
+              {on && <span className="ncp-agenda-tag-dot" />}
+              {tag}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Selected summary (shown only when ≥1 selected) ── */}
+      {selected.length > 0 && (
+        <div className="ncp-agenda-summary">
+          <span className="ncp-agenda-summary-label">{selected.length} selected</span>
+          {selected.map((t) => {
+            const cat = Object.entries(AGENDA_TAXONOMY).find(([, ts]) => ts.includes(t))?.[0];
+            const selCls = cat ? (CATEGORY_SEL_CLASS[cat] ?? "sel-accent") : "sel-accent";
+            return (
+              <span key={t} className={cn("ncp-agenda-sel-chip", selCls)}>
+                {t}
+                <button
+                  type="button"
+                  className="ncp-agenda-dismiss"
+                  onClick={(e) => { e.stopPropagation(); toggle(t); }}
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Custom / ad-hoc items ───────────────────── */}
+      <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+        <div className="ncp-prop-label">Custom topics</div>
+        <input
+          className="ncp-prop-input"
+          placeholder="Any other agenda item, comma-separated…"
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
+
+
+
+function MeetingFormNCP({
+  // overview
+  meetingTitle, setMeetingTitle,
+  meetingType, setMeetingType,
+  meetingDate, setMeetingDate,
+  startTime, setStartTime,
+  endTime, setEndTime,
+  meetingMode, setMeetingMode,
+  meetingStatus, setMeetingStatus,
+  followUpDate, setFollowUpDate,
+  nextMeetingDate, setNextMeetingDate,
+  // project
+  projectId,
+  projects,
+  onProjectChange,
+  accountSnapshot, setAccountSnapshot,
+  // attendees
+  organizerUserId, setOrganizerUserId,
+  setOrganizerName,
+  internalIds, setInternalIds,
+  attendeesExternal, setAttendeesExternal,
+  extContacts, setExtContacts,
+  // discussion
+  agendaItems, setAgendaItems,
+  keyDiscussionPoints, setKeyDiscussionPoints,
+  discussionSummary, setDiscussionSummary,
+  decisionsTaken, setDecisionsTaken,
+  momStatus, setMomStatus,
+  momLinkRemarks, setMomLinkRemarks,
+  // actions
+  actions, setActions,
+  // meta
+  platformUsers,
+  tab, setTab,
+}: {
+  meetingTitle: string; setMeetingTitle: (v: string) => void;
+  meetingType: string; setMeetingType: (v: string) => void;
+  meetingDate: string; setMeetingDate: (v: string) => void;
+  startTime: string; setStartTime: (v: string) => void;
+  endTime: string; setEndTime: (v: string) => void;
+  meetingMode: string; setMeetingMode: (v: string) => void;
+  meetingStatus: string; setMeetingStatus: (v: string) => void;
+  followUpDate: string; setFollowUpDate: (v: string) => void;
+  nextMeetingDate: string; setNextMeetingDate: (v: string) => void;
+  projectId: string;
+  projects: Project[];
+  onProjectChange: (pid: string) => void;
+  accountSnapshot: string; setAccountSnapshot: (v: string) => void;
+  organizerUserId: string; setOrganizerUserId: (v: string) => void;
+  setOrganizerName: (v: string) => void;
+  internalIds: string[]; setInternalIds: (ids: string[]) => void;
+  attendeesExternal: string; setAttendeesExternal: (v: string) => void;
+  extContacts: ExtContact[]; setExtContacts: React.Dispatch<React.SetStateAction<ExtContact[]>>;
+  agendaItems: string; setAgendaItems: (v: string) => void;
+  keyDiscussionPoints: string; setKeyDiscussionPoints: (v: string) => void;
+  discussionSummary: string; setDiscussionSummary: (v: string) => void;
+  decisionsTaken: string; setDecisionsTaken: (v: string) => void;
+  momStatus: string; setMomStatus: (v: string) => void;
+  momLinkRemarks: string; setMomLinkRemarks: (v: string) => void;
+  actions: Omit<MeetingActionItemRow, "id">[];
+  setActions: React.Dispatch<React.SetStateAction<Omit<MeetingActionItemRow, "id">[]>>;
+  platformUsers: PlatformUserLite[];
+  tab: number; setTab: (n: number) => void;
+}) {
+  // Project picker portal
+  const [projDdOpen, setProjDdOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState("");
+  const [projDdRect, setProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const projWrapRef = useRef<HTMLDivElement>(null);
+  const projBtnRef = useRef<HTMLButtonElement>(null);
+  const projPortalRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!projDdOpen) { setProjDdRect(null); return; }
+    const measure = () => {
+      const btn = projBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (projBtnRef.current) ro.observe(projBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
+  }, [projDdOpen]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (projWrapRef.current?.contains(t) || projPortalRef.current?.contains(t)) return;
+      setProjDdOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
+
+  const filteredProjects = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = `prj-${p.id} ${p.account_name || p.engagement_name || p.filename || ""}`.toLowerCase();
+      return lab.includes(q);
+    });
+  }, [projects, projSearch]);
+
+  const selectedProject = useMemo(() => {
+    const pid = parseInt(projectId, 10);
+    return Number.isFinite(pid) && pid > 0 ? projects.find((p) => p.id === pid) ?? null : null;
+  }, [projectId, projects]);
+
+  // helpers
+  const pr = (label: string, value: string, onChange: (v: string) => void, extra?: React.InputHTMLAttributes<HTMLInputElement>) => (
+    <div className="ncp-prop-row">
+      <div className="ncp-prop-label">{label}</div>
+      <input className="ncp-prop-input" value={value} onChange={(e) => onChange(e.target.value)} {...extra} />
+    </div>
+  );
+
+  const dd = (label: string, value: string, onChange: (v: string) => void, opts: string[], allowEmpty = true) => (
+    <div className="ncp-prop-row">
+      <div className="ncp-prop-label">{label}</div>
+      <select className="ncp-prop-input" value={value} onChange={(e) => onChange(e.target.value)}>
+        {allowEmpty && <option value="">— Choose —</option>}
+        {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+
+  const ta = (label: string, value: string, onChange: (v: string) => void, rows = 3, placeholder = "") => (
+    <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+      <div className="ncp-prop-label" style={{ paddingTop: 10 }}>{label}</div>
+      <textarea
+        className="ncp-prop-input"
+        rows={rows}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ resize: "vertical" }}
+      />
+    </div>
+  );
+
+  const section = (icon: React.ReactNode, colorCls: string, label: string, desc: string, body: React.ReactNode) => (
+    <div className="ncp-section" style={{ marginBottom: 12 }}>
+      <div className="ncp-section-header" style={{ cursor: "default" }}>
+        <div className={cn("ncp-section-icon", colorCls)}>{icon}</div>
+        <div>
+          <div className="ncp-section-label">{label}</div>
+          <div className="ncp-section-desc">{desc}</div>
+        </div>
+      </div>
+      <div className="ncp-section-body" style={{ maxHeight: 600 }}>{body}</div>
+    </div>
+  );
+
+  return (
+    <>
+      {/* ── Tabs ──────────────────────────────────────────── */}
+      <div className="ncp-steps" role="tablist" style={{ marginBottom: 18 }}>
+        {MTG_TABS.map(({ icon, label }, i) => (
+          <button
+            key={label}
+            type="button"
+            role="tab"
+            aria-selected={tab === i}
+            className={cn("ncp-step", tab === i && "ncp-active")}
+            onClick={() => setTab(i)}
+          >
+            <span className="ncp-step-num" style={{ fontSize: 14, background: tab === i ? "rgba(255,255,255,0.22)" : "var(--ncp-border)" }}>
+              {i < tab ? "✓" : icon}
+            </span>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab 0: Overview ───────────────────────────────── */}
+      <div className={cn("ncp-panel", tab === 0 && "ncp-panel-active")}>
+        {section("🗓", "ncp-orange", "Meeting details", "Title, type and linked project",
+          <>
+            {pr("Title", meetingTitle, setMeetingTitle, { placeholder: "e.g. Q2 QBR — Siemens" })}
+            {dd("Type", meetingType, setMeetingType, MEETING_TYPES)}
+            {/* Project picker */}
+            <div ref={projWrapRef} className="ncp-prop-row" style={{ alignItems: "center" }}>
+              <div className="ncp-prop-label">Project</div>
+              <div style={{ flex: 1, position: "relative" }}>
+                <button
+                  ref={projBtnRef}
+                  type="button"
+                  className={cn("ncp-project-btn", selectedProject && "ncp-selected")}
+                  style={{ padding: "8px 12px", height: 36 }}
+                  onClick={(e) => { e.stopPropagation(); setProjDdOpen((o) => !o); }}
+                >
+                  {selectedProject ? (
+                    <>
+                      <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)" }}>PRJ-{selectedProject.id}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)" }}>
+                        {selectedProject.account_name || selectedProject.engagement_name || selectedProject.filename || "—"}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ color: "var(--ncp-text-muted)", fontSize: 13 }}>— None / optional —</span>
+                  )}
+                  <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)" }}>▾</span>
+                </button>
+                {projDdOpen && projDdRect && createPortal(
+                  <div
+                    ref={projPortalRef}
+                    className="new-contract-sheet"
+                    style={{ position: "fixed", top: projDdRect.top, left: projDdRect.left, width: projDdRect.width, zIndex: 200, pointerEvents: "auto", minHeight: 0, height: "auto", display: "block", background: "transparent" }}
+                  >
+                    <div className="ncp-project-dd ncp-open ncp-project-dd--portal" onClick={(e) => e.stopPropagation()}>
+                      <div className="ncp-project-search">
+                        <span style={{ opacity: 0.5 }}>🔍</span>
+                        <input type="search" placeholder="Search projects…" value={projSearch} onChange={(e) => setProjSearch(e.target.value)} autoFocus />
+                      </div>
+                      <div className="ncp-dd-scroll" onWheel={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()}>
+                        <button type="button" className="ncp-project-opt" onClick={() => { onProjectChange(""); setProjDdOpen(false); setProjSearch(""); }}>
+                          <span style={{ fontSize: 11, color: "var(--ncp-text-muted)" }}>— None —</span>
+                        </button>
+                        {filteredProjects.map((p) => (
+                          <button key={p.id} type="button"
+                            className={cn("ncp-project-opt", projectId === String(p.id) && "ncp-selected")}
+                            onClick={() => { onProjectChange(String(p.id)); setProjDdOpen(false); setProjSearch(""); }}
+                          >
+                            <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)", minWidth: 52 }}>PRJ-{p.id}</span>
+                            <span>{p.account_name || p.engagement_name || p.filename || `Project ${p.id}`}</span>
+                          </button>
+                        ))}
+                        {filteredProjects.length === 0 && <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--ncp-text-muted)" }}>No projects match "{projSearch}"</div>}
+                      </div>
+                    </div>
+                  </div>,
+                  document.body,
+                )}
+              </div>
+            </div>
+            {pr("Account (snapshot)", accountSnapshot, setAccountSnapshot, { placeholder: "e.g. Siemens Healthineers" })}
+          </>
+        )}
+        {section("🕐", "ncp-blue", "Schedule", "When and how",
+          <>
+            <div className="ncp-date-grid" style={{ borderTop: "none" }}>
+              <div className="ncp-date-cell">
+                <label>Meeting date</label>
+                <input type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} />
+              </div>
+              <div className="ncp-date-cell">
+                <label>Follow-up date</label>
+                <input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="ncp-date-grid">
+              <div className="ncp-date-cell">
+                <label>Start time</label>
+                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+              </div>
+              <div className="ncp-date-cell">
+                <label>End time</label>
+                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+              </div>
+            </div>
+            <div className="ncp-date-grid">
+              <div className="ncp-date-cell" style={{ gridColumn: "1 / -1" }}>
+                <label>Next meeting date</label>
+                <input type="date" value={nextMeetingDate} onChange={(e) => setNextMeetingDate(e.target.value)} />
+              </div>
+            </div>
+            {dd("Mode", meetingMode, setMeetingMode, MEETING_MODES)}
+            {dd("Status", meetingStatus, setMeetingStatus, MEETING_STATUSES, false)}
+          </>
+        )}
+      </div>
+
+      {/* ── Tab 1: Attendees ──────────────────────────────── */}
+      <div className={cn("ncp-panel", tab === 1 && "ncp-panel-active")}>
+        {section("👤", "ncp-orange", "Organizer", "Meeting host / caller",
+          <div className="ncp-prop-row">
+            <div className="ncp-prop-label">Organizer</div>
+            <div style={{ flex: 1 }}>
+              <UserPickerDropdown
+                value={organizerUserId}
+                onChange={(v) => {
+                  setOrganizerUserId(v);
+                  const u = platformUsers.find((x) => String(x.id) === v);
+                  setOrganizerName(u ? u.email : "");
+                }}
+                users={platformUsers}
+                placeholder="— Select organizer —"
+              />
+            </div>
+          </div>
+        )}
+        {section("👥", "ncp-blue", "Internal attendees", "Platform users present in this meeting",
+          <div className="ncp-prop-row" style={{ alignItems: "flex-start", paddingTop: 8 }}>
+            <div className="ncp-prop-label" style={{ paddingTop: 6 }}>Attendees</div>
+            <MultiUserPicker
+              selectedIds={internalIds}
+              onChange={setInternalIds}
+              users={platformUsers}
+            />
+          </div>
+        )}
+        {section("🌐", "ncp-amber", "External attendees", "Contacts from the client / partner side",
+          <>
+            {extContacts.map((c, i) => (
+              <div key={i} style={{ borderTop: i === 0 ? "none" : "1px solid var(--ncp-border)" }}>
+                <div style={{ display: "flex", alignItems: "center", padding: "8px 0 4px", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--ncp-accent)", fontFamily: "var(--ncp-mono)", minWidth: 20 }}>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ncp-text-secondary)", flex: 1 }}>
+                    {c.name || c.email || "Contact"}
+                  </span>
+                  <button
+                    type="button"
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "var(--ncp-text-muted)", padding: "0 4px" }}
+                    onClick={() => setExtContacts((prev) => prev.length === 1 ? [emptyContact()] : prev.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </button>
+                </div>
+                {[
+                  { label: "Name", key: "name" as const, placeholder: "Full name" },
+                  { label: "Designation", key: "designation" as const, placeholder: "e.g. VP HR" },
+                  { label: "Email", key: "email" as const, placeholder: "work@company.com" },
+                  { label: "Phone", key: "phone" as const, placeholder: "+91 …" },
+                ].map(({ label, key, placeholder }) => (
+                  <div key={key} className="ncp-prop-row">
+                    <div className="ncp-prop-label" style={{ paddingLeft: 28 }}>{label}</div>
+                    <input
+                      className="ncp-prop-input"
+                      placeholder={placeholder}
+                      value={c[key]}
+                      onChange={(e) => setExtContacts((prev) => prev.map((x, j) => j === i ? { ...x, [key]: e.target.value } : x))}
+                    />
+                  </div>
+                ))}
+              </div>
+            ))}
+            <button
+              type="button"
+              className="ncp-btn ncp-btn-ghost"
+              style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
+              onClick={() => setExtContacts((p) => [...p, emptyContact()])}
+            >
+              + Add external contact
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* ── Tab 2: Discussion ─────────────────────────────── */}
+      <div className={cn("ncp-panel", tab === 2 && "ncp-panel-active")}>
+        {section("📋", "ncp-blue", "Content", "Agenda, discussion and decisions",
+          <>
+            <div className="ncp-section-body" style={{ borderTop: "none", padding: "12px 14px" }}>
+              <AgendaTagPicker value={agendaItems} onChange={setAgendaItems} />
+            </div>
+            {ta("Key points", keyDiscussionPoints, setKeyDiscussionPoints, 3, "Bullet points from the conversation…")}
+            {ta("Summary", discussionSummary, setDiscussionSummary, 3, "Overall narrative summary…")}
+            {ta("Decisions", decisionsTaken, setDecisionsTaken, 3, "Decisions made / agreed upon…")}
+          </>
+        )}
+        {section("📄", "ncp-amber", "Minutes of Meeting", "MoM status and record link",
+          <>
+            {dd("MoM status", momStatus, setMomStatus, MOM_STATUSES)}
+            {pr("MoM link / remarks", momLinkRemarks, setMomLinkRemarks, { placeholder: "Paste link or note…" })}
+          </>
+        )}
+      </div>
+
+      {/* ── Tab 3: Actions ────────────────────────────────── */}
+      <div className={cn("ncp-panel", tab === 3 && "ncp-panel-active")}>
+        {section("✅", "ncp-green", "Action items", "Tasks and owners from this meeting",
+          <>
+            {actions.map((a, i) => (
+              <div key={i} style={{ borderTop: i === 0 ? "none" : "1px solid var(--ncp-border)", paddingTop: i === 0 ? 0 : 6 }}>
+                <div style={{ display: "flex", alignItems: "center", padding: "6px 0 2px", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--ncp-accent)", fontFamily: "var(--ncp-mono)", minWidth: 20 }}>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ncp-text-secondary)", flex: 1 }}>
+                    {a.description || "Action item"}
+                  </span>
+                  <button
+                    type="button"
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "var(--ncp-text-muted)", padding: "0 4px" }}
+                    onClick={() => setActions((prev) => prev.length === 1 ? [emptyAction()] : prev.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="ncp-prop-row">
+                  <div className="ncp-prop-label" style={{ paddingLeft: 28 }}>Description</div>
+                  <input
+                    className="ncp-prop-input"
+                    placeholder="What needs to be done…"
+                    value={a.description ?? ""}
+                    onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
+                  />
+                </div>
+                <div className="ncp-prop-row">
+                  <div className="ncp-prop-label" style={{ paddingLeft: 28 }}>Owner</div>
+                  <input
+                    className="ncp-prop-input"
+                    placeholder="Name or email…"
+                    value={a.owner ?? ""}
+                    onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, owner: e.target.value } : x))}
+                  />
+                </div>
+                <div className="ncp-prop-row">
+                  <div className="ncp-prop-label" style={{ paddingLeft: 28 }}>Due date</div>
+                  <input
+                    type="date"
+                    className="ncp-prop-input"
+                    value={a.due_date ?? ""}
+                    onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, due_date: e.target.value } : x))}
+                  />
+                </div>
+                <div className="ncp-prop-row">
+                  <div className="ncp-prop-label" style={{ paddingLeft: 28 }}>Status</div>
+                  <select
+                    className="ncp-prop-input"
+                    value={a.status ?? ""}
+                    onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, status: e.target.value } : x))}
+                  >
+                    <option value="">— Choose —</option>
+                    {ACTION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="ncp-btn ncp-btn-ghost"
+              style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
+              onClick={() => setActions((p) => [...p, emptyAction()])}
+            >
+              + Add action item
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Meetings (main page) ─────────────────────────────────────────────────────
+
 export function Meetings() {
+  const [searchParams] = useSearchParams();
+  const openedFromUrlRef = useRef<number | null>(null);
+
   const [rows, setRows] = useState<MeetingRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [platformUsers, setPlatformUsers] = useState<PlatformUserLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [meetingTab, setMeetingTab] = useState(0);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
 
+  // Form state
   const [meetingTitle, setMeetingTitle] = useState("");
   const [meetingType, setMeetingType] = useState("");
   const [meetingDate, setMeetingDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [organizerName, setOrganizerName] = useState("");
-  const [attendeesInternal, setAttendeesInternal] = useState("");
+  const [organizerUserId, setOrganizerUserId] = useState("");
+  const [internalIds, setInternalIds] = useState<string[]>([]);
   const [attendeesExternal, setAttendeesExternal] = useState("");
   const [extContacts, setExtContacts] = useState<ExtContact[]>([emptyContact()]);
   const [projectId, setProjectId] = useState<string>("");
@@ -64,26 +958,28 @@ export function Meetings() {
   const [meetingStatus, setMeetingStatus] = useState("Scheduled");
   const [momStatus, setMomStatus] = useState("");
   const [momLinkRemarks, setMomLinkRemarks] = useState("");
-  const [attachmentsJson, setAttachmentsJson] = useState("");
   const [actions, setActions] = useState<Omit<MeetingActionItemRow, "id">[]>([emptyAction()]);
 
   const refresh = useCallback(() => {
     setLoading(true);
     Promise.all([queries.meetingsList(), queries.projects()])
-      .then(([m, p]) => {
-        setRows(m);
-        setProjects(p);
-      })
-      .catch(() => {
-        setRows([]);
-        setProjects([]);
-      })
+      .then(([m, p]) => { setRows(m); setProjects(p); })
+      .catch(() => { setRows([]); setProjects([]); })
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Load platform users once
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    Promise.all([queries.taskAssignableUsers().catch(() => []), adminApi.listUsers().catch(() => [])])
+      .then(([a, b]) => {
+        const m = new Map<number, PlatformUserLite>();
+        for (const u of a as PlatformUserLite[]) m.set(u.id, u);
+        for (const u of b as PlatformUserLite[]) if (!m.has(u.id)) m.set(u.id, u);
+        setPlatformUsers(Array.from(m.values()).sort((x, y) => x.email.localeCompare(y.email)));
+      });
+  }, []);
 
   const projectById = useMemo(() => {
     const m = new Map<number, Project>();
@@ -96,110 +992,79 @@ export function Meetings() {
     const sorted = sortMeetings(rows);
     if (!q) return sorted;
     return sorted.filter((r) => {
-      const blob = [
-        r.meeting_title,
-        r.meeting_type,
-        r.account_name_snapshot,
-        r.organizer_name,
-        r.meeting_status,
-        r.mom_status,
-        String(r.id),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+      const blob = [r.meeting_title, r.meeting_type, r.account_name_snapshot, r.organizer_name, r.meeting_status, r.mom_status, String(r.id)]
+        .filter(Boolean).join(" ").toLowerCase();
       return blob.includes(q);
     });
   }, [rows, search]);
 
   function resetForm() {
     setEditingId(null);
-    setMeetingTitle("");
-    setMeetingType("");
-    setMeetingDate("");
-    setStartTime("");
-    setEndTime("");
-    setOrganizerName("");
-    setAttendeesInternal("");
-    setAttendeesExternal("");
-    setExtContacts([emptyContact()]);
-    setProjectId("");
-    setAccountSnapshot("");
-    setAgendaItems("");
-    setDiscussionSummary("");
-    setDecisionsTaken("");
-    setKeyDiscussionPoints("");
-    setFollowUpDate("");
-    setNextMeetingDate("");
-    setMeetingMode("");
-    setMeetingStatus("Scheduled");
-    setMomStatus("");
-    setMomLinkRemarks("");
-    setAttachmentsJson("");
-    setActions([emptyAction()]);
+    setMeetingTitle(""); setMeetingType(""); setMeetingDate("");
+    setStartTime(""); setEndTime(""); setOrganizerName(""); setOrganizerUserId("");
+    setInternalIds([]); setAttendeesExternal(""); setExtContacts([emptyContact()]);
+    setProjectId(""); setAccountSnapshot(""); setAgendaItems("");
+    setDiscussionSummary(""); setDecisionsTaken(""); setKeyDiscussionPoints("");
+    setFollowUpDate(""); setNextMeetingDate(""); setMeetingMode("");
+    setMeetingStatus("Scheduled"); setMomStatus(""); setMomLinkRemarks("");
+    setActions([emptyAction()]); setMeetingTab(0); setSaveErr(null);
   }
 
   function openCreate() {
     resetForm();
-    setDialogOpen(true);
+    setSheetOpen(true);
   }
 
-  function openEdit(m: MeetingRow) {
+  const openEdit = useCallback((m: MeetingRow) => {
     setEditingId(m.id);
-    setMeetingTitle(m.meeting_title ?? "");
-    setMeetingType(m.meeting_type ?? "");
+    setMeetingTitle(m.meeting_title ?? ""); setMeetingType(m.meeting_type ?? "");
     setMeetingDate(m.meeting_date?.slice(0, 10) ?? "");
-    setStartTime(m.start_time ?? "");
-    setEndTime(m.end_time ?? "");
+    setStartTime(m.start_time ?? ""); setEndTime(m.end_time ?? "");
     setOrganizerName(m.organizer_name ?? "");
-    setAttendeesInternal(m.attendees_internal ?? "");
+    // Sync organizer user id
+    setOrganizerUserId("");
+    setInternalIds([]);
+    if (m.attendees_internal) {
+      // no-op: we'll try to match after platformUsers load
+    }
     setAttendeesExternal(m.attendees_external ?? "");
     const ej = m.external_attendees_json;
-    if (Array.isArray(ej) && ej.length) {
-      setExtContacts(
-        ej.map((x) => ({
-          name: String((x as Record<string, unknown>).name ?? ""),
-          designation: String((x as Record<string, unknown>).designation ?? ""),
-          email: String((x as Record<string, unknown>).email ?? ""),
-          phone: String((x as Record<string, unknown>).phone ?? ""),
-        })),
-      );
-    } else {
-      setExtContacts([emptyContact()]);
-    }
+    setExtContacts(Array.isArray(ej) && ej.length
+      ? ej.map((x) => ({
+          name: String((x as Record<string,unknown>).name ?? ""),
+          designation: String((x as Record<string,unknown>).designation ?? ""),
+          email: String((x as Record<string,unknown>).email ?? ""),
+          phone: String((x as Record<string,unknown>).phone ?? ""),
+        }))
+      : [emptyContact()]);
     setProjectId(m.project_id != null ? String(m.project_id) : "");
     setAccountSnapshot(m.account_name_snapshot ?? "");
-    setAgendaItems(m.agenda_items ?? "");
-    setDiscussionSummary(m.discussion_summary ?? "");
-    setDecisionsTaken(m.decisions_taken ?? "");
-    setKeyDiscussionPoints(m.key_discussion_points ?? "");
+    setAgendaItems(m.agenda_items ?? ""); setDiscussionSummary(m.discussion_summary ?? "");
+    setDecisionsTaken(m.decisions_taken ?? ""); setKeyDiscussionPoints(m.key_discussion_points ?? "");
     setFollowUpDate(m.follow_up_date?.slice(0, 10) ?? "");
     setNextMeetingDate(m.next_meeting_date?.slice(0, 10) ?? "");
-    setMeetingMode(m.meeting_mode ?? "");
-    setMeetingStatus(m.meeting_status ?? "Scheduled");
-    setMomStatus(m.mom_status ?? "");
-    setMomLinkRemarks(m.mom_link_remarks ?? "");
-    setAttachmentsJson(m.attachments_json ? JSON.stringify(m.attachments_json, null, 2) : "");
-    setActions(
-      m.action_items?.length
-        ? m.action_items.map((a) => ({
-            description: a.description ?? "",
-            owner: a.owner ?? "",
-            due_date: a.due_date?.slice(0, 10) ?? "",
-            status: a.status ?? "",
-            sort_order: a.sort_order ?? 0,
-          }))
-        : [emptyAction()],
-    );
-    setDialogOpen(true);
-  }
+    setMeetingMode(m.meeting_mode ?? ""); setMeetingStatus(m.meeting_status ?? "Scheduled");
+    setMomStatus(m.mom_status ?? ""); setMomLinkRemarks(m.mom_link_remarks ?? "");
+    setActions(m.action_items?.length
+      ? m.action_items.map((a) => ({ description: a.description ?? "", owner: a.owner ?? "", due_date: a.due_date?.slice(0,10) ?? "", status: a.status ?? "", sort_order: a.sort_order ?? 0 }))
+      : [emptyAction()]);
+    setMeetingTab(0); setSaveErr(null);
+    setSheetOpen(true);
+  }, []);
+
+  // Sync organizer + internal after users load
+  useEffect(() => {
+    if (!platformUsers.length) return;
+    if (organizerName && !organizerUserId) {
+      const u = platformUsers.find((x) => x.email.toLowerCase() === organizerName.toLowerCase());
+      if (u) setOrganizerUserId(String(u.id));
+    }
+  }, [platformUsers, organizerName, organizerUserId]);
 
   function onProjectChange(pid: string) {
     setProjectId(pid);
     const id = parseInt(pid, 10);
-    if (!pid || Number.isNaN(id)) {
-      return;
-    }
+    if (!pid || Number.isNaN(id)) return;
     const p = projectById.get(id);
     if (p) {
       const label = (p.account_name || p.engagement_name || "").trim();
@@ -210,32 +1075,12 @@ export function Meetings() {
   function buildPayload(): Record<string, unknown> {
     const pid = projectId.trim() ? parseInt(projectId, 10) : NaN;
     const extJson = extContacts
-      .map((c) => ({
-        name: c.name.trim(),
-        designation: c.designation.trim(),
-        email: c.email.trim(),
-        phone: c.phone.trim(),
-      }))
+      .map((c) => ({ name: c.name.trim(), designation: c.designation.trim(), email: c.email.trim(), phone: c.phone.trim() }))
       .filter((c) => c.name || c.email || c.phone || c.designation);
-    let attachments: unknown = null;
-    const aj = attachmentsJson.trim();
-    if (aj) {
-      try {
-        attachments = JSON.parse(aj);
-      } catch {
-        throw new Error("Attachments must be valid JSON (array or object).");
-      }
-    }
-    const actionPayload = actions
-      .map((a, i) => ({
-        description: (a.description ?? "").trim() || null,
-        owner: (a.owner ?? "").trim() || null,
-        due_date: (a.due_date ?? "").trim() || null,
-        status: (a.status ?? "").trim() || null,
-        sort_order: i,
-      }))
-      .filter((a) => a.description || a.owner || a.due_date || a.status);
-
+    // Build attendees_internal from selected user emails
+    const internalEmails = internalIds
+      .map((id) => platformUsers.find((u) => String(u.id) === id)?.email ?? "")
+      .filter(Boolean).join(", ");
     return {
       meeting_title: meetingTitle.trim() || null,
       meeting_type: meetingType.trim() || null,
@@ -243,7 +1088,7 @@ export function Meetings() {
       start_time: startTime.trim() || null,
       end_time: endTime.trim() || null,
       organizer_name: organizerName.trim() || null,
-      attendees_internal: attendeesInternal.trim() || null,
+      attendees_internal: internalEmails || null,
       attendees_external: attendeesExternal.trim() || null,
       external_attendees_json: extJson.length ? extJson : null,
       project_id: !Number.isNaN(pid) ? pid : null,
@@ -258,13 +1103,15 @@ export function Meetings() {
       meeting_status: meetingStatus.trim() || null,
       mom_status: momStatus.trim() || null,
       mom_link_remarks: momLinkRemarks.trim() || null,
-      attachments_json: attachments,
-      action_items: actionPayload,
+      attachments_json: null,
+      action_items: actions
+        .map((a, i) => ({ description: (a.description ?? "").trim() || null, owner: (a.owner ?? "").trim() || null, due_date: (a.due_date ?? "").trim() || null, status: (a.status ?? "").trim() || null, sort_order: i }))
+        .filter((a) => a.description || a.owner || a.due_date || a.status),
     };
   }
 
   async function save() {
-    setSaving(true);
+    setSaving(true); setSaveErr(null);
     try {
       const body = buildPayload();
       if (editingId != null) {
@@ -274,11 +1121,10 @@ export function Meetings() {
         const created = await queries.createMeeting(body);
         setRows((prev) => [created, ...prev]);
       }
-      setDialogOpen(false);
+      setSheetOpen(false);
       resetForm();
     } catch (e: unknown) {
-      const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Save failed";
-      alert(msg);
+      setSaveErr(e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Save failed");
     } finally {
       setSaving(false);
     }
@@ -290,10 +1136,20 @@ export function Meetings() {
       await queries.deleteMeeting(id);
       setRows((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
-      const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Delete failed";
-      alert(msg);
+      alert(e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Delete failed");
     }
   }
+
+  useEffect(() => {
+    if (loading) return;
+    const raw = searchParams.get("meeting");
+    if (!raw) return;
+    const id = parseInt(raw, 10);
+    if (Number.isNaN(id)) return;
+    if (openedFromUrlRef.current === id) return;
+    const m = rows.find((r) => r.id === id);
+    if (m) { openedFromUrlRef.current = id; openEdit(m); }
+  }, [loading, rows, searchParams, openEdit]);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -306,7 +1162,7 @@ export function Meetings() {
           type="button"
           className="platform-dialog__btn platform-dialog__btn--primary"
           style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
-          onClick={() => openCreate()}
+          onClick={openCreate}
         >
           + Log meeting
         </button>
@@ -329,33 +1185,22 @@ export function Meetings() {
             <table className="platform-table" style={{ minWidth: 1100 }}>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Date</th>
-                  <th>Title</th>
-                  <th>Type</th>
-                  <th>Account / project</th>
-                  <th>Mode</th>
-                  <th>Status</th>
-                  <th>Organizer</th>
-                  <th>MoM</th>
-                  <th>Created</th>
-                  <th />
+                  <th>ID</th><th>Date</th><th>Title</th><th>Type</th>
+                  <th>Account / project</th><th>Mode</th><th>Status</th>
+                  <th>Organizer</th><th>MoM</th><th>Created</th><th />
                 </tr>
               </thead>
               <tbody>
-                {!loading && filtered.length === 0 && (
+                {filtered.length === 0 && (
                   <tr>
                     <td colSpan={11} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
-                      No meetings yet. Use “Log meeting”.
+                      No meetings yet. Use "Log meeting".
                     </td>
                   </tr>
                 )}
                 {filtered.map((m) => {
                   const pr = m.project_id != null ? projectById.get(m.project_id) : undefined;
-                  const prLabel =
-                    m.account_name_snapshot ||
-                    (pr && (pr.engagement_name || pr.account_name)) ||
-                    (m.project_id != null ? `PRJ-${m.project_id}` : "—");
+                  const prLabel = m.account_name_snapshot || (pr && (pr.engagement_name || pr.account_name)) || (m.project_id != null ? `PRJ-${m.project_id}` : "—");
                   return (
                     <tr key={m.id}>
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>{m.id}</td>
@@ -364,9 +1209,7 @@ export function Meetings() {
                       <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{m.meeting_type ?? "—"}</td>
                       <td style={{ fontSize: 11 }}>{prLabel}</td>
                       <td style={{ fontSize: 10, color: "var(--text-muted)" }}>{m.meeting_mode ?? "—"}</td>
-                      <td>
-                        <StatusTag status={m.meeting_status || "—"} />
-                      </td>
+                      <td><StatusTag status={m.meeting_status || "—"} /></td>
                       <td style={{ fontSize: 11 }}>{m.organizer_name ?? "—"}</td>
                       <td style={{ fontSize: 10, color: "var(--text-muted)" }}>{m.mom_status ?? "—"}</td>
                       <td style={{ fontSize: 10, color: "var(--text-muted)" }}>
@@ -374,17 +1217,8 @@ export function Meetings() {
                         <div style={{ fontSize: 9, opacity: 0.8 }}>{m.system_created_at?.slice(0, 16) ?? ""}</div>
                       </td>
                       <td style={{ whiteSpace: "nowrap" }}>
-                        <button type="button" className="platform-dialog__btn" style={{ fontSize: 10, padding: "4px 8px" }} onClick={() => openEdit(m)}>
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="platform-dialog__btn"
-                          style={{ fontSize: 10, padding: "4px 8px", marginLeft: 6, color: "var(--red)", borderColor: "rgba(255,79,107,0.35)" }}
-                          onClick={() => void removeMeeting(m.id)}
-                        >
-                          Delete
-                        </button>
+                        <button type="button" className="platform-dialog__btn" style={{ fontSize: 10, padding: "4px 8px" }} onClick={() => openEdit(m)}>Edit</button>
+                        <button type="button" className="platform-dialog__btn" style={{ fontSize: 10, padding: "4px 8px", marginLeft: 6, color: "var(--red)", borderColor: "rgba(255,79,107,0.35)" }} onClick={() => void removeMeeting(m.id)}>Delete</button>
                       </td>
                     </tr>
                   );
@@ -395,193 +1229,97 @@ export function Meetings() {
         </PlatformSection>
       )}
 
-      <Dialog
-        open={dialogOpen}
-        onOpenChange={(o) => {
-          if (!o) resetForm();
-          setDialogOpen(o);
-        }}
-      >
-        <DialogContent showCloseButton className={cn("platform-dialog platform-dialog--wide max-h-[92vh] overflow-y-auto")}>
-          <DialogHeader className="platform-dialog__header">
-            <div className="platform-dialog__eyebrow">{editingId != null ? `Edit · MTG-${editingId}` : "New meeting"}</div>
-            <DialogTitle className="platform-dialog__title">{editingId != null ? "Update meeting record" : "Log a meeting"}</DialogTitle>
-            <DialogDescription className="platform-dialog__desc">
-              Link an optional project for access scoping. External contacts support name, designation, email, and phone. Action items replace the prior list on save.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="platform-dialog__body space-y-4" style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Meeting title</span>
-                <input className="platform-search" value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Meeting type (QBR, Monthly, …)</span>
-                <input className="platform-search" value={meetingType} onChange={(e) => setMeetingType(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Date</span>
-                <input className="platform-search" type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Organizer (name)</span>
-                <input className="platform-search" value={organizerName} onChange={(e) => setOrganizerName(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Start time</span>
-                <input className="platform-search" placeholder="12:00" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>End time</span>
-                <input className="platform-search" placeholder="12:30" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-              </label>
-            </div>
-
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Project (optional — ties to account scope)</span>
-              <select className="platform-search" value={projectId} onChange={(e) => onProjectChange(e.target.value)}>
-                <option value="">— None —</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    PRJ-{p.id} · {(p.engagement_name || p.account_name || p.filename || "").slice(0, 48)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Account / customer label (snapshot)</span>
-              <input className="platform-search" value={accountSnapshot} onChange={(e) => setAccountSnapshot(e.target.value)} placeholder="e.g. Siemens Healthineers" />
-            </label>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Meeting mode</span>
-                <input className="platform-search" value={meetingMode} onChange={(e) => setMeetingMode(e.target.value)} placeholder="Video / In person" />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Meeting status</span>
-                <select className="platform-search" value={meetingStatus} onChange={(e) => setMeetingStatus(e.target.value)}>
-                  <option value="Scheduled">Scheduled</option>
-                  <option value="Completed">Completed</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>MoM status</span>
-                <input className="platform-search" value={momStatus} onChange={(e) => setMomStatus(e.target.value)} placeholder="Draft / Shared" />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Follow-up date</span>
-                <input className="platform-search" type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-                <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Next meeting date</span>
-                <input className="platform-search" type="date" value={nextMeetingDate} onChange={(e) => setNextMeetingDate(e.target.value)} />
-              </label>
-            </div>
-
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Attendees (internal)</span>
-              <textarea className="platform-search" rows={2} value={attendeesInternal} onChange={(e) => setAttendeesInternal(e.target.value)} placeholder="Comma or line separated" />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Attendees (external — free text)</span>
-              <textarea className="platform-search" rows={2} value={attendeesExternal} onChange={(e) => setAttendeesExternal(e.target.value)} />
-            </label>
-
-            <div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginBottom: 8 }}>External contacts (structured)</div>
-              <div style={{ display: "grid", gap: 8 }}>
-                {extContacts.map((c, i) => (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 6, alignItems: "end" }}>
-                    <input className="platform-search" placeholder="Name" value={c.name} onChange={(e) => setExtContacts((prev) => prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
-                    <input className="platform-search" placeholder="Designation" value={c.designation} onChange={(e) => setExtContacts((prev) => prev.map((x, j) => (j === i ? { ...x, designation: e.target.value } : x)))} />
-                    <input className="platform-search" placeholder="Email" value={c.email} onChange={(e) => setExtContacts((prev) => prev.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} />
-                    <input className="platform-search" placeholder="Phone" value={c.phone} onChange={(e) => setExtContacts((prev) => prev.map((x, j) => (j === i ? { ...x, phone: e.target.value } : x)))} />
-                    <button
-                      type="button"
-                      className="platform-dialog__btn"
-                      style={{ fontSize: 10, padding: "6px 8px" }}
-                      onClick={() => setExtContacts((prev) => prev.filter((_, j) => j !== i || prev.length === 1))}
-                    >
-                      −
-                    </button>
+      {/* ── NCP side sheet ─────────────────────────────────── */}
+      <Sheet open={sheetOpen} onOpenChange={(o) => { if (!o) resetForm(); setSheetOpen(o); }}>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className={cn(
+            "flex h-full max-h-[100dvh] flex-col gap-0 border-l p-0",
+            "data-[side=right]:w-full data-[side=right]:max-w-[calc(100vw-1rem)]",
+            "sm:data-[side=right]:w-[min(calc(100vw-2rem),52rem)] sm:data-[side=right]:max-w-[min(calc(100vw-2rem),52rem)]",
+            "bg-[#f7f6f3] shadow-xl",
+          )}
+        >
+          <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+            {/* Scrollable content */}
+            <div className="ncp-scroll min-h-0 flex-1">
+              <div className="ncp-page">
+                {/* Header */}
+                <div className="ncp-header">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="ncp-breadcrumb">
+                      <span>Meetings</span>
+                      <span className="ncp-breadcrumb-sep">›</span>
+                      {editingId != null
+                        ? <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 10 }}>MTG-{editingId}</span>
+                        : <span>New</span>}
+                    </div>
+                    <h1 className="ncp-h1">
+                      {editingId == null ? "Log a meeting" : `Edit meeting #${editingId}`}
+                    </h1>
+                    <p className="ncp-subtitle" style={{ marginTop: 4 }}>
+                      Record a governance call, QBR, or MoM. Link an optional project for scoping.
+                    </p>
                   </div>
-                ))}
-                <button type="button" className="platform-dialog__btn" style={{ fontSize: 10 }} onClick={() => setExtContacts((p) => [...p, emptyContact()])}>
-                  + Add contact row
-                </button>
+                  <button type="button" className="ncp-close-btn" aria-label="Close" onClick={() => setSheetOpen(false)}>✕</button>
+                </div>
+
+                {/* Form */}
+                <MeetingFormNCP
+                  meetingTitle={meetingTitle} setMeetingTitle={setMeetingTitle}
+                  meetingType={meetingType} setMeetingType={setMeetingType}
+                  meetingDate={meetingDate} setMeetingDate={setMeetingDate}
+                  startTime={startTime} setStartTime={setStartTime}
+                  endTime={endTime} setEndTime={setEndTime}
+                  meetingMode={meetingMode} setMeetingMode={setMeetingMode}
+                  meetingStatus={meetingStatus} setMeetingStatus={setMeetingStatus}
+                  followUpDate={followUpDate} setFollowUpDate={setFollowUpDate}
+                  nextMeetingDate={nextMeetingDate} setNextMeetingDate={setNextMeetingDate}
+                  projectId={projectId} projects={projects} onProjectChange={onProjectChange}
+                  accountSnapshot={accountSnapshot} setAccountSnapshot={setAccountSnapshot}
+                  organizerUserId={organizerUserId} setOrganizerUserId={setOrganizerUserId}
+                  setOrganizerName={setOrganizerName}
+                  internalIds={internalIds} setInternalIds={setInternalIds}
+                  attendeesExternal={attendeesExternal} setAttendeesExternal={setAttendeesExternal}
+                  extContacts={extContacts} setExtContacts={setExtContacts}
+                  agendaItems={agendaItems} setAgendaItems={setAgendaItems}
+                  keyDiscussionPoints={keyDiscussionPoints} setKeyDiscussionPoints={setKeyDiscussionPoints}
+                  discussionSummary={discussionSummary} setDiscussionSummary={setDiscussionSummary}
+                  decisionsTaken={decisionsTaken} setDecisionsTaken={setDecisionsTaken}
+                  momStatus={momStatus} setMomStatus={setMomStatus}
+                  momLinkRemarks={momLinkRemarks} setMomLinkRemarks={setMomLinkRemarks}
+                  actions={actions} setActions={setActions}
+                  platformUsers={platformUsers}
+                  tab={meetingTab} setTab={setMeetingTab}
+                />
+
+                {saveErr && (
+                  <div style={{ margin: "0 0 12px", padding: "10px 14px", background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "var(--ncp-radius)", fontSize: 12, color: "#b91c1c" }}>
+                    {saveErr}
+                  </div>
+                )}
               </div>
             </div>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Agenda items</span>
-              <textarea className="platform-search" rows={2} value={agendaItems} onChange={(e) => setAgendaItems(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Discussion summary</span>
-              <textarea className="platform-search" rows={2} value={discussionSummary} onChange={(e) => setDiscussionSummary(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Key discussion points</span>
-              <textarea className="platform-search" rows={2} value={keyDiscussionPoints} onChange={(e) => setKeyDiscussionPoints(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Decisions taken</span>
-              <textarea className="platform-search" rows={2} value={decisionsTaken} onChange={(e) => setDecisionsTaken(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>MoM link / remarks</span>
-              <textarea className="platform-search" rows={2} value={momLinkRemarks} onChange={(e) => setMomLinkRemarks(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10 }}>
-              <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Attachments (JSON array — optional)</span>
-              <textarea
-                className="platform-search"
-                style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}
-                rows={2}
-                value={attachmentsJson}
-                onChange={(e) => setAttachmentsJson(e.target.value)}
-                placeholder='[{"name":"deck","url":"https://..."}]'
-              />
-            </label>
-
-            <div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginBottom: 8 }}>Action items</div>
-              <div style={{ display: "grid", gap: 8 }}>
-                {actions.map((a, i) => (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: 6, alignItems: "end" }}>
-                    <input className="platform-search" placeholder="Description" value={a.description ?? ""} onChange={(e) => setActions((prev) => prev.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))} />
-                    <input className="platform-search" placeholder="Owner" value={a.owner ?? ""} onChange={(e) => setActions((prev) => prev.map((x, j) => (j === i ? { ...x, owner: e.target.value } : x)))} />
-                    <input className="platform-search" type="date" value={a.due_date ?? ""} onChange={(e) => setActions((prev) => prev.map((x, j) => (j === i ? { ...x, due_date: e.target.value } : x)))} />
-                    <input className="platform-search" placeholder="Status" value={a.status ?? ""} onChange={(e) => setActions((prev) => prev.map((x, j) => (j === i ? { ...x, status: e.target.value } : x)))} />
-                    <button
-                      type="button"
-                      className="platform-dialog__btn"
-                      style={{ fontSize: 10, padding: "6px 8px" }}
-                      onClick={() => setActions((prev) => prev.filter((_, j) => j !== i || prev.length === 1))}
-                    >
-                      −
-                    </button>
-                  </div>
-                ))}
-                <button type="button" className="platform-dialog__btn" style={{ fontSize: 10 }} onClick={() => setActions((p) => [...p, emptyAction()])}>
-                  + Add action item
+            {/* Footer */}
+            <div className="ncp-footer">
+              <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {meetingTab > 0 && (
+                  <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setMeetingTab((t) => t - 1)}>← Back</button>
+                )}
+                {meetingTab < MTG_TABS.length - 1 && (
+                  <button type="button" className="ncp-btn ncp-btn-secondary" onClick={() => setMeetingTab((t) => t + 1)}>Next →</button>
+                )}
+                <button type="button" className="ncp-btn ncp-btn-primary" disabled={saving} onClick={() => void save()}>
+                  {saving ? "Saving…" : editingId == null ? "Create ✓" : "Save changes ✓"}
                 </button>
               </div>
             </div>
           </div>
-          <DialogFooter className="platform-dialog__footer">
-            <button type="button" className="platform-dialog__btn" onClick={() => setDialogOpen(false)} disabled={saving}>
-              Cancel
-            </button>
-            <button type="button" className="platform-dialog__btn platform-dialog__btn--primary" onClick={() => void save()} disabled={saving}>
-              {saving ? "Saving…" : editingId != null ? "Save changes" : "Create"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

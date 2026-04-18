@@ -401,8 +401,19 @@ export type Project = {
   filename: string;
   /** FK to clients.id — parent legal client for rollups */
   client_id?: number | null;
+  /** Client > BU > SBU: parent BU project (same client_id), null for top-level */
+  parent_project_id?: number | null;
+  /** business_unit | sub_business_unit (legacy rows: null = SBU) */
+  org_unit_kind?: string | null;
   /** SBU / engagement label (e.g. TATA Motors) */
   engagement_name?: string | null;
+  /** Optional BU / SBU / SBG / SBE directory tags */
+  hierarchy_tag_bu?: string | null;
+  hierarchy_tag_sbu?: string | null;
+  hierarchy_tag_sbg?: string | null;
+  hierarchy_tag_sbe?: string | null;
+  /** Linked platform user as accountable project head */
+  project_head_user_id?: number | null;
   /** Joined from Client.official_name in list/detail APIs */
   client_official_name?: string | null;
   account_name?: string;
@@ -459,6 +470,8 @@ export type ProjectTransitionRow = {
   ageing_days_effective: number | null;
   reason_for_delay: string | null;
   linked_meeting_ids_json: number[] | null;
+  /** Uploaded files: [{ filename, original_name, uploaded_at }] — persisted on server disk + DB JSON. */
+  resource_attachments_json?: { filename: string; original_name: string; uploaded_at?: string }[] | null;
   created_by_user_id: number | null;
   updated_by_user_id: number | null;
   system_created_at: string | null;
@@ -472,6 +485,12 @@ export type ClientGroup = {
   id: number;
   official_name: string;
   short_code: string | null;
+  /** prospect = pre-close; active = operating client */
+  lifecycle_state?: string | null;
+  hierarchy_tag_bu?: string | null;
+  hierarchy_tag_sbu?: string | null;
+  hierarchy_tag_sbg?: string | null;
+  hierarchy_tag_sbe?: string | null;
   projects: Project[];
 };
 
@@ -512,11 +531,25 @@ export type ProjectContractRow = {
   internal_signoff: string | null;
   revenue_run_rate_inr: number | null;
   practice_head_snapshot: string | null;
+  /** Commercial closing pipeline stage */
+  pipeline_stage?: string | null;
   system_created_at?: string | null;
   system_updated_at?: string | null;
   source_filename?: string | null;
   uploaded_by?: string | null;
 };
+
+/** Contract commercial closing pipeline — values match POST/PATCH /contracts. */
+export const CONTRACT_PIPELINE_STAGES: { value: string; label: string }[] = [
+  { value: "discovery", label: "Discovery" },
+  { value: "meetings_in_process", label: "Meetings in process" },
+  { value: "terms_settlement", label: "Terms settlement" },
+  { value: "legal_review", label: "Legal review" },
+  { value: "signed", label: "Signed" },
+  { value: "active_client", label: "Active client" },
+  { value: "lapsed", label: "Lapsed" },
+  { value: "cancelled", label: "Cancelled" },
+];
 
 /** `platform_meetings` + nested `meeting_action_items` (MoM / governance). */
 export type MeetingActionItemRow = {
@@ -630,8 +663,13 @@ export type AdminUserRow = {
 
 export const adminApi = {
   listUsers: () => api.get<AdminUserRow[]>("/admin/users").then((r) => r.data),
-  createUser: (body: { email: string; password: string; role: string; vertical_access?: string[] }) =>
-    api.post("/admin/users", body).then((r) => r.data),
+  createUser: (body: {
+    email: string;
+    password: string;
+    role: string;
+    vertical_access?: string[];
+    manager_user_id?: number | null;
+  }) => api.post("/admin/users", body).then((r) => r.data),
   patchUser: (
     id: number,
     body: {
@@ -1073,6 +1111,33 @@ export const queries = {
   patchTransition: (projectId: number, body: Record<string, unknown>) =>
     api.patch<ProjectTransitionRow>(`/transitions/by-project/${projectId}`, body).then((r) => r.data),
 
+  uploadTransitionResource: (projectId: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api
+      .post<{ attachment: { filename: string; original_name: string; uploaded_at: string }; transition: ProjectTransitionRow }>(
+        `/transitions/by-project/${projectId}/upload-resource`,
+        fd,
+      )
+      .then((r) => r.data);
+  },
+
+  downloadTransitionResource: (projectId: number, filename: string, originalName: string) =>
+    api
+      .get(`/transitions/by-project/${projectId}/resource-file/${encodeURIComponent(filename)}`, {
+        responseType: "blob",
+      })
+      .then((r) => {
+        const url = URL.createObjectURL(r.data);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = originalName || filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }),
+
   /** PATCH directory metadata (charge code, heads, region, category, …). */
   patchProjectMetadata: (
     project_id: number,
@@ -1094,6 +1159,13 @@ export const queries = {
         | "practice"
         | "client_id"
         | "engagement_name"
+        | "parent_project_id"
+        | "org_unit_kind"
+        | "hierarchy_tag_bu"
+        | "hierarchy_tag_sbu"
+        | "hierarchy_tag_sbg"
+        | "hierarchy_tag_sbe"
+        | "project_head_user_id"
       >
     >
   ) =>
@@ -1139,6 +1211,29 @@ export const queries = {
       return r.data;
     }),
 
+  uploadContractMSA: (contractId: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api
+      .post<{ status: string; filename: string; sow_msa_reference: string }>(
+        `/contracts/${contractId}/upload-msa`,
+        fd,
+      )
+      .then((r) => r.data);
+  },
+
+  contractMSAUrl: (contractId: number) => `/contracts/${contractId}/msa-document`,
+
+  realiseContractClient: (id: number) =>
+    api
+      .post<{ status: string; client_id: number; lifecycle_state: string }>(`/contracts/${id}/realise-client`, {})
+      .then((r) => {
+        invalidateCache("contracts");
+        invalidateCache("clients");
+        invalidateCache("client/");
+        return r.data;
+      }),
+
   deleteContract: (id: number) =>
     api.delete<{ status: string; id: number }>(`/contracts/${id}`).then((r) => {
       invalidateCache("contracts");
@@ -1173,15 +1268,31 @@ export const queries = {
   deleteVendorLicense: (id: number) =>
     api.delete<{ status: string; id: number }>(`/vendor-licenses/${id}`).then((r) => r.data),
 
-  taskAssignableUsers: () =>
-    api.get<{ id: number; email: string; role: string }[]>(`/tasks/meta/assignable-users`).then((r) => r.data),
+  taskAssignableUsers: (params?: { project_id?: number }) => {
+    const q =
+      params?.project_id != null && params.project_id > 0
+        ? `?project_id=${encodeURIComponent(String(params.project_id))}`
+        : "";
+    return api
+      .get<{ id: number; email: string; role: string }[]>(`/tasks/meta/assignable-users${q}`)
+      .then((r) => r.data);
+  },
 
-  tasksList: (params?: { status?: string; project_id?: number; mine?: boolean; overdue?: boolean }) => {
+  tasksList: (params?: {
+    status?: string;
+    project_id?: number;
+    mine?: boolean;
+    overdue?: boolean;
+    task_category?: string;
+    linked_resource_type?: string;
+  }) => {
     const sp = new URLSearchParams();
     if (params?.status) sp.set("status", params.status);
     if (params?.project_id != null) sp.set("project_id", String(params.project_id));
     if (params?.mine) sp.set("mine", "true");
     if (params?.overdue) sp.set("overdue", "true");
+    if (params?.task_category?.trim()) sp.set("task_category", params.task_category.trim());
+    if (params?.linked_resource_type?.trim()) sp.set("linked_resource_type", params.linked_resource_type.trim());
     const q = sp.toString();
     return api.get<TaskRow[]>(`/tasks${q ? `?${q}` : ""}`).then((r) => r.data);
   },
@@ -1208,19 +1319,64 @@ export const queries = {
       api.get<ClientGroup>(`/clients/${clientId}`).then((r) => r.data)
     ),
 
-  createClient: (body: { official_name: string; short_code?: string | null }) =>
+  createClient: (body: {
+    official_name: string;
+    short_code?: string | null;
+    lifecycle_state?: "active" | "prospect";
+    hierarchy_tag_bu?: string | null;
+    hierarchy_tag_sbu?: string | null;
+    hierarchy_tag_sbg?: string | null;
+    hierarchy_tag_sbe?: string | null;
+  }) =>
     api
-      .post<{ id: number; official_name: string; short_code: string | null }>("/clients", body)
+      .post<{ id: number; official_name: string; short_code: string | null; lifecycle_state?: string }>(
+        "/clients",
+        body,
+      )
       .then((r) => {
         invalidateCache("clients");
         return r.data;
       }),
 
-  patchClient: (clientId: number, body: { official_name?: string; short_code?: string | null }) =>
+  createClientProject: (
+    clientId: number,
+    body: {
+      engagement_name: string;
+      account_name?: string | null;
+      org_unit_kind?: string | null;
+      parent_project_id?: number | null;
+      project_head_user_id?: number | null;
+      practice_head?: string | null;
+      project_head?: string | null;
+      hierarchy_tag_bu?: string | null;
+      hierarchy_tag_sbu?: string | null;
+      hierarchy_tag_sbg?: string | null;
+      hierarchy_tag_sbe?: string | null;
+    },
+  ) =>
+    api.post<Project>(`/clients/${clientId}/projects`, body).then((r) => {
+      invalidateCache("projects");
+      invalidateCache("clients");
+      invalidateCache(`client/${clientId}`);
+      return r.data;
+    }),
+
+  patchClient: (
+    clientId: number,
+    body: {
+      official_name?: string;
+      short_code?: string | null;
+      lifecycle_state?: "active" | "prospect";
+      hierarchy_tag_bu?: string | null;
+      hierarchy_tag_sbu?: string | null;
+      hierarchy_tag_sbg?: string | null;
+      hierarchy_tag_sbe?: string | null;
+    },
+  ) =>
     api
-      .patch<{ id: number; official_name: string; short_code: string | null }>(
+      .patch<{ id: number; official_name: string; short_code: string | null; lifecycle_state?: string }>(
         `/clients/${clientId}`,
-        body
+        body,
       )
       .then((r) => {
         invalidateCache("clients");

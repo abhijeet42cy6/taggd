@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Contract — Reimagined</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f7f6f3;
+    --surface: #ffffff;
+    --surface-hover: #f7f6f3;
+    --border: rgba(55, 53, 47, 0.09);
+    --border-focus: rgba(55, 53, 47, 0.3);
+    --text-primary: #191817;
+    --text-secondary: rgba(55, 53, 47, 0.65);
+    --text-muted: rgba(55, 53, 47, 0.4);
+    --accent: #e16f3d;
+    --accent-soft: rgba(225, 111, 61, 0.08);
+    --accent-mid: rgba(225, 111, 61, 0.18);
+    --green: #2ecc71;
+    --green-soft: rgba(46, 204, 113, 0.1);
+    --amber: #f59e0b;
+    --amber-soft: rgba(245, 158, 11, 0.1);
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+    --radius: 6px;
+    --radius-lg: 10px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1917;
+      --surface: #252422;
+      --surface-hover: #2e2c2a;
+      --border: rgba(255,255,255,0.08);
+      --border-focus: rgba(255,255,255,0.25);
+      --text-primary: #f0ede8;
+      --text-secondary: rgba(240, 237, 232, 0.6);
+      --text-muted: rgba(240, 237, 232, 0.35);
+      --accent-soft: rgba(225, 111, 61, 0.12);
+      --accent-mid: rgba(225, 111, 61, 0.22);
+      --green-soft: rgba(46, 204, 113, 0.12);
+      --amber-soft: rgba(245, 158, 11, 0.12);
+    }
+  }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 32px 16px 64px;
+    color: var(--text-primary);
+  }
+
+  .page {
+    width: 100%;
+    max-width: 680px;
+    animation: fadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 32px;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .breadcrumb-sep { opacity: 0.4; }
+
+  h1 {
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+
+  .subtitle {
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-width: 480px;
+  }
+
+  .close-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: var(--border);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    color: var(--text-secondary);
+    font-size: 16px;
+  }
+  .close-btn:hover { background: var(--border-focus); }
+
+  /* ── Progress Steps ── */
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 32px;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 4px;
+    overflow: hidden;
+  }
+
+  .step {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .step.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .step.done {
+    color: var(--text-secondary);
+  }
+
+  .step.done .step-num {
+    background: var(--green);
+    color: #fff;
+  }
+
+  .step-num {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: var(--mono);
+    flex-shrink: 0;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .step.active .step-num {
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+  }
+
+  /* ── Panels ── */
+  .panel {
+    display: none;
+    animation: fadeIn 0.25s ease both;
+  }
+  .panel.active { display: block; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Section card ── */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+
+  .section:focus-within {
+    box-shadow: var(--shadow);
+    border-color: var(--border-focus);
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .section-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .section-icon.orange { background: var(--accent-soft); }
+  .section-icon.blue   { background: rgba(56,132,255,0.08); }
+  .section-icon.green  { background: var(--green-soft); }
+  .section-icon.amber  { background: var(--amber-soft); }
+
+  .section-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
+  }
+
+  .section-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .section-toggle {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 13px;
+    transition: transform 0.2s;
+  }
+
+  .section.collapsed .section-toggle { transform: rotate(-90deg); }
+
+  .section-body {
+    padding: 0 18px 16px;
+    overflow: hidden;
+    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .section.collapsed .section-body {
+    max-height: 0 !important;
+    padding-bottom: 0;
+  }
+
+  /* ── Inline property rows (Notion style) ── */
+  .prop-row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    align-items: center;
+    min-height: 36px;
+    border-radius: var(--radius);
+    padding: 4px 0;
+    gap: 12px;
+  }
+
+  .prop-row + .prop-row {
+    border-top: 1px solid var(--border);
+  }
+
+  .prop-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    padding: 6px 8px;
+    border-radius: var(--radius);
+    cursor: default;
+    transition: background 0.12s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .prop-row:hover .prop-label { background: var(--surface-hover); }
+
+  .prop-icon { font-size: 13px; opacity: 0.7; }
+
+  .required-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-left: 2px;
+  }
+
+  .prop-input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--text-primary);
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    outline: none;
+    transition: background 0.12s;
+    line-height: 1.4;
+  }
+
+  .prop-input:hover { background: var(--surface-hover); }
+  .prop-input:focus { background: var(--accent-soft); outline: none; }
+  .prop-input::placeholder { color: var(--text-muted); }
+
+  .prop-input[type="date"] {
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  .prop-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+
+  select.prop-input {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+  }
+
+  /* ── Status badge select ── */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 8px;
+    border-radius: 100px;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    font-family: var(--font);
+    outline: none;
+    appearance: none;
+    transition: filter 0.15s;
+  }
+  .status-pill:hover { filter: brightness(0.94); }
+  .status-pill.active { background: var(--green-soft); color: #1a7a47; }
+  .status-pill.pending { background: var(--amber-soft); color: #92600a; }
+  .status-pill.inactive { background: var(--border); color: var(--text-secondary); }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.green { background: var(--green); }
+  .dot.amber { background: var(--amber); }
+  .dot.gray  { background: var(--text-muted); }
+
+  /* ── Computed field ── */
+  .computed-field {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-mid);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-family: var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+  }
+
+  .computed-label {
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: var(--mono);
+  }
+
+  /* ── Date grid ── */
+  .date-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 4px 0 8px;
+  }
+
+  .date-cell {
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    cursor: pointer;
+  }
+
+  .date-cell:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .date-cell label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-family: var(--mono);
+    margin-bottom: 4px;
+  }
+
+  .date-cell input[type="date"] {
+    display: block;
+    width: 100%;
+    border: none;
+    background: transparent;
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    outline: none;
+    cursor: pointer;
+  }
+  .date-cell input::-webkit-calendar-picker-indicator { opacity: 0.4; cursor: pointer; }
+
+  /* ── Commercial card ── */
+  .commercial-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding-top: 4px;
+  }
+
+  .amount-input-wrap {
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .amount-input-wrap:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .amount-input-wrap label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-family: var(--mono);
+    margin-bottom: 4px;
+  }
+
+  .amount-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .currency-badge {
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    font-weight: 500;
+    background: var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .amount-input-wrap input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-primary);
+    outline: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .amount-input-wrap input::placeholder { color: var(--text-muted); font-weight: 400; }
+
+  /* ── Project selector ── */
+  .project-select-wrap {
+    position: relative;
+    margin-bottom: 8px;
+  }
+
+  .project-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1.5px dashed var(--border-focus);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    text-align: left;
+  }
+
+  .project-btn:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .project-btn.selected {
+    border-style: solid;
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .project-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius);
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+    color: white;
+    font-weight: 500;
+    font-family: var(--mono);
+  }
+
+  .project-meta { flex: 1; min-width: 0; }
+  .project-meta strong { display: block; font-size: 14px; }
+  .project-meta span { font-size: 12px; color: var(--text-secondary); font-weight: 400; }
+
+  .project-chevron { color: var(--text-muted); font-size: 14px; }
+
+  .project-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+    overflow: hidden;
+  }
+
+  .project-dropdown.open { display: block; }
+
+  .project-search {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .project-search input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--text-primary);
+    outline: none;
+  }
+  .project-search input::placeholder { color: var(--text-muted); }
+
+  .project-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 13px;
+  }
+  .project-option:hover { background: var(--surface-hover); }
+
+  .proj-ico {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    flex-shrink: 0;
+  }
+
+  .proj-ico.a { background: #6366f1; }
+  .proj-ico.b { background: #14b8a6; }
+  .proj-ico.c { background: #f59e0b; }
+  .proj-ico.d { background: var(--accent); }
+
+  .proj-name { font-weight: 500; color: var(--text-primary); }
+  .proj-id { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+
+  /* ── Required note ── */
+  .req-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 20px;
+    font-weight: 500;
+  }
+
+  /* ── Footer actions ── */
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 20px;
+    margin-top: 8px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { background: var(--surface-hover); border-color: var(--border-focus); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(225,111,61,0.3);
+  }
+  .btn-primary:hover {
+    background: #c85f30;
+    box-shadow: 0 2px 8px rgba(225,111,61,0.4);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active { transform: translateY(0); }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { background: var(--surface-hover); }
+
+  .footer-left { display: flex; align-items: center; gap: 8px; }
+
+  /* ── Duration display ── */
+  #duration-display {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    min-width: 90px;
+  }
+
+  /* ── Hint text ── */
+  .hint { font-size: 11.5px; color: var(--text-muted); padding: 4px 0 6px; }
+
+  /* ── Keyboard hint ── */
+  kbd {
+    display: inline-block;
+    background: var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="breadcrumb">
+        <span>Portfolio</span>
+        <span class="breadcrumb-sep">›</span>
+        <span>Contracts</span>
+        <span class="breadcrumb-sep">›</span>
+        <span>New</span>
+      </div>
+      <h1>New contract</h1>
+      <p class="subtitle">Link to a project (SBU), then capture commercial terms. You can edit everything later from the portfolio.</p>
+    </div>
+    <button class="close-btn" onclick="window.close()">✕</button>
+  </div>
+
+  <!-- Step tabs -->
+  <div class="steps" id="steps">
+    <div class="step active" data-panel="0" onclick="goTo(0)">
+      <div class="step-num">1</div> Project
+    </div>
+    <div class="step" data-panel="1" onclick="goTo(1)">
+      <div class="step-num">2</div> Identity
+    </div>
+    <div class="step" data-panel="2" onclick="goTo(2)">
+      <div class="step-num">3</div> Dates
+    </div>
+    <div class="step" data-panel="3" onclick="goTo(3)">
+      <div class="step-num">4</div> Commercial
+    </div>
+  </div>
+
+  <!-- ── Panel 0: Project ── -->
+  <div class="panel active" id="panel-0">
+
+    <div class="req-note">
+      <span>●</span> Project selection is required to continue
+    </div>
+
+    <div class="project-select-wrap">
+      <button class="project-btn" id="proj-btn" onclick="toggleDropdown()">
+        <span style="font-size: 20px;">＋</span>
+        <span>Search or select a project (PRJ-···)</span>
+        <span class="project-chevron">▾</span>
+      </button>
+
+      <div class="project-dropdown" id="proj-dropdown">
+        <div class="project-search">
+          <span>🔍</span>
+          <input type="text" placeholder="Search projects…" oninput="filterProjects(this.value)" id="proj-search" />
+        </div>
+        <div id="proj-list">
+          <div class="project-option" onclick="selectProject('PRJ-0041','Accenture RPO — Wave 3','a','AC')">
+            <div class="proj-ico a">AC</div>
+            <div><div class="proj-name">Accenture RPO — Wave 3</div><div class="proj-id">PRJ-0041</div></div>
+          </div>
+          <div class="project-option" onclick="selectProject('PRJ-0039','Tata Consultancy — Staff Aug','b','TC')">
+            <div class="proj-ico b">TC</div>
+            <div><div class="proj-name">Tata Consultancy — Staff Aug</div><div class="proj-id">PRJ-0039</div></div>
+          </div>
+          <div class="project-option" onclick="selectProject('PRJ-0037','Wipro Analytics Centre','c','WI')">
+            <div class="proj-ico c">WI</div>
+            <div><div class="proj-name">Wipro Analytics Centre</div><div class="proj-id">PRJ-0037</div></div>
+          </div>
+          <div class="project-option" onclick="selectProject('PRJ-0035','Infosys BPO Managed Services','d','IN')">
+            <div class="proj-ico d">IN</div>
+            <div><div class="proj-name">Infosys BPO Managed Services</div><div class="proj-id">PRJ-0035</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="hint" style="text-align:center; margin-top: 12px;">Can't find a project? <a href="#" style="color:var(--accent); text-decoration: none;">Create new SBU →</a></p>
+
+    <div class="footer">
+      <span class="hint"><kbd>Esc</kbd> to cancel</span>
+      <button class="btn btn-primary" id="next-btn-0" onclick="goTo(1)" disabled style="opacity:0.45;cursor:not-allowed;">
+        Continue →
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Panel 1: Identity ── -->
+  <div class="panel" id="panel-1">
+
+    <div class="section" id="sec-identity">
+      <div class="section-header" onclick="toggleSection('sec-identity')">
+        <div class="section-icon orange">👤</div>
+        <div>
+          <div class="section-label">Identity & classification</div>
+          <div class="section-desc">Who is this contract with, and how is it classified?</div>
+        </div>
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="section-body" style="max-height:400px;">
+
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">🏢</span> Customer name</div>
+          <input class="prop-input" type="text" placeholder="e.g. Accenture India Pvt Ltd" />
+        </div>
+
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">📋</span> Contract type</div>
+          <select class="prop-input">
+            <option value="">Choose type…</option>
+            <option>RPO</option>
+            <option>Staff Augmentation</option>
+            <option>Managed Services</option>
+            <option>Project-based</option>
+            <option>Retainer</option>
+          </select>
+        </div>
+
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">👔</span> Practice head</div>
+          <input class="prop-input" type="text" placeholder="Name of accountable lead" />
+        </div>
+
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">🔄</span> Current status</div>
+          <div style="padding: 6px 0;">
+            <select class="status-pill active" id="status-select" onchange="updateStatus(this)">
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">♻️</span> Renewal status</div>
+          <select class="prop-input">
+            <option value="">Not set</option>
+            <option>Auto-renew</option>
+            <option>Manual review</option>
+            <option>In negotiation</option>
+            <option>Do not renew</option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="footer">
+      <button class="btn btn-ghost" onclick="goTo(0)">← Back</button>
+      <button class="btn btn-primary" onclick="goTo(2)">Continue →</button>
+    </div>
+  </div>
+
+  <!-- ── Panel 2: Dates ── -->
+  <div class="panel" id="panel-2">
+
+    <div class="section" id="sec-dates">
+      <div class="section-header" onclick="toggleSection('sec-dates')">
+        <div class="section-icon blue">📅</div>
+        <div>
+          <div class="section-label">Contract dates</div>
+          <div class="section-desc">Duration auto-calculates from start and end</div>
+        </div>
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="section-body" style="max-height:500px;">
+
+        <div class="date-grid">
+          <div class="date-cell">
+            <label>Contract start</label>
+            <input type="date" id="start-date" onchange="calcDuration()" />
+          </div>
+          <div class="date-cell">
+            <label>Contract end / renewal</label>
+            <input type="date" id="end-date" onchange="calcDuration()" />
+          </div>
+        </div>
+
+        <div class="prop-row" style="margin-top: 4px;">
+          <div class="prop-label"><span class="prop-icon">⏱</span> Duration</div>
+          <div class="computed-field">
+            <span class="computed-label">AUTO</span>
+            <span id="duration-display">— months</span>
+          </div>
+        </div>
+
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">🔔</span> Renewal reminder</div>
+          <input class="prop-input" type="date" id="reminder-date" />
+        </div>
+
+        <p class="hint" style="padding-top: 8px;">Tip — reminder is typically set 60–90 days before contract end.</p>
+
+      </div>
+    </div>
+
+    <div class="footer">
+      <button class="btn btn-ghost" onclick="goTo(1)">← Back</button>
+      <button class="btn btn-primary" onclick="goTo(3)">Continue →</button>
+    </div>
+  </div>
+
+  <!-- ── Panel 3: Commercial ── -->
+  <div class="panel" id="panel-3">
+
+    <div class="section" id="sec-commercial">
+      <div class="section-header" onclick="toggleSection('sec-commercial')">
+        <div class="section-icon green">₹</div>
+        <div>
+          <div class="section-label">Commercial terms (INR)</div>
+          <div class="section-desc">Annual contract value and margin details</div>
+        </div>
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="section-body" style="max-height:600px;">
+
+        <div class="commercial-row">
+          <div class="amount-input-wrap">
+            <label>Signed ACV</label>
+            <div class="amount-row">
+              <span class="currency-badge">₹</span>
+              <input type="number" placeholder="0" id="acv-input" oninput="calcMetrics()" />
+            </div>
+          </div>
+          <div class="amount-input-wrap">
+            <label>Signed CM%</label>
+            <div class="amount-row">
+              <span class="currency-badge">%</span>
+              <input type="number" placeholder="0.00" step="0.01" id="cm-input" oninput="calcMetrics()" />
+            </div>
+          </div>
+        </div>
+
+        <div class="prop-row" style="margin-top: 12px;">
+          <div class="prop-label"><span class="prop-icon">💰</span> Gross margin</div>
+          <div class="computed-field">
+            <span class="computed-label">AUTO</span>
+            <span id="margin-display">₹ —</span>
+          </div>
+        </div>
+
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">📊</span> Monthly run rate</div>
+          <div class="computed-field">
+            <span class="computed-label">AUTO</span>
+            <span id="mrr-display">₹ —</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Summary preview -->
+    <div class="section" id="sec-summary" style="border-style: dashed; border-color: var(--border-focus);">
+      <div class="section-header" onclick="toggleSection('sec-summary')">
+        <div class="section-icon amber">✅</div>
+        <div>
+          <div class="section-label">Review summary</div>
+          <div class="section-desc">Everything looks good? Hit Create to save.</div>
+        </div>
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="section-body" style="max-height: 200px;">
+        <div id="summary-content" style="font-size: 13px; color: var(--text-secondary); line-height: 1.8;">
+          Loading summary…
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <button class="btn btn-ghost" onclick="goTo(2)">← Back</button>
+      <div style="display:flex; gap: 8px;">
+        <button class="btn btn-secondary" onclick="saveDraft()">Save draft</button>
+        <button class="btn btn-primary" onclick="createContract()">Create contract ✓</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let currentPanel = 0;
+let selectedProject = null;
+const PANELS = 4;
+
+function goTo(idx) {
+  if (idx === 1 && !selectedProject) return;
+  document.querySelectorAll('.panel').forEach((p, i) => {
+    p.classList.toggle('active', i === idx);
+  });
+  document.querySelectorAll('.step').forEach((s, i) => {
+    s.classList.remove('active', 'done');
+    if (i < idx) {
+      s.classList.add('done');
+      s.querySelector('.step-num').textContent = '✓';
+    } else if (i === idx) {
+      s.classList.add('active');
+      if (s.querySelector('.step-num').textContent === '✓') s.querySelector('.step-num').textContent = i+1;
+    }
+  });
+  currentPanel = idx;
+  if (idx === 3) buildSummary();
+}
+
+function toggleDropdown() {
+  const dd = document.getElementById('proj-dropdown');
+  dd.classList.toggle('open');
+  if (dd.classList.contains('open')) document.getElementById('proj-search').focus();
+}
+
+function filterProjects(val) {
+  const opts = document.querySelectorAll('#proj-list .project-option');
+  opts.forEach(o => {
+    o.style.display = o.textContent.toLowerCase().includes(val.toLowerCase()) ? '' : 'none';
+  });
+}
+
+function selectProject(id, name, cls, initials) {
+  selectedProject = { id, name, cls, initials };
+  const btn = document.getElementById('proj-btn');
+  btn.classList.add('selected');
+  btn.innerHTML = `
+    <div class="project-icon">${initials}</div>
+    <div class="project-meta">
+      <strong>${name}</strong>
+      <span>${id}</span>
+    </div>
+    <span class="project-chevron" style="color:var(--accent)">✓</span>
+  `;
+  document.getElementById('proj-dropdown').classList.remove('open');
+  const nb = document.getElementById('next-btn-0');
+  nb.disabled = false;
+  nb.style.opacity = '1';
+  nb.style.cursor = 'pointer';
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.querySelector('.project-select-wrap');
+  if (!wrap.contains(e.target)) {
+    document.getElementById('proj-dropdown').classList.remove('open');
+  }
+});
+
+function toggleSection(id) {
+  document.getElementById(id).classList.toggle('collapsed');
+}
+
+function updateStatus(sel) {
+  sel.className = 'status-pill';
+  const v = sel.value;
+  if (v === 'active') sel.classList.add('active');
+  else if (v === 'pending') sel.classList.add('pending');
+  else sel.classList.add('inactive');
+}
+
+function calcDuration() {
+  const s = document.getElementById('start-date').value;
+  const e = document.getElementById('end-date').value;
+  if (!s || !e) { document.getElementById('duration-display').textContent = '— months'; return; }
+  const start = new Date(s), end = new Date(e);
+  const months = Math.round((end - start) / (1000 * 60 * 60 * 24 * 30.44));
+  if (months < 0) { document.getElementById('duration-display').textContent = '⚠ Check dates'; return; }
+  document.getElementById('duration-display').textContent = `${months} month${months !== 1 ? 's' : ''}`;
+
+  if (!document.getElementById('reminder-date').value) {
+    const rem = new Date(end);
+    rem.setDate(rem.getDate() - 60);
+    document.getElementById('reminder-date').valueAsDate = rem;
+  }
+}
+
+function fmt(n) {
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(n));
+}
+
+function calcMetrics() {
+  const acv = parseFloat(document.getElementById('acv-input').value) || 0;
+  const cm = parseFloat(document.getElementById('cm-input').value) || 0;
+  const cmReal = cm > 1 ? cm / 100 : cm;
+  const margin = acv * cmReal;
+  const mrr = acv / 12;
+  document.getElementById('margin-display').textContent = acv ? `₹ ${fmt(margin)}` : '₹ —';
+  document.getElementById('mrr-display').textContent = acv ? `₹ ${fmt(mrr)} / mo` : '₹ —';
+}
+
+function buildSummary() {
+  const proj = selectedProject ? selectedProject.name : '—';
+  const projId = selectedProject ? selectedProject.id : '—';
+  const status = document.getElementById('status-select').value || 'active';
+  const start = document.getElementById('start-date').value || '—';
+  const end = document.getElementById('end-date').value || '—';
+  const acv = document.getElementById('acv-input').value;
+  const cm = document.getElementById('cm-input').value;
+  const dur = document.getElementById('duration-display').textContent;
+
+  document.getElementById('summary-content').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap: 4px 24px;">
+      <div><span style="color:var(--text-muted)">Project</span><br><strong>${proj}</strong> <span style="font-family:var(--mono); font-size:11px; color:var(--accent);">${projId}</span></div>
+      <div><span style="color:var(--text-muted)">Status</span><br><strong>${status.charAt(0).toUpperCase()+status.slice(1)}</strong></div>
+      <div style="margin-top:8px"><span style="color:var(--text-muted)">Start</span><br><strong>${start}</strong></div>
+      <div style="margin-top:8px"><span style="color:var(--text-muted)">End</span><br><strong>${end}</strong></div>
+      <div style="margin-top:8px"><span style="color:var(--text-muted)">Duration</span><br><strong>${dur}</strong></div>
+      <div style="margin-top:8px"><span style="color:var(--text-muted)">ACV</span><br><strong>${acv ? '₹ '+fmt(parseFloat(acv)) : '—'}</strong></div>
+      ${cm ? `<div style="margin-top:8px"><span style="color:var(--text-muted)">CM%</span><br><strong>${cm}%</strong></div>` : ''}
+    </div>
+  `;
+}
+
+function saveDraft() {
+  const btn = event.target;
+  btn.textContent = '✓ Draft saved';
+  btn.style.color = 'var(--green)';
+  setTimeout(() => { btn.textContent = 'Save draft'; btn.style.color = ''; }, 2000);
+}
+
+function createContract() {
+  const btn = event.target;
+  btn.textContent = '⏳ Creating…';
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = '✓ Contract created!';
+    btn.style.background = '#1a7a47';
+  }, 1200);
+}
+</script>
+</body>
+</html>

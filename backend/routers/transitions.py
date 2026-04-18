@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import datetime
+import mimetypes
+import os
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -58,6 +61,29 @@ def _effective_ageing_days(row: ProjectTransition, today: datetime.date) -> Opti
     return None
 
 
+def _attachment_filename(entry: Any) -> Optional[str]:
+    if isinstance(entry, dict):
+        fn = entry.get("filename")
+        return str(fn).strip() if fn else None
+    return None
+
+
+def _normalize_attachments(v: Any) -> list[dict[str, Any]]:
+    if not v or not isinstance(v, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for x in v:
+        if isinstance(x, dict) and x.get("filename"):
+            out.append(
+                {
+                    "filename": str(x["filename"]).strip(),
+                    "original_name": str(x.get("original_name") or x["filename"]).strip()[:240],
+                    "uploaded_at": str(x.get("uploaded_at") or "")[:40],
+                }
+            )
+    return out
+
+
 def transition_to_dict(row: ProjectTransition, *, today: datetime.date) -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": row.id,
@@ -83,6 +109,7 @@ def transition_to_dict(row: ProjectTransition, *, today: datetime.date) -> dict[
         "ageing_days_effective": _effective_ageing_days(row, today),
         "reason_for_delay": row.reason_for_delay,
         "linked_meeting_ids_json": row.linked_meeting_ids_json,
+        "resource_attachments_json": getattr(row, "resource_attachments_json", None),
         "created_by_user_id": row.created_by_user_id,
         "updated_by_user_id": row.updated_by_user_id,
         "system_created_at": row.system_created_at.isoformat() if row.system_created_at else None,
@@ -116,6 +143,7 @@ class TransitionPatch(BaseModel):
     ageing_days: Optional[int] = None
     reason_for_delay: Optional[str] = None
     linked_meeting_ids_json: Optional[List[int]] = None
+    resource_attachments_json: Optional[List[dict[str, Any]]] = None
 
 
 def _get_or_none(db: Session, project_id: int) -> Optional[ProjectTransition]:
@@ -196,6 +224,101 @@ def create_transition(
     return transition_to_dict(row, today=today)
 
 
+@router.post("/by-project/{project_id}/upload-resource")
+async def upload_transition_resource(
+    project_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Save a file under `transition_documents/` and append metadata to the transition row (creates draft row if missing)."""
+    from backend.core.transition_storage import save_transition_file
+
+    assert_project_access(user, db, project_id)
+    if not db.query(Project).filter(Project.id == project_id).first():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    raw = await file.read()
+    try:
+        stored_name = save_transition_file(project_id, raw, file.filename or "document")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    row = _get_or_none(db, project_id)
+    if not row:
+        row = ProjectTransition(
+            project_id=project_id,
+            status="draft",
+            created_by_user_id=user.id,
+            updated_by_user_id=user.id,
+            resource_attachments_json=[],
+        )
+        db.add(row)
+        db.flush()
+
+    attachments = row.resource_attachments_json or []
+    if not isinstance(attachments, list):
+        attachments = []
+    entry = {
+        "filename": stored_name,
+        "original_name": (file.filename or stored_name)[:240],
+        "uploaded_at": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+    }
+    attachments = [*attachments, entry]
+    row.resource_attachments_json = attachments
+    row.updated_by_user_id = user.id
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    log_activity(
+        db,
+        user=user,
+        action="upload",
+        resource_type="transition",
+        summary=f"Transition resource uploaded for PRJ-{project_id}",
+        project_id=project_id,
+        resource_id=str(row.id),
+        meta={"filename": stored_name},
+    )
+    today = datetime.date.today()
+    return {"attachment": entry, "transition": transition_to_dict(row, today=today)}
+
+
+@router.get("/by-project/{project_id}/resource-file/{filename}")
+def download_transition_resource(
+    project_id: int,
+    filename: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from backend.core.transition_storage import resolve_transition_path
+
+    assert_project_access(user, db, project_id)
+    row = _get_or_none(db, project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="No transition record for this project")
+
+    att = getattr(row, "resource_attachments_json", None) or []
+    if not isinstance(att, list):
+        att = []
+    allowed = {_attachment_filename(x) for x in att}
+    allowed.discard(None)
+    safe = os.path.basename(filename)
+    if safe != filename.replace("\\", "/").rsplit("/", 1)[-1] or safe not in allowed:
+        raise HTTPException(status_code=404, detail="File not found for this transition")
+
+    path = resolve_transition_path(safe)
+    if not path:
+        raise HTTPException(status_code=404, detail="File missing on server")
+
+    mt = mimetypes.guess_type(safe)[0] or "application/octet-stream"
+    orig = next(
+        (str(x.get("original_name") or safe) for x in att if isinstance(x, dict) and _attachment_filename(x) == safe),
+        safe,
+    )
+    return FileResponse(path, media_type=mt, filename=os.path.basename(orig))
+
+
 @router.patch("/by-project/{project_id}")
 def patch_transition(
     project_id: int,
@@ -228,6 +351,20 @@ def patch_transition(
             setattr(row, k, _parse_date(v) if v else None)
         elif k == "linked_meeting_ids_json":
             row.linked_meeting_ids_json = v
+        elif k == "resource_attachments_json":
+            from backend.core.transition_storage import try_delete_file
+
+            new_norm = _normalize_attachments(v)
+            old = row.resource_attachments_json or []
+            if not isinstance(old, list):
+                old = []
+            old_fns = {_attachment_filename(x) for x in old}
+            old_fns.discard(None)
+            new_fns = {_attachment_filename(x) for x in new_norm}
+            new_fns.discard(None)
+            for fn in old_fns - new_fns:
+                try_delete_file(fn)
+            row.resource_attachments_json = new_norm or None
         elif k == "transition_done_by_user_id":
             if v is not None:
                 u = db.query(User).filter(User.id == int(v)).first()

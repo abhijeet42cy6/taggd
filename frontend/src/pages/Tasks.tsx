@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import axios from "axios";
 import { queries, type Project, type TaskRow } from "@/lib/api";
+import {
+  CUSTOM_LINK_PRESET,
+  PLATFORM_TASK_LINK_KINDS,
+  defaultCategoryForLinkKind,
+  platformTaskLinkHref,
+  platformTaskLinkSummary,
+} from "@/lib/task-platform-links";
 import { isPlatformAdminRole, isReadOnlyClient, isRecruiterUser, useAuth } from "@/lib/auth";
 import { PageHeader, PlatformKpi, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
@@ -13,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { Check, Search } from "lucide-react";
 
 function getApiErrorMessage(e: unknown): string {
   if (axios.isAxiosError(e)) {
@@ -36,18 +45,26 @@ const STATUSES = ["open", "in_progress", "blocked", "done", "cancelled"] as cons
 
 const CATEGORIES = [
   { value: "", label: "— None —" },
-  { value: "ingestion", label: "Ingestion / data ops" },
-  { value: "requisition", label: "Requisition / record" },
+  { value: "portfolio", label: "Portfolio intelligence" },
   { value: "client_project", label: "Client / project" },
-  { value: "contract", label: "Contract" },
-  { value: "meeting", label: "Meeting / MoM" },
-  { value: "billing", label: "Billing / revenue" },
-  { value: "finance", label: "Finance ledger" },
-  { value: "sla", label: "SLA" },
-  { value: "wfm", label: "WFM" },
-  { value: "vendor_license", label: "Vendor license" },
-  { value: "candidate", label: "Candidate" },
-  { value: "admin", label: "Admin / access" },
+  { value: "transitions", label: "Client onboarding" },
+  { value: "contract", label: "Contracts" },
+  { value: "meeting", label: "Meetings / MoM" },
+  { value: "requisition", label: "Requisitions / records" },
+  { value: "candidate", label: "Candidates" },
+  { value: "ingestion", label: "Ingestion / uploads" },
+  { value: "data_operations", label: "Data operations" },
+  { value: "finance", label: "Finance command" },
+  { value: "revenue_tracker", label: "Revenue trackers" },
+  { value: "revenue_governance", label: "Revenue packs (governance)" },
+  { value: "billing", label: "Billing" },
+  { value: "finance_validation", label: "Finance validation" },
+  { value: "sla", label: "SLA performance" },
+  { value: "wfm", label: "Workforce management" },
+  { value: "vendor_license", label: "Vendor licenses" },
+  { value: "activity", label: "Activity log" },
+  { value: "admin", label: "Users & access" },
+  { value: "agent", label: "Assistant" },
   { value: "adhoc", label: "Ad hoc" },
 ];
 
@@ -74,6 +91,24 @@ function fmtWhen(iso: string | null | undefined): string {
 
 function isDemoTask(t: TaskRow): boolean {
   return t.id < 0;
+}
+
+function initialsFromEmail(email: string): string {
+  const local = email.split("@")[0]?.trim() || "?";
+  const parts = local.replace(/[^a-z0-9]/gi, " ").trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2);
+  return local.slice(0, 2).toUpperCase();
+}
+
+function avatarHue(email: string): number {
+  let h = 0;
+  for (let i = 0; i < email.length; i++) h = (h + email.charCodeAt(i) * 17) % 360;
+  return h;
+}
+
+function formatRoleLabel(role: string): string {
+  if (!role) return "—";
+  return role.replace(/_/g, " ");
 }
 
 /** Shown when the API returns no rows so the board stays demonstrable. IDs are negative — never sent to PATCH/DELETE. */
@@ -332,6 +367,8 @@ function applyClientTaskFilters(
     filterMine: boolean;
     filterOverdue: boolean;
     filterProjectId: string;
+    filterCategory: string;
+    filterLinkKind: string;
     uid: number | null;
   },
 ): TaskRow[] {
@@ -352,6 +389,14 @@ function applyClientTaskFilters(
   if (opts.filterProjectId) {
     const pid = parseInt(opts.filterProjectId, 10);
     if (!Number.isNaN(pid)) out = out.filter((t) => t.project_id === pid);
+  }
+  if (opts.filterCategory) {
+    const c = opts.filterCategory.toLowerCase();
+    out = out.filter((t) => (t.task_category ?? "").toLowerCase() === c);
+  }
+  if (opts.filterLinkKind) {
+    const k = opts.filterLinkKind.toLowerCase();
+    out = out.filter((t) => (t.linked_resource_type ?? "").toLowerCase() === k);
   }
   return out;
 }
@@ -382,6 +427,8 @@ export function Tasks() {
   const [filterMine, setFilterMine] = useState(false);
   const [filterOverdue, setFilterOverdue] = useState(false);
   const [filterProjectId, setFilterProjectId] = useState<string>("");
+  const [filterCategory, setFilterCategory] = useState<string>("");
+  const [filterLinkKind, setFilterLinkKind] = useState<string>("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TaskRow | null>(null);
@@ -396,9 +443,11 @@ export function Tasks() {
   const [subtype, setSubtype] = useState("");
   const [linkedType, setLinkedType] = useState("");
   const [linkedId, setLinkedId] = useState("");
+  const [linkPreset, setLinkPreset] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
   const [dueLocal, setDueLocal] = useState("");
   const [assigneeIds, setAssigneeIds] = useState<Set<number>>(new Set());
+  const [assigneeSearch, setAssigneeSearch] = useState("");
 
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [pendingMove, setPendingMove] = useState<{ task: TaskRow; nextStatus: string } | null>(null);
@@ -414,6 +463,8 @@ export function Tasks() {
           mine: filterMine || undefined,
           overdue: filterOverdue || undefined,
           project_id: filterProjectId ? parseInt(filterProjectId, 10) : undefined,
+          task_category: filterCategory || undefined,
+          linked_resource_type: filterLinkKind || undefined,
         }),
         queries.projects(),
         queries.taskAssignableUsers(),
@@ -428,7 +479,7 @@ export function Tasks() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterMine, filterOverdue, filterProjectId]);
+  }, [filterStatus, filterMine, filterOverdue, filterProjectId, filterCategory, filterLinkKind]);
 
   useEffect(() => {
     void refresh();
@@ -449,9 +500,21 @@ export function Tasks() {
       filterMine,
       filterOverdue,
       filterProjectId,
+      filterCategory,
+      filterLinkKind,
       uid,
     });
-  }, [rows, sampleWithOverrides, filterStatus, filterMine, filterOverdue, filterProjectId, uid]);
+  }, [
+    rows,
+    sampleWithOverrides,
+    filterStatus,
+    filterMine,
+    filterOverdue,
+    filterProjectId,
+    filterCategory,
+    filterLinkKind,
+    uid,
+  ]);
 
   const tasksByStatus = useMemo(() => {
     const m = new Map<string, TaskRow[]>();
@@ -492,9 +555,11 @@ export function Tasks() {
     setSubtype("");
     setLinkedType("");
     setLinkedId("");
+    setLinkPreset("");
     setProjectId("");
     setDueLocal("");
     setAssigneeIds(new Set());
+    setAssigneeSearch("");
   }
 
   function openCreate() {
@@ -505,6 +570,7 @@ export function Tasks() {
 
   function openEdit(t: TaskRow) {
     setSaveError(null);
+    setAssigneeSearch("");
     setEditing(t);
     setTitle(t.title);
     setDescription(t.description ?? "");
@@ -512,6 +578,9 @@ export function Tasks() {
     setPriority(t.priority ?? "");
     setCategory(t.task_category ?? "");
     setSubtype(t.task_subtype ?? "");
+    const lt = (t.linked_resource_type ?? "").trim().toLowerCase();
+    const known = PLATFORM_TASK_LINK_KINDS.some((k) => k.value === lt);
+    setLinkPreset(known ? lt : lt ? CUSTOM_LINK_PRESET : "");
     setLinkedType(t.linked_resource_type ?? "");
     setLinkedId(t.linked_resource_id ?? "");
     setProjectId(t.project_id != null ? String(t.project_id) : "");
@@ -528,6 +597,17 @@ export function Tasks() {
       return n;
     });
   }
+
+  const filteredAssignable = useMemo(() => {
+    const q = assigneeSearch.trim().toLowerCase();
+    if (!q) return assignable;
+    return assignable.filter(
+      (u) =>
+        u.email.toLowerCase().includes(q) ||
+        u.role.toLowerCase().includes(q) ||
+        formatRoleLabel(u.role).toLowerCase().includes(q),
+    );
+  }, [assignable, assigneeSearch]);
 
   async function save() {
     if (!title.trim()) {
@@ -743,6 +823,32 @@ export function Tasks() {
             <input type="checkbox" checked={filterOverdue} onChange={(e) => setFilterOverdue(e.target.checked)} />
             Overdue
           </label>
+          <select
+            className="platform-search"
+            style={{ minWidth: 200 }}
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+          >
+            <option value="">All categories</option>
+            {CATEGORIES.filter((c) => c.value).map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="platform-search"
+            style={{ minWidth: 220 }}
+            value={filterLinkKind}
+            onChange={(e) => setFilterLinkKind(e.target.value)}
+          >
+            <option value="">All link types</option>
+            {PLATFORM_TASK_LINK_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>
+                {k.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         {usingSampleBoard && (
@@ -848,7 +954,9 @@ export function Tasks() {
                         : t.project_id != null
                           ? `PRJ-${t.project_id}`
                           : null;
-                    const link =
+                    const linkHref = platformTaskLinkHref(t.linked_resource_type, t.linked_resource_id);
+                    const linkSummary = platformTaskLinkSummary(t.linked_resource_type, t.linked_resource_id);
+                    const legacyLinkLabel =
                       t.linked_resource_type && t.linked_resource_id
                         ? `${t.linked_resource_type}:${t.linked_resource_id}`
                         : null;
@@ -907,6 +1015,11 @@ export function Tasks() {
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                           <StatusTag status={t.status} />
                           <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{catLabel}</span>
+                          {t.task_subtype?.trim() ? (
+                            <span className="platform-badge" style={{ fontSize: 9, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }} title={t.task_subtype}>
+                              {t.task_subtype}
+                            </span>
+                          ) : null}
                         </div>
                         <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
                           Due {fmtWhen(t.due_at)}
@@ -917,9 +1030,26 @@ export function Tasks() {
                           </div>
                         )}
                         {prLabel && <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{prLabel}</div>}
-                        {link && (
-                          <div style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", color: "var(--text-muted)", wordBreak: "break-all" }} title={link}>
-                            {link}
+                        {(linkHref || legacyLinkLabel) && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                            {linkHref ? (
+                              <Link
+                                to={linkHref}
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                  color: "var(--accent)",
+                                  textDecoration: "none",
+                                  borderBottom: "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Open in platform →
+                              </Link>
+                            ) : null}
+                            <span style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", color: "var(--text-muted)", wordBreak: "break-all" }} title={legacyLinkLabel ?? ""}>
+                              {linkHref ? linkSummary : legacyLinkLabel}
+                            </span>
                           </div>
                         )}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
@@ -1023,18 +1153,59 @@ export function Tasks() {
             </div>
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {lbl("Subtype / verb (optional)")}
-              <input className="platform-search" value={subtype} onChange={(e) => setSubtype(e.target.value)} placeholder="e.g. ingestion_sla_upload_review" />
+              <input className="platform-search" value={subtype} onChange={(e) => setSubtype(e.target.value)} placeholder="e.g. pack_review, sla_upload_review" />
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {lbl("Link to platform module")}
+              <select
+                className="platform-search"
+                value={linkPreset}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setLinkPreset(v);
+                  if (v === "") {
+                    setLinkedType("");
+                    setLinkedId("");
+                    return;
+                  }
+                  if (v === CUSTOM_LINK_PRESET) return;
+                  setLinkedType(v);
+                  const dc = defaultCategoryForLinkKind(v);
+                  if (dc) setCategory((prev) => (prev.trim() ? prev : dc));
+                }}
+              >
+                <option value="">— Not linked —</option>
+                {PLATFORM_TASK_LINK_KINDS.map((k) => (
+                  <option key={k.value} value={k.value}>
+                    {k.label}
+                  </option>
+                ))}
+                <option value={CUSTOM_LINK_PRESET}>Custom (advanced)…</option>
+              </select>
+              {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
+                <p style={{ margin: 0, fontSize: 10, color: "var(--text-muted)", lineHeight: 1.45 }}>
+                  {PLATFORM_TASK_LINK_KINDS.find((k) => k.value === linkPreset)?.hint ?? ""}
+                </p>
+              ) : null}
+            </label>
+            {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
               <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Linked resource type")}
-                <input className="platform-search" value={linkedType} onChange={(e) => setLinkedType(e.target.value)} placeholder="requisition, meeting, …" />
+                {lbl("Resource id (when applicable)")}
+                <input className="platform-search" value={linkedId} onChange={(e) => setLinkedId(e.target.value)} placeholder="e.g. submission id, project id, record id" />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Linked resource id")}
-                <input className="platform-search" value={linkedId} onChange={(e) => setLinkedId(e.target.value)} placeholder="numeric id" />
-              </label>
-            </div>
+            ) : null}
+            {linkPreset === CUSTOM_LINK_PRESET ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {lbl("Linked resource type")}
+                  <input className="platform-search" value={linkedType} onChange={(e) => setLinkedType(e.target.value)} placeholder="any canonical type string" />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {lbl("Linked resource id")}
+                  <input className="platform-search" value={linkedId} onChange={(e) => setLinkedId(e.target.value)} placeholder="id or composite key" />
+                </label>
+              </div>
+            ) : null}
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {lbl("Project (optional)")}
               <select className="platform-search" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
@@ -1050,27 +1221,107 @@ export function Tasks() {
               {lbl("Due date & time")}
               <input className="platform-search" type="datetime-local" value={dueLocal} onChange={(e) => setDueLocal(e.target.value)} />
             </label>
-            <div>
-              {lbl("Assignees")}
+            <div className="min-w-0">
+              <div className="mb-1.5 flex flex-wrap items-end justify-between gap-2">
+                {lbl("Assignees")}
+                <span
+                  className="rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums"
+                  style={{
+                    background: "rgba(255, 107, 53, 0.12)",
+                    color: "var(--accent, #ff6b35)",
+                    fontFamily: "'DM Mono',monospace",
+                  }}
+                >
+                  {assigneeIds.size} selected
+                </span>
+              </div>
               <div
-                style={{
-                  marginTop: 8,
-                  maxHeight: 160,
-                  overflowY: "auto",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: 8,
-                  display: "grid",
-                  gap: 6,
-                }}
+                className="overflow-hidden rounded-xl border border-border/80 bg-muted/20 shadow-sm"
+                style={{ marginTop: 6 }}
               >
-                {assignable.map((u) => (
-                  <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, cursor: "pointer" }}>
-                    <input type="checkbox" checked={assigneeIds.has(u.id)} onChange={() => toggleAssignee(u.id)} />
-                    <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{u.email}</span>
-                    <span style={{ color: "var(--text-muted)", fontSize: 9 }}>{u.role}</span>
-                  </label>
-                ))}
+                <div className="relative border-b border-border/60 bg-background/80 px-2 py-2">
+                  <Search
+                    className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <input
+                    type="search"
+                    className="platform-search h-9 w-full rounded-lg border border-border/70 bg-background pl-9 pr-3 text-xs outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                    placeholder="Search by email or role…"
+                    value={assigneeSearch}
+                    onChange={(e) => setAssigneeSearch(e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+                <div
+                  className="max-h-[min(240px,40vh)] overflow-y-auto p-1.5"
+                  role="listbox"
+                  aria-label="Task assignees"
+                  aria-multiselectable="true"
+                >
+                  {filteredAssignable.length === 0 ? (
+                    <p className="px-3 py-8 text-center text-[11px] text-muted-foreground">
+                      {assignable.length === 0
+                        ? "No assignable users loaded."
+                        : "No users match your search."}
+                    </p>
+                  ) : (
+                    <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                      {filteredAssignable.map((u) => {
+                        const selected = assigneeIds.has(u.id);
+                        const hue = avatarHue(u.email);
+                        return (
+                          <li key={u.id}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={selected}
+                              onClick={() => toggleAssignee(u.id)}
+                              className={cn(
+                                "flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
+                                selected
+                                  ? "bg-accent/10 ring-1 ring-accent/35"
+                                  : "hover:bg-muted/60 active:bg-muted/80",
+                              )}
+                            >
+                              <span
+                                className="flex size-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase tracking-tight text-white shadow-inner"
+                                style={{
+                                  background: `linear-gradient(145deg, hsl(${hue} 58% 46%) 0%, hsl(${hue} 52% 34%) 100%)`,
+                                }}
+                                aria-hidden
+                              >
+                                {initialsFromEmail(u.email)}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span
+                                  className="block truncate text-[12px] font-medium leading-tight"
+                                  style={{ fontFamily: "'DM Mono',monospace" }}
+                                >
+                                  {u.email}
+                                </span>
+                                <span className="mt-0.5 inline-block max-w-full truncate rounded-md bg-muted/80 px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">
+                                  {formatRoleLabel(u.role)}
+                                </span>
+                              </span>
+                              <span
+                                className={cn(
+                                  "flex size-6 shrink-0 items-center justify-center rounded-full border text-muted-foreground transition-colors",
+                                  selected
+                                    ? "border-accent bg-accent text-accent-foreground"
+                                    : "border-border/80 bg-background/60",
+                                )}
+                                aria-hidden
+                              >
+                                {selected ? <Check className="size-3.5 stroke-[2.5]" /> : null}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               </div>
             </div>
           </div>

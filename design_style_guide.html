@@ -1,0 +1,2086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SaaS Design System — Style Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    /* ── Core Palette ── */
+    --bg:             #f7f6f3;
+    --surface:        #ffffff;
+    --surface-hover:  #f7f6f3;
+    --surface-raised: #ffffff;
+
+    /* ── Borders ── */
+    --border:         rgba(55, 53, 47, 0.09);
+    --border-focus:   rgba(55, 53, 47, 0.30);
+    --border-strong:  rgba(55, 53, 47, 0.18);
+
+    /* ── Text ── */
+    --text-primary:   #191817;
+    --text-secondary: rgba(55, 53, 47, 0.65);
+    --text-muted:     rgba(55, 53, 47, 0.40);
+    --text-on-accent: #ffffff;
+
+    /* ── Accent (Brand) ── */
+    --accent:         #e16f3d;
+    --accent-hover:   #c85f30;
+    --accent-soft:    rgba(225, 111, 61, 0.08);
+    --accent-mid:     rgba(225, 111, 61, 0.18);
+
+    /* ── Semantic Colors ── */
+    --green:          #2ecc71;
+    --green-hover:    #1a7a47;
+    --green-soft:     rgba(46, 204, 113, 0.10);
+    --amber:          #f59e0b;
+    --amber-soft:     rgba(245, 158, 11, 0.10);
+    --red:            #ef4444;
+    --red-soft:       rgba(239, 68, 68, 0.10);
+    --blue:           #3884ff;
+    --blue-soft:      rgba(56, 132, 255, 0.08);
+
+    /* ── Entity Colors (for avatars/icons) ── */
+    --entity-indigo:  #6366f1;
+    --entity-teal:    #14b8a6;
+    --entity-amber:   #f59e0b;
+    --entity-orange:  #e16f3d;
+
+    /* ── Typography ── */
+    --font:           'DM Sans', sans-serif;
+    --mono:           'DM Mono', monospace;
+
+    /* ── Radii ── */
+    --radius-sm:      4px;
+    --radius:         6px;
+    --radius-lg:      10px;
+    --radius-pill:    100px;
+
+    /* ── Shadows ── */
+    --shadow-sm:      0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+    --shadow:         0 2px 8px rgba(0,0,0,0.08), 0 8px 32px rgba(0,0,0,0.06);
+    --shadow-lg:      0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+
+    /* ── Transitions ── */
+    --t-fast:         0.12s ease;
+    --t-base:         0.15s ease;
+    --t-slow:         0.25s ease;
+    --t-spring:       0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    --t-smooth:       0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* ── Spacing Scale ── */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+    --sp-8: 32px;
+    --sp-10: 40px;
+    --sp-12: 48px;
+    --sp-16: 64px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:             #1a1917;
+      --surface:        #252422;
+      --surface-hover:  #2e2c2a;
+      --surface-raised: #2e2c2a;
+      --border:         rgba(255,255,255,0.08);
+      --border-focus:   rgba(255,255,255,0.25);
+      --border-strong:  rgba(255,255,255,0.14);
+      --text-primary:   #f0ede8;
+      --text-secondary: rgba(240, 237, 232, 0.60);
+      --text-muted:     rgba(240, 237, 232, 0.35);
+      --accent-soft:    rgba(225, 111, 61, 0.12);
+      --accent-mid:     rgba(225, 111, 61, 0.22);
+      --green-soft:     rgba(46, 204, 113, 0.12);
+      --amber-soft:     rgba(245, 158, 11, 0.12);
+      --red-soft:       rgba(239, 68, 68, 0.12);
+      --blue-soft:      rgba(56, 132, 255, 0.10);
+    }
+  }
+
+  /* ════════════════════════════════════════
+     BASE
+  ════════════════════════════════════════ */
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text-primary);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ════════════════════════════════════════
+     LAYOUT
+  ════════════════════════════════════════ */
+  .guide-wrap {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 32px 0 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .sidebar-brand {
+    padding: 0 20px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+
+  .sidebar-brand-name {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+  }
+
+  .sidebar-brand-version {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--accent);
+    margin-top: 2px;
+  }
+
+  .sidebar-section {
+    padding: 0 12px 8px;
+  }
+
+  .sidebar-section-label {
+    font-size: 10px;
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 0 8px;
+    margin-bottom: 4px;
+    margin-top: 12px;
+  }
+
+  .sidebar-link {
+    display: block;
+    padding: 6px 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: var(--radius);
+    transition: background var(--t-fast), color var(--t-fast);
+    cursor: pointer;
+  }
+
+  .sidebar-link:hover, .sidebar-link.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  /* ── Main content ── */
+  .main {
+    padding: 48px 56px 96px;
+    max-width: 900px;
+  }
+
+  /* ── Section container ── */
+  .guide-section {
+    margin-bottom: 72px;
+    animation: fadeUp 0.4s var(--t-spring) both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-tag {
+    font-size: 10px;
+    font-family: var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  .section-title {
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    line-height: 1.2;
+  }
+
+  .section-desc {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    max-width: 600px;
+    margin-bottom: 32px;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* ── Subsection ── */
+  .subsection {
+    margin-bottom: 40px;
+  }
+
+  .subsection-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Demo card ── */
+  .demo-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    margin-bottom: 16px;
+  }
+
+  /* ── Spec table ── */
+  .spec-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+
+  .spec-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 6px 12px 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .spec-table td {
+    padding: 9px 12px 9px 0;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    line-height: 1.5;
+  }
+
+  .spec-table td:first-child {
+    color: var(--text-primary);
+    font-weight: 500;
+    white-space: nowrap;
+    width: 180px;
+  }
+
+  .spec-table code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 1px 5px;
+    color: var(--accent);
+  }
+
+  /* ════════════════════════════════════════
+     1. COLOR PALETTE
+  ════════════════════════════════════════ */
+  .color-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 12px;
+  }
+
+  .color-swatch {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .swatch-block {
+    height: 64px;
+    width: 100%;
+  }
+
+  .swatch-meta {
+    background: var(--surface);
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .swatch-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .swatch-var {
+    font-size: 10.5px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .swatch-hex {
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+  }
+
+  /* ════════════════════════════════════════
+     2. TYPOGRAPHY
+  ════════════════════════════════════════ */
+  .type-scale-item {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .type-scale-item:last-child { border-bottom: none; }
+
+  .type-meta {
+    width: 160px;
+    flex-shrink: 0;
+  }
+
+  .type-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .type-spec {
+    font-size: 10.5px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    margin-top: 3px;
+  }
+
+  /* ════════════════════════════════════════
+     3. SPACING
+  ════════════════════════════════════════ */
+  .spacing-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .spacing-bar {
+    background: var(--accent-mid);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  .spacing-label {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    width: 80px;
+    flex-shrink: 0;
+  }
+
+  .spacing-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* ════════════════════════════════════════
+     4. RADII
+  ════════════════════════════════════════ */
+  .radius-grid {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .radius-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .radius-box {
+    width: 64px;
+    height: 64px;
+    background: var(--accent-soft);
+    border: 2px solid var(--accent-mid);
+  }
+
+  .radius-meta {
+    text-align: center;
+  }
+
+  .radius-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .radius-val {
+    font-size: 10.5px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+  }
+
+  /* ════════════════════════════════════════
+     5. BUTTONS
+  ════════════════════════════════════════ */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all var(--t-base);
+    line-height: 1;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(225,111,61,0.30);
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-hover);
+    box-shadow: 0 2px 8px rgba(225,111,61,0.40);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active { transform: translateY(0); }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-focus);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .btn-ghost:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-focus);
+  }
+
+  .btn-danger {
+    background: var(--red-soft);
+    color: var(--red);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+
+  .btn-danger:hover {
+    background: rgba(239, 68, 68, 0.16);
+  }
+
+  .btn-sm { padding: 6px 12px; font-size: 12.5px; }
+  .btn-lg { padding: 13px 24px; font-size: 15px; }
+
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  .btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  /* ════════════════════════════════════════
+     6. FORM ELEMENTS
+  ════════════════════════════════════════ */
+  /* Property row (Notion-style inline) */
+  .prop-row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    align-items: center;
+    min-height: 36px;
+    border-radius: var(--radius);
+    padding: 4px 0;
+    gap: 12px;
+  }
+
+  .prop-row + .prop-row { border-top: 1px solid var(--border); }
+
+  .prop-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    padding: 6px 8px;
+    border-radius: var(--radius);
+    cursor: default;
+    transition: background var(--t-fast);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .prop-row:hover .prop-label { background: var(--surface-hover); }
+
+  .prop-icon { font-size: 13px; opacity: 0.7; }
+
+  .required-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-left: 2px;
+  }
+
+  .prop-input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--text-primary);
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    outline: none;
+    transition: background var(--t-fast);
+    line-height: 1.4;
+  }
+
+  .prop-input:hover { background: var(--surface-hover); }
+  .prop-input:focus { background: var(--accent-soft); }
+  .prop-input::placeholder { color: var(--text-muted); }
+
+  select.prop-input {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+  }
+
+  /* Floating-label input */
+  .input-field {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    width: 100%;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color var(--t-base), box-shadow var(--t-base);
+  }
+
+  .input-field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .input-field::placeholder { color: var(--text-muted); }
+
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 14px;
+  }
+
+  .input-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .input-hint {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  /* Prefix/suffix input */
+  .input-addon-wrap {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color var(--t-base), box-shadow var(--t-base);
+  }
+
+  .input-addon-wrap:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .input-addon {
+    background: var(--surface-hover);
+    border-right: 1px solid var(--border);
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .input-addon-wrap input {
+    border: none;
+    background: var(--surface);
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--text-primary);
+    padding: 10px 12px;
+    outline: none;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ════════════════════════════════════════
+     7. STATUS / BADGES
+  ════════════════════════════════════════ */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .badge-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .badge-green  { background: var(--green-soft); color: #1a7a47; }
+  .badge-green .badge-dot { background: var(--green); }
+
+  .badge-amber  { background: var(--amber-soft); color: #92600a; }
+  .badge-amber .badge-dot { background: var(--amber); }
+
+  .badge-red    { background: var(--red-soft); color: #b91c1c; }
+  .badge-red .badge-dot { background: var(--red); }
+
+  .badge-blue   { background: var(--blue-soft); color: #1d4ed8; }
+  .badge-blue .badge-dot { background: var(--blue); }
+
+  .badge-gray   { background: var(--border); color: var(--text-secondary); }
+  .badge-gray .badge-dot { background: var(--text-muted); }
+
+  .badge-accent { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-mid); }
+
+  /* ════════════════════════════════════════
+     8. SECTION CARD
+  ════════════════════════════════════════ */
+  .section-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: box-shadow var(--t-base);
+    margin-bottom: 12px;
+  }
+
+  .section-card:focus-within {
+    box-shadow: var(--shadow-sm);
+    border-color: var(--border-focus);
+  }
+
+  .section-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .section-card-icon {
+    width: 28px; height: 28px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .icon-orange { background: var(--accent-soft); }
+  .icon-blue   { background: var(--blue-soft); }
+  .icon-green  { background: var(--green-soft); }
+  .icon-amber  { background: var(--amber-soft); }
+
+  .section-card-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .section-card-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .section-card-toggle {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .section-card-body {
+    padding: 0 18px 16px;
+  }
+
+  /* ════════════════════════════════════════
+     9. COMPUTED / READ-ONLY FIELD
+  ════════════════════════════════════════ */
+  .computed-field {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-mid);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-family: var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+  }
+
+  .computed-label {
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: var(--mono);
+  }
+
+  /* ════════════════════════════════════════
+     10. PROGRESS STEPPER
+  ════════════════════════════════════════ */
+  .stepper {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 4px;
+    gap: 0;
+  }
+
+  .step {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-muted);
+    white-space: nowrap;
+    transition: background var(--t-base);
+  }
+
+  .step.step-active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .step.step-done {
+    color: var(--text-secondary);
+  }
+
+  .step-num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: var(--mono);
+    flex-shrink: 0;
+    transition: background var(--t-base), color var(--t-base);
+  }
+
+  .step-active .step-num {
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+  }
+
+  .step-done .step-num {
+    background: var(--green);
+    color: #fff;
+  }
+
+  /* ════════════════════════════════════════
+     11. PROJECT / ENTITY SELECTOR
+  ════════════════════════════════════════ */
+  .entity-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1.5px dashed var(--border-focus);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--text-muted);
+    transition: all var(--t-base);
+    text-align: left;
+  }
+
+  .entity-btn:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    color: var(--text-primary);
+  }
+
+  .entity-btn.selected {
+    border-style: solid;
+    border-color: var(--border);
+    color: var(--text-primary);
+  }
+
+  .entity-icon {
+    width: 32px; height: 32px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  /* ════════════════════════════════════════
+     12. BREADCRUMB
+  ════════════════════════════════════════ */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .breadcrumb-sep { opacity: 0.4; }
+
+  .breadcrumb a {
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color var(--t-fast);
+  }
+
+  .breadcrumb a:hover { color: var(--accent); }
+
+  /* ════════════════════════════════════════
+     13. KEYBOARD HINT / KBD
+  ════════════════════════════════════════ */
+  kbd {
+    display: inline-block;
+    background: var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 1px 0 var(--border-strong);
+  }
+
+  /* ════════════════════════════════════════
+     14. SHADOWS DEMO
+  ════════════════════════════════════════ */
+  .shadow-demo {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 80px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  /* ════════════════════════════════════════
+     15. ANIMATION TOKENS DEMO
+  ════════════════════════════════════════ */
+  .anim-demo-btn {
+    padding: 8px 16px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-mid);
+    border-radius: var(--radius);
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--accent);
+    cursor: pointer;
+    font-weight: 500;
+  }
+
+  /* ════════════════════════════════════════
+     16. HINT TEXT
+  ════════════════════════════════════════ */
+  .hint-text {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  .hint-text a { color: var(--accent); text-decoration: none; }
+  .hint-text a:hover { text-decoration: underline; }
+
+  /* ════════════════════════════════════════
+     17. DROPDOWN / LIST
+  ════════════════════════════════════════ */
+  .dropdown-demo {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    width: 280px;
+  }
+
+  .dropdown-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .dropdown-search input {
+    border: none;
+    background: transparent;
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--text-primary);
+    outline: none;
+    flex: 1;
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background var(--t-fast);
+  }
+
+  .dropdown-item:hover { background: var(--surface-hover); }
+
+  /* ════════════════════════════════════════
+     18. MONO / CODE INLINE
+  ════════════════════════════════════════ */
+  .mono-id {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+
+  /* ════════════════════════════════════════
+     FOOTER ACTIONS PATTERN
+  ════════════════════════════════════════ */
+  .footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 20px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ════════════════════════════════════════
+     USAGE CALLOUT
+  ════════════════════════════════════════ */
+  .callout {
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .callout-do {
+    background: var(--green-soft);
+    border-left: 3px solid var(--green);
+    color: #1a5c38;
+  }
+
+  .callout-dont {
+    background: var(--red-soft);
+    border-left: 3px solid var(--red);
+    color: #7f1d1d;
+  }
+
+  .callout-note {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    color: var(--text-primary);
+  }
+
+  .callout strong {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  /* ════════════════════════════════════════
+     MISC
+  ════════════════════════════════════════ */
+  .tag-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .mono-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2px 8px;
+    color: var(--text-muted);
+  }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+  @media (max-width: 768px) {
+    .guide-wrap { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .main { padding: 32px 24px; }
+    .two-col { grid-template-columns: 1fr; }
+  }
+
+  /* Guide hero */
+  .guide-hero {
+    margin-bottom: 56px;
+    padding-bottom: 40px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .guide-hero-eyebrow {
+    font-size: 11px;
+    font-family: var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  .guide-hero-title {
+    font-size: 40px;
+    font-weight: 500;
+    letter-spacing: -1px;
+    line-height: 1.1;
+    color: var(--text-primary);
+    margin-bottom: 14px;
+  }
+
+  .guide-hero-desc {
+    font-size: 15px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    max-width: 560px;
+  }
+
+  .guide-hero-meta {
+    display: flex;
+    gap: 24px;
+    margin-top: 20px;
+  }
+
+  .guide-hero-meta-item {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+  }
+
+  .guide-hero-meta-item span {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+
+<div class="guide-wrap">
+
+  <!-- ── Sidebar Nav ── -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-name">Design System</div>
+      <div class="sidebar-brand-version">v1.0 · 2025</div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Foundation</div>
+      <a class="sidebar-link active" href="#colors">Colors</a>
+      <a class="sidebar-link" href="#typography">Typography</a>
+      <a class="sidebar-link" href="#spacing">Spacing</a>
+      <a class="sidebar-link" href="#radii">Border Radius</a>
+      <a class="sidebar-link" href="#shadows">Shadows</a>
+      <a class="sidebar-link" href="#motion">Motion</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Components</div>
+      <a class="sidebar-link" href="#buttons">Buttons</a>
+      <a class="sidebar-link" href="#forms">Form Inputs</a>
+      <a class="sidebar-link" href="#badges">Badges & Status</a>
+      <a class="sidebar-link" href="#cards">Section Cards</a>
+      <a class="sidebar-link" href="#stepper">Progress Stepper</a>
+      <a class="sidebar-link" href="#selectors">Entity Selectors</a>
+      <a class="sidebar-link" href="#computed">Computed Fields</a>
+      <a class="sidebar-link" href="#dropdowns">Dropdowns</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Patterns</div>
+      <a class="sidebar-link" href="#navigation">Navigation</a>
+      <a class="sidebar-link" href="#footer">Footer Actions</a>
+      <a class="sidebar-link" href="#feedback">Feedback & Hints</a>
+      <a class="sidebar-link" href="#darkmode">Dark Mode</a>
+      <a class="sidebar-link" href="#usage">Usage Rules</a>
+    </div>
+  </nav>
+
+  <!-- ── Main Content ── -->
+  <main class="main">
+
+    <!-- Hero -->
+    <div class="guide-hero">
+      <div class="guide-hero-eyebrow">Universal SaaS Design System</div>
+      <h1 class="guide-hero-title">Style Guide</h1>
+      <p class="guide-hero-desc">A comprehensive, opinionated design system built for B2B SaaS products. Warm, document-native aesthetics. Reduced chrome, maximum clarity. Scales from simple forms to complex data-entry workflows.</p>
+      <div class="guide-hero-meta">
+        <div class="guide-hero-meta-item">Typeface <span>DM Sans + DM Mono</span></div>
+        <div class="guide-hero-meta-item">Accent <span>#e16f3d</span></div>
+        <div class="guide-hero-meta-item">Mode <span>Light + Dark</span></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         1. COLORS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="colors">
+      <div class="section-tag">01 — Foundation</div>
+      <h2 class="section-title">Color Palette</h2>
+      <p class="section-desc">All colors are defined as CSS custom properties and adapt automatically to light and dark mode. The palette is anchored by a warm off-white background, near-black text, and a terracotta-orange accent. Semantic colors (green, amber, red, blue) are used exclusively for status communication.</p>
+
+      <div class="subsection">
+        <div class="subsection-title">Backgrounds & Surfaces</div>
+        <div class="color-grid">
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#f7f6f3; border-bottom: 1px solid #e8e7e3;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Background</div><div class="swatch-var">--bg</div><div class="swatch-hex">#f7f6f3</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#ffffff;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Surface</div><div class="swatch-var">--surface</div><div class="swatch-hex">#ffffff</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#f7f6f3; border:1px solid #e8e7e3;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Surface Hover</div><div class="swatch-var">--surface-hover</div><div class="swatch-hex">#f7f6f3</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Text</div>
+        <div class="color-grid">
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#191817;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Primary</div><div class="swatch-var">--text-primary</div><div class="swatch-hex">#191817</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:rgba(55,53,47,0.65);"></div>
+            <div class="swatch-meta"><div class="swatch-name">Secondary</div><div class="swatch-var">--text-secondary</div><div class="swatch-hex">37352f · 65%</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:rgba(55,53,47,0.40);"></div>
+            <div class="swatch-meta"><div class="swatch-name">Muted</div><div class="swatch-var">--text-muted</div><div class="swatch-hex">37352f · 40%</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Brand Accent</div>
+        <div class="color-grid">
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#e16f3d;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Accent</div><div class="swatch-var">--accent</div><div class="swatch-hex">#e16f3d</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#c85f30;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Accent Hover</div><div class="swatch-var">--accent-hover</div><div class="swatch-hex">#c85f30</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:rgba(225,111,61,0.08);"></div>
+            <div class="swatch-meta"><div class="swatch-name">Accent Soft</div><div class="swatch-var">--accent-soft</div><div class="swatch-hex">e16f3d · 8%</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:rgba(225,111,61,0.18);"></div>
+            <div class="swatch-meta"><div class="swatch-name">Accent Mid</div><div class="swatch-var">--accent-mid</div><div class="swatch-hex">e16f3d · 18%</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Semantic Colors</div>
+        <div class="color-grid">
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#2ecc71;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Green</div><div class="swatch-var">--green</div><div class="swatch-hex">#2ecc71</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#f59e0b;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Amber</div><div class="swatch-var">--amber</div><div class="swatch-hex">#f59e0b</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#ef4444;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Red</div><div class="swatch-var">--red</div><div class="swatch-hex">#ef4444</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#3884ff;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Blue</div><div class="swatch-var">--blue</div><div class="swatch-hex">#3884ff</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Entity Colors (Avatars & Icons)</div>
+        <div class="color-grid">
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#6366f1;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Indigo</div><div class="swatch-var">--entity-indigo</div><div class="swatch-hex">#6366f1</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#14b8a6;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Teal</div><div class="swatch-var">--entity-teal</div><div class="swatch-hex">#14b8a6</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#f59e0b;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Amber</div><div class="swatch-var">--entity-amber</div><div class="swatch-hex">#f59e0b</div></div>
+          </div>
+          <div class="color-swatch">
+            <div class="swatch-block" style="background:#e16f3d;"></div>
+            <div class="swatch-meta"><div class="swatch-name">Orange</div><div class="swatch-var">--entity-orange</div><div class="swatch-hex">#e16f3d</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         2. TYPOGRAPHY
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="typography">
+      <div class="section-tag">02 — Foundation</div>
+      <h2 class="section-title">Typography</h2>
+      <p class="section-desc">Two typefaces. <strong>DM Sans</strong> for all UI text — warm, humanist, highly legible at small sizes. <strong>DM Mono</strong> for all machine-generated data: IDs, timestamps, computed values, code, metadata, and labels. Never mix them at the same semantic level.</p>
+
+      <div class="subsection">
+        <div class="subsection-title">Type Scale — DM Sans</div>
+        <div class="demo-card">
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Display / H1</div><div class="type-spec">26–40px · weight 500 · -0.5px tracking</div></div>
+            <div style="font-size:32px; font-weight:500; letter-spacing:-0.5px; color:var(--text-primary);">New contract</div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Section Title</div><div class="type-spec">18–22px · weight 500 · -0.3px tracking</div></div>
+            <div style="font-size:20px; font-weight:500; letter-spacing:-0.3px; color:var(--text-primary);">Identity & classification</div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Body / UI</div><div class="type-spec">14px · weight 400 · 1.5 line-height</div></div>
+            <div style="font-size:14px; color:var(--text-secondary);">Link to a project, then capture commercial terms. You can edit everything later from the portfolio.</div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Label / Small</div><div class="type-spec">13px · weight 400–500 · --text-secondary</div></div>
+            <div style="font-size:13px; font-weight:500; color:var(--text-primary);">Customer name</div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Caption / Hint</div><div class="type-spec">11.5–12px · weight 400 · --text-muted</div></div>
+            <div style="font-size:11.5px; color:var(--text-muted);">Tip — reminder is typically set 60–90 days before contract end.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Monospace — DM Mono</div>
+        <div class="demo-card">
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Breadcrumb</div><div class="type-spec">12px · uppercase · 0.04em tracking</div></div>
+            <div class="breadcrumb"><a href="#">Portfolio</a><span class="breadcrumb-sep">›</span><a href="#">Contracts</a><span class="breadcrumb-sep">›</span><span>New</span></div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Entity ID</div><div class="type-spec">11px · --accent color · 0.02em tracking</div></div>
+            <div class="mono-id">PRJ-0041</div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Computed Value</div><div class="type-spec">13px · displayed in computed field</div></div>
+            <div class="computed-field" style="width:fit-content;"><span class="computed-label">AUTO</span> 18 months</div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Field Label (caps)</div><div class="type-spec">11px · uppercase · 0.06em tracking · --text-muted</div></div>
+            <div style="font-size:11px; font-family:var(--mono); text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted);">Contract start</div>
+          </div>
+          <div class="type-scale-item">
+            <div class="type-meta"><div class="type-label">Amount / Number</div><div class="type-spec">16px · weight 500 · --mono for financial data</div></div>
+            <div style="font-size:16px; font-weight:500; font-family:var(--mono); color:var(--text-primary);">₹ 48,00,000</div>
+          </div>
+        </div>
+      </div>
+
+      <table class="spec-table">
+        <tr><th>Rule</th><th>Description</th></tr>
+        <tr><td>IDs & codes</td><td>Always <code>--mono</code> · accent color · uppercase preferred · e.g. <code>PRJ-0041</code>, <code>AUTO</code></td></tr>
+        <tr><td>Financial values</td><td>Always <code>--mono</code> · currency symbol + <code>Intl.NumberFormat</code> for locale-aware display</td></tr>
+        <tr><td>Timestamps & dates</td><td><code>--mono</code> when machine-generated, <code>--font</code> when user-entered in a form</td></tr>
+        <tr><td>Step numbers</td><td><code>--mono</code> inside step badges</td></tr>
+        <tr><td>Breadcrumbs</td><td><code>--mono</code> · uppercase · letter-spacing</td></tr>
+        <tr><td>Button text</td><td>Always <code>--font</code> · 14px · weight 500</td></tr>
+      </table>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         3. SPACING
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="spacing">
+      <div class="section-tag">03 — Foundation</div>
+      <h2 class="section-title">Spacing Scale</h2>
+      <p class="section-desc">An 4px-base grid. All margins, paddings, and gaps use these named tokens. Never use arbitrary pixel values.</p>
+
+      <div class="demo-card">
+        <div class="spacing-row"><div class="spacing-bar" style="width:4px;"></div><div class="spacing-label">--sp-1 · 4px</div><div class="spacing-desc">Icon-to-label gap, tight badge padding</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:8px;"></div><div class="spacing-label">--sp-2 · 8px</div><div class="spacing-desc">Inline element gap, small component gap</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:12px;"></div><div class="spacing-label">--sp-3 · 12px</div><div class="spacing-desc">Section inner padding, step gap</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:16px;"></div><div class="spacing-label">--sp-4 · 16px</div><div class="spacing-desc">Form element padding, card body indent</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:20px;"></div><div class="spacing-label">--sp-5 · 20px</div><div class="spacing-desc">Footer top margin, standard gap</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:24px;"></div><div class="spacing-label">--sp-6 · 24px</div><div class="spacing-desc">Section-to-section gap, card padding</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:32px;"></div><div class="spacing-label">--sp-8 · 32px</div><div class="spacing-desc">Page top padding, major section gap</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:48px;"></div><div class="spacing-label">--sp-12 · 48px</div><div class="spacing-desc">Page body horizontal padding</div></div>
+        <div class="spacing-row"><div class="spacing-bar" style="width:64px;"></div><div class="spacing-label">--sp-16 · 64px</div><div class="spacing-desc">Page bottom padding, section-to-section in style guide</div></div>
+      </div>
+
+      <div class="callout callout-note" style="margin-top:16px;">
+        <strong>Prop-row grid</strong>
+        Property rows use <code>grid-template-columns: 160px 1fr</code> — a fixed 160px label column and a fluid value column. This creates the Notion-style aligned property table used throughout forms.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         4. BORDER RADIUS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="radii">
+      <div class="section-tag">04 — Foundation</div>
+      <h2 class="section-title">Border Radius</h2>
+      <p class="section-desc">Four radii cover every scenario. Use the smallest appropriate radius — don't round everything to pill.</p>
+
+      <div class="demo-card">
+        <div class="radius-grid">
+          <div class="radius-item">
+            <div class="radius-box" style="border-radius:4px;"></div>
+            <div class="radius-meta"><div class="radius-name">Small</div><div class="radius-val">--radius-sm · 4px</div></div>
+            <div class="hint-text" style="text-align:center; margin-top:4px;">kbd, currency badge, code</div>
+          </div>
+          <div class="radius-item">
+            <div class="radius-box" style="border-radius:6px;"></div>
+            <div class="radius-meta"><div class="radius-name">Base</div><div class="radius-val">--radius · 6px</div></div>
+            <div class="hint-text" style="text-align:center; margin-top:4px;">Buttons, inputs, step-num, section icons</div>
+          </div>
+          <div class="radius-item">
+            <div class="radius-box" style="border-radius:10px;"></div>
+            <div class="radius-meta"><div class="radius-name">Large</div><div class="radius-val">--radius-lg · 10px</div></div>
+            <div class="hint-text" style="text-align:center; margin-top:4px;">Section cards, stepper, dropdowns, entity btns</div>
+          </div>
+          <div class="radius-item">
+            <div class="radius-box" style="border-radius:100px;"></div>
+            <div class="radius-meta"><div class="radius-name">Pill</div><div class="radius-val">--radius-pill · 100px</div></div>
+            <div class="hint-text" style="text-align:center; margin-top:4px;">Status badges only, close btn (50%)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         5. SHADOWS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="shadows">
+      <div class="section-tag">05 — Foundation</div>
+      <h2 class="section-title">Shadows & Elevation</h2>
+      <p class="section-desc">Shadows are subtle and warm — no cold blue tints. Used sparingly to indicate elevation or interactive focus, not decoration.</p>
+
+      <div class="three-col">
+        <div>
+          <div class="shadow-demo" style="box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);">sm</div>
+          <div style="margin-top:10px; text-align:center;"><div style="font-size:12px; font-weight:500; color:var(--text-primary);">Shadow SM</div><div class="hint-text" style="text-align:center;">Focus states, section :focus-within</div></div>
+        </div>
+        <div>
+          <div class="shadow-demo" style="box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 8px 32px rgba(0,0,0,0.06);">base</div>
+          <div style="margin-top:10px; text-align:center;"><div style="font-size:12px; font-weight:500; color:var(--text-primary);">Shadow</div><div class="hint-text" style="text-align:center;">Dropdowns, elevated cards</div></div>
+        </div>
+        <div>
+          <div class="shadow-demo" style="box-shadow: 0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);">lg</div>
+          <div style="margin-top:10px; text-align:center;"><div style="font-size:12px; font-weight:500; color:var(--text-primary);">Shadow LG</div><div class="hint-text" style="text-align:center;">Modals, popovers</div></div>
+        </div>
+      </div>
+
+      <div class="callout callout-note" style="margin-top:24px;">
+        <strong>Focus ring</strong>
+        Focus states use <code>box-shadow: 0 0 0 3px var(--accent-soft)</code> paired with <code>border-color: var(--accent)</code>. This creates a soft terracotta halo. Never use default browser outlines.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         6. MOTION
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="motion">
+      <div class="section-tag">06 — Foundation</div>
+      <h2 class="section-title">Motion & Animation</h2>
+      <p class="section-desc">Motion is purposeful and fast. Micro-interactions use <code>0.12–0.15s ease</code>. Page-level entrances use a spring curve. Collapsible sections use the smooth easing curve for height transitions.</p>
+
+      <table class="spec-table">
+        <tr><th>Token</th><th>Value</th><th>Use case</th></tr>
+        <tr><td><code>--t-fast</code></td><td>0.12s ease</td><td>Hover backgrounds (prop-label, dropdown items)</td></tr>
+        <tr><td><code>--t-base</code></td><td>0.15s ease</td><td>Button states, border-color, box-shadow, badge filters</td></tr>
+        <tr><td><code>--t-slow</code></td><td>0.25s ease</td><td>Panel fade-ins, opacity changes</td></tr>
+        <tr><td><code>--t-spring</code></td><td>0.35s cubic-bezier(0.16,1,0.3,1)</td><td>Page load <code>fadeUp</code>, modal entrances</td></tr>
+        <tr><td><code>--t-smooth</code></td><td>0.3s cubic-bezier(0.4,0,0.2,1)</td><td>Collapsible section max-height, toggle arrows</td></tr>
+      </table>
+
+      <div class="subsection" style="margin-top: 24px;">
+        <div class="subsection-title">Standard Keyframes</div>
+        <table class="spec-table">
+          <tr><th>Name</th><th>Effect</th><th>Used on</th></tr>
+          <tr><td><code>fadeUp</code></td><td>opacity 0→1, translateY 12px→0</td><td>Page / panel entry</td></tr>
+          <tr><td><code>fadeIn</code></td><td>opacity 0→1, translateY 6px→0</td><td>Panel step transitions</td></tr>
+        </table>
+      </div>
+
+      <div class="callout callout-do">
+        <strong>✓ Do</strong>
+        Animate page-level arrivals (forms, panels) with <code>fadeUp</code>. Use <code>translateY(-1px)</code> on primary button hover for tactile lift.
+      </div>
+      <div class="callout callout-dont">
+        <strong>✗ Don't</strong>
+        Animate layout reflows, add delays to interactive elements, or use bounce/elastic curves on functional UI.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         7. BUTTONS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="buttons">
+      <div class="section-tag">07 — Components</div>
+      <h2 class="section-title">Buttons</h2>
+      <p class="section-desc">Four variants cover every action hierarchy. One primary per view. Never two primary buttons adjacent to each other.</p>
+
+      <div class="demo-card">
+        <div class="subsection-title">Variants</div>
+        <div class="btn-row" style="margin-bottom: 24px;">
+          <button class="btn btn-primary">Create contract ✓</button>
+          <button class="btn btn-secondary">Save draft</button>
+          <button class="btn btn-ghost">← Back</button>
+          <button class="btn btn-danger">Delete</button>
+        </div>
+
+        <div class="subsection-title">Sizes</div>
+        <div class="btn-row" style="margin-bottom: 24px;">
+          <button class="btn btn-primary btn-sm">Continue →</button>
+          <button class="btn btn-primary">Continue →</button>
+          <button class="btn btn-primary btn-lg">Continue →</button>
+        </div>
+
+        <div class="subsection-title">States</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" disabled>Disabled</button>
+          <button class="btn btn-primary" style="background:#1a7a47;">✓ Created!</button>
+          <button class="btn btn-secondary" style="color:var(--green);">✓ Draft saved</button>
+        </div>
+      </div>
+
+      <table class="spec-table" style="margin-top:16px;">
+        <tr><th>Variant</th><th>Background</th><th>Border</th><th>Usage</th></tr>
+        <tr><td>Primary</td><td><code>--accent</code></td><td>None</td><td>Primary CTA, one per page section. Has <code>translateY(-1px)</code> on hover.</td></tr>
+        <tr><td>Secondary</td><td><code>--surface</code></td><td><code>--border</code></td><td>Secondary CTA, save/export. No shadow.</td></tr>
+        <tr><td>Ghost</td><td>Transparent</td><td><code>--border</code></td><td>Navigation (Back), tertiary actions.</td></tr>
+        <tr><td>Danger</td><td><code>--red-soft</code></td><td><code>red · 20%</code></td><td>Destructive actions only.</td></tr>
+        <tr><td>Disabled</td><td>Any</td><td>—</td><td><code>opacity: 0.45</code> + <code>cursor: not-allowed</code>. Never grey out text alone.</td></tr>
+      </table>
+
+      <div class="callout callout-note" style="margin-top:16px;">
+        <strong>Success state feedback</strong>
+        After async actions complete, mutate button text and color in place (e.g. "✓ Contract created!" with <code>background: #1a7a47</code>). Reset after 2s if the action is reversible.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         8. FORM INPUTS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="forms">
+      <div class="section-tag">08 — Components</div>
+      <h2 class="section-title">Form Inputs</h2>
+      <p class="section-desc">Two input paradigms: inline property rows (Notion-style) for structured record editing, and standalone labeled fields for less-dense forms. Both share the same focus ring and accent-soft focus background.</p>
+
+      <div class="subsection">
+        <div class="subsection-title">Pattern A — Inline Property Rows</div>
+        <div class="demo-card">
+          <div class="prop-row">
+            <div class="prop-label"><span class="prop-icon">🏢</span> Customer name <span class="required-dot"></span></div>
+            <input class="prop-input" type="text" placeholder="e.g. Accenture India Pvt Ltd" />
+          </div>
+          <div class="prop-row">
+            <div class="prop-label"><span class="prop-icon">📋</span> Contract type</div>
+            <select class="prop-input">
+              <option>RPO</option>
+              <option>Staff Augmentation</option>
+              <option>Managed Services</option>
+            </select>
+          </div>
+          <div class="prop-row">
+            <div class="prop-label"><span class="prop-icon">📅</span> Start date</div>
+            <input class="prop-input" type="date" />
+          </div>
+        </div>
+        <p class="hint-text" style="margin-top:8px;">Label column is fixed at 160px. Required fields show a 5px accent dot after the label. Hover highlights the label background. Focus fills the input with <code>--accent-soft</code>.</p>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Pattern B — Standalone Fields</div>
+        <div class="demo-card">
+          <div class="two-col">
+            <div class="input-group">
+              <label class="input-label">Contract name</label>
+              <input class="input-field" type="text" placeholder="Enter name…" />
+              <span class="hint-text">Used in reports and email notifications.</span>
+            </div>
+            <div class="input-group">
+              <label class="input-label">Signed ACV</label>
+              <div class="input-addon-wrap">
+                <span class="input-addon">₹</span>
+                <input type="number" placeholder="0" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <table class="spec-table">
+        <tr><th>State</th><th>Border</th><th>Background</th><th>Shadow</th></tr>
+        <tr><td>Default</td><td><code>--border</code></td><td><code>--surface</code></td><td>None</td></tr>
+        <tr><td>Hover</td><td><code>--border</code></td><td><code>--surface-hover</code></td><td>None</td></tr>
+        <tr><td>Focus</td><td><code>--accent</code></td><td><code>--accent-soft</code></td><td><code>0 0 0 3px --accent-soft</code></td></tr>
+        <tr><td>Error</td><td><code>--red</code></td><td><code>--red-soft</code></td><td><code>0 0 0 3px --red-soft</code></td></tr>
+        <tr><td>Read-only</td><td><code>--border</code></td><td><code>--surface-hover</code></td><td>None · use computed-field component</td></tr>
+      </table>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         9. BADGES & STATUS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="badges">
+      <div class="section-tag">09 — Components</div>
+      <h2 class="section-title">Badges & Status Indicators</h2>
+      <p class="section-desc">Status is always communicated with color + a dot — never color alone. Badges use pill shape (<code>border-radius: 100px</code>) exclusively. The accent badge has a border to distinguish it as a system-generated tag.</p>
+
+      <div class="demo-card">
+        <div class="tag-row">
+          <span class="badge badge-green"><span class="badge-dot"></span>Active</span>
+          <span class="badge badge-amber"><span class="badge-dot"></span>Pending</span>
+          <span class="badge badge-red"><span class="badge-dot"></span>Expired</span>
+          <span class="badge badge-blue"><span class="badge-dot"></span>In review</span>
+          <span class="badge badge-gray"><span class="badge-dot"></span>Inactive</span>
+          <span class="badge badge-accent">AUTO</span>
+        </div>
+      </div>
+
+      <table class="spec-table" style="margin-top:16px;">
+        <tr><th>Badge</th><th>Semantic meaning</th><th>Text color</th></tr>
+        <tr><td>Green</td><td>Active, success, complete, verified</td><td>#1a7a47 (accessible on green-soft)</td></tr>
+        <tr><td>Amber</td><td>Pending, warning, in negotiation, partial</td><td>#92600a</td></tr>
+        <tr><td>Red</td><td>Error, expired, rejected, critical</td><td>#b91c1c</td></tr>
+        <tr><td>Blue</td><td>Informational, in-review, neutral progress</td><td>#1d4ed8</td></tr>
+        <tr><td>Gray</td><td>Inactive, disabled, not set, archived</td><td>--text-secondary</td></tr>
+        <tr><td>Accent</td><td>System labels (AUTO, COMPUTED, DRAFT)</td><td>--accent</td></tr>
+      </table>
+
+      <div class="callout callout-dont" style="margin-top:16px;">
+        <strong>✗ Don't use color for meaning alone.</strong>
+        Always pair with a dot, icon, or label text. Color-blind users rely on the text or icon to interpret status.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         10. SECTION CARDS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="cards">
+      <div class="section-tag">10 — Components</div>
+      <h2 class="section-title">Section Cards</h2>
+      <p class="section-desc">The primary content container. Collapsible by default. Header contains a colored icon, a label, a description, and a toggle chevron. Body contains any form content. Collapses via max-height animation.</p>
+
+      <div class="section-card">
+        <div class="section-card-header">
+          <div class="section-card-icon icon-orange">👤</div>
+          <div>
+            <div class="section-card-label">Identity & classification</div>
+            <div class="section-card-desc">Who is this contract with, and how is it classified?</div>
+          </div>
+          <span class="section-card-toggle">▾</span>
+        </div>
+        <div class="section-card-body">
+          <div class="prop-row">
+            <div class="prop-label"><span class="prop-icon">🏢</span> Customer name</div>
+            <input class="prop-input" type="text" placeholder="e.g. Accenture India Pvt Ltd" />
+          </div>
+          <div class="prop-row">
+            <div class="prop-label"><span class="prop-icon">📋</span> Contract type</div>
+            <select class="prop-input"><option>Managed Services</option></select>
+          </div>
+        </div>
+      </div>
+
+      <table class="spec-table" style="margin-top:16px;">
+        <tr><th>Element</th><th>Spec</th></tr>
+        <tr><td>Card border</td><td><code>1px solid --border</code> · on <code>:focus-within</code> upgrades to <code>--border-focus</code> + <code>--shadow-sm</code></td></tr>
+        <tr><td>Section icon</td><td>28×28px, <code>--radius</code> corners. Background from semantic color: orange, blue, green, or amber.</td></tr>
+        <tr><td>Label</td><td>13px, weight 500, <code>--text-primary</code></td></tr>
+        <tr><td>Description</td><td>12px, <code>--text-muted</code></td></tr>
+        <tr><td>Collapsed state</td><td><code>max-height: 0</code> + <code>padding-bottom: 0</code>, chevron rotates <code>-90deg</code></td></tr>
+        <tr><td>Special variant</td><td>Review/summary cards use <code>border-style: dashed</code> to signal read-only or preview mode</td></tr>
+      </table>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         11. PROGRESS STEPPER
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="stepper">
+      <div class="section-tag">11 — Components</div>
+      <h2 class="section-title">Progress Stepper</h2>
+      <p class="section-desc">A pill-shaped container holding 2–6 steps. Active step has solid accent background. Completed steps show a green checkmark step-num. Inactive steps are muted. Clicking a done step navigates backwards.</p>
+
+      <div class="demo-card">
+        <div class="stepper">
+          <div class="step step-done"><div class="step-num">✓</div> Project</div>
+          <div class="step step-done"><div class="step-num">✓</div> Identity</div>
+          <div class="step step-active"><div class="step-num">3</div> Dates</div>
+          <div class="step"><div class="step-num">4</div> Commercial</div>
+        </div>
+      </div>
+
+      <table class="spec-table" style="margin-top:16px;">
+        <tr><th>State</th><th>Background</th><th>Text</th><th>Step-num</th></tr>
+        <tr><td>Inactive</td><td>Transparent</td><td><code>--text-muted</code></td><td><code>--border</code> bg</td></tr>
+        <tr><td>Active</td><td><code>--accent</code></td><td>White, weight 500</td><td>White 25% bg</td></tr>
+        <tr><td>Done</td><td>Transparent</td><td><code>--text-secondary</code></td><td><code>--green</code> bg, "✓" text</td></tr>
+      </table>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         12. ENTITY SELECTORS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="selectors">
+      <div class="section-tag">12 — Components</div>
+      <h2 class="section-title">Entity Selectors</h2>
+      <p class="section-desc">Used to link records (e.g. select a project). An unselected selector uses dashed border as an affordance for interactivity. Selected state converts to solid border and shows the chosen entity's icon and metadata.</p>
+
+      <div class="demo-card">
+        <div style="margin-bottom: 16px;">
+          <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">Unselected state</p>
+          <button class="entity-btn">
+            <span style="font-size: 20px;">＋</span>
+            <span>Search or select a project (PRJ-···)</span>
+            <span style="margin-left:auto; color:var(--text-muted);">▾</span>
+          </button>
+        </div>
+        <div>
+          <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">Selected state</p>
+          <button class="entity-btn selected">
+            <div class="entity-icon" style="background:#6366f1;">AC</div>
+            <div>
+              <div style="font-size:14px; font-weight:500; color:var(--text-primary);">Accenture RPO — Wave 3</div>
+              <div class="mono-id">PRJ-0041</div>
+            </div>
+            <span style="margin-left:auto; color:var(--accent);">✓</span>
+          </button>
+        </div>
+      </div>
+
+      <table class="spec-table" style="margin-top:16px;">
+        <tr><th>State</th><th>Border</th><th>Focus ring on hover</th></tr>
+        <tr><td>Empty</td><td><code>1.5px dashed --border-focus</code></td><td>Yes — <code>0 0 0 3px --accent-soft</code></td></tr>
+        <tr><td>Selected</td><td><code>1px solid --border</code></td><td>No ring needed</td></tr>
+      </table>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         13. COMPUTED FIELDS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="computed">
+      <div class="section-tag">13 — Components</div>
+      <h2 class="section-title">Computed / Read-only Fields</h2>
+      <p class="section-desc">Visually distinct from editable inputs. The <code>--accent-soft</code> background and <code>--accent-mid</code> border signal "this was calculated for you." The <code>AUTO</code> label (mono, uppercase, accent) identifies the source as system-generated.</p>
+
+      <div class="demo-card">
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">⏱</span> Duration</div>
+          <div class="computed-field"><span class="computed-label">AUTO</span> 18 months</div>
+        </div>
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">💰</span> Gross margin</div>
+          <div class="computed-field"><span class="computed-label">AUTO</span> ₹ 8,64,000</div>
+        </div>
+        <div class="prop-row">
+          <div class="prop-label"><span class="prop-icon">📊</span> Monthly run rate</div>
+          <div class="computed-field"><span class="computed-label">AUTO</span> ₹ 4,00,000 / mo</div>
+        </div>
+      </div>
+
+      <div class="callout callout-note" style="margin-top:16px;">
+        Use this component for any field whose value is derived from user input. Never show a computed value in a plain <code>prop-input</code> — the visual contrast is essential for data integrity.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         14. DROPDOWNS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="dropdowns">
+      <div class="section-tag">14 — Components</div>
+      <h2 class="section-title">Dropdowns & Search Lists</h2>
+      <p class="section-desc">Dropdowns use <code>--shadow</code> for elevation. A search input is included whenever the list exceeds ~5 items. Items show entity icon + primary text + secondary ID. Hover state uses <code>--surface-hover</code>.</p>
+
+      <div class="demo-card" style="display:flex; justify-content:center;">
+        <div class="dropdown-demo">
+          <div class="dropdown-search">
+            <span>🔍</span>
+            <input type="text" placeholder="Search projects…" />
+          </div>
+          <div class="dropdown-item">
+            <div class="entity-icon" style="background:#6366f1; width:28px; height:28px; font-size:11px;">AC</div>
+            <div><div style="font-weight:500; font-size:13px;">Accenture RPO — Wave 3</div><div class="mono-id">PRJ-0041</div></div>
+          </div>
+          <div class="dropdown-item" style="background:var(--surface-hover);">
+            <div class="entity-icon" style="background:#14b8a6; width:28px; height:28px; font-size:11px;">TC</div>
+            <div><div style="font-weight:500; font-size:13px;">Tata Consultancy — Staff Aug</div><div class="mono-id">PRJ-0039</div></div>
+          </div>
+          <div class="dropdown-item">
+            <div class="entity-icon" style="background:#f59e0b; width:28px; height:28px; font-size:11px;">WI</div>
+            <div><div style="font-weight:500; font-size:13px;">Wipro Analytics Centre</div><div class="mono-id">PRJ-0037</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         15. NAVIGATION PATTERNS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="navigation">
+      <div class="section-tag">15 — Patterns</div>
+      <h2 class="section-title">Navigation Patterns</h2>
+      <p class="section-desc">Two navigation components: breadcrumbs for hierarchical context and the close button for dismissing overlays/modals.</p>
+
+      <div class="subsection">
+        <div class="subsection-title">Breadcrumb</div>
+        <div class="demo-card">
+          <div class="breadcrumb">
+            <a href="#">Portfolio</a>
+            <span class="breadcrumb-sep">›</span>
+            <a href="#">Contracts</a>
+            <span class="breadcrumb-sep">›</span>
+            <span>New</span>
+          </div>
+        </div>
+        <p class="hint-text" style="margin-top:8px;">Mono, 12px, uppercase, 0.04em tracking. Separator is <code>›</code> at 40% opacity. Last item is not a link. Items are <code>--text-muted</code> at rest, <code>--accent</code> on hover.</p>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Close Button</div>
+        <div class="demo-card" style="display:flex; align-items:center; gap:16px;">
+          <button style="width:32px; height:32px; border:none; background:var(--border); border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:16px; color:var(--text-secondary); transition:background var(--t-base);">✕</button>
+          <span class="hint-text">32×32px circle. Background: <code>--border</code>. On hover: <code>--border-focus</code>. Position: top-right of page header. Always a true button element.</span>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         16. FOOTER ACTIONS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="footer">
+      <div class="section-tag">16 — Patterns</div>
+      <h2 class="section-title">Footer Actions Pattern</h2>
+      <p class="section-desc">Every multi-step panel has a sticky footer with back/forward navigation. Space-between layout: left side = back or cancel (ghost), right side = primary or grouped secondaries. A keyboard hint lives in the left side on step 0.</p>
+
+      <div class="demo-card">
+        <div class="footer-actions">
+          <button class="btn btn-ghost">← Back</button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary">Save draft</button>
+            <button class="btn btn-primary">Create contract ✓</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo-card" style="margin-top: 12px;">
+        <div class="footer-actions">
+          <span class="hint-text"><kbd>Esc</kbd> to cancel</span>
+          <button class="btn btn-primary" disabled style="opacity:0.45; cursor:not-allowed;">Continue →</button>
+        </div>
+      </div>
+
+      <div class="callout callout-note" style="margin-top:16px;">
+        <strong>Gate progression</strong>
+        The primary Continue button is disabled (<code>opacity: 0.45</code>, <code>cursor: not-allowed</code>) until the required action on that step is complete. Never hide it — always show disabled state to telegraph what's expected.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         17. FEEDBACK & HINTS
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="feedback">
+      <div class="section-tag">17 — Patterns</div>
+      <h2 class="section-title">Feedback & Hint Text</h2>
+      <p class="section-desc">Contextual guidance lives close to the field it refers to. Three levels: hints (passive), callouts (proactive), and required notes (gating).</p>
+
+      <div class="demo-card">
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <p style="font-size:12px; font-weight:500; color:var(--text-muted); margin-bottom:4px;">Hint text</p>
+            <p class="hint-text">Tip — reminder is typically set 60–90 days before contract end. <a href="#">Learn more →</a></p>
+          </div>
+
+          <div>
+            <p style="font-size:12px; font-weight:500; color:var(--text-muted); margin-bottom:4px;">Required note</p>
+            <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--accent); font-weight:500;">
+              <span>●</span> Project selection is required to continue
+            </div>
+          </div>
+
+          <div>
+            <p style="font-size:12px; font-weight:500; color:var(--text-muted); margin-bottom:6px;">Keyboard hint</p>
+            <span class="hint-text"><kbd>Esc</kbd> to cancel &nbsp;&nbsp; <kbd>↵</kbd> to confirm</span>
+          </div>
+        </div>
+      </div>
+
+      <table class="spec-table" style="margin-top:16px;">
+        <tr><th>Type</th><th>Font size</th><th>Color</th><th>Use when</th></tr>
+        <tr><td>Hint text</td><td>11.5px</td><td><code>--text-muted</code></td><td>Passive guidance, tips, suggestions</td></tr>
+        <tr><td>Required note</td><td>12px · weight 500</td><td><code>--accent</code></td><td>Blocking condition the user must satisfy</td></tr>
+        <tr><td>Keyboard hint</td><td>11px mono</td><td><code>--text-muted</code></td><td>Power-user shortcuts in footer</td></tr>
+        <tr><td>Inline link</td><td>Inherits</td><td><code>--accent</code></td><td>Escape hatches ("Create new SBU →")</td></tr>
+      </table>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         18. DARK MODE
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="darkmode">
+      <div class="section-tag">18 — Patterns</div>
+      <h2 class="section-title">Dark Mode</h2>
+      <p class="section-desc">All colors are defined once via CSS custom properties and adapted via a single <code>@media (prefers-color-scheme: dark)</code> block. No component-level dark variants are needed. The accent color <code>#e16f3d</code> remains unchanged in dark mode — it has sufficient contrast on dark surfaces.</p>
+
+      <table class="spec-table">
+        <tr><th>Token</th><th>Light value</th><th>Dark value</th></tr>
+        <tr><td><code>--bg</code></td><td>#f7f6f3</td><td>#1a1917</td></tr>
+        <tr><td><code>--surface</code></td><td>#ffffff</td><td>#252422</td></tr>
+        <tr><td><code>--surface-hover</code></td><td>#f7f6f3</td><td>#2e2c2a</td></tr>
+        <tr><td><code>--border</code></td><td>rgba(55,53,47,0.09)</td><td>rgba(255,255,255,0.08)</td></tr>
+        <tr><td><code>--border-focus</code></td><td>rgba(55,53,47,0.30)</td><td>rgba(255,255,255,0.25)</td></tr>
+        <tr><td><code>--text-primary</code></td><td>#191817</td><td>#f0ede8</td></tr>
+        <tr><td><code>--text-secondary</code></td><td>37352f · 65%</td><td>f0ede8 · 60%</td></tr>
+        <tr><td><code>--text-muted</code></td><td>37352f · 40%</td><td>f0ede8 · 35%</td></tr>
+        <tr><td><code>--accent-soft</code></td><td>e16f3d · 8%</td><td>e16f3d · 12%</td></tr>
+        <tr><td><code>--accent-mid</code></td><td>e16f3d · 18%</td><td>e16f3d · 22%</td></tr>
+      </table>
+
+      <div class="callout callout-do" style="margin-top:16px;">
+        <strong>✓ Implementation rule</strong>
+        Always define component colors using CSS variables. Never hardcode hex values directly in component rules — if a value can't be expressed as a token, add a new token first.
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ══════════════════════════════════════════
+         19. USAGE RULES
+    ══════════════════════════════════════════ -->
+    <section class="guide-section" id="usage">
+      <div class="section-tag">19 — Rules</div>
+      <h2 class="section-title">Core Design Rules</h2>
+      <p class="section-desc">These rules govern how all components are composed together. They are not optional.</p>
+
+      <div class="subsection">
+        <div class="subsection-title">Color usage</div>
+        <div class="callout callout-do"><strong>✓ Do</strong> Use semantic colors (green/amber/red/blue) exclusively for status communication. Use accent for the single interactive highlight per surface.</div>
+        <div class="callout callout-dont"><strong>✗ Don't</strong> Use semantic colors decoratively. Don't use red for branding, amber for accent, or blue for a primary button.</div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Hierarchy</div>
+        <div class="callout callout-do"><strong>✓ Do</strong> One primary button per logical group. Use the ghost/secondary variants to support it.</div>
+        <div class="callout callout-dont"><strong>✗ Don't</strong> Place two primary buttons adjacent to each other. If you think you need two, reconsider the flow.</div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Typography</div>
+        <div class="callout callout-do"><strong>✓ Do</strong> Use DM Mono for all machine data (IDs, computed values, timestamps, financial figures, breadcrumbs, uppercase labels).</div>
+        <div class="callout callout-dont"><strong>✗ Don't</strong> Use DM Mono for body copy, button labels, section titles, or instructions. These are human-authored text.</div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Borders & surfaces</div>
+        <div class="callout callout-do"><strong>✓ Do</strong> Use <code>--border</code> (low opacity) for containers at rest. Upgrade to <code>--border-focus</code> on hover or focus-within.</div>
+        <div class="callout callout-dont"><strong>✗ Don't</strong> Add decorative borders or use high-opacity borders in a default/resting state. The system should feel light.</div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Accessibility</div>
+        <div class="callout callout-do"><strong>✓ Do</strong> Always pair color status with text or a dot indicator. Ensure focus rings are visible (3px accent-soft halo). Use <code>disabled</code> attribute on buttons that cannot be clicked.</div>
+        <div class="callout callout-dont"><strong>✗ Don't</strong> Rely on color alone to communicate state. Don't suppress focus outlines — replace them with the design system's ring instead.</div>
+      </div>
+
+      <div class="subsection">
+        <div class="subsection-title">Max content width</div>
+        <div class="callout callout-note"><strong>Page width</strong> Forms and data-entry panels are capped at <strong>680px</strong>. This keeps line lengths readable and prevents the form from spreading uncomfortably on wide screens. Dashboards and lists may use wider containers.</div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // Sidebar link highlighting
+  const sections = document.querySelectorAll('.guide-section');
+  const links = document.querySelectorAll('.sidebar-link');
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        links.forEach(l => {
+          l.classList.toggle('active', l.getAttribute('href') === '#' + id);
+        });
+      }
+    });
+  }, { threshold: 0.3 });
+
+  sections.forEach(s => observer.observe(s));
+
+  links.forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const target = document.querySelector(link.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>

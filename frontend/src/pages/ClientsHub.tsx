@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { queries } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { usePersona } from "@/lib/persona";
 import { PlatformSection, PageHeader, MiniStatRow, Tabs, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
-import { clientGroupsToVm, clientsVm, type ClientVm } from "@/lib/view-models/clients";
+import { clientGroupsToVm, clientsVm, projectForestForClient, type ClientVm, type ProjectTreeNode } from "@/lib/view-models/clients";
 import { formatCurrency } from "@/lib/utils";
 import { isRecruiterUser, useAuth } from "@/lib/auth";
 
@@ -62,30 +62,71 @@ export function ClientsHub() {
   const { persona, scopedClients } = usePersona();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    Promise.all([queries.clients(), queries.globalMonitor()])
-      .then(([groups, monitor]) => {
-        setClientsList(clientGroupsToVm(groups));
-        const map = new Map<number, ProjectStat>();
-        for (const s of monitor.project_stats ?? []) {
-          map.set(s.id, {
-            positions: s.positions,
-            revenue: s.revenue,
-            closed: s.closed,
-            active: s.active,
-            on_hold: s.on_hold,
-          });
-        }
-        setProjectStats(map);
-        setLoading(false);
-      })
-      .catch(() => {
-        queries.projects().then((ps) => {
-          setClientsList(clientsVm(ps));
-          setLoading(false);
+  const loadClients = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [groups, monitor] = await Promise.all([queries.clients(), queries.globalMonitor()]);
+      setClientsList(clientGroupsToVm(groups));
+      const map = new Map<number, ProjectStat>();
+      for (const s of monitor.project_stats ?? []) {
+        map.set(s.id, {
+          positions: s.positions,
+          revenue: s.revenue,
+          closed: s.closed,
+          active: s.active,
+          on_hold: s.on_hold,
         });
-      });
+      }
+      setProjectStats(map);
+    } catch {
+      const ps = await queries.projects();
+      setClientsList(clientsVm(ps));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadClients();
+  }, [loadClients]);
+
+  function renderProjectTree(nodes: ProjectTreeNode[], depth: number, clientId: number): React.ReactNode {
+    return nodes.map(({ project, children }) => (
+      <div key={project.id}>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => goToClient(clientId, navigate)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              goToClient(clientId, navigate);
+            }
+          }}
+          style={{
+            paddingLeft: depth * 14,
+            fontSize: 12,
+            marginTop: 6,
+            cursor: "pointer",
+            lineHeight: 1.4,
+          }}
+        >
+          <span style={{ fontFamily: "'DM Mono',monospace", color: "var(--accent)", fontSize: 10 }}>PRJ-{project.id}</span>
+          <span style={{ marginLeft: 6 }}>
+            {project.org_unit_kind === "business_unit" ? (
+              <span className="platform-badge" style={{ fontSize: 9 }}>BU</span>
+            ) : (
+              <span className="platform-badge green" style={{ fontSize: 9 }}>SBU</span>
+            )}
+          </span>
+          <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
+            {(project.engagement_name || project.account_name || project.filename || "").slice(0, 56)}
+          </span>
+        </div>
+        {children.length > 0 ? renderProjectTree(children, depth + 1, clientId) : null}
+      </div>
+    ));
+  }
 
   const clients = useMemo<ClientVm[]>(() => {
     const all = clientsList;
@@ -138,7 +179,7 @@ export function ClientsHub() {
         </div>
       )}
 
-      <Tabs tabs={["Overview", "Table"]} active={tab} onChange={setTab} />
+      <Tabs tabs={["Overview", "Hierarchy", "Table"]} active={tab} onChange={setTab} />
 
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
         <input
@@ -227,6 +268,11 @@ export function ClientsHub() {
                     title={c.officialName}
                   >
                     {c.officialName}
+                    {c.lifecycleState === "prospect" && c.id >= 0 ? (
+                      <span className="platform-badge amber" style={{ marginLeft: 8, fontSize: 9 }}>
+                        Prospect
+                      </span>
+                    ) : null}
                   </div>
                   <StatusTag status={status} />
                 </div>
@@ -257,6 +303,49 @@ export function ClientsHub() {
             );
           })}
         </div>
+      )}
+
+      {tab === "Hierarchy" && (
+        <PlatformSection title="Client → BU → SBU" action="Refresh" onAction={() => void loadClients()}>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 14, maxWidth: 720 }}>
+            Projects under each legal client, nested by <strong>parent PRJ</strong>. Mark units as BU or SBU and set parent BU on the{" "}
+            <strong>Account Info</strong> tab in client detail. Click a row to open the client cockpit.
+          </p>
+          {loading && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Loading…</div>}
+          {!loading && filteredClients.length === 0 && (
+            <div style={{ color: "var(--text-muted)", fontSize: 12 }}>No clients to show.</div>
+          )}
+          {!loading &&
+            filteredClients.map((c) => (
+              <div
+                key={c.id}
+                className="platform-card"
+                style={{ padding: 14, marginBottom: 12, cursor: "default" }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13 }}>{c.officialName}</span>
+                  {c.lifecycleState === "prospect" && c.id >= 0 ? (
+                    <span className="platform-badge amber" style={{ fontSize: 9 }}>
+                      Prospect client
+                    </span>
+                  ) : null}
+                  {c.id >= 0 && (
+                    <button
+                      type="button"
+                      className="platform-dialog__btn"
+                      style={{ fontSize: 10, marginLeft: "auto" }}
+                      onClick={() => goToClient(c.id, navigate)}
+                    >
+                      Open client
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
+                  {renderProjectTree(projectForestForClient(c.projects), 0, c.id)}
+                </div>
+              </div>
+            ))}
+        </PlatformSection>
       )}
 
       {tab === "Table" && (
