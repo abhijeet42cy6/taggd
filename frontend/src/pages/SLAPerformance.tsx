@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { api, invalidateCache, queries } from "@/lib/api";
+import { api, adminApi, invalidateCache, queries } from "@/lib/api";
+import type { PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
+import {
+  SlaAccountMultiProjectPicker,
+  SlaMultiStringPicker,
+  SlaPracticeHeadMultiPicker,
+} from "@/components/platform/SlaGlobalFilterPickers";
 import { isProjectHeadLike, useAuth } from "@/lib/auth";
-import { formatPercent } from "@/lib/utils";
+import { cn, formatPercent } from "@/lib/utils";
 import {
   aggregatePeriod,
   formatPeriodColumnHeader,
@@ -12,7 +18,6 @@ import {
 import { StatusTag } from "@/components/platform/PlatformBlocks";
 import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
 import {
-  SlaBenchmarkGroupedBar,
   SlaComplianceBar,
   SlaExecutiveDeltaBar,
   SlaExecutiveMetPctBar,
@@ -26,10 +31,11 @@ import {
 } from "@/components/platform/Charts";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { SlaMetricFormDialog } from "@/components/platform/SlaMetricFormDialog";
-import { slaRowsVm, slaStatsVm } from "@/lib/view-models/sla";
-import { Menu, Plus } from "lucide-react";
+import { slaRowsVm } from "@/lib/view-models/sla";
+import { Calendar, Check, ChevronDown, Filter, Menu, Plus, Tags, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import "@/styles/finance-exec-dashboard.css";
+import "@/styles/new-contract-panel.css";
 import "@/styles/sla-dash-ui.css";
 
 // ─── Colour palette to match SlaTimeSeriesChart ────────────────────────────────
@@ -70,20 +76,27 @@ function monthSortKey(r: any): string {
   return "";
 }
 
-function accountMetaByAccount(rows: any[]): Map<string, { region: string; practice_head: string }> {
+function regionalHeadFromRow(r: any): string {
+  const v = r?.regional_head ?? r?.regionalHead;
+  const s = v != null ? String(v).trim() : "";
+  return s || "—";
+}
+
+function accountMetaByAccount(rows: any[]): Map<string, { region: string; practice_head: string; regional_head: string }> {
   const by = new Map<string, any[]>();
   for (const r of rows) {
     const a = r.account_name || "Unknown";
     if (!by.has(a)) by.set(a, []);
     by.get(a)!.push(r);
   }
-  const out = new Map<string, { region: string; practice_head: string }>();
+  const out = new Map<string, { region: string; practice_head: string; regional_head: string }>();
   for (const [acc, list] of by) {
     const sorted = [...list].sort((a, b) => monthSortKey(b).localeCompare(monthSortKey(a)));
     const best = sorted[0];
     out.set(acc, {
       region: (best?.region && String(best.region).trim()) || "—",
       practice_head: (best?.practice_head && String(best.practice_head).trim()) || "—",
+      regional_head: regionalHeadFromRow(best),
     });
   }
   return out;
@@ -124,6 +137,120 @@ function indianFyTitleFromMonth(ym: string): string {
   if (Number.isNaN(y) || Number.isNaN(mo)) return "";
   const fyStart = mo >= 4 ? y : y - 1;
   return `FY ${String(fyStart).slice(2)}–${String(fyStart + 1).slice(2)}`;
+}
+
+/** Portfolio-wide SLA filters (draft + apply) — scoped to loaded /sla/data + /sla/timeseries. */
+type SlaGlobalFilters = {
+  fiscalYear: "all" | string;
+  regionalHeads: string[];
+  regions: string[];
+  practiceHeads: string[];
+  accounts: string[];
+  /** Inclusive month range (`YYYY-MM`), filtered to months present in loaded data on apply. */
+  monthFrom: string;
+  monthTo: string;
+  metricNature: "all" | "contractual" | "internal";
+};
+
+const SLA_GF_INITIAL: SlaGlobalFilters = {
+  fiscalYear: "all",
+  regionalHeads: [],
+  regions: [],
+  practiceHeads: [],
+  accounts: [],
+  monthFrom: "",
+  monthTo: "",
+  metricNature: "all",
+};
+
+function indianFyLabelsFromMonths(allMonths: string[]): string[] {
+  const s = new Set<string>();
+  for (const m of allMonths) {
+    const t = indianFyTitleFromMonth(m);
+    if (t) s.add(t);
+  }
+  return Array.from(s).sort((a, b) => a.localeCompare(b));
+}
+
+function monthsMatchingIndianFy(allMonths: string[], fyLabel: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of allMonths) {
+    if (indianFyTitleFromMonth(m) === fyLabel) out.add(m);
+  }
+  return out;
+}
+
+function effectiveGlobalMonthSet(gf: SlaGlobalFilters, allMonths: string[]): Set<string> | null {
+  let acc: Set<string> | null = null;
+  if (gf.fiscalYear !== "all") {
+    acc = monthsMatchingIndianFy(allMonths, gf.fiscalYear);
+  }
+  const rawFrom = (gf.monthFrom || "").trim();
+  const rawTo = (gf.monthTo || "").trim();
+  if (rawFrom || rawTo) {
+    let lo = rawFrom || rawTo;
+    let hi = rawTo || rawFrom;
+    if (lo > hi) [lo, hi] = [hi, lo];
+    const pick = new Set(allMonths.filter((m) => m >= lo && m <= hi));
+    if (acc == null) acc = pick;
+    else acc = new Set([...acc].filter((m) => pick.has(m)));
+  }
+  return acc;
+}
+
+function buildAllowedAccountsForGlobalFilters(
+  dim: Map<string, { region: string; practice_head: string; regional_head: string }>,
+  gf: SlaGlobalFilters,
+): Set<string> {
+  const out = new Set<string>();
+  for (const [acc, d] of dim) {
+    if (gf.regionalHeads.length > 0 && !gf.regionalHeads.includes(d.regional_head)) continue;
+    if (gf.regions.length > 0 && !gf.regions.includes(d.region)) continue;
+    if (gf.practiceHeads.length > 0 && !gf.practiceHeads.includes(d.practice_head)) continue;
+    if (gf.accounts.length > 0 && !gf.accounts.includes(acc)) continue;
+    out.add(acc);
+  }
+  return out;
+}
+
+function globalFilterRows(rawRows: any[], gf: SlaGlobalFilters, allMonthsFromTs: string[]): any[] {
+  const dim = accountMetaByAccount(rawRows);
+  const allowed = buildAllowedAccountsForGlobalFilters(dim, gf);
+  const monthSet = effectiveGlobalMonthSet(gf, allMonthsFromTs);
+  return rawRows.filter((r) => {
+    const acc = r.account_name || "Unknown";
+    if (!allowed.has(acc)) return false;
+    if (gf.metricNature !== "all") {
+      const label = kpiTypeLabel(r.metric_nature).toLowerCase();
+      if (gf.metricNature === "contractual" && !label.includes("contract")) return false;
+      if (gf.metricNature === "internal" && !label.includes("internal")) return false;
+    }
+    if (monthSet != null) {
+      const rm = String((r as any).reporting_month ?? "").trim();
+      if (!rm || rm === "N/A" || !monthSet.has(rm)) return false;
+    }
+    return true;
+  });
+}
+
+function globalFilterTimeseries(
+  rawTs: any[],
+  gf: SlaGlobalFilters,
+  rawRows: any[],
+  allMonthsFromTs: string[],
+): any[] {
+  const dim = accountMetaByAccount(rawRows);
+  const allowed = buildAllowedAccountsForGlobalFilters(dim, gf);
+  const monthSet = effectiveGlobalMonthSet(gf, allMonthsFromTs);
+  return rawTs
+    .filter((a: any) => allowed.has(a.account_name))
+    .map((a: any) => ({
+      ...a,
+      timeline:
+        monthSet == null
+          ? a.timeline
+          : (a.timeline as any[]).filter((t: any) => monthSet.has(t.month)),
+    }));
 }
 
 type TimelinePt = {
@@ -186,7 +313,6 @@ type SlaDashView =
   | "account"
   | "region"
   | "practice"
-  | "benchmarking"
   | "notreported"
   | "manual";
 
@@ -199,20 +325,25 @@ const SL_NAV: { id: SlaDashView; label: string; icon: string }[] = [
   { id: "account", label: "Project Analysis", icon: "fa-building" },
   { id: "region", label: "Regional Analysis", icon: "fa-map-location-dot" },
   { id: "practice", label: "Practice Head Analysis", icon: "fa-users" },
-  { id: "benchmarking", label: "Industry Benchmarking", icon: "fa-trophy" },
   { id: "notreported", label: "Not Reported Analysis", icon: "fa-triangle-exclamation" },
   { id: "manual", label: "User Manual", icon: "fa-book-open" },
 ];
+
+const SLA_FIN_SIDEBAR_NARROW_MQ = "(max-width: 900px)";
 
 export function SLAPerformance() {
   const { user } = useAuth();
   const phLike = isProjectHeadLike(user);
 
-  // Core data
-  const [stats,      setStats]      = useState<any>(null);
-  const [rows,       setRows]       = useState<any[]>([]);
-  const [timeseries, setTimeseries] = useState<any[]>([]);
-  const [loading,    setLoading]    = useState(true);
+  // Core data (API); portfolio filters narrow derived `rows` / `timeseries` below
+  const [rawRows, setRawRows] = useState<any[]>([]);
+  const [rawTimeseries, setRawTimeseries] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [slaGfDraft, setSlaGfDraft] = useState<SlaGlobalFilters>(SLA_GF_INITIAL);
+  const [slaGfApplied, setSlaGfApplied] = useState<SlaGlobalFilters>(SLA_GF_INITIAL);
+  const [slaAdvFiltersOpen, setSlaAdvFiltersOpen] = useState(false);
+  const [slaFilterUsers, setSlaFilterUsers] = useState<PlatformUserLite[]>([]);
 
   // Table filters
   const [search,       setSearch]       = useState("");
@@ -253,13 +384,17 @@ export function SLAPerformance() {
 
   const [slaMetricDialogOpen, setSlaMetricDialogOpen] = useState(false);
   const [slaView, setSlaView] = useState<SlaDashView>("overview");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  /** On narrow SLA layout the sidebar is off-canvas until opened; start collapsed so the toggle does something useful. */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(SLA_FIN_SIDEBAR_NARROW_MQ).matches;
+  });
   const [regionChartKind, setRegionChartKind] = useState<"line" | "bar">("bar");
 
   const slaMetricOptions = useMemo(() => {
     const seen = new Set<number>();
     const out: { id: number; label: string; account: string }[] = [];
-    for (const r of rows) {
+    for (const r of rawRows) {
       const id = Number((r as any).id);
       if (!Number.isFinite(id) || seen.has(id)) continue;
       seen.add(id);
@@ -271,19 +406,14 @@ export function SLAPerformance() {
     }
     out.sort((a, b) => a.label.localeCompare(b.label) || a.account.localeCompare(b.account));
     return out;
-  }, [rows]);
+  }, [rawRows]);
 
   const reloadSla = useCallback(async () => {
     invalidateCache("sla");
-    const [s, d, ts] = await Promise.allSettled([
-      queries.slaStats(),
-      queries.slaData(),
-      queries.slaTimeseries(),
-    ]);
-    if (s.status === "fulfilled") setStats(slaStatsVm(s.value));
-    if (d.status === "fulfilled") setRows(slaRowsVm(d.value || []));
+    const [d, ts] = await Promise.allSettled([queries.slaData(), queries.slaTimeseries()]);
+    if (d.status === "fulfilled") setRawRows(slaRowsVm(d.value || []));
     if (ts.status === "fulfilled") {
-      setTimeseries(ts.value || []);
+      setRawTimeseries(ts.value || []);
       const top5 = (ts.value || [])
         .sort((a: any, b: any) => {
           const aSnaps = a.timeline.reduce((n: number, t: any) => n + t.met + t.not_met + t.not_reported, 0);
@@ -299,15 +429,10 @@ export function SLAPerformance() {
   // ─── Fetch data ───────────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
-      const [s, d, ts] = await Promise.allSettled([
-        queries.slaStats(),
-        queries.slaData(),
-        queries.slaTimeseries(),
-      ]);
-      if (s.status === "fulfilled") setStats(slaStatsVm(s.value));
-      if (d.status === "fulfilled") setRows(slaRowsVm(d.value || []));
+      const [d, ts] = await Promise.allSettled([queries.slaData(), queries.slaTimeseries()]);
+      if (d.status === "fulfilled") setRawRows(slaRowsVm(d.value || []));
       if (ts.status === "fulfilled") {
-        setTimeseries(ts.value || []);
+        setRawTimeseries(ts.value || []);
         // Default: top 5 accounts by snapshot count
         const top5 = (ts.value || [])
           .sort((a: any, b: any) => {
@@ -328,6 +453,24 @@ export function SLAPerformance() {
     if (slaView === "notreported") setStatusFilter("not_reported");
     else setStatusFilter((prev) => (prev === "not_reported" ? "all" : prev));
   }, [slaView]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      queries.taskAssignableUsers().catch(() => [] as PlatformUserLite[]),
+      adminApi.listUsers().catch(() => []),
+    ]).then(([a, b]) => {
+      const map = new Map<number, PlatformUserLite>();
+      const add = (u: { id: number; email: string; role: string }) =>
+        map.set(u.id, { id: u.id, email: u.email, role: u.role });
+      a.forEach(add);
+      b.forEach((u) => add({ id: u.id, email: u.email, role: u.role }));
+      if (!cancelled) setSlaFilterUsers([...map.values()]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!drillAccount) {
@@ -370,29 +513,108 @@ export function SLAPerformance() {
     await reloadSla();
   };
 
-  // ─── Derived: KPI numbers ─────────────────────────────────────────────────────
-  const metPct = stats?.portfolio_health ?? 0;
-  const notMetPct = stats && (stats.met_count + stats.not_met_count) > 0
-    ? Math.round((stats.not_met_count / (stats.met_count + stats.not_met_count)) * 100) : 0;
-  const notReportedCount = useMemo(
-    () => rows.filter((r: any) => statusBucket(r.status) === "not_reported").length, [rows]);
-  const notReportedPct = rows.length > 0 ? Math.round((notReportedCount / rows.length) * 100) : 0;
-
-  // ─── All accounts list ────────────────────────────────────────────────────────
-  const allAccounts = useMemo(
-    () => [...new Set(rows.map((r: any) => r.account_name || "Unknown"))].sort(),
-    [rows]
-  );
-
-  // ─── Sorted month list from timeseries ───────────────────────────────────────
+  // ─── Sorted month list from raw timeseries (for FY / month filter options) ──
   const allMonths = useMemo<string[]>(() => {
     const monthSet = new Set<string>();
-    timeseries.forEach((acc: any) =>
-      acc.timeline.forEach((t: any) => monthSet.add(t.month))
+    rawTimeseries.forEach((acc: any) =>
+      acc.timeline.forEach((t: any) => monthSet.add(t.month)),
     );
-    // Canonical YYYY-MM from API sorts chronologically by string compare
     return Array.from(monthSet).sort((a, b) => a.localeCompare(b));
-  }, [timeseries]);
+  }, [rawTimeseries]);
+
+  const rows = useMemo(
+    () => globalFilterRows(rawRows, slaGfApplied, allMonths),
+    [rawRows, slaGfApplied, allMonths],
+  );
+  const timeseries = useMemo(
+    () => globalFilterTimeseries(rawTimeseries, slaGfApplied, rawRows, allMonths),
+    [rawTimeseries, slaGfApplied, rawRows, allMonths],
+  );
+
+  const accountMetaFull = useMemo(() => accountMetaByAccount(rawRows), [rawRows]);
+  const slaGfFyOptions = useMemo(() => indianFyLabelsFromMonths(allMonths), [allMonths]);
+  const slaGfRegionalHeadOpts = useMemo(() => {
+    const s = new Set<string>();
+    accountMetaFull.forEach((d) => {
+      if (d.regional_head && d.regional_head !== "—") s.add(d.regional_head);
+    });
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [accountMetaFull]);
+  const slaGfRegionOpts = useMemo(() => {
+    const s = new Set<string>();
+    accountMetaFull.forEach((d) => {
+      if (d.region && d.region !== "—") s.add(d.region);
+    });
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [accountMetaFull]);
+  const slaGfPracticeHeadOpts = useMemo(() => {
+    const s = new Set<string>();
+    accountMetaFull.forEach((d) => {
+      if (d.practice_head && d.practice_head !== "—") s.add(d.practice_head);
+    });
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [accountMetaFull]);
+  const slaGfProjects = useMemo(() => {
+    const byName = new Map<string, { id: number; account_name: string; engagement_name?: string | null }>();
+    for (const r of rawRows) {
+      const name = String((r as any).account_name || "").trim();
+      if (!name) continue;
+      const id = Number((r as any).project_id);
+      if (byName.has(name)) continue;
+      if (Number.isFinite(id) && id > 0) {
+        byName.set(name, { id, account_name: name, engagement_name: null });
+      }
+    }
+    for (const r of rawRows) {
+      const name = String((r as any).account_name || "").trim();
+      if (!name || byName.has(name)) continue;
+      byName.set(name, { id: 0, account_name: name, engagement_name: null });
+    }
+    return [...byName.values()].sort((a, b) => a.account_name.localeCompare(b.account_name));
+  }, [rawRows]);
+  const slaGfMonthOpts = useMemo(() => [...allMonths], [allMonths]);
+
+  // ─── Derived: KPI numbers (from filtered metric rows) ────────────────────────
+  const metPct = useMemo(() => {
+    let met = 0;
+    let br = 0;
+    for (const r of rows) {
+      const b = statusBucket(r.status);
+      if (b === "met") met++;
+      else if (b === "breached") br++;
+    }
+    return met + br > 0 ? Math.round((met / (met + br)) * 1000) / 10 : 0;
+  }, [rows]);
+  const notMetPct = useMemo(() => {
+    let met = 0;
+    let br = 0;
+    for (const r of rows) {
+      const b = statusBucket(r.status);
+      if (b === "met") met++;
+      else if (b === "breached") br++;
+    }
+    return met + br > 0 ? Math.round((br / (met + br)) * 1000) / 10 : 0;
+  }, [rows]);
+  const metRowCount = useMemo(() => rows.filter((r: any) => statusBucket(r.status) === "met").length, [rows]);
+  const breachedRowCount = useMemo(
+    () => rows.filter((r: any) => statusBucket(r.status) === "breached").length,
+    [rows],
+  );
+  const notReportedCount = useMemo(
+    () => rows.filter((r: any) => statusBucket(r.status) === "not_reported").length,
+    [rows],
+  );
+  const notReportedPct = rows.length > 0 ? Math.round((notReportedCount / rows.length) * 100) : 0;
+  const scopedAccountCount = useMemo(
+    () => new Set(rows.map((r: any) => r.account_name || "Unknown")).size,
+    [rows],
+  );
+
+  // ─── All accounts list (full workspace — local table filter) ────────────────
+  const allAccounts = useMemo(
+    () => [...new Set(rawRows.map((r: any) => r.account_name || "Unknown"))].sort(),
+    [rawRows],
+  );
 
   /** Union of timeline months + any reporting_month on SLA rows (for table time filter). */
   const monthsOrderedForTable = useMemo(() => {
@@ -404,7 +626,7 @@ export function SLAPerformance() {
         out.push(m);
       }
     }
-    for (const r of rows) {
+    for (const r of rawRows) {
       const m = String((r as any).reporting_month ?? "").trim();
       if (m && m !== "N/A" && !seen.has(m)) {
         seen.add(m);
@@ -412,7 +634,7 @@ export function SLAPerformance() {
       }
     }
     return out.sort((a, b) => a.localeCompare(b));
-  }, [allMonths, rows]);
+  }, [allMonths, rawRows]);
 
   /** When non-null, only rows whose reporting_month is in this set pass the table time filter. */
   const tableFilteredMonthSet = useMemo(() => {
@@ -491,7 +713,7 @@ export function SLAPerformance() {
       .slice(0, 12);
   }, [rows]);
 
-  const accountMetaMap = useMemo(() => accountMetaByAccount(rows), [rows]);
+  const accountMetaMap = useMemo(() => accountMetaByAccount(rawRows), [rawRows]);
 
   const p1Months = useMemo(() => periodMonthSet(fyMode, "p1"), [fyMode]);
   const p2Months = useMemo(() => periodMonthSet(fyMode, "p2"), [fyMode]);
@@ -744,20 +966,6 @@ export function SLAPerformance() {
       return { name: short, p1: a1.met_pct, p2: a2.met_pct };
     });
   }, [timeseries, p1Months, p2Months]);
-
-  const benchmarkVsPortfolioData = useMemo(() => {
-    const bench = portfolioFySnapshots.p2_pct;
-    if (bench == null) return [];
-    return [...fyComparisonTableRows]
-      .filter((r) => r.p2 != null)
-      .sort((a, b) => (b.p2 ?? 0) - (a.p2 ?? 0))
-      .slice(0, 10)
-      .map((r) => ({
-        name: r.account.length > 12 ? `${r.account.slice(0, 11)}…` : r.account,
-        client: r.p2 as number,
-        benchmark: bench,
-      }));
-  }, [fyComparisonTableRows, portfolioFySnapshots.p2_pct]);
 
   const notReportedByAccount = useMemo(() => {
     return timeseries
@@ -1026,6 +1234,199 @@ export function SLAPerformance() {
             </header>
 
             <div className="fin-dash-content">
+              <section className="sla-adv-filters" aria-label="Portfolio filters">
+                <div
+                  className={cn(
+                    "dashboard-filter-bar sla-adv-filters__shell",
+                    slaAdvFiltersOpen && "sla-adv-filters__shell--expanded",
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="sla-adv-filters__head sla-adv-filters__head--toggle"
+                    id="sla-adv-filters-trigger"
+                    aria-expanded={slaAdvFiltersOpen}
+                    aria-controls="sla-adv-filters-panel"
+                    onClick={() => setSlaAdvFiltersOpen((o) => !o)}
+                  >
+                    <span className="sla-adv-filters__head-inner">
+                      <Filter className="sla-adv-filters__head-icon" strokeWidth={2} aria-hidden />
+                      <span className="sla-adv-filters__head-title">Advanced filters</span>
+                    </span>
+                    <ChevronDown
+                      className={cn("sla-adv-filters__chev", slaAdvFiltersOpen && "sla-adv-filters__chev--open")}
+                      strokeWidth={2}
+                      aria-hidden
+                    />
+                  </button>
+                  <div
+                    id="sla-adv-filters-panel"
+                    className="sla-adv-filters__panel"
+                    role="region"
+                    aria-labelledby="sla-adv-filters-trigger"
+                    hidden={!slaAdvFiltersOpen}
+                  >
+                  <div className="sla-adv-filters__row sla-adv-filters__row--3col">
+                    <div className="dashboard-filter-field sla-adv-filters__field">
+                      <span className="dashboard-filter-label sla-adv-filters__label-row">
+                        <Calendar className="sla-adv-filters__lbl-icon" strokeWidth={2} aria-hidden />
+                        Fiscal year
+                      </span>
+                      <select
+                        className="dashboard-filter-select"
+                        value={slaGfDraft.fiscalYear}
+                        onChange={(e) =>
+                          setSlaGfDraft((d) => ({
+                            ...d,
+                            fiscalYear: e.target.value as SlaGlobalFilters["fiscalYear"],
+                          }))
+                        }
+                      >
+                        <option value="all">All years (comparison)</option>
+                        {slaGfFyOptions.map((fy) => (
+                          <option key={fy} value={fy}>
+                            {fy}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="new-contract-sheet sla-gf-ncp-embed sla-gf-ncp-embed--cell">
+                      <SlaMultiStringPicker
+                        label="Regional head"
+                        options={slaGfRegionalHeadOpts}
+                        value={slaGfDraft.regionalHeads}
+                        onChange={(regionalHeads) => setSlaGfDraft((d) => ({ ...d, regionalHeads }))}
+                        emptyHint="— Select heads —"
+                        searchPlaceholder="Search regional heads…"
+                        nounPlural="heads"
+                        leadingEmptyGlyph="👤"
+                      />
+                    </div>
+                    <div className="new-contract-sheet sla-gf-ncp-embed sla-gf-ncp-embed--cell">
+                      <SlaMultiStringPicker
+                        label="Region"
+                        options={slaGfRegionOpts}
+                        value={slaGfDraft.regions}
+                        onChange={(regions) => setSlaGfDraft((d) => ({ ...d, regions }))}
+                        emptyHint="— Select regions —"
+                        searchPlaceholder="Search regions…"
+                        nounPlural="regions"
+                        leadingEmptyGlyph="📍"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="sla-adv-filters__row sla-adv-filters__row--full" aria-label="Practice head">
+                    <div className="new-contract-sheet sla-gf-ncp-embed">
+                      <SlaPracticeHeadMultiPicker
+                        options={slaGfPracticeHeadOpts}
+                        value={slaGfDraft.practiceHeads}
+                        onChange={(practiceHeads) => setSlaGfDraft((d) => ({ ...d, practiceHeads }))}
+                        users={slaFilterUsers}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="sla-adv-filters__row sla-adv-filters__row--full" aria-label="Project">
+                    <div className="new-contract-sheet sla-gf-ncp-embed">
+                      <SlaAccountMultiProjectPicker
+                        projects={slaGfProjects}
+                        value={slaGfDraft.accounts}
+                        onChange={(accounts) => setSlaGfDraft((d) => ({ ...d, accounts }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="sla-adv-filters__row sla-adv-filters__row--2col">
+                    <div className="dashboard-filter-field sla-adv-filters__field sla-adv-filters__field--month-range">
+                      <span className="dashboard-filter-label sla-adv-filters__label-row">
+                        <Calendar className="sla-adv-filters__lbl-icon" strokeWidth={2} aria-hidden />
+                        Reporting period
+                      </span>
+                      <p className="sla-adv-filters__field-hint">Optional inclusive range; empty uses fiscal year only.</p>
+                      <div className="new-contract-sheet sla-gf-ncp-embed">
+                        <div className="sla-gf-month-range ncp-date-grid" style={{ borderTop: "none", padding: "4px 0 0" }}>
+                          <div className="ncp-date-cell">
+                            <label htmlFor="sla-gf-month-from">From</label>
+                            <input
+                              id="sla-gf-month-from"
+                              type="month"
+                              min={slaGfMonthOpts[0] || undefined}
+                              max={slaGfMonthOpts[slaGfMonthOpts.length - 1] || undefined}
+                              value={slaGfDraft.monthFrom}
+                              onChange={(e) =>
+                                setSlaGfDraft((d) => ({
+                                  ...d,
+                                  monthFrom: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="ncp-date-cell">
+                            <label htmlFor="sla-gf-month-to">To</label>
+                            <input
+                              id="sla-gf-month-to"
+                              type="month"
+                              min={slaGfMonthOpts[0] || undefined}
+                              max={slaGfMonthOpts[slaGfMonthOpts.length - 1] || undefined}
+                              value={slaGfDraft.monthTo}
+                              onChange={(e) =>
+                                setSlaGfDraft((d) => ({
+                                  ...d,
+                                  monthTo: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="dashboard-filter-field sla-adv-filters__field">
+                      <span className="dashboard-filter-label sla-adv-filters__label-row">
+                        <Tags className="sla-adv-filters__lbl-icon" strokeWidth={2} aria-hidden />
+                        KPI type
+                      </span>
+                      <select
+                        className="dashboard-filter-select"
+                        value={slaGfDraft.metricNature}
+                        onChange={(e) =>
+                          setSlaGfDraft((d) => ({
+                            ...d,
+                            metricNature: e.target.value as SlaGlobalFilters["metricNature"],
+                          }))
+                        }
+                      >
+                        <option value="all">All types</option>
+                        <option value="contractual">Contractual KPI</option>
+                        <option value="internal">Internal KPI</option>
+                      </select>
+                    </div>
+                  </div>
+                      <div className="sla-adv-filters__actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary sla-adv-filters__apply"
+                          onClick={() => setSlaGfApplied({ ...slaGfDraft })}
+                        >
+                          <Check className="sla-adv-filters__btn-ic" strokeWidth={2.5} aria-hidden />
+                          Apply filters
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline sla-adv-filters__clear"
+                          onClick={() => {
+                            setSlaGfDraft(SLA_GF_INITIAL);
+                            setSlaGfApplied(SLA_GF_INITIAL);
+                          }}
+                        >
+                          <X className="sla-adv-filters__btn-ic" strokeWidth={2.5} aria-hidden />
+                          Clear all
+                        </button>
+                      </div>
+                    </div>
+                </div>
+              </section>
+
               <div className="fin-dash-inline-actions">
                 <button type="button" className="btn btn-primary" onClick={() => setSlaMetricDialogOpen(true)}>
                   <i className="fas fa-plus" aria-hidden />
@@ -1073,7 +1474,7 @@ export function SLAPerformance() {
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length > 0 ? formatPercent(metPct) : "—"}</div>
                           <div className="sla-metric-sub">
-                            {rows.length > 0 ? `${stats?.met_count ?? 0} of ${rows.length} metrics` : "Upload SLA data"}
+                            {rows.length > 0 ? `${metRowCount} of ${rows.length} metrics` : "Upload SLA data"}
                           </div>
                         </div>
                       </div>
@@ -1081,7 +1482,7 @@ export function SLAPerformance() {
                         <div className="sla-metric-card-hd">Not met</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notMetPct) : "—"}</div>
-                          <div className="sla-metric-sub">{rows.length > 0 ? `${stats?.not_met_count ?? 0} metrics` : "—"}</div>
+                          <div className="sla-metric-sub">{rows.length > 0 ? `${breachedRowCount} metrics` : "—"}</div>
                         </div>
                       </div>
                       <div className="sla-metric-card">
@@ -1094,9 +1495,9 @@ export function SLAPerformance() {
                       <div className="sla-metric-card">
                         <div className="sla-metric-card-hd">Total metrics</div>
                         <div className="sla-metric-card-body">
-                          <div className="sla-metric-val">{stats?.total_metrics ?? (rows.length || "—")}</div>
+                          <div className="sla-metric-val">{rows.length || "—"}</div>
                           <div className="sla-metric-sub">
-                            {stats?.total_accounts ? `${stats.total_accounts} accounts` : "—"}
+                            {scopedAccountCount > 0 ? `${scopedAccountCount} accounts` : "—"}
                           </div>
                         </div>
                       </div>
@@ -1777,34 +2178,6 @@ export function SLAPerformance() {
             )}
           </div>
         </div>
-      )}
-
-      {(slaView === "benchmarking") && (
-        <>
-          <div className="sla-dash-card">
-            <div className="sla-dash-card-hd">
-              <div className="sla-dash-card-title">Client vs portfolio benchmark</div>
-              <div className="sla-dash-card-sub">
-                Top clients by {formatPeriodLabelShort(fyMode, "p2")} Met % vs portfolio Met % in the same window (proxy until
-                external benchmark feeds exist).
-              </div>
-            </div>
-            <div className="sla-dash-card-bd">
-              {benchmarkVsPortfolioData.length === 0 ? (
-                <div className="sla-empty">Need FY time-series with Met % in period 2 and a non-empty portfolio rollup.</div>
-              ) : (
-                <SlaBenchmarkGroupedBar
-                  data={benchmarkVsPortfolioData}
-                  benchmarkLabel={`Portfolio ${formatPeriodLabelShort(fyMode, "p2")}`}
-                  height={280}
-                />
-              )}
-            </div>
-          </div>
-          <div className="sla-info-box" style={{ marginTop: 12 }}>
-            Replace the portfolio proxy with industry benchmarks when benchmark sheets or API feeds are connected.
-          </div>
-        </>
       )}
 
       {(slaView === "manual") && (

@@ -516,6 +516,8 @@ class Record(Base, AuditMixin):
     rpo_taggd_pm = Column(String, nullable=True)
     rpo_hiring_agency = Column(String, nullable=True)
     rpo_ijp_referral = Column(String, nullable=True)
+    # Taggd vs non-Taggd joiner source (UI enum); see RecordCreate.source_joiner_type
+    source_joiner_type = Column(String(64), nullable=True)
     mandate_received_date = Column(DateTime, nullable=True)
     intake_date = Column(DateTime, nullable=True)
     first_cv_share_date = Column(DateTime, nullable=True)
@@ -1350,6 +1352,7 @@ def _ensure_user_rbac_and_attribution_columns():
     addcol("projects", "project_head_user_id", "INTEGER")
     addcol("records", "hiring_manager_user_id", "INTEGER")
     addcol("records", "assigned_recruiter_user_id", "INTEGER")
+    addcol("records", "source_joiner_type", "VARCHAR(64)")
     addcol("candidates", "hiring_manager_user_id", "INTEGER")
     addcol("candidates", "assigned_recruiter_user_id", "INTEGER")
 

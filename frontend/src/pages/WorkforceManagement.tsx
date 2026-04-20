@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Plus } from "lucide-react";
 import { api, invalidateCache, queries } from "@/lib/api";
 import { formatNumber, formatPercent } from "@/lib/utils";
-import { PlatformKpi, PlatformSection, PageHeader, StatusTag } from "@/components/platform/PlatformBlocks";
+import { PlatformSection, PageHeader } from "@/components/platform/PlatformBlocks";
 import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
 import { GaugeRing, HcIdealActualGroupedChart, WlDistributionBar, WfmProductivityFillChart } from "@/components/platform/Charts";
 import { WfmBenchmarkFormDialog } from "@/components/platform/WfmBenchmarkFormDialog";
@@ -16,7 +16,6 @@ import {
   type WfmBenchmarkRowVm,
 } from "@/lib/view-models/wfm";
 
-
 type PerformFilter = "all" | "strong" | "watch" | "risk";
 type ExpandMode = null | "hc" | "gap" | "benchmark";
 
@@ -26,31 +25,90 @@ type BulletItem = {
   ideal: number;
   color: string;
   pct: number;
-  row: any;
+  row: WfmBenchmarkRowVm;
 };
 
+// ─── helpers ──────────────────────────────────────────────────────────────────
+function bandClass(band: "strong" | "watch" | "risk") {
+  if (band === "strong") return "wfm-kpi-fill--green";
+  if (band === "watch")  return "wfm-kpi-fill--amber";
+  return "wfm-kpi-fill--red";
+}
+
+function deltaClass(band: "strong" | "watch" | "risk") {
+  if (band === "strong") return "wfm-kpi-delta--green";
+  if (band === "watch")  return "wfm-kpi-delta--amber";
+  return "wfm-kpi-delta--red";
+}
+
+function statusClass(label: "Strong" | "Watch" | "At Risk") {
+  if (label === "Strong")   return "wfm-status--on-track";
+  if (label === "Watch")    return "wfm-status--watch";
+  return "wfm-status--at-risk";
+}
+
+function barFillClass(pct: number, ideal: number) {
+  const b = wfmFillBand(pct, ideal);
+  if (b === "strong") return "wfm-bar-fill--green";
+  if (b === "watch")  return "wfm-bar-fill--amber";
+  return "wfm-bar-fill--red";
+}
+
 // ─── FILTER CHIPS ─────────────────────────────────────────────────────────────
+const CHIPS: { key: PerformFilter; label: string; cls: string }[] = [
+  { key: "all",    label: "All",          cls: "wfm-chip--active-accent" },
+  { key: "strong", label: "On plan 70–100%", cls: "wfm-chip--active-green" },
+  { key: "watch",  label: "Watch 50–69%",    cls: "wfm-chip--active-amber" },
+  { key: "risk",   label: ">100% or <50%",   cls: "wfm-chip--active-red" },
+];
+
 function FilterChips({ value, onChange }: { value: PerformFilter; onChange: (v: PerformFilter) => void }) {
-  const chips: { key: PerformFilter; label: string; color: string }[] = [
-    { key: "all", label: "All", color: "var(--text-subtle)" },
-    { key: "strong", label: "On plan 70–100%", color: "var(--green)" },
-    { key: "watch", label: "Watch 50–69%", color: "var(--amber)" },
-    { key: "risk", label: ">100% or <50%", color: "var(--red)" },
-  ];
   return (
-    <div style={{ display: "flex", gap: 5 }}>
-      {chips.map((c) => (
-        <button key={c.key} onClick={() => onChange(c.key)} style={{
-          padding: "2px 9px", borderRadius: 5, fontSize: 9.5,
-          fontFamily: "'DM Mono',monospace", cursor: "pointer",
-          border: `1px solid ${value === c.key ? c.color : "var(--border)"}`,
-          background: value === c.key ? `${c.color}1a` : "transparent",
-          color: value === c.key ? c.color : "var(--text-muted)",
-          transition: "all .15s",
-        }}>{c.label}</button>
+    <div className="wfm-chip-row">
+      {CHIPS.map((c) => (
+        <button
+          key={c.key}
+          className={`wfm-chip ${value === c.key ? c.cls : ""}`}
+          onClick={() => onChange(c.key)}
+        >
+          {c.label}
+        </button>
       ))}
     </div>
   );
+}
+
+// ─── KPI CARD ────────────────────────────────────────────────────────────────
+function KpiCard({
+  label, value, sub, delta, deltaClass: dCls, color, fillPct, fillClass,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  delta?: string;
+  deltaClass?: string;
+  color: string;
+  fillPct?: number;
+  fillClass?: string;
+}) {
+  return (
+    <div className={`wfm-kpi-card wfm-kpi-card--${color}`}>
+      <div className="wfm-kpi-label">{label}</div>
+      <div className="wfm-kpi-primary">{value}</div>
+      {delta && <span className={`wfm-kpi-delta ${dCls ?? "wfm-kpi-delta--muted"}`}>{delta}</span>}
+      {sub && <div className="wfm-kpi-sub">{sub}</div>}
+      {fillPct !== undefined && fillClass && (
+        <div className="wfm-kpi-track">
+          <div className={`wfm-kpi-fill ${fillClass}`} style={{ width: `${Math.min(fillPct, 100)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── STATUS BADGE ─────────────────────────────────────────────────────────────
+function WfmStatus({ label }: { label: "Strong" | "Watch" | "At Risk" }) {
+  return <span className={`wfm-status ${statusClass(label)}`}>{label}</span>;
 }
 
 // ─── EXPAND MODAL ─────────────────────────────────────────────────────────────
@@ -59,7 +117,7 @@ function WfmExpandModal({
 }: {
   mode: ExpandMode;
   items: BulletItem[];
-  rows: any[];
+  rows: WfmBenchmarkRowVm[];
   filter: PerformFilter;
   onFilterChange: (v: PerformFilter) => void;
   onClose: () => void;
@@ -73,8 +131,7 @@ function WfmExpandModal({
   };
 
   const filteredItems = items.filter((b) => wfmMatchesFilter(b.pct, b.ideal, filter));
-
-  const filteredRows = rows.filter((r: any) => {
+  const filteredRows = rows.filter((r) => {
     const ideal = Number(r.ideal_hc ?? 0);
     const actual = Number(r.actual_hc_total ?? 0);
     const pct = wfmFillPct(actual, ideal);
@@ -82,64 +139,67 @@ function WfmExpandModal({
   });
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 1000,
-      background: "color-mix(in srgb, var(--surface-page) 85%, transparent)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: 24,
-    }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "color-mix(in srgb, var(--surface-page) 85%, transparent)",
+        backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
       <div style={{
         background: "var(--bg1)", border: "1px solid var(--border)",
-        borderRadius: 14, width: "100%", maxWidth: 1000,
+        borderRadius: 14, width: "100%", maxWidth: 1080,
         maxHeight: "88vh", display: "flex", flexDirection: "column",
         boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
       }}>
-        {/* HEADER */}
         <div style={{
           padding: "14px 20px", borderBottom: "1px solid var(--border)",
-          display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, gap: 12,
         }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>{titles[mode]}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>{titles[mode]}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <FilterChips value={filter} onChange={onFilterChange} />
-            <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>
               {mode === "benchmark" ? filteredRows.length : filteredItems.length} clients
-            </div>
-            <button onClick={onClose} style={{
-              background: "rgba(255,79,107,0.1)", border: "1px solid rgba(255,79,107,0.3)",
-              color: "var(--red)", borderRadius: 6, padding: "4px 12px",
-              cursor: "pointer", fontSize: 11, fontFamily: "'DM Mono',monospace",
-            }}>✕ Close</button>
+            </span>
+            <button
+              onClick={onClose}
+              style={{
+                background: "var(--red-soft)", border: "1px solid color-mix(in srgb, var(--red) 30%, transparent)",
+                color: "var(--red)", borderRadius: 6, padding: "4px 12px", cursor: "pointer",
+                fontSize: 11, fontFamily: "var(--mono)",
+              }}
+            >
+              ✕ Close
+            </button>
           </div>
         </div>
 
-        {/* BODY */}
         <div style={{ overflowY: "auto", padding: "16px 20px", flex: 1 }}>
           {/* HC BULLET CHART — expanded */}
           {mode === "hc" && (
             filteredItems.length === 0
-              ? <EmptyFilter />
+              ? <div className="wfm-empty">No clients match this filter</div>
               : <div style={{ display: "grid", gap: 8 }}>
                   {filteredItems.map((item) => {
-                    const fullPct = wfmFillPct(item.actual, item.ideal);
-                    const barPct = Math.min(100, fullPct);
-                    const gap = item.ideal - item.actual;
-                    const barBg = `linear-gradient(90deg, ${item.color}, color-mix(in srgb, ${item.color} 72%, transparent))`;
+                    const barPct = Math.min(100, item.pct);
+                    const statusLbl = wfmStatusLabel(item.pct, item.ideal);
+                    const fc = barFillClass(item.pct, item.ideal);
                     return (
-                      <div key={item.name} style={{ display: "grid", gridTemplateColumns: "160px 1fr 90px 70px 80px", alignItems: "center", gap: 10 }}>
-                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.name}</div>
-                        <div style={{ height: 10, background: "var(--bg3)", borderRadius: 3, overflow: "hidden", position: "relative" }}>
-                          <div style={{ position: "absolute", top: 0, left: 0, height: "100%", borderRadius: 3, width: `${barPct}%`, background: barBg, transition: "width .5s" }} />
+                      <div key={item.name} style={{ display: "grid", gridTemplateColumns: "180px 1fr 100px 70px 90px", alignItems: "center", gap: 10 }}>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.name}</div>
+                        <div className="wfm-bar-track" style={{ height: 6 }}>
+                          <div className={`wfm-bar-fill ${fc}`} style={{ width: `${barPct}%`, height: "100%" }} />
                         </div>
-                        <div style={{ fontSize: 10.5, fontFamily: "'DM Mono',monospace", color: item.color, textAlign: "right" }}>
+                        <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: item.color, textAlign: "right" }}>
                           {formatNumber(item.actual)} / {formatNumber(item.ideal)}
                         </div>
-                        <div style={{ fontSize: 10.5, fontFamily: "'DM Mono',monospace", color: item.color, textAlign: "right" }}>
-                          {formatPercent(fullPct)}
+                        <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: item.color, textAlign: "right" }}>
+                          {formatPercent(item.pct)}
                         </div>
-                        <div style={{ textAlign: "right" }}>
-                          <StatusTag status={wfmStatusLabel(fullPct, item.ideal)} />
-                        </div>
+                        <div style={{ textAlign: "right" }}><WfmStatus label={statusLbl} /></div>
                       </div>
                     );
                   })}
@@ -149,34 +209,33 @@ function WfmExpandModal({
           {/* RESOURCE GAP TABLE — expanded */}
           {mode === "gap" && (
             filteredItems.length === 0
-              ? <EmptyFilter />
-              : <div className="platform-table-wrap">
-                  <table className="platform-table">
+              ? <div className="wfm-empty">No clients match this filter</div>
+              : <div style={{ overflowX: "auto" }}>
+                  <table className="wfm-table">
                     <thead>
                       <tr>
                         <th>Client</th>
-                        <th style={{ textAlign: "right" }}>Ideal HC</th>
-                        <th style={{ textAlign: "right" }}>Actual HC</th>
-                        <th style={{ textAlign: "right" }}>HC Gap</th>
-                        <th style={{ textAlign: "right" }}>Fill Rate</th>
+                        <th className="right">Ideal HC</th>
+                        <th className="right">Actual HC</th>
+                        <th className="right">HC Gap</th>
+                        <th className="right">Fill Rate</th>
                         <th>Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredItems.map((b) => {
                         const gap = b.ideal - b.actual;
+                        const statusLbl = wfmStatusLabel(b.pct, b.ideal);
                         return (
                           <tr key={b.name}>
-                            <td style={{ fontWeight: 500 }}>{b.name}</td>
-                            <td style={{ textAlign: "right", fontFamily: "'DM Mono',monospace" }}>{formatNumber(b.ideal)}</td>
-                            <td style={{ textAlign: "right", fontFamily: "'DM Mono',monospace", color: b.color }}>{formatNumber(b.actual)}</td>
-                            <td style={{ textAlign: "right", fontFamily: "'DM Mono',monospace", color: b.color }}>
-                              {`${gap >= 0 ? "−" : "+"}${formatNumber(Math.abs(gap))}`}
+                            <td><span className="wfm-table__name">{b.name}</span></td>
+                            <td className="right">{formatNumber(b.ideal)}</td>
+                            <td className="right" style={{ color: b.color }}>{formatNumber(b.actual)}</td>
+                            <td className="right" style={{ color: b.color }}>
+                              {gap >= 0 ? "−" : "+"}{formatNumber(Math.abs(gap))}
                             </td>
-                            <td style={{ textAlign: "right", fontFamily: "'DM Mono',monospace", color: b.color }}>
-                              {formatPercent(b.pct)}
-                            </td>
-                            <td><StatusTag status={wfmStatusLabel(b.pct, b.ideal)} /></td>
+                            <td className="right" style={{ color: b.color }}>{formatPercent(b.pct)}</td>
+                            <td><WfmStatus label={statusLbl} /></td>
                           </tr>
                         );
                       })}
@@ -188,46 +247,47 @@ function WfmExpandModal({
           {/* FULL BENCHMARK TABLE — expanded */}
           {mode === "benchmark" && (
             filteredRows.length === 0
-              ? <EmptyFilter />
-              : <div className="platform-table-wrap">
-                  <table className="platform-table">
+              ? <div className="wfm-empty">No clients match this filter</div>
+              : <div style={{ overflowX: "auto" }}>
+                  <table className="wfm-table">
                     <thead>
                       <tr>
                         <th>Client</th>
-                        <th>Practice head</th>
-                        <th style={{ textAlign: "right" }}>Lateral Target</th>
-                        <th style={{ textAlign: "right" }}>Productivity</th>
-                        <th style={{ textAlign: "right" }}>Ideal HC</th>
-                        <th style={{ textAlign: "right" }}>Actual HC</th>
-                        <th style={{ textAlign: "right" }}>HC Gap</th>
-                        <th style={{ textAlign: "right" }}>Fill Rate</th>
-                        <th style={{ textAlign: "right" }}>WL1</th>
-                        <th style={{ textAlign: "right" }}>WL2</th>
-                        <th style={{ textAlign: "right" }}>WL3+</th>
+                        <th>Practice Head</th>
+                        <th className="right">Lateral Tgt</th>
+                        <th className="right">Productivity</th>
+                        <th className="right">Ideal HC</th>
+                        <th className="right">Actual HC</th>
+                        <th className="right">HC Gap</th>
+                        <th className="right">Fill Rate</th>
+                        <th className="right">WL1</th>
+                        <th className="right">WL2</th>
+                        <th className="right">WL3+</th>
                         <th>Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredRows.map((r: any, i: number) => {
-                        const idealHcRow = Number(r.ideal_hc ?? 0);
-                        const actualHcRow = Number(r.actual_hc_total ?? 0);
-                        const hcGap = idealHcRow - actualHcRow;
-                        const pct = wfmFillPct(actualHcRow, idealHcRow);
-                        const gapColor = wfmFillColor(pct, idealHcRow);
+                      {filteredRows.map((r, i) => {
+                        const idealN = Number(r.ideal_hc ?? 0);
+                        const actualN = Number(r.actual_hc_total ?? 0);
+                        const hcGap = idealN - actualN;
+                        const pct = wfmFillPct(actualN, idealN);
+                        const gapColor = wfmFillColor(pct, idealN);
+                        const statusLbl = wfmStatusLabel(pct, idealN);
                         return (
                           <tr key={i}>
-                            <td style={{ fontWeight: 500 }}>{r.account_name || `Project ${r.project_id}`}</td>
-                            <td style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 120 }} title={r.practice_head || ""}>{r.practice_head ? String(r.practice_head) : "—"}</td>
-                            <td style={{ textAlign: "right" }}>{r.lateral_hc_target != null ? formatNumber(r.lateral_hc_target) : "—"}</td>
-                            <td style={{ textAlign: "right" }}>{r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}</td>
-                            <td style={{ textAlign: "right" }}>{r.ideal_hc != null ? formatNumber(r.ideal_hc) : "—"}</td>
-                            <td style={{ textAlign: "right", color: gapColor }}>{r.actual_hc_total != null ? formatNumber(r.actual_hc_total) : "—"}</td>
-                            <td style={{ textAlign: "right", color: gapColor }}>{`${hcGap >= 0 ? "−" : "+"}${formatNumber(Math.abs(hcGap))}`}</td>
-                            <td style={{ textAlign: "right", color: gapColor }}>{formatPercent(pct)}</td>
-                            <td style={{ textAlign: "right" }}>{r.wl1_hires ?? "—"}</td>
-                            <td style={{ textAlign: "right" }}>{r.wl2_hires ?? "—"}</td>
-                            <td style={{ textAlign: "right" }}>{(r.wl3_hires ?? 0) + (r.wl4_hires ?? 0) || "—"}</td>
-                            <td><StatusTag status={wfmStatusLabel(pct, idealHcRow)} /></td>
+                            <td><span className="wfm-table__name">{r.account_name || `Project ${r.project_id}`}</span></td>
+                            <td><span className="wfm-table__muted" title={r.practice_head || ""}>{r.practice_head || "—"}</span></td>
+                            <td className="right">{r.lateral_hc_target != null ? formatNumber(r.lateral_hc_target) : "—"}</td>
+                            <td className="right">{r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}</td>
+                            <td className="right">{formatNumber(idealN)}</td>
+                            <td className="right" style={{ color: gapColor }}>{formatNumber(actualN)}</td>
+                            <td className="right" style={{ color: gapColor }}>{hcGap >= 0 ? "−" : "+"}{formatNumber(Math.abs(hcGap))}</td>
+                            <td className="right" style={{ color: gapColor }}>{formatPercent(pct)}</td>
+                            <td className="right">{r.wl1_hires ?? "—"}</td>
+                            <td className="right">{r.wl2_hires ?? "—"}</td>
+                            <td className="right">{(r.wl3_hires ?? 0) + (r.wl4_hires ?? 0) || "—"}</td>
+                            <td><WfmStatus label={statusLbl} /></td>
                           </tr>
                         );
                       })}
@@ -236,39 +296,6 @@ function WfmExpandModal({
                 </div>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function EmptyFilter() {
-  return (
-    <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-muted)", fontSize: 12, fontFamily: "'DM Mono',monospace" }}>
-      No clients match this filter
-    </div>
-  );
-}
-
-// ─── CARD HEADER with Expand + Filter ─────────────────────────────────────────
-function CardHeader({
-  title, filter, onFilterChange, onExpand,
-}: {
-  title: string;
-  filter: PerformFilter;
-  onFilterChange: (v: PerformFilter) => void;
-  onExpand: () => void;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-      <div style={{ fontWeight: 700, fontSize: 11, color: "var(--text-subtle)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{title}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <FilterChips value={filter} onChange={onFilterChange} />
-        <button onClick={onExpand} title="Expand all clients" style={{
-          background: "color-mix(in srgb, var(--accent) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
-          color: "var(--accent)", borderRadius: 5, padding: "2px 8px",
-          cursor: "pointer", fontSize: 11, fontFamily: "'DM Mono',monospace",
-          lineHeight: 1.4,
-        }}>⤢ All</button>
       </div>
     </div>
   );
@@ -288,17 +315,11 @@ export function WorkforceManagement() {
     if (d.status === "fulfilled") setRows(wfmRowsVm(d.value || []));
   }, []);
 
-  // per-card filter state
-  const [hcFilter, setHcFilter] = useState<PerformFilter>("all");
-  const [gapFilter, setGapFilter] = useState<PerformFilter>("risk"); // default: show at-risk in compact
-  const [benchFilter, setBenchFilter] = useState<PerformFilter>("all");
-
-  // expand modal state
+  const [tableFilter, setTableFilter] = useState<PerformFilter>("all");
   const [expandMode, setExpandMode] = useState<ExpandMode>(null);
-  // shared filter for the expand modal (inherits from the card that opened it)
   const [expandFilter, setExpandFilter] = useState<PerformFilter>("all");
 
-  // Productivity vs fill chart: empty selection = show all clients
+  // Productivity chart client picker
   const [prodChartSelected, setProdChartSelected] = useState<string[]>([]);
   const [prodChartSearch, setProdChartSearch] = useState("");
   const [prodChartPickerOpen, setProdChartPickerOpen] = useState(false);
@@ -307,18 +328,14 @@ export function WorkforceManagement() {
   useEffect(() => {
     if (!prodChartPickerOpen) return;
     const onDocDown = (e: MouseEvent) => {
-      const el = prodChartPickerWrapRef.current;
-      if (el && !el.contains(e.target as Node)) setProdChartPickerOpen(false);
+      if (prodChartPickerWrapRef.current && !prodChartPickerWrapRef.current.contains(e.target as Node)) {
+        setProdChartPickerOpen(false);
+      }
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setProdChartPickerOpen(false);
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setProdChartPickerOpen(false); };
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => { document.removeEventListener("mousedown", onDocDown); document.removeEventListener("keydown", onKey); };
   }, [prodChartPickerOpen]);
 
   useEffect(() => {
@@ -332,419 +349,498 @@ export function WorkforceManagement() {
 
   const onUpload = async (file?: File | null) => {
     if (!file) return;
-    const form = new FormData(); form.append("file", file);
+    const form = new FormData();
+    form.append("file", file);
     await api.post("/wfm/upload", form);
     await reloadWfm();
   };
 
-  function openExpand(mode: NonNullable<ExpandMode>, filter: PerformFilter) {
-    setExpandMode(mode);
-    setExpandFilter(filter);
-  }
-
+  // ── derived metrics ─────────────────────────────────────────────────────────
   const idealHc = Number(stats?.total_ideal_hc ?? 0);
   const actualHc = Number(stats?.total_actual_hc ?? 0);
-  const fillRate = (actualHc / Math.max(idealHc, 1)) * 100;
-  const gap = idealHc - actualHc;
+  const fillRate = idealHc > 0 ? (actualHc / idealHc) * 100 : 0;
+  const hcGap = idealHc - actualHc;
 
-  // ALL bullet items — no slice
-  const allBulletItems = useMemo((): BulletItem[] => {
-    if (rows.length === 0) return [];
-    return rows.map((r: any) => {
+  // Projected HC = actual + wl1 + wl2 + wl3 + wl4 − resignations (not tracked; just sum hires)
+  const totalWl1 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl1_hires ?? 0), 0), [rows]);
+  const totalWl2 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl2_hires ?? 0), 0), [rows]);
+  const totalWl3 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0), 0), [rows]);
+  const totalAdditional = totalWl1 + totalWl2 + totalWl3;
+  const projectedHc = actualHc + totalAdditional;
+  const varActual = projectedHc - actualHc;   // additional support / pipeline
+  const openPositions = hcGap > 0 ? hcGap : 0;
+
+  const fillBand = idealHc > 0 ? wfmFillBand(fillRate, idealHc) : "risk";
+  const fgColor = idealHc > 0 ? wfmFillColor(fillRate, idealHc) : "var(--accent)";
+
+  // Bullet items for all clients
+  const allBulletItems = useMemo((): BulletItem[] =>
+    rows.map((r) => {
       const ideal = Number(r.ideal_hc ?? 0);
       const actual = Number(r.actual_hc_total ?? 0);
       const pct = wfmFillPct(actual, ideal);
       const color = wfmFillColor(pct, ideal);
       return { name: r.account_name || `Project ${r.project_id}`, actual, ideal, color, pct, row: r };
-    });
-  }, [rows]);
+    }),
+  [rows]);
 
-  // Compact filtered bullet items (top 6 of filtered set)
-  const compactHcItems = useMemo(() => {
-    return allBulletItems
-      .filter((b) => wfmMatchesFilter(b.pct, b.ideal, hcFilter))
-      .slice(0, 6);
-  }, [allBulletItems, hcFilter]);
+  // Filtered table rows
+  const filteredRows = useMemo(() =>
+    rows.filter((r) => {
+      const ideal = Number(r.ideal_hc ?? 0);
+      const actual = Number(r.actual_hc_total ?? 0);
+      const pct = wfmFillPct(actual, ideal);
+      return wfmMatchesFilter(pct, ideal, tableFilter);
+    }),
+  [rows, tableFilter]);
 
-  const compactGapItems = useMemo(() => {
-    return allBulletItems
-      .filter((b) => wfmMatchesFilter(b.pct, b.ideal, gapFilter))
-      .slice(0, 6);
-  }, [allBulletItems, gapFilter]);
+  // At-risk clients count
+  const atRiskCount = useMemo(() =>
+    allBulletItems.filter((b) => wfmFillBand(b.pct, b.ideal) === "risk").length,
+  [allBulletItems]);
 
-  const fgColor = idealHc > 0 ? wfmFillColor(fillRate, idealHc) : "var(--accent)";
-  const fillKpiAccent =
-    idealHc <= 0 ? "amber" : wfmFillBand(fillRate, idealHc) === "strong" ? "green" : wfmFillBand(fillRate, idealHc) === "watch" ? "amber" : "red";
+  const onPlanCount = useMemo(() =>
+    allBulletItems.filter((b) => wfmFillBand(b.pct, b.ideal) === "strong").length,
+  [allBulletItems]);
 
-  // Real WL distribution from wfm rows (wl1_hires…wl4_hires per client)
-  const wlData = useMemo(() => {
-    if (!rows.length) return [];
-    return rows
-      .map((r: any) => ({
-        name: (r.account_name || `P${r.project_id}`).length > 12
-          ? (r.account_name || `P${r.project_id}`).slice(0, 11) + "…"
-          : (r.account_name || `P${r.project_id}`),
-        wl1: Number(r.wl1_hires ?? 0),
-        wl2: Number(r.wl2_hires ?? 0),
-        wl3: Number(r.wl3_hires ?? 0),
-        wl4: Number(r.wl4_hires ?? 0),
-      }))
-      .filter((d) => d.wl1 + d.wl2 + d.wl3 + d.wl4 > 0);
-  }, [rows]);
+  // WL distribution
+  const wlData = useMemo(() => rows.map((r) => ({
+    name: (r.account_name || `P${r.project_id}`).slice(0, 12),
+    wl1: Number(r.wl1_hires ?? 0),
+    wl2: Number(r.wl2_hires ?? 0),
+    wl3: Number(r.wl3_hires ?? 0),
+    wl4: Number(r.wl4_hires ?? 0),
+  })).filter((d) => d.wl1 + d.wl2 + d.wl3 + d.wl4 > 0), [rows]);
 
-  // Compact benchmark rows (top 8 of filtered set)
-  const compactBenchRows = useMemo(() => {
-    return rows
-      .filter((r: any) => {
-        const ideal = Number(r.ideal_hc ?? 0);
-        const actual = Number(r.actual_hc_total ?? 0);
-        const pct = wfmFillPct(actual, ideal);
-        return wfmMatchesFilter(pct, ideal, benchFilter);
-      })
-      .slice(0, 8);
-  }, [rows, benchFilter]);
-
-  const productivityFillChartAll = useMemo(() => {
-    return rows
-      .filter((r: any) => Number(r.ideal_hc ?? 0) > 0)
-      .map((r: any) => {
+  // Productivity vs fill chart
+  const productivityFillChartAll = useMemo(() =>
+    rows
+      .filter((r) => Number(r.ideal_hc ?? 0) > 0)
+      .map((r) => {
         const ideal = Number(r.ideal_hc ?? 0);
         const actual = Number(r.actual_hc_total ?? 0);
         const pct = wfmFillPct(actual, ideal);
         const fullName = String(r.account_name || `Project ${r.project_id}`);
         const short = fullName.length > 14 ? `${fullName.slice(0, 13)}…` : fullName;
-        return {
-          fullName,
-          name: short,
-          fillPct: Math.round(pct * 10) / 10,
-          productivity: Number(r.lateral_productivity_target ?? 0),
-        };
+        return { fullName, name: short, fillPct: Math.round(pct * 10) / 10, productivity: Number(r.lateral_productivity_target ?? 0) };
       })
-      .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [rows]);
+      .sort((a, b) => a.fullName.localeCompare(b.fullName)),
+  [rows]);
 
   const productivityFillChartData = useMemo(() => {
-    if (productivityFillChartAll.length === 0) return [];
-    if (prodChartSelected.length === 0) return productivityFillChartAll;
+    if (!productivityFillChartAll.length) return [];
+    if (!prodChartSelected.length) return productivityFillChartAll;
     const sel = new Set(prodChartSelected);
     return productivityFillChartAll.filter((d) => sel.has(d.fullName));
   }, [productivityFillChartAll, prodChartSelected]);
 
   const prodChartPickerCandidates = useMemo(() => {
     const q = prodChartSearch.trim().toLowerCase();
-    return productivityFillChartAll.filter((d) => {
-      if (prodChartSelected.includes(d.fullName)) return false;
-      if (!q) return true;
-      return d.fullName.toLowerCase().includes(q);
-    }).slice(0, 60);
+    return productivityFillChartAll
+      .filter((d) => !prodChartSelected.includes(d.fullName) && (!q || d.fullName.toLowerCase().includes(q)))
+      .slice(0, 60);
   }, [productivityFillChartAll, prodChartSearch, prodChartSelected]);
 
+  // ── render ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <PageHeader title="Workforce Management" subtitle="Fill rate vs ideal HC (≤100% on plan; >100% over-capacity) · Productivity targets · WL mix" />
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+    <div className="wfm-page">
+
+      {/* ── Header row ── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <PageHeader
+          title="Workforce Management"
+          subtitle="Fill rate vs ideal HC · Productivity targets · WL mix"
+        />
+        <div className="wfm-actions">
           <button
             type="button"
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-0 bg-[var(--accent)] px-3 py-1.5 text-[10.5px] font-semibold text-[var(--accent-foreground)] shadow-sm transition-colors hover:bg-[var(--accent-hover)]"
+            className="wfm-btn wfm-btn--primary"
             onClick={() => setWfmDialogOpen(true)}
           >
-            <Plus className="shrink-0" size={14} strokeWidth={2.5} aria-hidden />
+            <Plus size={14} strokeWidth={2.5} aria-hidden />
             Add / edit WFM data
           </button>
-          <label className="platform-chip active" style={{ cursor: "pointer" }}>
+          <label className="wfm-btn" style={{ cursor: "pointer" }}>
             ↑ Upload WFM
             <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => onUpload(e.target.files?.[0])} />
           </label>
         </div>
       </div>
 
-      {/* KPI RIBBON */}
+      {/* ── Section label ── */}
+      <div className="wfm-section-label">Key Performance Indicators</div>
+
+      {/* ── 5-up KPI grid ── */}
       {loading
-        ? <SkeletonKpiRow count={3} />
+        ? <SkeletonKpiRow count={5} />
         : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
-            <PlatformKpi label="Ideal HC" value={formatNumber(idealHc)} accent="teal" delta="— Target" />
-            <PlatformKpi
-              label="Actual HC"
-              value={formatNumber(actualHc)}
-              accent="blue"
-              delta={`${gap >= 0 ? "−" : "+"}${formatNumber(Math.abs(gap))} gap`}
+          <div className="wfm-kpi-grid">
+            <KpiCard
+              label="Ideal Headcount"
+              value={formatNumber(idealHc)}
+              sub="Target Strength"
+              color="teal"
             />
-            <PlatformKpi label="Fill Rate" value={idealHc > 0 ? formatPercent(fillRate) : "—"} accent={fillKpiAccent} subtext="≤100% on plan; >100% over-capacity" />
+            <KpiCard
+              label="Actual Headcount"
+              value={formatNumber(actualHc)}
+              sub="On Rolls Today"
+              delta={`${hcGap >= 0 ? "−" : "+"}${formatNumber(Math.abs(hcGap))} gap`}
+              deltaClass={hcGap > 0 ? "wfm-kpi-delta--red" : hcGap < 0 ? "wfm-kpi-delta--amber" : "wfm-kpi-delta--green"}
+              color="blue"
+            />
+            <KpiCard
+              label="Fill Rate"
+              value={idealHc > 0 ? formatPercent(fillRate) : "—"}
+              sub="≤100% on plan; >100% over-capacity"
+              delta={fillBand === "strong" ? "On Plan" : fillBand === "watch" ? "Watch" : "At Risk"}
+              deltaClass={deltaClass(fillBand)}
+              fillPct={fillRate}
+              fillClass={bandClass(fillBand)}
+              color={fillBand === "strong" ? "green" : fillBand === "watch" ? "amber" : "red"}
+            />
+            <KpiCard
+              label="Open Positions"
+              value={formatNumber(openPositions)}
+              sub="Active Openings (gap)"
+              delta={openPositions > 0 ? "Unfilled" : "Fully Staffed"}
+              deltaClass={openPositions > 0 ? "wfm-kpi-delta--red" : "wfm-kpi-delta--green"}
+              color="red"
+            />
+            <KpiCard
+              label="Clients at Risk"
+              value={String(atRiskCount)}
+              sub={`${onPlanCount} on plan · ${rows.length} total`}
+              delta={atRiskCount > 0 ? `${atRiskCount} need attention` : "All on plan"}
+              deltaClass={atRiskCount > 0 ? "wfm-kpi-delta--red" : "wfm-kpi-delta--green"}
+              color="orange"
+            />
           </div>
         )
       }
 
-      {/* HC BULLETS + GAUGE */}
-      <div className="platform-grid-2">
-        {/* HC — grouped horizontal bars (ideal vs actual per client) */}
-        <section className="platform-card">
-          <CardHeader
-            title="Client HC — ideal vs actual"
-            filter={hcFilter}
-            onFilterChange={setHcFilter}
-            onExpand={() => openExpand("hc", hcFilter)}
-          />
-          {rows.length === 0
-            ? <div style={{ color: "var(--text-muted)", fontSize: 11, textAlign: "center", padding: "16px 0" }}>Upload WFM data to see HC breakdown</div>
-            : compactHcItems.length === 0
-              ? <div style={{ color: "var(--text-muted)", fontSize: 11, textAlign: "center", padding: "16px 0" }}>No clients match filter</div>
-              : <HcIdealActualGroupedChart items={compactHcItems} />
-          }
-          <div style={{ marginTop: 8, fontSize: 9.5, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-            Showing {compactHcItems.length} of {allBulletItems.length} clients · click ⤢ All for full list and status
-          </div>
-        </section>
-
-        <PlatformSection title="WL Distribution + Capacity Gauge">
-          {wlData.length === 0
-            ? <div style={{ height: 140, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 11 }}>
-                Upload WFM data to see WL distribution
+      {/* ── Projected HC 3-up ── */}
+      {!loading && rows.length > 0 && (
+        <>
+          <div className="wfm-section-label">Projected Headcount</div>
+          <div className="wfm-proj-grid">
+            <div className="wfm-proj-card">
+              <div className="wfm-proj-card__label">Projected Headcount</div>
+              <div className="wfm-proj-card__value">{formatNumber(projectedHc)}</div>
+              <div className="wfm-proj-card__sub">Actual + Additional Support</div>
+            </div>
+            <div className="wfm-proj-card">
+              <div className="wfm-proj-card__label">Variance vs Actual</div>
+              <div className="wfm-proj-card__value" style={{ color: varActual > 0 ? "var(--green)" : varActual < 0 ? "var(--red)" : "var(--text)" }}>
+                {varActual >= 0 ? "+" : ""}{formatNumber(varActual)}
               </div>
-            : <WlDistributionBar data={wlData} />
-          }
-          <div style={{ marginTop: 16 }}>
-            <GaugeRing
-              value={fillRate}
-              label="Capacity Fill Rate"
-              sublabel={`${formatNumber(actualHc)} of ${formatNumber(idealHc)} positions`}
-              color={fgColor}
-            />
-            <div style={{ marginTop: 6, fontSize: 10.5, color: "var(--red)", fontFamily: "'DM Mono',monospace" }}>
-              {formatNumber(Math.abs(gap))} open gaps
+              <div className="wfm-proj-card__sub">Projected − Actual</div>
+            </div>
+            <div className="wfm-proj-card">
+              <div className="wfm-proj-card__label">Net Variance vs Projected</div>
+              <div className="wfm-proj-card__value" style={{ color: idealHc - projectedHc <= 0 ? "var(--green)" : "var(--amber)" }}>
+                {idealHc - projectedHc >= 0 ? "−" : "+"}{formatNumber(Math.abs(idealHc - projectedHc))}
+              </div>
+              <div className="wfm-proj-card__sub">Ideal − Projected</div>
             </div>
           </div>
-        </PlatformSection>
+        </>
+      )}
+
+      {/* ── WL Mix summary ── */}
+      {!loading && rows.length > 0 && (
+        <>
+          <div className="wfm-section-label">WL Hire Mix (Additional Support)</div>
+          <div className="wfm-wl-grid">
+            {[
+              { label: "WL1 Hires", value: totalWl1, sub: "Entry level" },
+              { label: "WL2 Hires", value: totalWl2, sub: "Mid level" },
+              { label: "WL3+ Hires", value: totalWl3, sub: "Senior / leadership" },
+              { label: "Total Pipeline", value: totalAdditional, sub: "All WL tiers" },
+            ].map((c) => (
+              <div key={c.label} className="wfm-wl-cell">
+                <div className="wfm-wl-cell__label">{c.label}</div>
+                <div className="wfm-wl-cell__value">{formatNumber(c.value)}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{c.sub}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── Project-wise table ── */}
+      <div className="wfm-section-label" style={{ marginTop: 4 }}>Project Wise</div>
+      <div className="wfm-section-card">
+        <div className="wfm-section-card__header">
+          <div>
+            <div className="wfm-section-card__tag">Client Headcount Detail</div>
+            <div className="wfm-section-card__title">Fill Rate & Resource Gap by Client</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <FilterChips value={tableFilter} onChange={setTableFilter} />
+            <button
+              className="wfm-section-card__action"
+              onClick={() => { setExpandMode("benchmark"); setExpandFilter(tableFilter); }}
+            >
+              ⤢ Expand all
+            </button>
+          </div>
+        </div>
+        <div className="wfm-section-card__body" style={{ padding: 0 }}>
+          {loading
+            ? <SkeletonTable rows={6} cols={10} />
+            : rows.length === 0
+              ? <div className="wfm-empty">Upload WFM data to populate this table</div>
+              : filteredRows.length === 0
+                ? <div className="wfm-empty">No clients match this filter</div>
+                : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="wfm-table">
+                      <thead>
+                        <tr>
+                          <th>Department / Client</th>
+                          <th className="right">Target Productivity</th>
+                          <th className="right">Ideal HC</th>
+                          <th className="right">Actual HC</th>
+                          <th className="right">Variance</th>
+                          <th className="right">Additional HC</th>
+                          <th className="right">Open Positions</th>
+                          <th className="right">Projected HC</th>
+                          <th className="right">Net Variance</th>
+                          <th>Fill Rate</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredRows.map((r, i) => {
+                          const idealN = Number(r.ideal_hc ?? 0);
+                          const actualN = Number(r.actual_hc_total ?? 0);
+                          const variance = idealN - actualN;
+                          const additional = Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0);
+                          const openPos = variance > 0 ? variance : 0;
+                          const projHc = actualN + additional;
+                          const netVariance = idealN - projHc;
+                          const pct = wfmFillPct(actualN, idealN);
+                          const gapColor = wfmFillColor(pct, idealN);
+                          const statusLbl = wfmStatusLabel(pct, idealN);
+                          const fc = barFillClass(pct, idealN);
+                          return (
+                            <tr key={i}>
+                              <td>
+                                <div className="wfm-table__name">{r.account_name || `Project ${r.project_id}`}</div>
+                                {r.practice_head && <div className="wfm-table__muted">{r.practice_head}</div>}
+                              </td>
+                              <td className="right">{r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}</td>
+                              <td className="right">{formatNumber(idealN)}</td>
+                              <td className="right">{formatNumber(actualN)}</td>
+                              <td className="right" style={{ color: variance > 0 ? "var(--red)" : variance < 0 ? "var(--amber)" : "var(--green)", fontWeight: 600 }}>
+                                {variance > 0 ? "+" : ""}{formatNumber(variance)}
+                              </td>
+                              <td className="right">{formatNumber(additional)}</td>
+                              <td className="right" style={{ color: openPos > 0 ? "var(--red)" : "var(--text-muted)" }}>
+                                {formatNumber(openPos)}
+                              </td>
+                              <td className="right" style={{ color: "var(--blue)" }}>{formatNumber(projHc)}</td>
+                              <td className="right" style={{ color: netVariance > 0 ? "var(--amber)" : "var(--green)", fontWeight: 600 }}>
+                                {netVariance <= 0 ? "0" : formatNumber(netVariance)}
+                              </td>
+                              <td style={{ minWidth: 130 }}>
+                                <div className="wfm-bar-wrap">
+                                  <div className="wfm-bar-track">
+                                    <div className={`wfm-bar-fill ${fc}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                                  </div>
+                                  <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: gapColor, minWidth: 36 }}>
+                                    {formatPercent(pct)}
+                                  </span>
+                                </div>
+                              </td>
+                              <td><WfmStatus label={statusLbl} /></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      {/* TOTAL row */}
+                      {filteredRows.length > 1 && (() => {
+                        const totIdeal = filteredRows.reduce((s, r) => s + Number(r.ideal_hc ?? 0), 0);
+                        const totActual = filteredRows.reduce((s, r) => s + Number(r.actual_hc_total ?? 0), 0);
+                        const totAdditional = filteredRows.reduce((s, r) =>
+                          s + Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0), 0);
+                        const totVariance = totIdeal - totActual;
+                        const totOpenPos = totVariance > 0 ? totVariance : 0;
+                        const totProj = totActual + totAdditional;
+                        const totNetVar = totIdeal - totProj;
+                        const totFill = wfmFillPct(totActual, totIdeal);
+                        return (
+                          <tfoot>
+                            <tr style={{ background: "var(--surface-muted)", fontWeight: 700 }}>
+                              <td style={{ fontWeight: 700 }}>TOTAL</td>
+                              <td className="right">—</td>
+                              <td className="right">{formatNumber(totIdeal)}</td>
+                              <td className="right">{formatNumber(totActual)}</td>
+                              <td className="right" style={{ color: totVariance > 0 ? "var(--red)" : "var(--green)" }}>
+                                {totVariance > 0 ? "+" : ""}{formatNumber(totVariance)}
+                              </td>
+                              <td className="right">{formatNumber(totAdditional)}</td>
+                              <td className="right" style={{ color: totOpenPos > 0 ? "var(--red)" : "var(--text-muted)" }}>
+                                {formatNumber(totOpenPos)}
+                              </td>
+                              <td className="right" style={{ color: "var(--blue)" }}>{formatNumber(totProj)}</td>
+                              <td className="right" style={{ color: totNetVar > 0 ? "var(--amber)" : "var(--green)" }}>
+                                {totNetVar <= 0 ? "0" : formatNumber(totNetVar)}
+                              </td>
+                              <td>
+                                <div className="wfm-bar-wrap">
+                                  <div className="wfm-bar-track">
+                                    <div className={`wfm-bar-fill ${bandClass(wfmFillBand(totFill, totIdeal))}`} style={{ width: `${Math.min(totFill, 100)}%` }} />
+                                  </div>
+                                  <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: wfmFillColor(totFill, totIdeal), minWidth: 36 }}>
+                                    {formatPercent(totFill)}
+                                  </span>
+                                </div>
+                              </td>
+                              <td>—</td>
+                            </tr>
+                          </tfoot>
+                        );
+                      })()}
+                    </table>
+                  </div>
+                )
+          }
+        </div>
       </div>
 
-      {/* RESOURCE GAP */}
-      <section className="platform-card">
-        <CardHeader
-          title="Resource Gap Summary"
-          filter={gapFilter}
-          onFilterChange={setGapFilter}
-          onExpand={() => openExpand("gap", gapFilter)}
-        />
-        <div className="platform-table-wrap">
-          <table className="platform-table">
-            <thead><tr><th>Client</th><th>HC Gap</th><th>Fill Rate</th><th>Status</th></tr></thead>
-            <tbody>
-              {compactGapItems.length === 0 && (
-                <tr><td colSpan={4} style={{ color: "var(--text-muted)", textAlign: "center" }}>No clients match filter</td></tr>
-              )}
-              {compactGapItems.map((b) => (
-                <tr key={b.name}>
-                  <td>{b.name}</td>
-                  <td style={{ color: b.color }}>{`${b.ideal - b.actual >= 0 ? "−" : "+"}${formatNumber(Math.abs(b.ideal - b.actual))}`}</td>
-                  <td style={{ color: b.color }}>{formatPercent(b.pct)}</td>
-                  <td><StatusTag status={wfmStatusLabel(b.pct, b.ideal)} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ marginTop: 8, fontSize: 9.5, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-          Showing {compactGapItems.length} of {allBulletItems.length} clients · click ⤢ All to see everyone
-        </div>
-      </section>
-
-      <PlatformSection title="Productivity target vs fill rate (by client)">
-        <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 10, fontFamily: "'DM Mono',monospace", lineHeight: 1.45 }}>
-          Bars: fill rate (actual ÷ ideal HC). Line: productivity target from WFM. Dashed line: 100% fill — above = over-capacity (at risk).
-          {productivityFillChartAll.length > 0 ? (
-            <span style={{ display: "block", marginTop: 4 }}>
-              {prodChartSelected.length === 0
-                ? `Showing all ${productivityFillChartAll.length} clients — search below to narrow.`
-                : `Showing ${productivityFillChartData.length} of ${productivityFillChartAll.length} selected clients.`}
-            </span>
-          ) : null}
-        </div>
-        {productivityFillChartAll.length > 0 && (
-          <div style={{ display: "grid", gap: 10, marginBottom: 12 }}>
-            <div ref={prodChartPickerWrapRef} style={{ position: "relative" }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                <input
-                  className="platform-search"
-                  style={{ flex: "1 1 200px", minWidth: 160, maxWidth: 320, fontSize: 12 }}
-                  placeholder="Search clients to add…"
-                  value={prodChartSearch}
-                  onChange={(e) => setProdChartSearch(e.target.value)}
-                  onFocus={() => setProdChartPickerOpen(true)}
-                  onClick={() => setProdChartPickerOpen(true)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") setProdChartPickerOpen(false);
-                  }}
-                  aria-expanded={prodChartPickerOpen}
-                  aria-haspopup="listbox"
-                  autoComplete="off"
-                />
+      {/* ── HC Chart + Gauge side by side ── */}
+      {!loading && rows.length > 0 && (
+        <>
+          <div className="wfm-section-label">Client HC — Ideal vs Actual</div>
+          <div className="wfm-charts-grid">
+            <div className="wfm-section-card">
+              <div className="wfm-section-card__header">
+                <div className="wfm-section-card__title">HC Comparison</div>
                 <button
-                  type="button"
-                  className="platform-chip"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => {
-                    if (prodChartPickerCandidates.length === 0) return;
-                    const next = prodChartPickerCandidates[0].fullName;
-                    if (!prodChartSelected.includes(next)) setProdChartSelected((s) => [...s, next]);
-                    setProdChartSearch("");
-                  }}
-                  disabled={prodChartPickerCandidates.length === 0}
+                  className="wfm-section-card__action"
+                  onClick={() => { setExpandMode("hc"); setExpandFilter("all"); }}
                 >
-                  + Add first match
-                </button>
-                <button
-                  type="button"
-                  className="platform-chip active"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => {
-                    setProdChartSelected([]);
-                    setProdChartSearch("");
-                    setProdChartPickerOpen(false);
-                  }}
-                >
-                  Show all clients
+                  ⤢ Full list
                 </button>
               </div>
-              {prodChartPickerOpen && prodChartPickerCandidates.length > 0 && (
-                <div
-                  role="listbox"
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: "100%",
-                    marginTop: 6,
-                    zIndex: 40,
-                    maxHeight: 160,
-                    overflowY: "auto",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    padding: "6px 0",
-                    background: "color-mix(in srgb, var(--surface-muted) 98%, transparent)",
-                    boxShadow: "0 12px 32px rgba(0,0,0,0.45)",
-                  }}
-                >
-                  <div style={{ fontSize: 9, color: "var(--text-muted)", padding: "0 12px 6px", fontFamily: "'DM Mono',monospace" }}>
-                    Click to add · search narrows the list
+              <div className="wfm-section-card__body">
+                {allBulletItems.length === 0
+                  ? <div className="wfm-empty">No data</div>
+                  : <HcIdealActualGroupedChart items={allBulletItems.slice(0, 8)} />
+                }
+              </div>
+            </div>
+
+            <div className="wfm-section-card">
+              <div className="wfm-section-card__header">
+                <div className="wfm-section-card__title">Capacity Fill Gauge</div>
+              </div>
+              <div className="wfm-section-card__body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                <GaugeRing
+                  value={fillRate}
+                  label="Capacity Fill Rate"
+                  sublabel={`${formatNumber(actualHc)} of ${formatNumber(idealHc)} positions`}
+                  color={fgColor}
+                />
+                {wlData.length > 0 && <WlDistributionBar data={wlData} />}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Productivity vs Fill chart ── */}
+      {!loading && rows.length > 0 && (
+        <PlatformSection title="Productivity Target vs Fill Rate (by client)">
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 10, fontFamily: "var(--mono)", lineHeight: 1.5 }}>
+            Bars: fill rate (actual ÷ ideal HC). Line: productivity target. Dashed line: 100% fill — above = over-capacity.
+            {productivityFillChartAll.length > 0 && (
+              <span style={{ display: "block", marginTop: 2 }}>
+                {prodChartSelected.length === 0
+                  ? `Showing all ${productivityFillChartAll.length} clients — search to narrow.`
+                  : `Showing ${productivityFillChartData.length} of ${productivityFillChartAll.length} selected.`}
+              </span>
+            )}
+          </div>
+          {productivityFillChartAll.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div ref={prodChartPickerWrapRef} style={{ position: "relative" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="platform-search"
+                    style={{ flex: "1 1 200px", minWidth: 160, maxWidth: 320, fontSize: 12 }}
+                    placeholder="Search clients to add…"
+                    value={prodChartSearch}
+                    onChange={(e) => setProdChartSearch(e.target.value)}
+                    onFocus={() => setProdChartPickerOpen(true)}
+                    onClick={() => setProdChartPickerOpen(true)}
+                    onKeyDown={(e) => { if (e.key === "Escape") setProdChartPickerOpen(false); }}
+                    autoComplete="off"
+                  />
+                  <button type="button" className="platform-chip" style={{ cursor: "pointer" }}
+                    onClick={() => {
+                      const next = prodChartPickerCandidates[0]?.fullName;
+                      if (next && !prodChartSelected.includes(next)) setProdChartSelected((s) => [...s, next]);
+                      setProdChartSearch("");
+                    }}
+                    disabled={!prodChartPickerCandidates.length}
+                  >+ Add first match</button>
+                  <button type="button" className="platform-chip active" style={{ cursor: "pointer" }}
+                    onClick={() => { setProdChartSelected([]); setProdChartSearch(""); setProdChartPickerOpen(false); }}
+                  >Show all</button>
+                </div>
+                {prodChartPickerOpen && prodChartPickerCandidates.length > 0 && (
+                  <div role="listbox" style={{
+                    position: "absolute", left: 0, right: 0, top: "100%", marginTop: 6, zIndex: 40,
+                    maxHeight: 160, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8,
+                    padding: "6px 0", background: "var(--surface-muted)", boxShadow: "0 12px 32px rgba(0,0,0,0.45)",
+                  }}>
+                    <div style={{ fontSize: 9, color: "var(--text-muted)", padding: "0 12px 6px", fontFamily: "var(--mono)" }}>
+                      Click to add · search narrows the list
+                    </div>
+                    {prodChartPickerCandidates.map((d) => (
+                      <button key={d.fullName} type="button" role="option"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => { setProdChartSelected((s) => (s.includes(d.fullName) ? s : [...s, d.fullName])); setProdChartSearch(""); }}
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 12px", border: "none", background: "transparent", color: "var(--text-muted)", fontSize: 12, cursor: "pointer" }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "color-mix(in srgb, var(--accent) 10%, transparent)"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                      >
+                        {d.fullName}
+                      </button>
+                    ))}
                   </div>
-                  {prodChartPickerCandidates.map((d) => (
-                    <button
-                      key={d.fullName}
-                      type="button"
-                      role="option"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setProdChartSelected((s) => (s.includes(d.fullName) ? s : [...s, d.fullName]));
-                        setProdChartSearch("");
-                      }}
+                )}
+              </div>
+              {prodChartSelected.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 8 }}>
+                  <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>SELECTED</span>
+                  {prodChartSelected.map((fn) => (
+                    <button key={fn} type="button"
+                      onClick={() => setProdChartSelected((s) => s.filter((x) => x !== fn))}
                       style={{
-                        display: "block",
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "6px 12px",
-                        border: "none",
-                        background: "transparent",
-                        color: "var(--text-muted)",
-                        fontSize: 12,
-                        cursor: "pointer",
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                        padding: "2px 8px", borderRadius: 20,
+                        border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
+                        background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+                        color: "var(--accent)", fontSize: 10.5, fontFamily: "var(--mono)", cursor: "pointer",
                       }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "color-mix(in srgb, var(--accent) 10%, transparent)"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                     >
-                      {d.fullName}
+                      {fn.length > 28 ? `${fn.slice(0, 27)}…` : fn}
+                      <span style={{ opacity: 0.7 }}>×</span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
-            {prodChartSelected.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>SELECTED</span>
-                {prodChartSelected.map((fn) => (
-                  <button
-                    key={fn}
-                    type="button"
-                    onClick={() => setProdChartSelected((s) => s.filter((x) => x !== fn))}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: "2px 8px",
-                      borderRadius: 20,
-                      border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
-                      background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-                      color: "var(--accent)",
-                      fontSize: 10.5,
-                      fontFamily: "'DM Mono',monospace",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {fn.length > 28 ? `${fn.slice(0, 27)}…` : fn}
-                    <span style={{ opacity: 0.7 }}>×</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <WfmProductivityFillChart data={productivityFillChartData} />
-      </PlatformSection>
+          )}
+          <WfmProductivityFillChart data={productivityFillChartData} />
+        </PlatformSection>
+      )}
 
-      {/* BENCHMARK TABLE CARD */}
-      <section className="platform-card">
-        <CardHeader
-          title="Workforce Benchmark Snapshot"
-          filter={benchFilter}
-          onFilterChange={setBenchFilter}
-          onExpand={() => openExpand("benchmark", benchFilter)}
-        />
-        <div className="platform-table-wrap">
-          <table className="platform-table">
-            <thead>
-              <tr>
-                <th>Client</th><th>Practice head</th><th>Lateral Target</th><th>HC Target</th><th>Productivity</th>
-                <th>Ideal HC</th><th>Actual HC</th><th>HC Gap</th><th>WL1</th><th>WL2</th><th>WL3+</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr><td colSpan={11} style={{ color: "var(--text-muted)", textAlign: "center" }}>Upload WFM file to populate data</td></tr>
-              ) : compactBenchRows.length === 0 ? (
-                <tr><td colSpan={11} style={{ color: "var(--text-muted)", textAlign: "center" }}>No clients match this filter</td></tr>
-              ) : compactBenchRows.map((r: any, i: number) => {
-                const idealN = Number(r.ideal_hc ?? 0);
-                const actualN = Number(r.actual_hc_total ?? 0);
-                const hcGap = idealN - actualN;
-                const fillPct = wfmFillPct(actualN, idealN);
-                const gapColor = wfmFillColor(fillPct, idealN);
-                return (
-                  <tr key={i}>
-                    <td>{r.account_name || `Project ${r.project_id}`}</td>
-                    <td style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 160 }} title={r.practice_head || ""}>
-                      {r.practice_head ? String(r.practice_head) : "—"}
-                    </td>
-                    <td>{r.lateral_hc_target != null ? formatNumber(r.lateral_hc_target) : "—"}</td>
-                    <td>{r.ideal_hc != null ? formatNumber(r.ideal_hc) : "—"}</td>
-                    <td>{r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}</td>
-                    <td>{r.ideal_hc != null ? formatNumber(r.ideal_hc) : "—"}</td>
-                    <td style={{ color: gapColor }}>{r.actual_hc_total != null ? formatNumber(r.actual_hc_total) : "—"}</td>
-                    <td style={{ color: gapColor }}>{`${hcGap >= 0 ? "−" : "+"}${formatNumber(Math.abs(hcGap))}`}</td>
-                    <td>{r.wl1_hires ?? "—"}</td>
-                    <td>{r.wl2_hires ?? "—"}</td>
-                    <td>{(r.wl3_hires ?? 0) + (r.wl4_hires ?? 0) || "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ marginTop: 8, fontSize: 9.5, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-          Showing {compactBenchRows.length} of {rows.length} clients · click ⤢ All to see everyone
-        </div>
-      </section>
-
-      {/* EXPAND MODAL */}
+      {/* ── Expand Modal ── */}
       <WfmExpandModal
         mode={expandMode}
         items={allBulletItems}

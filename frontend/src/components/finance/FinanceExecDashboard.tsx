@@ -67,6 +67,7 @@ type FinanceStats = ReturnType<typeof financeStatsVm>;
 
 function aggregateStatsFromRows(rs: FinanceRowVm[]): FinanceStats {
   const revenue_budget_inr = rs.reduce((a, r) => a + (r.rev_budget_inr ?? 0), 0);
+  const revenue_forecast_inr = rs.reduce((a, r) => a + (r.rev_forecast_inr ?? 0), 0);
   const revenue_actual_inr = rs.reduce((a, r) => a + (r.rev_actual_inr ?? 0), 0);
   const total_cm_inr = rs.reduce((a, r) => a + (r.cm_actual_inr ?? 0), 0);
   const total_unbilled_inr = rs.reduce((a, r) => a + (r.unbilled_inr ?? 0), 0);
@@ -79,6 +80,7 @@ function aggregateStatsFromRows(rs: FinanceRowVm[]): FinanceStats {
     total_collection_target_inr > 0 ? (total_collected_inr / total_collection_target_inr) * 100 : 0;
   return {
     revenue_budget_inr,
+    revenue_forecast_inr,
     revenue_actual_inr,
     total_cm_inr,
     total_unbilled_inr,

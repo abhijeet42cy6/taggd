@@ -1,0 +1,837 @@
+/*
+ * Tasks page — design-guide-aligned stylesheet.
+ * Uses the platform.css custom-property set (--bg, --surface, --border, --text, --accent, etc.)
+ * and mirrors the typography / radii / shadow tokens from the design style guide.
+ */
+
+/* ═══════════════════════════════════════
+   PAGE CHROME
+═══════════════════════════════════════ */
+.tsk-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1400px;
+}
+
+/* Hero header row */
+.tsk-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.tsk-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tsk-page-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.tsk-page-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  max-width: 540px;
+}
+
+/* Primary "New task" button */
+.tsk-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: background 0.14s ease, box-shadow 0.14s ease, transform 0.12s ease;
+  box-shadow: 0 1px 3px rgba(234, 88, 12, 0.28);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tsk-btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 3px 10px rgba(234, 88, 12, 0.38);
+  transform: translateY(-1px);
+}
+
+.tsk-btn-primary:active { transform: translateY(0); }
+.tsk-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Read-only notice */
+.tsk-readonly-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--amber);
+}
+
+/* ═══════════════════════════════════════
+   KPI STRIP  (design_style_guide: demo-card + badges + section-tag)
+   — Light 1px border, --radius-lg, soft semantic fills, dot + label.
+═══════════════════════════════════════ */
+.tsk-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 680px) {
+  .tsk-kpi-strip { grid-template-columns: 1fr; }
+}
+
+.tsk-kpi {
+  /* Mirrors .demo-card: compact strip for task counts */
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+/* Soft semantic tint — matches design_style_guide.html --*-soft tokens */
+.tsk-kpi--blue {
+  background: rgba(56, 132, 255, 0.08);
+}
+
+.tsk-kpi--teal {
+  background: rgba(20, 184, 166, 0.09);
+}
+
+.tsk-kpi--amber {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.tsk-kpi--red {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.tsk-kpi:hover,
+.tsk-kpi:focus-within {
+  /* --shadow-sm from guide */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  border-color: var(--border2, rgba(24, 24, 27, 0.14));
+}
+
+/* Label row: mono caps + status dot (guide § Badges — never color alone) */
+.tsk-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  font-family: var(--mono, "DM Mono", ui-monospace, monospace);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.tsk-kpi-label::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tsk-kpi--blue .tsk-kpi-label::before {
+  background: #3884ff;
+}
+
+.tsk-kpi--teal .tsk-kpi-label::before {
+  background: #14b8a6;
+}
+
+.tsk-kpi--amber .tsk-kpi-label::before {
+  background: #f59e0b;
+}
+
+.tsk-kpi--red .tsk-kpi-label::before {
+  background: #ef4444;
+}
+
+/* Primary metric — slightly smaller than before for a denser KPI row */
+.tsk-kpi-value {
+  font-size: clamp(22px, 2.5vw, 28px);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.4px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tsk-kpi-sub {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-muted);
+  margin-top: 0;
+}
+
+/* ═══════════════════════════════════════
+   BOARD SHELL
+═══════════════════════════════════════ */
+.tsk-board-shell {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.tsk-board-toolbar {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tsk-board-toolbar-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+/* ── Filters ── */
+.tsk-filters {
+  padding: 10px 16px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2, #f4f4f5);
+}
+
+.tsk-filter-select {
+  appearance: none;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 28px 5px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.tsk-filter-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.15);
+}
+
+.tsk-filter-select.tsk-filter-active {
+  border-color: var(--accent);
+  background-color: rgba(234, 88, 12, 0.06);
+  color: var(--accent);
+}
+
+.tsk-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface, #fff);
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.tsk-filter-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+.tsk-filter-toggle:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(234, 88, 12, 0.06);
+  color: var(--accent);
+}
+
+/* ─── Sample board notice ─── */
+.tsk-sample-notice {
+  margin: 12px 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(56, 132, 255, 0.2);
+  background: rgba(56, 132, 255, 0.05);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.tsk-sample-notice strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ═══════════════════════════════════════
+   KANBAN BOARD
+═══════════════════════════════════════ */
+.tsk-board {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 12px 16px 16px;
+  align-items: flex-start;
+  scrollbar-width: thin;
+}
+
+.tsk-board::-webkit-scrollbar { height: 5px; }
+.tsk-board::-webkit-scrollbar-track { background: transparent; }
+.tsk-board::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* Column */
+.tsk-col {
+  flex: 0 0 264px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 160px;
+  max-height: calc(100vh - 340px);
+  max-height: calc(100dvh - 340px);
+  border-radius: 10px;
+  transition: background 0.14s ease;
+}
+
+.tsk-col--drag-over { background: rgba(234, 88, 12, 0.04); }
+
+/* Column header */
+.tsk-col-head {
+  background: var(--bg2, #f4f4f5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px 8px;
+  flex-shrink: 0;
+}
+
+.tsk-col-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tsk-col-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tsk-col-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tsk-col-dot--open       { background: #94a3b8; }
+.tsk-col-dot--in_progress { background: #3b82f6; }
+.tsk-col-dot--blocked    { background: #ef4444; }
+.tsk-col-dot--done       { background: #22c55e; }
+.tsk-col-dot--cancelled  { background: #a1a1aa; }
+
+.tsk-col-count {
+  font-family: var(--mono, "DM Mono", monospace);
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--border);
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+
+.tsk-col-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Card list scroll area */
+.tsk-col-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.tsk-col-list::-webkit-scrollbar { width: 3px; }
+.tsk-col-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* ═══════════════════════════════════════
+   TASK CARD  (design_style_guide: demo-card + prop-row + badges)
+═══════════════════════════════════════ */
+.tsk-card {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 10px; /* --radius-lg */
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: grab;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  position: relative;
+}
+
+.tsk-card:hover {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  border-color: var(--border2, rgba(24, 24, 27, 0.14));
+}
+
+.tsk-card:active { cursor: grabbing; }
+
+.tsk-card--done {
+  opacity: 0.78;
+}
+
+.tsk-card--cancelled {
+  opacity: 0.6;
+}
+
+/* Title block: dominant title, subtle kicker (Notion page row) */
+.tsk-card-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tsk-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.tsk-card--done .tsk-card-title,
+.tsk-card--cancelled .tsk-card-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.tsk-card-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tsk-card-id {
+  font-family: var(--mono, "DM Mono", ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Priority badges */
+.tsk-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--mono, "DM Mono", monospace);
+  white-space: nowrap;
+}
+
+.tsk-priority--p0 {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.tsk-priority--p1 {
+  background: rgba(245, 158, 11, 0.1);
+  color: #92600a;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.tsk-priority--p2 {
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+}
+
+.tsk-priority--p3 {
+  background: rgba(113, 113, 122, 0.1);
+  color: #52525b;
+  border: 1px solid rgba(113, 113, 122, 0.15);
+}
+
+.tsk-priority--other {
+  background: rgba(113, 113, 122, 0.08);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* Overdue badge */
+.tsk-badge-overdue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-size: 9.5px;
+  font-weight: 500;
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Sample badge */
+.tsk-badge-sample {
+  display: inline-flex;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-size: 9px;
+  background: rgba(113, 113, 122, 0.1);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* Description — guide body scale */
+.tsk-card-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Metadata: tags row */
+.tsk-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Status badges — guide §7: pill + dot, never color alone */
+.tsk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tsk-badge-dot::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tsk-badge--open {
+  background: rgba(148, 163, 184, 0.12);
+  color: #64748b;
+}
+
+.tsk-badge--open.tsk-badge-dot::before {
+  background: #94a3b8;
+}
+
+.tsk-badge--in_progress {
+  background: rgba(56, 132, 255, 0.1);
+  color: #1d4ed8;
+}
+
+.tsk-badge--in_progress.tsk-badge-dot::before {
+  background: #3884ff;
+}
+
+.tsk-badge--blocked {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+}
+
+.tsk-badge--blocked.tsk-badge-dot::before {
+  background: #ef4444;
+}
+
+.tsk-badge--done {
+  background: rgba(46, 204, 113, 0.1);
+  color: #15803d;
+}
+
+.tsk-badge--done.tsk-badge-dot::before {
+  background: #22c55e;
+}
+
+.tsk-badge--cancelled {
+  background: rgba(113, 113, 122, 0.1);
+  color: #71717a;
+}
+
+.tsk-badge--cancelled.tsk-badge-dot::before {
+  background: #a1a1aa;
+}
+
+/* Category chip */
+.tsk-cat-chip {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface-hover, #f4f4f5);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Subtype chip */
+.tsk-subtype-chip {
+  font-size: 10px;
+  font-family: var(--mono, "DM Mono", ui-monospace, monospace);
+  color: var(--text-muted);
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Property rows (Notion-style label / value) */
+.tsk-card-props {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
+}
+
+.tsk-card-prop {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tsk-card-prop-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.tsk-card-prop-value {
+  font-family: var(--mono, "DM Mono", ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.tsk-card-prop-value--accent {
+  font-family: var(--mono, "DM Mono", ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--accent);
+}
+
+.tsk-card-prop--warn .tsk-card-prop-value {
+  color: #b91c1c;
+}
+
+.tsk-card-assignees {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding-top: 4px;
+}
+
+.tsk-card-assignees .tsk-card-prop-label {
+  align-self: center;
+}
+
+/* Assignee avatars */
+.tsk-avatars {
+  display: flex;
+  align-items: center;
+}
+
+.tsk-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #fff;
+  border: 1.5px solid var(--surface, #fff);
+  margin-left: -5px;
+  flex-shrink: 0;
+}
+
+.tsk-avatars .tsk-avatar:first-child { margin-left: 0; }
+
+.tsk-link-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+/* Platform link */
+.tsk-platform-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  text-decoration: none;
+  width: fit-content;
+  border-bottom: 1px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.tsk-platform-link:hover {
+  color: var(--accent-hover);
+  border-bottom-color: rgba(234, 88, 12, 0.45);
+}
+
+.tsk-link-meta {
+  font-size: 10px;
+  font-family: var(--mono, "DM Mono", ui-monospace, monospace);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* Card actions — guide .btn-secondary / .btn-ghost */
+.tsk-card-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid var(--border);
+}
+
+.tsk-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface, #fff);
+  color: var(--text);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tsk-action-btn:hover {
+  background: var(--bg2, #f4f4f5);
+  border-color: var(--border2, rgba(24, 24, 27, 0.16));
+}
+
+.tsk-action-btn--danger {
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.tsk-action-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* Empty column state */
+.tsk-col-empty {
+  padding: 24px 0 8px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+}
+
+/* ═══════════════════════════════════════
+   SKELETON LOADER (using existing platform pattern)
+═══════════════════════════════════════ */
+.tsk-skeleton-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+/* ═══════════════════════════════════════
+   EMPTY FILTER STATE
+═══════════════════════════════════════ */
+.tsk-empty-state {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.tsk-empty-state-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}

@@ -17,15 +17,9 @@ import { cn, formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { RefreshCw, Plus, PencilLine, Trash2, FilterX } from "lucide-react";
 import "@/styles/new-contract-panel.css";
+import "@/styles/billing-ds-table.css";
 
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
@@ -79,16 +73,6 @@ function rowMatchesBillingTableFilters(
   return true;
 }
 
-const selectFilterStyle: React.CSSProperties = {
-  padding: "6px 10px",
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--bg2)",
-  color: "var(--text)",
-  fontSize: 11,
-  fontFamily: "'DM Mono',monospace",
-};
-
 function formatWorkflowLabel(raw: string | null | undefined): string {
   const s = (raw || "draft").trim();
   if (!s) return "Draft";
@@ -98,22 +82,53 @@ function formatWorkflowLabel(raw: string | null | undefined): string {
 function BillingWorkflowCell({ row }: { row: RevenueBillingRow }) {
   const raw = (row.workflow?.validation_status || "draft").toLowerCase();
   const label = formatWorkflowLabel(row.workflow?.validation_status || "draft");
+  const dot = <span className="billing-ds-badge-dot" aria-hidden />;
   if (raw === "fully_approved") {
-    return <span className="platform-badge green">{label}</span>;
+    return (
+      <span className="billing-ds-badge billing-ds-badge-green">
+        {dot}
+        {label}
+      </span>
+    );
   }
   if (raw === "rejected") {
-    return <span className="platform-badge red">{label}</span>;
+    return (
+      <span className="billing-ds-badge billing-ds-badge-red">
+        {dot}
+        {label}
+      </span>
+    );
   }
   if (raw === "submitted" || raw === "under_review") {
-    return <span className="platform-badge blue">{label}</span>;
+    return (
+      <span className="billing-ds-badge billing-ds-badge-blue">
+        {dot}
+        {label}
+      </span>
+    );
   }
   if (raw === "cfo_pending") {
-    return <span className="platform-badge teal">{label}</span>;
+    return (
+      <span className="billing-ds-badge billing-ds-badge-teal">
+        {dot}
+        {label}
+      </span>
+    );
   }
   if (raw === "disputed") {
-    return <span className="platform-badge amber">{label}</span>;
+    return (
+      <span className="billing-ds-badge billing-ds-badge-amber">
+        {dot}
+        {label}
+      </span>
+    );
   }
-  return <span className="platform-badge grey">{label}</span>;
+  return (
+    <span className="billing-ds-badge billing-ds-badge-gray">
+      {dot}
+      {label}
+    </span>
+  );
 }
 
 type Draft = Record<string, string>;
@@ -799,6 +814,12 @@ export function Billing() {
   const [rows, setRows] = useState<RevenueBillingRow[]>([]);
   const [total, setTotal] = useState(0);
   const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [filterProjDdOpen, setFilterProjDdOpen] = useState(false);
+  const [filterProjSearch, setFilterProjSearch] = useState("");
+  const [filterProjDdRect, setFilterProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const filterProjWrapRef = useRef<HTMLDivElement>(null);
+  const filterProjBtnRef = useRef<HTMLButtonElement>(null);
+  const filterProjPortalRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -817,6 +838,54 @@ export function Billing() {
   const [tableInvoice, setTableInvoice] = useState<"all" | "has" | "none">("all");
 
   const pid = projectFilter === "all" ? undefined : Number(projectFilter);
+
+  const selectedFilterProject = useMemo(() => {
+    if (projectFilter === "all") return null;
+    const id = Number(projectFilter);
+    return Number.isFinite(id) && id > 0 ? projects.find((p) => p.id === id) ?? null : null;
+  }, [projectFilter, projects]);
+
+  const filteredFilterProjects = useMemo(() => {
+    const q = filterProjSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = `prj-${p.id} ${p.account_name || p.filename || ""}`.toLowerCase();
+      return lab.includes(q);
+    });
+  }, [projects, filterProjSearch]);
+
+  useLayoutEffect(() => {
+    if (!filterProjDdOpen) {
+      setFilterProjDdRect(null);
+      return;
+    }
+    const measure = () => {
+      const btn = filterProjBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setFilterProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (filterProjBtnRef.current) ro.observe(filterProjBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [filterProjDdOpen]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (filterProjWrapRef.current?.contains(t) || filterProjPortalRef.current?.contains(t)) return;
+      setFilterProjDdOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
 
   const reload = useCallback(async () => {
     setErr(null);
@@ -989,37 +1058,201 @@ export function Billing() {
       />
 
       <PlatformSection title="Filters & actions">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1 min-w-[200px]">
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Project</span>
-            <Select value={projectFilter} onValueChange={setProjectFilter}>
-              <SelectTrigger className="h-9 text-xs w-[260px]">
-                <SelectValue placeholder="All projects" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">
-                  All projects
-                </SelectItem>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)} className="text-xs font-mono">
-                    PRJ-{p.id} · {p.account_name || p.filename || "—"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="billing-toolbar">
+          <div className="billing-toolbar-field billing-toolbar-field--project">
+            <span id="billing-project-filter-label" className="billing-toolbar-label">
+              Project
+            </span>
+            <div
+              className="new-contract-sheet billing-toolbar-project-embed"
+              ref={filterProjWrapRef}
+              style={{
+                minHeight: 0,
+                display: "block",
+                background: "transparent",
+                padding: 0,
+                margin: 0,
+                fontFamily: "inherit",
+                color: "inherit",
+              }}
+            >
+              <div className="ncp-project-wrap" style={{ borderTop: "none", marginBottom: 0 }}>
+                <button
+                  ref={filterProjBtnRef}
+                  type="button"
+                  className={cn(
+                    "ncp-project-btn",
+                    (projectFilter === "all" || selectedFilterProject) && "ncp-selected",
+                  )}
+                  aria-haspopup="listbox"
+                  aria-expanded={filterProjDdOpen}
+                  aria-labelledby="billing-project-filter-label"
+                  disabled={!projects.length}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (projects.length) setFilterProjDdOpen((o) => !o);
+                  }}
+                >
+                  {projectFilter === "all" ? (
+                    <>
+                      <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-text-muted)" }}>
+                        All
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)" }}>
+                        All projects
+                      </span>
+                    </>
+                  ) : selectedFilterProject ? (
+                    <>
+                      <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)" }}>
+                        PRJ-{selectedFilterProject.id}
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)" }}>
+                        {selectedFilterProject.account_name || selectedFilterProject.filename || "—"}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span>＋</span>
+                      <span>Pick a project</span>
+                    </>
+                  )}
+                  <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)" }}>▾</span>
+                </button>
+                {filterProjDdOpen &&
+                  filterProjDdRect &&
+                  createPortal(
+                    <div
+                      ref={filterProjPortalRef}
+                      className="new-contract-sheet"
+                      style={{
+                        position: "fixed",
+                        top: filterProjDdRect.top,
+                        left: filterProjDdRect.left,
+                        width: filterProjDdRect.width,
+                        zIndex: 200,
+                        pointerEvents: "auto",
+                        minHeight: 0,
+                        height: "auto",
+                        display: "block",
+                        background: "transparent",
+                      }}
+                    >
+                      <div
+                        className="ncp-project-dd ncp-open ncp-project-dd--portal"
+                        onClick={(e) => e.stopPropagation()}
+                        role="listbox"
+                        aria-labelledby="billing-project-filter-label"
+                      >
+                        <div className="ncp-project-search">
+                          <span style={{ opacity: 0.5 }}>🔍</span>
+                          <input
+                            type="search"
+                            placeholder="Search projects…"
+                            value={filterProjSearch}
+                            onChange={(e) => setFilterProjSearch(e.target.value)}
+                            autoFocus
+                          />
+                        </div>
+                        <div
+                          className="ncp-dd-scroll"
+                          onWheel={(e) => e.stopPropagation()}
+                          onTouchMove={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={projectFilter === "all"}
+                            className={cn("ncp-project-opt", projectFilter === "all" && "ncp-selected")}
+                            onClick={() => {
+                              setProjectFilter("all");
+                              setFilterProjDdOpen(false);
+                              setFilterProjSearch("");
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontFamily: "var(--ncp-mono)",
+                                fontSize: 11,
+                                color: "var(--ncp-text-muted)",
+                                minWidth: 52,
+                              }}
+                            >
+                              —
+                            </span>
+                            <span>All projects</span>
+                          </button>
+                          {filteredFilterProjects.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              role="option"
+                              aria-selected={projectFilter === String(p.id)}
+                              className={cn("ncp-project-opt", projectFilter === String(p.id) && "ncp-selected")}
+                              onClick={() => {
+                                setProjectFilter(String(p.id));
+                                setFilterProjDdOpen(false);
+                                setFilterProjSearch("");
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontFamily: "var(--ncp-mono)",
+                                  fontSize: 11,
+                                  color: "var(--ncp-accent)",
+                                  minWidth: 52,
+                                }}
+                              >
+                                PRJ-{p.id}
+                              </span>
+                              <span>{p.account_name || p.filename || `Project ${p.id}`}</span>
+                            </button>
+                          ))}
+                          {filteredFilterProjects.length === 0 && (
+                            <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--ncp-text-muted)" }}>
+                              {projects.length === 0
+                                ? "No projects."
+                                : `No projects match “${filterProjSearch.trim()}”.`}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>,
+                    document.body,
+                  )}
+              </div>
+            </div>
           </div>
-          <Button variant="outline" size="sm" className="h-9 gap-2" onClick={() => void reload()} disabled={loading}>
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+          <button
+            type="button"
+            className="billing-toolbar-btn"
+            onClick={() => void reload()}
+            disabled={loading}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 shrink-0", loading && "animate-spin")} aria-hidden />
             Refresh
-          </Button>
-          <Button size="sm" className="h-9 gap-2" onClick={openCreate} disabled={!projects.length}>
-            <Plus className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            className="billing-toolbar-btn billing-toolbar-btn--primary"
+            onClick={openCreate}
+            disabled={!projects.length}
+          >
+            <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
             New billing row
-          </Button>
-          <span className="text-[10px] text-muted-foreground font-mono ml-auto">{total} row(s)</span>
+          </button>
+          <span className="billing-toolbar-count">{total} row(s)</span>
         </div>
         {err && (
-          <div className="mt-3 text-xs text-destructive font-mono border border-destructive/30 rounded-md px-3 py-2 bg-destructive/5">
+          <div
+            className="mt-3 rounded-md border px-3 py-2 text-xs font-mono"
+            style={{
+              borderColor: "rgba(239, 68, 68, 0.25)",
+              background: "var(--red-soft)",
+              color: "#b91c1c",
+            }}
+            role="alert"
+          >
             {err}
           </div>
         )}
@@ -1044,182 +1277,157 @@ export function Billing() {
             )}
           </div>
         ) : (
-          <>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
-              <input
-                className="platform-search"
-                placeholder="Search ID, account, PM, invoice, FY, PRJ…"
-                value={tableSearch}
-                onChange={(e) => setTableSearch(e.target.value)}
-                style={{ flex: "1 1 220px", maxWidth: 400, minWidth: 180 }}
-              />
-              <select value={tableFy} onChange={(e) => setTableFy(e.target.value)} style={{ ...selectFilterStyle, minWidth: 140 }}>
-                <option value="all">All years</option>
-                {hasEmptyFy ? (
-                  <option value={FY_NONE}>No FY set</option>
-                ) : null}
-                {distinctFiscalYears.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-              <select value={tablePm} onChange={(e) => setTablePm(e.target.value)} style={{ ...selectFilterStyle, minWidth: 160 }}>
-                <option value="all">All PMs</option>
-                {hasEmptyPm ? (
-                  <option value={PM_NONE}>No PM set</option>
-                ) : null}
-                {distinctPMs.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={tableInvoice}
-                onChange={(e) => setTableInvoice(e.target.value as "all" | "has" | "none")}
-                style={{ ...selectFilterStyle, minWidth: 130 }}
-              >
-                <option value="all">All invoices</option>
-                <option value="has">Has invoice #</option>
-                <option value="none">No invoice</option>
-              </select>
-              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginLeft: "auto" }}>
-                {tableFiltersActive ? `${filteredRows.length} of ${rows.length} shown` : `${rows.length} loaded`}
-                {total > rows.length ? ` · ${total} total` : ""}
-              </span>
-              {tableFiltersActive ? (
-                <button
-                  type="button"
-                  className="platform-dialog__btn"
-                  style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", display: "inline-flex", alignItems: "center", gap: 6 }}
-                  onClick={clearTableFilters}
+          <div className="billing-ds">
+            <div className="billing-ds-section-card">
+              <div className="billing-ds-filters">
+                <input
+                  className="billing-ds-input"
+                  placeholder="Search ID, account, PM, invoice, FY, PRJ…"
+                  value={tableSearch}
+                  onChange={(e) => setTableSearch(e.target.value)}
+                />
+                <select className="billing-ds-select" style={{ minWidth: 140 }} value={tableFy} onChange={(e) => setTableFy(e.target.value)}>
+                  <option value="all">All years</option>
+                  {hasEmptyFy ? (
+                    <option value={FY_NONE}>No FY set</option>
+                  ) : null}
+                  {distinctFiscalYears.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+                <select className="billing-ds-select" style={{ minWidth: 160 }} value={tablePm} onChange={(e) => setTablePm(e.target.value)}>
+                  <option value="all">All PMs</option>
+                  {hasEmptyPm ? (
+                    <option value={PM_NONE}>No PM set</option>
+                  ) : null}
+                  {distinctPMs.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="billing-ds-select"
+                  style={{ minWidth: 130 }}
+                  value={tableInvoice}
+                  onChange={(e) => setTableInvoice(e.target.value as "all" | "has" | "none")}
                 >
-                  <FilterX className="h-3 w-3" />
-                  Clear filters
-                </button>
-              ) : null}
-            </div>
+                  <option value="all">All invoices</option>
+                  <option value="has">Has invoice #</option>
+                  <option value="none">No invoice</option>
+                </select>
+                <span className="billing-ds-meta">
+                  {tableFiltersActive ? `${filteredRows.length} of ${rows.length} shown` : `${rows.length} loaded`}
+                  {total > rows.length ? ` · ${total} total` : ""}
+                </span>
+                {tableFiltersActive ? (
+                  <button type="button" className="billing-ds-filter-btn" onClick={clearTableFilters}>
+                    <FilterX className="h-3 w-3" />
+                    Clear filters
+                  </button>
+                ) : null}
+              </div>
 
-            {filteredRows.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-8 text-center">
-                No rows match these filters.{" "}
-                <button
-                  type="button"
-                  className="text-primary underline-offset-2 hover:underline font-mono text-xs bg-transparent border-0 cursor-pointer p-0"
-                  onClick={clearTableFilters}
-                >
-                  Clear filters
-                </button>
-              </div>
-            ) : (
-              <div className="platform-table-wrap" style={{ overflowX: "auto" }}>
-                <table className="platform-table" style={{ minWidth: 980 }}>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Project</th>
-                      <th>Update</th>
-                      <th>FY</th>
-                      <th>PM</th>
-                      <th style={{ textAlign: "right" }}>Net rev</th>
-                      <th style={{ textAlign: "right" }}>MMF</th>
-                      <th>Invoice</th>
-                      <th>Workflow</th>
-                      <th style={{ textAlign: "right" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRows.map((r) => (
-                      <tr key={r.id} className="hover:bg-muted/20">
-                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>{r.id}</td>
-                        <td style={{ maxWidth: 200 }}>
-                          <div style={{ fontWeight: 600, fontSize: 11 }}>{r.account_name || "—"}</div>
-                          <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
-                            PRJ-{r.project_id}
-                          </div>
-                        </td>
-                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{r.update_date?.slice(0, 10) || "—"}</td>
-                        <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.fiscal_year_label || "—"}</td>
-                        <td
-                          style={{
-                            fontSize: 10,
-                            color: "var(--text-muted)",
-                            maxWidth: 120,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                          title={r.project_manager || ""}
-                        >
-                          {r.project_manager || "—"}
-                        </td>
-                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, textAlign: "right" }}>
-                          {r.net_revenue_inr != null ? formatLargeCurrency(r.net_revenue_inr) : "—"}
-                        </td>
-                        <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, textAlign: "right" }}>
-                          {r.mmf_inr != null ? formatLargeCurrency(r.mmf_inr) : "—"}
-                        </td>
-                        <td
-                          style={{
-                            fontFamily: "'DM Mono',monospace",
-                            fontSize: 10,
-                            maxWidth: 120,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            color: r.invoice_number ? "var(--accent)" : "var(--text-muted)",
-                          }}
-                          title={r.invoice_number || ""}
-                        >
-                          {r.invoice_number || "—"}
-                        </td>
-                        <td>
-                          <BillingWorkflowCell row={r} />
-                        </td>
-                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                          {canSubmitBilling(r) && canPracticeSubmitBilling(user) ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-[10px] mr-1"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleSubmitForFinance(r);
-                              }}
-                              title="Submit to finance for validation"
-                            >
-                              Submit
-                            </Button>
-                          ) : null}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2"
-                            disabled={billingRowLocked(r)}
-                            onClick={() => openEdit(r)}
-                            title={billingRowLocked(r) ? "Locked under finance workflow" : "Edit"}
-                          >
-                            <PencilLine className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-destructive hover:text-destructive"
-                            disabled={billingRowLocked(r)}
-                            onClick={() => void handleDelete(r.id)}
-                            title={billingRowLocked(r) ? "Locked" : "Delete"}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </td>
+              {filteredRows.length === 0 ? (
+                <div className="billing-ds-empty-msg">
+                  No rows match these filters.{" "}
+                  <button type="button" className="billing-ds-link-btn" onClick={clearTableFilters}>
+                    Clear filters
+                  </button>
+                </div>
+              ) : (
+                <div className="billing-ds-table-scroll">
+                  <table className="billing-ds-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Project</th>
+                        <th>Update</th>
+                        <th>FY</th>
+                        <th>PM</th>
+                        <th className="billing-ds-th-end">Net rev</th>
+                        <th className="billing-ds-th-end">MMF</th>
+                        <th>Invoice</th>
+                        <th>Workflow</th>
+                        <th className="billing-ds-th-end">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
+                    </thead>
+                    <tbody>
+                      {filteredRows.map((r) => (
+                        <tr key={r.id}>
+                          <td className="billing-ds-id">{r.id}</td>
+                          <td style={{ maxWidth: 220 }}>
+                            <div className="billing-ds-project-name">{r.account_name || "—"}</div>
+                            <div className="billing-ds-project-sub">PRJ-{r.project_id}</div>
+                          </td>
+                          <td className="billing-ds-mono" style={{ fontSize: 12 }}>
+                            {r.update_date?.slice(0, 10) || "—"}
+                          </td>
+                          <td className="billing-ds-fy">{r.fiscal_year_label || "—"}</td>
+                          <td className="billing-ds-pm" title={r.project_manager || ""}>
+                            {r.project_manager || "—"}
+                          </td>
+                          <td className="billing-ds-td-end billing-ds-num">
+                            {r.net_revenue_inr != null ? formatLargeCurrency(r.net_revenue_inr) : "—"}
+                          </td>
+                          <td className="billing-ds-td-end billing-ds-num">
+                            {r.mmf_inr != null ? formatLargeCurrency(r.mmf_inr) : "—"}
+                          </td>
+                          <td
+                            className={cn("billing-ds-invoice", r.invoice_number?.trim() ? "billing-ds-invoice--set" : "billing-ds-invoice--empty")}
+                            title={r.invoice_number || ""}
+                          >
+                            {r.invoice_number || "—"}
+                          </td>
+                          <td>
+                            <BillingWorkflowCell row={r} />
+                          </td>
+                          <td className="billing-ds-actions">
+                            {canSubmitBilling(r) && canPracticeSubmitBilling(user) ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-[10px] mr-1"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleSubmitForFinance(r);
+                                }}
+                                title="Submit to finance for validation"
+                              >
+                                Submit
+                              </Button>
+                            ) : null}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2"
+                              disabled={billingRowLocked(r)}
+                              onClick={() => openEdit(r)}
+                              title={billingRowLocked(r) ? "Locked under finance workflow" : "Edit"}
+                            >
+                              <PencilLine className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-destructive hover:text-destructive"
+                              disabled={billingRowLocked(r)}
+                              onClick={() => void handleDelete(r.id)}
+                              title={billingRowLocked(r) ? "Locked" : "Delete"}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </PlatformSection>
 

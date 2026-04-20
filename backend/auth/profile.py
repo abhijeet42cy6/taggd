@@ -39,6 +39,7 @@ CANONICAL_ROLES = frozenset(
 # Documented vertical keys for `users.vertical_access_json` (JSON array of strings).
 VERTICAL_KEYS = frozenset(
     {
+        "executive_dashboard",
         "finance",
         "finance_validation",
         "sla",

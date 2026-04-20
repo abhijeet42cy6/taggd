@@ -200,6 +200,7 @@ export type ExecTableRow = {
 export function buildExecutiveSummary(
   finance: {
     revenue_budget_inr: number;
+    revenue_forecast_inr?: number;
     revenue_actual_inr: number;
     total_cm_inr: number;
     total_unbilled_inr: number;
@@ -209,12 +210,22 @@ export function buildExecutiveSummary(
     rev_attainment: number;
   } | null,
   priorFYRevenueActualCr: number,
+  priorFinance?: {
+    revenue_actual_inr: number;
+    total_cm_inr: number;
+    total_unbilled_inr: number;
+    total_bad_debt_inr: number;
+    total_collected_inr: number;
+    total_collection_target_inr: number;
+  } | null,
 ): ExecTableRow[] {
   if (!finance) return [];
   const revB = finance.revenue_budget_inr / 1e7;
   const revA = finance.revenue_actual_inr / 1e7;
-  const revF = revB;
+  const revFLedger = (finance.revenue_forecast_inr ?? 0) / 1e7;
+  const revF = revFLedger > 0 ? revFLedger : revB;
   const vb = revB > 0 ? ((revA / revB) - 1) * 100 : 0;
+  const vf = revF > 0 ? ((revA / revF) - 1) * 100 : 0;
   const cmB = revB * 0.35;
   const cmA = finance.total_cm_inr / 1e7;
   const cmPctA = revA > 0 ? (cmA / revA) * 100 : 0;
@@ -224,6 +235,20 @@ export function buildExecutiveSummary(
   const unb = finance.total_unbilled_inr / 1e7;
   const bd = finance.total_bad_debt_inr / 1e7;
   const yoyRev = priorFYRevenueActualCr > 0 ? ((revA - priorFYRevenueActualCr) / priorFYRevenueActualCr) * 100 : 0;
+
+  const pRevA = priorFinance ? priorFinance.revenue_actual_inr / 1e7 : 0;
+  const pCmPct =
+    priorFinance && priorFinance.revenue_actual_inr > 0
+      ? (priorFinance.total_cm_inr / priorFinance.revenue_actual_inr) * 100
+      : 0;
+  const pCollA = priorFinance ? priorFinance.total_collected_inr / 1e7 : 0;
+  const pUnb = priorFinance ? priorFinance.total_unbilled_inr / 1e7 : 0;
+  const pBd = priorFinance ? priorFinance.total_bad_debt_inr / 1e7 : 0;
+  const cmPpDelta = priorFinance && priorFinance.revenue_actual_inr > 0 ? cmPctA - pCmPct : 0;
+  const yoyColl =
+    pCollA > 0 ? ((collA - pCollA) / pCollA) * 100 : collA > 0 && pCollA === 0 ? 100 : 0;
+  const yoyUnb = pUnb > 0 ? ((unb - pUnb) / pUnb) * 100 : unb > 0 && pUnb === 0 ? 100 : 0;
+  const yoyBd = pBd > 0 ? ((bd - pBd) / pBd) * 100 : bd > 0 && pBd === 0 ? 100 : 0;
 
   const fmt = (n: number) => `₹${n.toFixed(2)} Cr`;
   const fmtPct = (n: number) => `${n >= 0 ? "" : ""}${n.toFixed(1)}%`;
@@ -235,7 +260,7 @@ export function buildExecutiveSummary(
       forecast: fmt(revF),
       actual: fmt(revA),
       varBudget: fmtPct(vb),
-      varForecast: "—",
+      varForecast: revF > 0 ? fmtPct(vf) : "—",
       priorActual: fmt(priorFYRevenueActualCr),
       yoy: fmtPct(yoyRev),
     },
@@ -246,8 +271,11 @@ export function buildExecutiveSummary(
       actual: `${cmPctA.toFixed(2)}%`,
       varBudget: fmtPct(cmPctA - cmPctB),
       varForecast: "—",
-      priorActual: "—",
-      yoy: "—",
+      priorActual: priorFinance && priorFinance.revenue_actual_inr > 0 ? `${pCmPct.toFixed(2)}%` : "—",
+      yoy:
+        priorFinance && priorFinance.revenue_actual_inr > 0
+          ? `${cmPpDelta >= 0 ? "+" : ""}${cmPpDelta.toFixed(1)} pp`
+          : "—",
     },
     {
       metric: "Collection",
@@ -256,8 +284,8 @@ export function buildExecutiveSummary(
       actual: fmt(collA),
       varBudget: collT > 0 ? fmtPct(((collA / collT) - 1) * 100) : "—",
       varForecast: "—",
-      priorActual: "—",
-      yoy: "—",
+      priorActual: priorFinance ? fmt(pCollA) : "—",
+      yoy: priorFinance ? fmtPct(yoyColl) : "—",
     },
     {
       metric: "Unbilled",
@@ -266,8 +294,8 @@ export function buildExecutiveSummary(
       actual: fmt(unb),
       varBudget: revA > 0 ? fmtPct((unb / revA) * 100) + " of Rev" : "—",
       varForecast: "—",
-      priorActual: "—",
-      yoy: "—",
+      priorActual: priorFinance ? fmt(pUnb) : "—",
+      yoy: priorFinance ? fmtPct(yoyUnb) : "—",
     },
     {
       metric: "Bad debt",
@@ -276,8 +304,8 @@ export function buildExecutiveSummary(
       actual: fmt(bd),
       varBudget: collA > 0 ? fmtPct((bd / collA) * 100) + " of Coll." : "—",
       varForecast: "—",
-      priorActual: "—",
-      yoy: "—",
+      priorActual: priorFinance ? fmt(pBd) : "—",
+      yoy: priorFinance ? fmtPct(yoyBd) : "—",
     },
   ];
 }
@@ -290,6 +318,7 @@ export function sumPriorFYActual(yoy: YoYRevPoint[]): number {
 /** Sum ledger rows (same units as API: INR). */
 export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
   revenue_budget_inr: number;
+  revenue_forecast_inr: number;
   revenue_actual_inr: number;
   total_cm_inr: number;
   total_unbilled_inr: number;
@@ -302,6 +331,7 @@ export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
 } | null {
   if (!rows.length) return null;
   let revB = 0;
+  let revF = 0;
   let revA = 0;
   let cm = 0;
   let unb = 0;
@@ -310,6 +340,7 @@ export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
   let ct = 0;
   for (const r of rows) {
     revB += r.rev_budget_inr;
+    revF += r.rev_forecast_inr;
     revA += r.rev_actual_inr;
     cm += r.cm_actual_inr;
     unb += r.unbilled_inr;
@@ -322,6 +353,7 @@ export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
   const collection_pending_inr = ct - coll;
   return {
     revenue_budget_inr: revB,
+    revenue_forecast_inr: revF,
     revenue_actual_inr: revA,
     total_cm_inr: cm,
     total_unbilled_inr: unb,
@@ -332,4 +364,30 @@ export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
     rev_attainment,
     collection_efficiency,
   };
+}
+
+/** Q1–Q4 plan (budget) vs actual for one Indian FY start year (e.g. 2025 = FY2025-26). */
+export function quarterlyPlanActualForFy(
+  rows: FinanceRowVm[],
+  fyStart: number,
+): { q: string; planInr: number; actualInr: number }[] {
+  const buckets = [
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+  ];
+  for (const r of rows) {
+    const d = parseMonthSort(r.month_sort);
+    if (!d || fiscalYearStart(d) !== fyStart) continue;
+    const mi = monthIndexInFY(d);
+    const qi = mi <= 2 ? 0 : mi <= 5 ? 1 : mi <= 8 ? 2 : 3;
+    buckets[qi].plan += r.rev_budget_inr;
+    buckets[qi].actual += r.rev_actual_inr;
+  }
+  return buckets.map((b, i) => ({
+    q: `Q${i + 1}`,
+    planInr: b.plan,
+    actualInr: b.actual,
+  }));
 }

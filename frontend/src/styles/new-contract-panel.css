@@ -182,6 +182,11 @@
   color: #fff;
 }
 
+.new-contract-sheet .ncp-step:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
 .new-contract-sheet .ncp-panel {
   display: none;
   animation: ncp-fadeIn 0.25s ease both;
@@ -284,7 +289,7 @@
 
 .new-contract-sheet .ncp-prop-row {
   display: grid;
-  grid-template-columns: minmax(120px, 160px) 1fr;
+  grid-template-columns: minmax(120px, min(38%, 200px)) 1fr;
   align-items: center;
   min-height: 36px;
   border-radius: var(--ncp-radius);
@@ -302,8 +307,10 @@
   color: var(--ncp-text-secondary);
   padding: 6px 8px;
   border-radius: var(--ncp-radius);
-  white-space: nowrap;
-  flex-shrink: 0;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 .new-contract-sheet .ncp-prop-row:hover .ncp-prop-label {
   background: var(--ncp-surface-hover);
@@ -325,6 +332,28 @@
   background: var(--ncp-surface-hover);
 }
 .new-contract-sheet .ncp-prop-input:focus {
+  background: var(--ncp-accent-soft);
+}
+/* Standalone count fields (e.g. WFM WL grid): bordered so they read as inputs, not labels. */
+.new-contract-sheet .ncp-wl-count-field {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--ncp-mono, ui-monospace, monospace);
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ncp-text-primary);
+  background: var(--ncp-surface);
+  border: 1px solid var(--ncp-border);
+  border-radius: var(--ncp-radius);
+  outline: none;
+}
+.new-contract-sheet .ncp-wl-count-field:hover {
+  border-color: var(--ncp-border-focus);
+}
+.new-contract-sheet .ncp-wl-count-field:focus {
+  border-color: var(--ncp-border-focus);
   background: var(--ncp-accent-soft);
 }
 .new-contract-sheet .ncp-prop-input::placeholder {
@@ -417,7 +446,8 @@
   font-family: var(--ncp-mono);
   margin-bottom: 4px;
 }
-.new-contract-sheet .ncp-date-cell input[type="date"] {
+.new-contract-sheet .ncp-date-cell input[type="date"],
+.new-contract-sheet .ncp-date-cell input[type="datetime-local"] {
   display: block;
   width: 100%;
   border: none;

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   invalidateCache,
   queries,
@@ -10,7 +11,7 @@ import {
 } from "@/lib/api";
 import { canPracticeSubmitBilling, isProjectHeadLike, useAuth } from "@/lib/auth";
 import { formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
-import { PageHeader, PlatformSection, Tabs } from "@/components/platform/PlatformBlocks";
+import { ExecutiveKpiCard } from "@/components/platform/ExecutiveKpiCard";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +19,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import "@/styles/new-contract-panel.css";
 import { cn } from "@/lib/utils";
 import {
   ResponsiveContainer,
@@ -32,7 +35,8 @@ import {
   Legend,
   BarChart,
 } from "recharts";
-import { RefreshCw, Plus, PencilLine } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, RefreshCw, Plus, PencilLine } from "lucide-react";
+import { WeeklyPackNcpSheet } from "@/components/platform/WeeklyPackNcpSheet";
 
 const LAKHS = 100_000;
 
@@ -59,6 +63,78 @@ function mondayYmd(): string {
   const m = String(mon.getMonth() + 1).padStart(2, "0");
   const dd = String(mon.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
+}
+
+function parseYmd(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function addDaysYmd(ymd: string, days: number): string {
+  const dt = parseYmd(ymd);
+  dt.setDate(dt.getDate() + days);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function mondayOfYmd(ymd: string): string {
+  const dt = parseYmd(ymd);
+  const day = dt.getDay();
+  const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
+  dt.setDate(diff);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function shiftWeekMonday(mondayYmdVal: string, deltaWeeks: number): string {
+  return mondayOfYmd(addDaysYmd(mondayYmdVal, deltaWeeks * 7));
+}
+
+function formatWeekRangeLabel(mondayYmdVal: string): string {
+  const start = parseYmd(mondayYmdVal);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const opt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
+  return `${start.toLocaleDateString("en-IN", opt)} – ${end.toLocaleDateString("en-IN", opt)}`;
+}
+
+function projectDisplayNameFromProject(p: Project): string {
+  return (
+    (p.engagement_name && String(p.engagement_name).trim()) ||
+    (p.account_name && String(p.account_name).trim()) ||
+    p.filename ||
+    `PRJ-${p.id}`
+  );
+}
+
+function projInitials(label: string): string {
+  const t = label.replace(/[^a-zA-Z0-9\s]/g, " ").trim();
+  const parts = t.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2);
+  return t.slice(0, 2).toUpperCase() || "PR";
+}
+
+function monthAnchorOptions(): string[] {
+  const out: string[] = [];
+  const start = new Date();
+  start.setMonth(start.getMonth() - 30);
+  for (let i = 0; i < 72; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    out.push(`${y}-${m}-01`);
+  }
+  return out;
+}
+
+function monthAnchorLabel(ymd: string): string {
+  const [y, m] = ymd.split("-").map(Number);
+  if (!y || !m) return ymd;
+  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 }
 
 function formatMonthLabel(ym: string): string {
@@ -114,83 +190,6 @@ type KpiProps = {
   sub?: string;
   accent?: "default" | "amber" | "teal";
 };
-
-function MyWeeklyPacksPanel({
-  loading,
-  rows,
-  onRefresh,
-  onOpenRow,
-}: {
-  loading: boolean;
-  rows: RevenueWeeklySubmissionDto[];
-  onRefresh: () => void;
-  onOpenRow: (projectId: number, weekStart: string) => void;
-}) {
-  return (
-    <PlatformSection
-      title="My weekly packs"
-      headerRight={
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="font-mono text-[11px]"
-          onClick={onRefresh}
-          disabled={loading}
-        >
-          <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
-          Refresh
-        </Button>
-      }
-    >
-      <p className="text-[11px] text-muted-foreground font-mono mb-3 max-w-2xl leading-relaxed">
-        Draft and submitted packs for your assigned projects. Open a row to return to the workspace with that account and
-        governance week pre-selected.
-      </p>
-      <div className="platform-table-wrap">
-        <table className="platform-table">
-          <thead>
-            <tr>
-              <th>Account</th>
-              <th>Week (Mon)</th>
-              <th>Status</th>
-              <th>Updated</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>{r.account_name || `Project ${r.project_id}`}</td>
-                <td>{r.week_start_date ?? "—"}</td>
-                <td>{r.status}</td>
-                <td className="text-[10px] font-mono">{r.updated_at ?? "—"}</td>
-                <td>
-                  {r.week_start_date ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      className="font-mono text-[10px] h-7"
-                      onClick={() => onOpenRow(r.project_id, r.week_start_date!)}
-                    >
-                      Open in workspace
-                    </Button>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!rows.length && !loading ? (
-          <div className="p-4 text-muted-foreground text-xs font-mono">
-            No packs yet. In Workspace, pick a project and governance week, then save a weekly forecast to create a draft pack.
-          </div>
-        ) : null}
-      </div>
-    </PlatformSection>
-  );
-}
 
 function KpiTile({ icon, label, value, sub, accent = "default" }: KpiProps) {
   return (
@@ -248,7 +247,7 @@ export function RevenueTrackers() {
   const [editForecastRow, setEditForecastRow] = useState<RevenueForecastWeeklyRow | null>(null);
   const [editVisibilityRow, setEditVisibilityRow] = useState<RevenueVisibilitySnapshotRow | null>(null);
 
-  const [mainTab, setMainTab] = useState<"Revenue visibility" | "Revenue forecast">("Revenue visibility");
+  const [mainTab, setMainTab] = useState<"Revenue visibility" | "Revenue forecast" | "My weekly packs">("Revenue visibility");
   const [governanceWeek, setGovernanceWeek] = useState(() => mondayYmd());
   const [weeklyPack, setWeeklyPack] = useState<RevenueWeeklyPackResponse | null>(null);
 
@@ -256,10 +255,19 @@ export function RevenueTrackers() {
   const governancePid = pid ?? projects[0]?.id;
 
   const ph = isProjectHeadLike(user);
-  const [revenuePageTab, setRevenuePageTab] = useState<"workspace" | "my_packs">("workspace");
   const [minePacks, setMinePacks] = useState<RevenueWeeklySubmissionDto[]>([]);
   const [minePacksLoading, setMinePacksLoading] = useState(false);
   const [forecastWizard, setForecastWizard] = useState<{ projectId: number; week: string } | null>(null);
+  const [weeklyPackSheetOpen, setWeeklyPackSheetOpen] = useState(false);
+
+  const [scopeProjDdOpen, setScopeProjDdOpen] = useState(false);
+  const [scopeProjSearch, setScopeProjSearch] = useState("");
+  const [scopeProjDdRect, setScopeProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const scopeProjWrapRef = useRef<HTMLDivElement>(null);
+  const scopeProjBtnRef = useRef<HTMLButtonElement>(null);
+  const scopeProjPortalRef = useRef<HTMLDivElement>(null);
+
+  const governanceWeekMon = mondayOfYmd(governanceWeek);
 
   const reload = useCallback(async () => {
     setErr(null);
@@ -273,7 +281,7 @@ export function RevenueTrackers() {
       setVisibility(v.items ?? []);
       if (governancePid) {
         try {
-          setWeeklyPack(await queries.revenueWeeklyPack(governancePid, governanceWeek));
+          setWeeklyPack(await queries.revenueWeeklyPack(governancePid, governanceWeekMon));
         } catch {
           setWeeklyPack(null);
         }
@@ -284,7 +292,7 @@ export function RevenueTrackers() {
     } catch (e: unknown) {
       setErr(String(e instanceof Error ? e.message : e));
     }
-  }, [pid, governancePid, governanceWeek]);
+  }, [pid, governancePid, governanceWeekMon]);
 
   useEffect(() => {
     void queries.projects().then(setProjects).catch(() => setProjects([]));
@@ -311,8 +319,59 @@ export function RevenueTrackers() {
   }, []);
 
   useEffect(() => {
-    if (ph && revenuePageTab === "my_packs") void loadMinePacks();
-  }, [ph, revenuePageTab, loadMinePacks]);
+    if (ph && mainTab === "My weekly packs") void loadMinePacks();
+  }, [ph, mainTab, loadMinePacks]);
+
+  useEffect(() => {
+    if (!ph && mainTab === "My weekly packs") setMainTab("Revenue visibility");
+  }, [ph, mainTab]);
+
+  const scopeSelectedProject = useMemo(
+    () => (projectFilter ? projects.find((p) => String(p.id) === projectFilter) ?? null : null),
+    [projects, projectFilter],
+  );
+
+  const scopeFilteredProjects = useMemo(() => {
+    const q = scopeProjSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = projectDisplayNameFromProject(p).toLowerCase();
+      return lab.includes(q) || String(p.id).includes(q);
+    });
+  }, [projects, scopeProjSearch]);
+
+  useLayoutEffect(() => {
+    if (!scopeProjDdOpen) {
+      setScopeProjDdRect(null);
+      return;
+    }
+    const measure = () => {
+      const btn = scopeProjBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setScopeProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (scopeProjBtnRef.current) ro.observe(scopeProjBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [scopeProjDdOpen]);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (scopeProjWrapRef.current?.contains(t) || scopeProjPortalRef.current?.contains(t)) return;
+      setScopeProjDdOpen(false);
+    }
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
 
   const asOfDates = useMemo(() => {
     const s = new Set<string>();
@@ -493,401 +552,467 @@ export function RevenueTrackers() {
   };
 
   return (
-    <div style={{ display: "grid", gap: 24, paddingBottom: 48 }}>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 16,
-        }}
-      >
-        <PageHeader
-          title="Revenue trackers"
-          subtitle={
-            ph
-              ? "Workspace: pick project + governance week, then forecast and visibility feed one weekly pack. My weekly packs lists every pack in your scope."
-              : "Use the tabs below to switch between pipeline visibility and TAGGD forecast — dashboards, tables, and add/update in each area"
-          }
-        />
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          {lastRefresh ? (
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-              Last refresh {lastRefresh.toLocaleTimeString()}
-            </span>
-          ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="font-mono text-[11px]"
-            onClick={() => void reload()}
-            disabled={loading}
+    <div style={{ display: "grid", gap: 0, paddingBottom: 48 }}>
+      {/* ── Page header ── */}
+      <div className="rt-page-header-row">
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.4px", color: "var(--text)", lineHeight: 1.2 }}>
+            Revenue trackers
+          </div>
+          <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+            {lastRefresh ? (
+              <span style={{ fontSize: 11, color: "var(--text-subtle)", fontFamily: "var(--mono)" }}>
+                Last refresh {lastRefresh.toLocaleTimeString()}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="font-mono text-[11px]"
+          onClick={() => void reload()}
+          disabled={loading}
+        >
+          <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* ── Filter bar: scope (week + project) + PH pack rail + as-of ── */}
+      <div className="rt-filter-bar rt-filter-bar--scope">
+        <div className="rt-filter-bar__top">
+        <div className="new-contract-sheet rt-scope-ncp-host">
+          <div
+            className="ncp-section"
+            style={{
+              marginBottom: 0,
+              border: "1px solid color-mix(in srgb, var(--ncp-accent, #e16f3d) 18%, transparent)",
+              borderRadius: "var(--ncp-radius-lg, 10px)",
+            }}
           >
-            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
-            Refresh
-          </Button>
-        </div>
-      </div>
-
-      {ph ? (
-        <div style={{ marginBottom: 4 }}>
-          <Tabs
-            tabs={["Workspace", "My weekly packs"]}
-            active={revenuePageTab === "workspace" ? "Workspace" : "My weekly packs"}
-            onChange={(t) => setRevenuePageTab(t === "Workspace" ? "workspace" : "my_packs")}
-          />
-        </div>
-      ) : null}
-
-      {ph && revenuePageTab === "my_packs" ? (
-        <MyWeeklyPacksPanel
-          loading={minePacksLoading}
-          rows={minePacks}
-          onRefresh={() => void loadMinePacks()}
-          onOpenRow={(projectId, week) => {
-            setProjectFilter(String(projectId));
-            setGovernanceWeek(week);
-            setRevenuePageTab("workspace");
-            setMainTab("Revenue forecast");
-          }}
-        />
-      ) : (
-        <>
-      <div style={{ marginBottom: 4 }}>
-        <Tabs
-          tabs={["Revenue visibility", "Revenue forecast"]}
-          active={mainTab}
-          onChange={(t) => setMainTab(t as "Revenue visibility" | "Revenue forecast")}
-        />
-      </div>
-
-      {governancePid ? (
-        ph ? (
-          <PlatformSection title="Weekly pack — where your numbers go">
-            <p className="text-[11px] text-muted-foreground font-mono mb-3 max-w-3xl leading-relaxed">
-              Everything below saves against <strong className="text-foreground">one governance week</strong> for the{" "}
-              <strong className="text-foreground">project in Scope</strong>. Saving the weekly forecast creates or updates the
-              draft pack; linking visibility to the same week attaches the second half. When you submit, finance sees the
-              combined pack for that week.
-            </p>
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-start">
-              <div className="flex flex-wrap gap-3 items-end text-[11px] font-mono">
-                <label className="flex flex-col gap-1 text-muted-foreground">
-                  Governance week (Mon)
-                  <input
-                    className="platform-search h-9 text-xs min-w-[140px]"
-                    value={governanceWeek}
-                    onChange={(e) => setGovernanceWeek(e.target.value)}
-                  />
-                </label>
-                <div className="rounded-md border border-border/60 bg-muted/15 px-3 py-2 min-w-[200px]">
-                  <div className="text-[10px] uppercase text-muted-foreground">Pack status</div>
-                  <div className="text-sm mt-1">
-                    {weeklyPack?.submission?.status ? (
-                      <span className="text-primary">{weeklyPack.submission.status}</span>
-                    ) : (
-                      <span className="text-muted-foreground">No draft yet — add forecast for this week</span>
-                    )}
-                  </div>
-                  {weeklyPack?.submission?.approved_by?.email ? (
-                    <div className="text-[10px] text-muted-foreground mt-1">
-                      Approved by {weeklyPack.submission.approved_by.email}{" "}
-                      {weeklyPack.submission.approved_at ? `· ${weeklyPack.submission.approved_at}` : ""}
-                    </div>
-                  ) : null}
-                  {weeklyPack?.submission?.submitted_by?.email && weeklyPack.submission.status !== "draft" ? (
-                    <div className="text-[10px] text-muted-foreground mt-1">
-                      Submitted by {weeklyPack.submission.submitted_by.email}
-                    </div>
-                  ) : null}
-                  {weeklyPack?.submission?.review_notes ? (
-                    <div className="text-[10px] text-amber-600 mt-2 max-w-md">{weeklyPack.submission.review_notes}</div>
-                  ) : null}
-                </div>
-                <div className="flex flex-col gap-1 text-muted-foreground text-[10px]">
-                  <span>Forecast in pack: {weeklyPack?.forecast ? "✓" : "—"}</span>
-                  <span>Visibility in pack: {weeklyPack?.visibility ? "✓" : "—"}</span>
-                </div>
+            <div className="ncp-section-body" style={{ maxHeight: "none", paddingTop: 12 }}>
+              <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                Governance week (Monday). Use arrows to move week by week.
               </div>
-              <div className="flex flex-col gap-2 min-w-[200px]">
-                <div className="text-[10px] uppercase text-muted-foreground font-mono">Next steps</div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="font-mono text-[11px] justify-start h-8"
-                  disabled={!governancePid}
-                  onClick={() => {
-                    if (!governancePid) return;
-                    setEditForecastRow(null);
-                    setForecastWizard({ projectId: governancePid, week: governanceWeek });
-                    setForecastModalOpen(true);
-                  }}
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() => setGovernanceWeek(shiftWeekMonday(governanceWeekMon, -1))}
+                  aria-label="Previous week"
                 >
-                  <PencilLine className="mr-1.5 h-3.5 w-3.5 shrink-0" />
-                  1 · Forecast for this week
+                  <ChevronLeft className="h-4 w-4" />
                 </Button>
+                <div className="flex flex-col gap-1 min-w-[200px] flex-1">
+                  <span className="text-[10px] uppercase text-muted-foreground font-mono">Week of (Mon)</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <input
+                      type="date"
+                      className="ncp-prop-input rounded-md border border-border bg-background px-2 py-1.5 text-sm font-mono flex-1 min-w-0"
+                      value={governanceWeekMon}
+                      onChange={(e) => setGovernanceWeek(mondayOfYmd(e.target.value || governanceWeekMon))}
+                    />
+                    <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  </div>
+                  <span className="text-xs font-semibold text-foreground">{formatWeekRangeLabel(governanceWeekMon)}</span>
+                </div>
                 <Button
                   type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="font-mono text-[11px] justify-start h-8"
-                  disabled={!governancePid}
-                  onClick={() => {
-                    setEditVisibilityRow(null);
-                    setMainTab("Revenue visibility");
-                    setVisibilityModalOpen(true);
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() => setGovernanceWeek(shiftWeekMonday(governanceWeekMon, 1))}
+                  aria-label="Next week"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div
+                className="ncp-project-wrap mt-4"
+                ref={scopeProjWrapRef}
+                style={{ borderTop: "1px solid var(--ncp-border, #e8e6e1)", paddingTop: 12 }}
+              >
+                <button
+                  ref={scopeProjBtnRef}
+                  type="button"
+                  className={cn("ncp-project-btn", (scopeSelectedProject || !projectFilter) && "ncp-selected")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setScopeProjDdOpen((o) => !o);
                   }}
                 >
-                  <PencilLine className="mr-1.5 h-3.5 w-3.5 shrink-0" />
-                  2 · Visibility (same week)
-                </Button>
-                {weeklyPack?.submission &&
-                ["draft", "changes_requested", "rejected"].includes(String(weeklyPack.submission.status)) &&
-                canPracticeSubmitBilling(user) ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="text-xs font-mono h-8"
-                    onClick={async () => {
-                      try {
-                        await queries.revenueWeeklySubmissionSubmit(weeklyPack.submission!.id);
-                        await reload();
-                        void loadMinePacks();
-                      } catch (e: unknown) {
-                        window.alert(e instanceof Error ? e.message : String(e));
-                      }
-                    }}
-                  >
-                    3 · Submit pack to finance
-                  </Button>
-                ) : null}
+                  {scopeSelectedProject ? (
+                    <>
+                      <span className="ncp-project-icon">{projInitials(projectDisplayNameFromProject(scopeSelectedProject))}</span>
+                      <div className="ncp-project-meta">
+                        <strong>{projectDisplayNameFromProject(scopeSelectedProject)}</strong>
+                        <span>PRJ-{scopeSelectedProject.id}</span>
+                      </div>
+                      <span style={{ color: "var(--ncp-accent)" }}>▾</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="ncp-project-icon" style={{ fontSize: 11, fontWeight: 700 }}>
+                        ∑
+                      </span>
+                      <div className="ncp-project-meta">
+                        <strong>All assigned projects</strong>
+                        <span>Aggregate scope</span>
+                      </div>
+                      <span style={{ color: "var(--ncp-accent)" }}>▾</span>
+                    </>
+                  )}
+                </button>
+                {scopeProjDdOpen && scopeProjDdRect
+                  ? createPortal(
+                      <div
+                        ref={scopeProjPortalRef}
+                        className="new-contract-sheet"
+                        style={{
+                          position: "fixed",
+                          top: scopeProjDdRect.top,
+                          left: scopeProjDdRect.left,
+                          width: scopeProjDdRect.width,
+                          zIndex: 200,
+                          pointerEvents: "auto",
+                          minHeight: 0,
+                          height: "auto",
+                          display: "block",
+                          background: "transparent",
+                        }}
+                      >
+                        <div className="ncp-project-dd ncp-open ncp-project-dd--portal" onClick={(e) => e.stopPropagation()}>
+                          <div className="ncp-project-search">
+                            <span style={{ opacity: 0.5 }}>🔍</span>
+                            <input
+                              type="search"
+                              placeholder="Search projects…"
+                              value={scopeProjSearch}
+                              onChange={(e) => setScopeProjSearch(e.target.value)}
+                              autoFocus
+                            />
+                          </div>
+                          <div
+                            className="ncp-dd-scroll"
+                            style={{ maxHeight: 280 }}
+                            onWheel={(e) => e.stopPropagation()}
+                            onTouchMove={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className="ncp-project-opt"
+                              onClick={() => {
+                                setProjectFilter("");
+                                setScopeProjDdOpen(false);
+                                setScopeProjSearch("");
+                              }}
+                            >
+                              <span className="ncp-proj-ico" style={{ fontSize: 11, fontWeight: 700 }}>
+                                ∑
+                              </span>
+                              <div>
+                                <div style={{ fontWeight: 500, color: "var(--ncp-text-primary)" }}>All assigned projects</div>
+                                <div style={{ fontSize: 11, color: "var(--ncp-text-muted)", fontFamily: "var(--ncp-mono)" }}>
+                                  Aggregate scope
+                                </div>
+                              </div>
+                            </button>
+                            {scopeFilteredProjects.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="ncp-project-opt"
+                                onClick={() => {
+                                  setProjectFilter(String(p.id));
+                                  setScopeProjDdOpen(false);
+                                  setScopeProjSearch("");
+                                }}
+                              >
+                                <span className="ncp-proj-ico">{projInitials(projectDisplayNameFromProject(p))}</span>
+                                <div>
+                                  <div style={{ fontWeight: 500, color: "var(--ncp-text-primary)" }}>{projectDisplayNameFromProject(p)}</div>
+                                  <div
+                                    style={{ fontSize: 11, color: "var(--ncp-text-muted)", fontFamily: "var(--ncp-mono)" }}
+                                  >
+                                    PRJ-{p.id}
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>,
+                      document.body,
+                    )
+                  : null}
               </div>
             </div>
-          </PlatformSection>
-        ) : (
-        <PlatformSection title="Weekly pack (forecast + visibility)">
-          <div className="flex flex-wrap gap-3 items-end text-[11px] font-mono">
-            <label className="flex flex-col gap-1 text-muted-foreground">
-              Governance week (Mon)
-              <input
-                className="platform-search h-9 text-xs min-w-[140px]"
-                value={governanceWeek}
-                onChange={(e) => setGovernanceWeek(e.target.value)}
-              />
-            </label>
-            <div className="rounded-md border border-border/60 bg-muted/15 px-3 py-2 min-w-[200px]">
-              <div className="text-[10px] uppercase text-muted-foreground">Pack status</div>
-              <div className="text-sm mt-1">
+          </div>
+        </div>
+
+        {ph && governancePid ? (
+          <div className="rt-command-inline">
+            <div className="rt-pack-status">
+              <div className="rt-pack-status__head">
+                <div
+                  className={cn(
+                    "rt-pack-status__dot",
+                    `rt-pack-status__dot--${weeklyPack?.submission?.status ?? "none"}`,
+                  )}
+                />
+                <span className="rt-pack-status__label">Pack status</span>
+              </div>
+              <div className="rt-pack-status__value">
                 {weeklyPack?.submission?.status ? (
-                  <span className="text-primary">{weeklyPack.submission.status}</span>
+                  <span style={{ textTransform: "capitalize" }}>{weeklyPack.submission.status.replace(/_/g, " ")}</span>
                 ) : (
-                  <span className="text-muted-foreground">No pack yet — save forecast for this week</span>
+                  <span style={{ color: "var(--text-subtle)", fontWeight: 400, fontSize: 12 }}>No draft yet</span>
                 )}
               </div>
-              {weeklyPack?.submission?.approved_by?.email ? (
-                <div className="text-[10px] text-muted-foreground mt-1">
-                  Approved by {weeklyPack.submission.approved_by.email}{" "}
-                  {weeklyPack.submission.approved_at ? `· ${weeklyPack.submission.approved_at}` : ""}
-                </div>
-              ) : null}
               {weeklyPack?.submission?.submitted_by?.email && weeklyPack.submission.status !== "draft" ? (
-                <div className="text-[10px] text-muted-foreground mt-1">
+                <div className="rt-pack-status__meta">
                   Submitted by {weeklyPack.submission.submitted_by.email}
                 </div>
               ) : null}
+              {weeklyPack?.submission?.approved_by?.email ? (
+                <div className="rt-pack-status__meta">
+                  Approved by {weeklyPack.submission.approved_by.email}
+                </div>
+              ) : null}
               {weeklyPack?.submission?.review_notes ? (
-                <div className="text-[10px] text-amber-600 mt-2 max-w-md">{weeklyPack.submission.review_notes}</div>
+                <div className="rt-pack-status__meta" style={{ color: "var(--amber)" }}>
+                  {weeklyPack.submission.review_notes}
+                </div>
               ) : null}
             </div>
-            <div className="flex flex-col gap-1 text-muted-foreground text-[10px]">
-              <span>Forecast row: {weeklyPack?.forecast ? "✓" : "—"}</span>
-              <span>Visibility linked: {weeklyPack?.visibility ? "✓" : "— (save visibility with week link)"}</span>
-            </div>
-            {weeklyPack?.submission &&
-            ["draft", "changes_requested", "rejected"].includes(String(weeklyPack.submission.status)) &&
-            canPracticeSubmitBilling(user) ? (
-              <Button
-                type="button"
-                size="sm"
-                className="text-xs font-mono h-9"
-                onClick={async () => {
-                  try {
-                    await queries.revenueWeeklySubmissionSubmit(weeklyPack.submission!.id);
-                    await reload();
-                  } catch (e: unknown) {
-                    window.alert(e instanceof Error ? e.message : String(e));
-                  }
-                }}
-              >
-                Submit pack for finance
-              </Button>
-            ) : null}
-          </div>
-          <p className="text-[10px] text-muted-foreground font-mono mt-2 max-w-3xl">
-            Saving a <strong>weekly forecast</strong> for this week creates or updates the draft pack. Save{" "}
-            <strong>revenue visibility</strong> with the same week in the form (&quot;Link to governance week&quot;) so
-            finance sees both. Approved packs lock edits until finance requests changes.
-          </p>
-        </PlatformSection>
-        )
-      ) : null}
 
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 12,
-          alignItems: "center",
-          padding: "12px 14px",
-          borderRadius: 10,
-          background: "color-mix(in srgb, var(--accent) 6%, transparent)",
-          border: "1px solid color-mix(in srgb, var(--accent) 14%, transparent)",
-        }}
-      >
-        <label style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", display: "flex", alignItems: "center", gap: 8 }}>
-          Scope
-          <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} style={toolbarSelect}>
-            <option value="">All assigned projects</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.account_name || p.filename || p.id}
-              </option>
-            ))}
-          </select>
-        </label>
-        {mainTab === "Revenue visibility" ? (
-          <label style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", display: "flex", alignItems: "center", gap: 8 }}>
-            Visibility as-of
-            <select value={effectiveAsOf} onChange={(e) => setAsOfFilter(e.target.value)} style={toolbarSelect}>
-              {asOfDates.length === 0 ? <option value="">No snapshots</option> : null}
-              {asOfDates.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-          </label>
+            <div className="rt-pack-completeness">
+              <div className={cn("rt-pack-completeness__row", weeklyPack?.forecast && "rt-pack-completeness__row--done")}>
+                <span>{weeklyPack?.forecast ? "✓" : "○"}</span>
+                <span>Forecast</span>
+              </div>
+              <div className={cn("rt-pack-completeness__row", weeklyPack?.visibility && "rt-pack-completeness__row--done")}>
+                <span>{weeklyPack?.visibility ? "✓" : "○"}</span>
+                <span>Visibility</span>
+              </div>
+            </div>
+
+            <div className="rt-cta-area">
+              {weeklyPack?.submission &&
+              ["draft", "changes_requested", "rejected"].includes(String(weeklyPack.submission.status)) &&
+              canPracticeSubmitBilling(user) ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="font-mono text-[11px]"
+                  onClick={async () => {
+                    try {
+                      await queries.revenueWeeklySubmissionSubmit(weeklyPack.submission!.id);
+                      await reload();
+                      void loadMinePacks();
+                    } catch (e: unknown) {
+                      window.alert(e instanceof Error ? e.message : String(e));
+                    }
+                  }}
+                >
+                  Submit to finance
+                </Button>
+              ) : null}
+              <button
+                type="button"
+                className="rt-cta-primary"
+                disabled={!governancePid}
+                onClick={() => setWeeklyPackSheetOpen(true)}
+              >
+                <span className="rt-cta-primary__icon" aria-hidden>
+                  <PencilLine strokeWidth={2} />
+                </span>
+                Open weekly pack
+              </button>
+            </div>
+          </div>
         ) : null}
-        {err ? <span style={{ color: "var(--red)", fontSize: 11 }}>{err}</span> : null}
+        </div>
+
+        <div className="rt-filter-bar__bottom">
+          {mainTab === "Revenue visibility" ? (
+            <div className="rt-filter-group rt-filter-group--asof">
+              <span className="rt-filter-label">Visibility as-of</span>
+              <select
+                className="rt-filter-select"
+                value={effectiveAsOf}
+                onChange={(e) => setAsOfFilter(e.target.value)}
+              >
+                {asOfDates.length === 0 ? <option value="">No snapshots yet</option> : null}
+                {asOfDates.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          {err ? <span style={{ fontSize: 11, color: "var(--red)", fontFamily: "var(--mono)" }}>{err}</span> : null}
+        </div>
       </div>
 
-      {/* —— Revenue visibility —— */}
+      {/* ── View tabs ── */}
+      <div className="rt-tabs-bar" role="tablist">
+        {(ph
+          ? (["Revenue visibility", "Revenue forecast", "My weekly packs"] as const)
+          : (["Revenue visibility", "Revenue forecast"] as const)
+        ).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={mainTab === t}
+            className={cn("rt-tab", mainTab === t && "rt-tab--active")}
+            onClick={() => setMainTab(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* ─────────── Revenue visibility ─────────── */}
       {mainTab === "Revenue visibility" ? (
-      <section>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Syne',sans-serif", letterSpacing: "-0.02em" }}>
-            Revenue visibility — summary dashboard
+        <section>
+          {/* KPIs */}
+          <div className="rt-kpi-grid">
+            <ExecutiveKpiCard
+              title="Total MMF"
+              accent="orange"
+              primary={formatLargeCurrency(visibilityTotals.mmf)}
+              sublines={[{ label: "In scope (₹)", value: visibilityTotals.mmf > 0 ? "—" : "No data" }]}
+            />
+            <ExecutiveKpiCard
+              title="Opening fee"
+              accent="teal"
+              primary={formatLargeCurrency(visibilityTotals.openFee)}
+              sublines={[{ label: "Open reqs", value: String(visibilityTotals.openReq) }]}
+            />
+            <ExecutiveKpiCard
+              title="Joining fee"
+              accent="green"
+              primary={formatLargeCurrency(visibilityTotals.joinFee)}
+              sublines={[{ label: "Joiners", value: String(visibilityTotals.joiners) }]}
+            />
+            <ExecutiveKpiCard
+              title="Yet to join"
+              accent="blue"
+              primary={String(visibilityTotals.ytj)}
+              sublines={[{ label: "YTJ fee (₹)", value: formatLargeCurrency(visibilityTotals.ytjFee) }]}
+            />
+            <ExecutiveKpiCard
+              title="Conversion %"
+              accent="amber"
+              primary={visibilityTotals.convPct != null ? formatPercent(visibilityTotals.convPct, 1) : "—"}
+              sublines={[
+                {
+                  label: "Rev realised",
+                  value: visibilityTotals.revPct != null ? formatPercent(visibilityTotals.revPct, 1) : "—",
+                },
+              ]}
+            />
+            <ExecutiveKpiCard
+              title="Gap to MMF"
+              accent="red"
+              primary={formatLargeCurrency(visibilityTotals.gap)}
+              sublines={[{ label: "vs MMF target", value: "↑ fill gap" }]}
+            />
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
-            Auto-refreshes from Revenue Tracker sheet · pipeline snapshot for the selected as-of date
-          </div>
-        </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-          <KpiTile icon="💰" label="Total MMF (₹)" value={formatLargeCurrency(visibilityTotals.mmf)} sub="In scope" />
-          <KpiTile icon="📥" label="Opening fee (₹)" value={formatLargeCurrency(visibilityTotals.openFee)} />
-          <KpiTile icon="✅" label="Joining fee (₹)" value={formatLargeCurrency(visibilityTotals.joinFee)} />
-          <KpiTile icon="📋" label="Open requisitions" value={String(visibilityTotals.openReq)} sub="#" />
-          <KpiTile icon="🤝" label="Total joiners" value={String(visibilityTotals.joiners)} sub="#" />
-          <KpiTile icon="⏳" label="Yet to join" value={String(visibilityTotals.ytj)} sub="#" />
-          <KpiTile
-            icon="🔄"
-            label="Overall conversion %"
-            value={visibilityTotals.convPct != null ? formatPercent(visibilityTotals.convPct, 1) : "—"}
-            accent="teal"
-          />
-          <KpiTile
-            icon="📈"
-            label="Revenue realised %"
-            value={visibilityTotals.revPct != null ? formatPercent(visibilityTotals.revPct, 1) : "—"}
-            accent="teal"
-          />
-          <KpiTile icon="⚠️" label="Gap to MMF (₹)" value={formatLargeCurrency(visibilityTotals.gap)} accent="amber" />
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginTop: 18 }}>
-          <div className="platform-card" style={{ padding: 14 }}>
-            <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace", marginBottom: 8 }}>
-              MMF vs gap (₹ Lakhs)
+          {/* Charts */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
+            <div className="platform-card" style={{ padding: 14 }}>
+              <div className="rt-section-hd" style={{ marginTop: 0 }}>
+                <div>
+                  <div className="rt-section-title">MMF vs gap</div>
+                  <div className="rt-section-sub">₹ Lakhs by project</div>
+                </div>
+              </div>
+              <div style={{ width: "100%", height: 200 }}>
+                {chartVisibilityMmF.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartVisibilityMmF} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-25} textAnchor="end" height={52} />
+                      <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={36} />
+                      <Tooltip contentStyle={CHART_TOOLTIP} formatter={(v: number | string, name: string) => [`${Number(v).toFixed(2)} L`, name === "mmf" ? "MMF" : "Gap"]} />
+                      <Bar dataKey="mmf" name="MMF" fill="color-mix(in srgb, var(--accent) 70%, transparent)" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="gap" name="Gap" fill="color-mix(in srgb, var(--amber) 55%, transparent)" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11 }}>No data</div>
+                )}
+              </div>
             </div>
-            <div style={{ width: "100%", height: 220 }}>
-              {chartVisibilityMmF.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartVisibilityMmF} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fill: "var(--text-muted)", fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-25} textAnchor="end" height={56} />
-                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 9 }} axisLine={false} tickLine={false} width={36} />
-                    <Tooltip
-                      contentStyle={CHART_TOOLTIP}
-                      formatter={(v: number | string, name: string) => [`${Number(v).toFixed(2)} L`, name === "mmf" ? "MMF" : "Gap"]}
-                    />
-                    <Bar dataKey="mmf" name="MMF" fill="color-mix(in srgb, var(--accent) 70%, transparent)" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="gap" name="Gap" fill="color-mix(in srgb, var(--amber) 55%, transparent)" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div style={{ height: 220, display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: 11 }}>No data</div>
-              )}
-            </div>
-          </div>
-          <div className="platform-card" style={{ padding: 14 }}>
-            <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace", marginBottom: 8 }}>
-              Pipeline mix (joiners vs YTJ)
-            </div>
-            <div style={{ width: "100%", height: 220 }}>
-              {visibilityForCut.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={visibilityForCut.map((r) => ({
-                      name: (r.account_name || `P${r.project_id}`).slice(0, 14),
-                      joiners: r.joiners_as_on_date || 0,
-                      ytj: r.yet_to_join || 0,
-                    }))}
-                    margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fill: "var(--text-muted)", fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-25} textAnchor="end" height={56} />
-                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 9 }} axisLine={false} tickLine={false} width={28} />
-                    <Tooltip contentStyle={CHART_TOOLTIP} />
-                    <Legend wrapperStyle={{ fontSize: 10, fontFamily: "'DM Mono',monospace" }} />
-                    <Bar dataKey="joiners" name="Joiners" stackId="a" fill="color-mix(in srgb, var(--green) 65%, transparent)" />
-                    <Bar dataKey="ytj" name="YTJ" stackId="a" fill="color-mix(in srgb, var(--accent2) 55%, transparent)" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div style={{ height: 220, display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: 11 }}>No data</div>
-              )}
+            <div className="platform-card" style={{ padding: 14 }}>
+              <div className="rt-section-hd" style={{ marginTop: 0 }}>
+                <div>
+                  <div className="rt-section-title">Pipeline mix</div>
+                  <div className="rt-section-sub">Joiners vs yet-to-join</div>
+                </div>
+              </div>
+              <div style={{ width: "100%", height: 200 }}>
+                {visibilityForCut.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={visibilityForCut.map((r) => ({
+                        name: (r.account_name || `P${r.project_id}`).slice(0, 14),
+                        joiners: r.joiners_as_on_date || 0,
+                        ytj: r.yet_to_join || 0,
+                      }))}
+                      margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-25} textAnchor="end" height={52} />
+                      <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={28} />
+                      <Tooltip contentStyle={CHART_TOOLTIP} />
+                      <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
+                      <Bar dataKey="joiners" name="Joiners" stackId="a" fill="color-mix(in srgb, var(--green) 65%, transparent)" />
+                      <Bar dataKey="ytj" name="YTJ" stackId="a" fill="color-mix(in srgb, var(--accent2) 55%, transparent)" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11 }}>No data</div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        <PlatformSection
-          title="Project-wise revenue summary"
-          headerRight={
+          {/* Table */}
+          <div className="rt-section-hd">
+            <div>
+              <div className="rt-section-title">Project-wise revenue summary</div>
+              <div className="rt-section-sub">As-of {effectiveAsOf || "latest"}</div>
+            </div>
             <Button
               type="button"
               size="sm"
               variant="secondary"
               className="font-mono text-[11px]"
-              onClick={() => {
-                setEditVisibilityRow(null);
-                setVisibilityModalOpen(true);
-              }}
+              onClick={() => { setEditVisibilityRow(null); setVisibilityModalOpen(true); }}
             >
               <Plus className="mr-1 h-3.5 w-3.5" />
               Add / update
             </Button>
-          }
-        >
-          <div className="platform-table-wrap" style={{ marginTop: 4 }}>
+          </div>
+          <div className="platform-table-wrap">
             <table className="platform-table">
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Project name</th>
+                  <th>Project</th>
                   <th>Open req</th>
                   <th>Opening fee (₹)</th>
                   <th>Joiners</th>
@@ -904,7 +1029,7 @@ export function RevenueTrackers() {
               <tbody>
                 {visibilityForCut.map((r, i) => (
                   <tr key={r.id}>
-                    <td style={{ fontFamily: "'DM Mono',monospace", color: "var(--text-muted)" }}>{i + 1}</td>
+                    <td style={{ fontFamily: "var(--mono)", color: "var(--text-subtle)" }}>{i + 1}</td>
                     <td>{r.account_name || projectLabel(r.project_id)}</td>
                     <td>{r.open_req}</td>
                     <td>{formatCurrency(r.opening_fee_inr)}</td>
@@ -922,17 +1047,14 @@ export function RevenueTrackers() {
                           type="button"
                           title="Edit"
                           style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", padding: 4 }}
-                          onClick={() => {
-                            setEditVisibilityRow(r);
-                            setVisibilityModalOpen(true);
-                          }}
+                          onClick={() => { setEditVisibilityRow(r); setVisibilityModalOpen(true); }}
                         >
                           <PencilLine className="h-4 w-4" />
                         </button>
                         <button
                           type="button"
                           title="Delete"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red)", fontSize: 10, fontFamily: "'DM Mono',monospace" }}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red)", fontSize: 10, fontFamily: "var(--mono)" }}
                           onClick={async () => {
                             if (!window.confirm("Delete this visibility snapshot?")) return;
                             await queries.deleteRevenueVisibility(r.id);
@@ -965,92 +1087,106 @@ export function RevenueTrackers() {
               ) : null}
             </table>
             {!visibilityForCut.length && !loading ? (
-              <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>No visibility rows for this as-of date.</div>
+              <div style={{ padding: 20, textAlign: "center", color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>
+                No visibility rows for this as-of date.
+              </div>
             ) : null}
           </div>
-        </PlatformSection>
-      </section>
+        </section>
       ) : null}
 
-      {/* —— Forecast —— */}
+      {/* ─────────── Revenue forecast ─────────── */}
       {mainTab === "Revenue forecast" ? (
-      <section>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Syne',sans-serif", letterSpacing: "-0.02em" }}>
-            TAGGD · Revenue forecast — summary dashboard
+        <section>
+          {/* KPIs */}
+          <div className="rt-kpi-grid">
+            <ExecutiveKpiCard
+              title="Revenue forecast"
+              accent="orange"
+              primary={fmtLakhs(forecastTotals.revL * LAKHS)}
+              sublines={[{ label: "₹ Lakhs", value: "total" }]}
+            />
+            <ExecutiveKpiCard
+              title="Total MMF"
+              accent="teal"
+              primary={fmtLakhs(forecastTotals.mmfL * LAKHS)}
+              sublines={[{ label: "₹ Lakhs", value: "target" }]}
+            />
+            <ExecutiveKpiCard
+              title="Open reqs"
+              accent="blue"
+              primary={String(forecastTotals.openReq)}
+              sublines={[{ label: "Open fee (L)", value: fmtLakhs(forecastTotals.openFeeL * LAKHS) }]}
+            />
+            <ExecutiveKpiCard
+              title="Total joiners"
+              accent="green"
+              primary={String(forecastTotals.joiners)}
+              sublines={[{ label: "Joiner fee (L)", value: fmtLakhs(forecastTotals.joinerFeeL * LAKHS) }]}
+            />
+            <ExecutiveKpiCard
+              title="Avg achievement"
+              accent="amber"
+              primary={forecastTotals.achPct != null ? formatPercent(forecastTotals.achPct, 1) : "—"}
+              sublines={[{ label: "vs MMF", value: "weekly avg" }]}
+            />
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
-            Auto-updated from revenue forecast data · weekly rows rolled up by month
-          </div>
-        </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 }}>
-          <KpiTile icon="📊" label="Total revenue forecast" value={fmtLakhs(forecastTotals.revL * LAKHS)} sub="₹ Lakhs" />
-          <KpiTile icon="🎯" label="Total MMF" value={fmtLakhs(forecastTotals.mmfL * LAKHS)} sub="₹ Lakhs" />
-          <KpiTile icon="📋" label="Total open reqs" value={String(forecastTotals.openReq)} sub="#" />
-          <KpiTile icon="🤝" label="Total joiners" value={String(forecastTotals.joiners)} sub="#" />
-          <KpiTile icon="💵" label="Total joiner fee" value={fmtLakhs(forecastTotals.joinerFeeL * LAKHS)} sub="₹ Lakhs" />
-          <KpiTile
-            icon="🏁"
-            label="Avg achievement %"
-            value={forecastTotals.achPct != null ? formatPercent(forecastTotals.achPct, 1) : "—"}
-            sub="%"
-          />
-        </div>
-
-        <div className="platform-card" style={{ padding: 14, marginTop: 18 }}>
-          <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace", marginBottom: 8 }}>
-            Revenue forecast vs MMF (₹ Lakhs)
+          {/* Chart */}
+          <div className="platform-card" style={{ padding: 14, marginBottom: 24 }}>
+            <div className="rt-section-hd" style={{ marginTop: 0 }}>
+              <div>
+                <div className="rt-section-title">Revenue forecast vs MMF</div>
+                <div className="rt-section-sub">₹ Lakhs · monthly roll-up from weekly entries</div>
+              </div>
+            </div>
+            <div style={{ width: "100%", height: 240 }}>
+              {chartForecastTrend.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={chartForecastTrend} margin={{ top: 12, right: 12, left: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" />
+                    <XAxis dataKey="month" tick={{ fill: "var(--text-subtle)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={40} />
+                    <Tooltip contentStyle={CHART_TOOLTIP} />
+                    <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
+                    <Bar dataKey="forecast" name="Revenue forecast" fill="color-mix(in srgb, var(--accent) 45%, transparent)" radius={[4, 4, 0, 0]} />
+                    <Line type="monotone" dataKey="mmf" name="MMF" stroke="var(--accent2)" strokeWidth={2} dot={{ r: 3 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ height: 240, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11, fontFamily: "var(--mono)" }}>No monthly roll-up yet</div>
+              )}
+            </div>
           </div>
-          <div style={{ width: "100%", height: 260 }}>
-            {chartForecastTrend.length ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartForecastTrend} margin={{ top: 12, right: 12, left: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" />
-                  <XAxis dataKey="month" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "var(--text-muted)", fontSize: 9 }} axisLine={false} tickLine={false} width={40} />
-                  <Tooltip contentStyle={CHART_TOOLTIP} />
-                  <Legend wrapperStyle={{ fontSize: 10, fontFamily: "'DM Mono',monospace" }} />
-                  <Bar dataKey="forecast" name="Revenue forecast" fill="color-mix(in srgb, var(--accent) 45%, transparent)" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="mmf" name="MMF" stroke="var(--accent2)" strokeWidth={2} dot={{ r: 3 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ height: 260, display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: 11 }}>No monthly roll-up yet</div>
-            )}
-          </div>
-        </div>
 
-        <PlatformSection
-          title="Monthly roll-up (from weekly entries)"
-          headerRight={
+          {/* Monthly roll-up table */}
+          <div className="rt-section-hd">
+            <div>
+              <div className="rt-section-title">Monthly roll-up</div>
+              <div className="rt-section-sub">Aggregated from weekly entries</div>
+            </div>
             <Button
               type="button"
               size="sm"
               variant="secondary"
               className="font-mono text-[11px]"
-              onClick={() => {
-                setForecastWizard(null);
-                setEditForecastRow(null);
-                setForecastModalOpen(true);
-              }}
+              onClick={() => { setForecastWizard(null); setEditForecastRow(null); setForecastModalOpen(true); }}
             >
               <Plus className="mr-1 h-3.5 w-3.5" />
-              Add / update weekly row
+              Add weekly row
             </Button>
-          }
-        >
-          <div className="platform-table-wrap">
+          </div>
+          <div className="platform-table-wrap" style={{ marginBottom: 24 }}>
             <table className="platform-table">
               <thead>
                 <tr>
                   <th>Month</th>
-                  <th>Revenue forecast (₹ Lakhs)</th>
-                  <th>MMF (₹ Lakhs)</th>
-                  <th>Open req (#)</th>
-                  <th>Open fee (₹ Lakhs)</th>
-                  <th>Joiner (#)</th>
-                  <th>Joiner fee (₹ Lakhs)</th>
+                  <th>Revenue forecast (L)</th>
+                  <th>MMF (L)</th>
+                  <th>Open req</th>
+                  <th>Open fee (L)</th>
+                  <th>Joiners</th>
+                  <th>Joiner fee (L)</th>
                   <th>Achievement %</th>
                 </tr>
               </thead>
@@ -1084,12 +1220,17 @@ export function RevenueTrackers() {
               ) : null}
             </table>
             {!forecastMonthly.length && !loading ? (
-              <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>No forecast rows in scope.</div>
+              <div style={{ padding: 16, color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>No forecast rows in scope.</div>
             ) : null}
           </div>
-        </PlatformSection>
 
-        <PlatformSection title="Weekly entries (edit / delete)">
+          {/* Weekly entries */}
+          <div className="rt-section-hd">
+            <div>
+              <div className="rt-section-title">Weekly entries</div>
+              <div className="rt-section-sub">Raw rows · edit or delete individual submissions</div>
+            </div>
+          </div>
           <div className="platform-table-wrap">
             <table className="platform-table">
               <thead>
@@ -1114,21 +1255,8 @@ export function RevenueTrackers() {
                       <div style={{ display: "flex", gap: 6 }}>
                         <button
                           type="button"
-                          style={{
-                            fontSize: 10,
-                            background: "none",
-                            border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
-                            color: "var(--accent)",
-                            borderRadius: 4,
-                            padding: "4px 10px",
-                            cursor: "pointer",
-                            fontFamily: "'DM Mono',monospace",
-                          }}
-                          onClick={() => {
-                            setForecastWizard(null);
-                            setEditForecastRow(r);
-                            setForecastModalOpen(true);
-                          }}
+                          style={{ fontSize: 10, background: "none", border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)", color: "var(--accent)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", fontFamily: "var(--mono)" }}
+                          onClick={() => { setForecastWizard(null); setEditForecastRow(r); setForecastModalOpen(true); }}
                         >
                           Edit
                         </button>
@@ -1150,23 +1278,85 @@ export function RevenueTrackers() {
               </tbody>
             </table>
             {!forecast.length && !loading ? (
-              <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>No weekly rows.</div>
+              <div style={{ padding: 16, color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>No weekly rows.</div>
             ) : null}
           </div>
-        </PlatformSection>
-      </section>
+        </section>
       ) : null}
-      </>
-      )}
 
+      {mainTab === "My weekly packs" && ph ? (
+        <section>
+          <div className="rt-section-hd" style={{ marginTop: 0 }}>
+            <div>
+              <div className="rt-section-title">My weekly packs</div>
+              <div className="rt-section-sub">Draft &amp; submitted history · open a row to jump to Revenue forecast with that week</div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="font-mono text-[11px]"
+              onClick={() => void loadMinePacks()}
+              disabled={minePacksLoading}
+            >
+              <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", minePacksLoading && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
+          <div className="platform-table-wrap">
+            <table className="platform-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Week (Mon)</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {minePacks.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.account_name || `Project ${r.project_id}`}</td>
+                    <td>{r.week_start_date ?? "—"}</td>
+                    <td>{r.status}</td>
+                    <td className="text-[10px] font-mono">{r.updated_at ?? "—"}</td>
+                    <td>
+                      {r.week_start_date ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="font-mono text-[10px] h-7"
+                          onClick={() => {
+                            setProjectFilter(String(r.project_id));
+                            setGovernanceWeek(mondayOfYmd(r.week_start_date!));
+                            setMainTab("Revenue forecast");
+                          }}
+                        >
+                          Open in workspace
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!minePacks.length && !minePacksLoading ? (
+              <div className="p-4 text-muted-foreground text-xs font-mono">
+                No packs yet. Open a weekly pack from the command bar above to create a draft.
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {/* ── Dialogs ── */}
       <ForecastFormDialog
         open={forecastModalOpen}
         onOpenChange={(o) => {
           setForecastModalOpen(o);
-          if (!o) {
-            setEditForecastRow(null);
-            setForecastWizard(null);
-          }
+          if (!o) { setEditForecastRow(null); setForecastWizard(null); }
         }}
         projects={projects}
         defaultProjectId={pid}
@@ -1185,10 +1375,26 @@ export function RevenueTrackers() {
         projects={projects}
         defaultProjectId={pid}
         defaultAsOf={effectiveAsOf}
-        governanceWeekStart={governancePid ? governanceWeek : null}
+        governanceWeekStart={governancePid ? governanceWeekMon : null}
         initialRow={editVisibilityRow}
         onSaved={reload}
       />
+      {ph && governancePid ? (
+        <WeeklyPackNcpSheet
+          open={weeklyPackSheetOpen}
+          onOpenChange={setWeeklyPackSheetOpen}
+          projects={projects}
+          projectId={governancePid}
+          governanceWeek={governanceWeekMon}
+          onGovernanceWeekChange={(w) => setGovernanceWeek(mondayOfYmd(w))}
+          onSaved={() => {
+            void reload();
+            void loadMinePacks();
+          }}
+          lockProject={!!projectFilter}
+          currentUser={user}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1214,6 +1420,7 @@ function ForecastFormDialog({
   governanceFieldsLocked?: boolean;
   onSaved: () => void;
 }) {
+  const lockProject = !!governanceFieldsLocked;
   const [projectId, setProjectId] = useState<number>(defaultProjectId ?? projects[0]?.id ?? 0);
   const [weekStart, setWeekStart] = useState(mondayYmd());
   const [monthAnchor, setMonthAnchor] = useState(() => todayYmd().slice(0, 7) + "-01");
@@ -1234,6 +1441,28 @@ function ForecastFormDialog({
   const [tboCount, setTboCount] = useState("0");
   const [achPct, setAchPct] = useState("");
   const [saving, setSaving] = useState(false);
+  const [step, setStep] = useState(0);
+  const [forecastDatesCollapsed, setForecastDatesCollapsed] = useState(false);
+  const [projDdOpen, setProjDdOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState("");
+  const [projDdRect, setProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const projWrapRef = useRef<HTMLDivElement>(null);
+  const projBtnRef = useRef<HTMLButtonElement>(null);
+  const projPortalRef = useRef<HTMLDivElement>(null);
+
+  const monthOptions = useMemo(() => monthAnchorOptions(), []);
+  const selectedProject = useMemo(() => projects.find((p) => p.id === projectId) ?? null, [projects, projectId]);
+  const filteredProjects = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = projectDisplayNameFromProject(p).toLowerCase();
+      return lab.includes(q) || String(p.id).includes(q);
+    });
+  }, [projects, projSearch]);
+
+  const weekMonday = mondayOfYmd(weekStart);
+  const weekEndYmd = addDaysYmd(weekMonday, 6);
 
   useEffect(() => {
     if (defaultProjectId) setProjectId(defaultProjectId);
@@ -1242,6 +1471,39 @@ function ForecastFormDialog({
   useEffect(() => {
     if (!projectId && projects.length) setProjectId(projects[0].id);
   }, [projects, projectId]);
+
+  useLayoutEffect(() => {
+    if (!projDdOpen) {
+      setProjDdRect(null);
+      return;
+    }
+    const measure = () => {
+      const btn = projBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (projBtnRef.current) ro.observe(projBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [projDdOpen]);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (projWrapRef.current?.contains(t) || projPortalRef.current?.contains(t)) return;
+      setProjDdOpen(false);
+    }
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
 
   const resetEmpty = useCallback(() => {
     setWeekStart(mondayYmd());
@@ -1266,7 +1528,7 @@ function ForecastFormDialog({
 
   const fillFromRow = useCallback((r: RevenueForecastWeeklyRow) => {
     setProjectId(r.project_id);
-    setWeekStart(r.week_start_date ?? mondayYmd());
+    setWeekStart(mondayOfYmd(r.week_start_date ?? mondayYmd()));
     setMonthAnchor(r.month_anchor ?? todayYmd().slice(0, 7) + "-01");
     setUpdateDate(r.update_date ?? todayYmd());
     setWeekLabel(r.week_label ?? "");
@@ -1288,34 +1550,39 @@ function ForecastFormDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (initialRow) fillFromRow(initialRow);
-    else {
+    setProjDdOpen(false);
+    setProjSearch("");
+    if (initialRow) {
+      fillFromRow(initialRow);
+      setStep(1);
+    } else {
       resetEmpty();
       const wPid = wizardProjectId != null && wizardProjectId > 0 ? wizardProjectId : null;
       if (wPid) setProjectId(wPid);
       else if (defaultProjectId) setProjectId(defaultProjectId);
-      if (wizardWeekStart) setWeekStart(wizardWeekStart);
+      if (wizardWeekStart) setWeekStart(mondayOfYmd(wizardWeekStart));
+      setStep(lockProject ? 1 : 0);
     }
-  }, [open, initialRow, fillFromRow, resetEmpty, defaultProjectId, wizardWeekStart, wizardProjectId]);
+  }, [open, initialRow, fillFromRow, resetEmpty, defaultProjectId, wizardWeekStart, wizardProjectId, lockProject]);
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    boxSizing: "border-box",
-    background: "var(--surface-raised)",
-    border: "1px solid color-mix(in srgb, var(--accent) 18%, transparent)",
-    color: "var(--text)",
-    borderRadius: 6,
-    padding: "8px 10px",
-    fontSize: 11,
-    fontFamily: "'DM Mono',monospace",
+  const stepLabels = ["Week & project", "Forecast", "Visibility"] as const;
+  const goToStep = (i: number) => {
+    if (i === 2) return;
+    if (i >= 1 && !projectId) return;
+    setStep(i);
   };
 
-  const gridForm: React.CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-    gap: 12,
-    marginTop: 8,
+  const bumpWeek = (delta: number) => {
+    if (lockProject) return;
+    setWeekStart(shiftWeekMonday(weekMonday, delta));
   };
+
+  const onWeekInput = (v: string) => {
+    if (lockProject) return;
+    setWeekStart(mondayOfYmd(v || weekMonday));
+  };
+
+  const forecastFormId = "revenue-forecast-sheet-form";
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1324,7 +1591,7 @@ function ForecastFormDialog({
     try {
       await queries.upsertRevenueForecastWeekly({
         project_id: projectId,
-        week_start_date: weekStart,
+        week_start_date: weekMonday,
         month_anchor: monthAnchor,
         update_date: updateDate || undefined,
         week_label: weekLabel || null,
@@ -1353,113 +1620,340 @@ function ForecastFormDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
         className={cn(
-          "max-h-[min(90vh,880px)] overflow-y-auto border border-[color-mix(in_srgb,var(--accent)_15%,transparent)] bg-[var(--surface-raised)] p-6 sm:max-w-3xl"
+          "flex h-full max-h-[100dvh] flex-col gap-0 border-l p-0",
+          "data-[side=right]:w-full data-[side=right]:max-w-[calc(100vw-1rem)]",
+          "sm:data-[side=right]:w-[min(calc(100vw-2rem),52rem)] sm:data-[side=right]:max-w-[min(calc(100vw-2rem),52rem)]",
+          "bg-[#f7f6f3] shadow-xl",
         )}
       >
-        <DialogHeader>
-          <DialogTitle className="font-[family-name:var(--font-syne)] text-lg">Weekly revenue forecast</DialogTitle>
-          <DialogDescription className="text-xs font-mono text-[var(--text-muted)]">
-            {governanceFieldsLocked
-              ? "Project and week match your weekly pack — amounts in ₹ Lakhs; save updates the draft pack for this week."
-              : "Amounts in ₹ Lakhs · same project + week start replaces an existing row"}
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={onSubmit}>
-          <div style={gridForm}>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Project
-              <select
-                value={projectId || ""}
-                onChange={(e) => setProjectId(Number(e.target.value))}
-                required
-                style={inputStyle}
-                disabled={!!governanceFieldsLocked}
-              >
-                <option value="">—</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.account_name || p.filename || p.id}
-                  </option>
+        <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+          <div className="ncp-scroll min-h-0 flex-1">
+            <div className="ncp-page">
+              <div className="ncp-header">
+                <div style={{ minWidth: 0 }}>
+                  <div className="ncp-breadcrumb">
+                    <span>Revenue</span>
+                    <span className="ncp-breadcrumb-sep">›</span>
+                    <span>Weekly pack</span>
+                  </div>
+                  <h1 className="ncp-h1">Forecast &amp; visibility</h1>
+                  <p className="ncp-subtitle" style={{ marginTop: 4 }}>
+                    Enter weekly forecast (₹ Lakhs) and pipeline visibility (INR) for one governance week. This sheet saves
+                    forecast numbers only; open the full weekly pack to edit visibility alongside forecast.
+                  </p>
+                </div>
+                <button type="button" className="ncp-close-btn" aria-label="Close" onClick={() => onOpenChange(false)}>
+                  ✕
+                </button>
+              </div>
+
+              <div className="ncp-steps" role="tablist">
+                {stepLabels.map((label, i) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className={cn("ncp-step", step === i && "ncp-active", step > i && "ncp-done")}
+                    onClick={() => goToStep(i)}
+                    disabled={i === 2 || (i >= 1 && !projectId)}
+                  >
+                    <span className="ncp-step-num">{step > i ? "✓" : i + 1}</span>
+                    {label}
+                  </button>
                 ))}
-              </select>
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Week start
-              <input
-                style={inputStyle}
-                value={weekStart}
-                onChange={(e) => setWeekStart(e.target.value)}
-                disabled={!!governanceFieldsLocked}
-              />
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Month anchor
-              <input style={inputStyle} value={monthAnchor} onChange={(e) => setMonthAnchor(e.target.value)} />
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Update date
-              <input style={inputStyle} value={updateDate} onChange={(e) => setUpdateDate(e.target.value)} />
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Week label
-              <input style={inputStyle} value={weekLabel} onChange={(e) => setWeekLabel(e.target.value)} />
-            </label>
+              </div>
+
+              {step >= 1 && !projectId ? (
+                <div className="ncp-req-note" style={{ marginBottom: 12 }}>
+                  <span>●</span> Project selection is required to continue
+                </div>
+              ) : null}
+
+              <form id={forecastFormId} onSubmit={onSubmit}>
+                <div className={cn("ncp-panel", step === 0 && "ncp-panel-active")}>
+                  <div
+                    className="ncp-section"
+                    style={{
+                      marginBottom: 14,
+                      border: "1px solid color-mix(in srgb, var(--ncp-accent, #e16f3d) 18%, transparent)",
+                      borderRadius: "var(--ncp-radius, 10px)",
+                    }}
+                  >
+                    <div className="ncp-section-body" style={{ maxHeight: "none", paddingTop: 12 }}>
+                      <div className="text-[11px] font-mono text-muted-foreground mb-3">
+                        Governance week (Monday). Use arrows to move week by week.
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9 shrink-0"
+                          onClick={() => bumpWeek(-1)}
+                          aria-label="Previous week"
+                          disabled={lockProject}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <div className="flex flex-col gap-1 min-w-[200px] flex-1">
+                          <span className="text-[10px] uppercase text-muted-foreground font-mono">Week of (Mon)</span>
+                          <input
+                            type="date"
+                            className="ncp-prop-input rounded-md border border-border bg-background px-2 py-1.5 text-sm font-mono"
+                            value={weekMonday}
+                            onChange={(e) => onWeekInput(e.target.value)}
+                            disabled={lockProject}
+                          />
+                          <span className="text-xs font-semibold text-foreground">{formatWeekRangeLabel(weekMonday)}</span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9 shrink-0"
+                          onClick={() => bumpWeek(1)}
+                          aria-label="Next week"
+                          disabled={lockProject}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      <div
+                        className="ncp-project-wrap mt-4"
+                        ref={projWrapRef}
+                        style={{ borderTop: "1px solid var(--ncp-border, #e8e6e1)", paddingTop: 12 }}
+                      >
+                        <button
+                          ref={projBtnRef}
+                          type="button"
+                          className={cn("ncp-project-btn", selectedProject && "ncp-selected")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (lockProject) return;
+                            setProjDdOpen((o) => !o);
+                          }}
+                          disabled={lockProject}
+                        >
+                          {selectedProject ? (
+                            <>
+                              <span className="ncp-project-icon">{projInitials(projectDisplayNameFromProject(selectedProject))}</span>
+                              <div className="ncp-project-meta">
+                                <strong>{projectDisplayNameFromProject(selectedProject)}</strong>
+                                <span>PRJ-{selectedProject.id}</span>
+                              </div>
+                              <span style={{ color: lockProject ? "var(--ncp-text-muted)" : "var(--ncp-accent)" }}>▾</span>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ fontSize: 20 }}>＋</span>
+                              <span>Search or select a project (PRJ-···)</span>
+                              <span style={{ color: "var(--ncp-text-muted)" }}>▾</span>
+                            </>
+                          )}
+                        </button>
+                        {!lockProject && projDdOpen && projDdRect
+                          ? createPortal(
+                              <div
+                                ref={projPortalRef}
+                                className="new-contract-sheet"
+                                style={{
+                                  position: "fixed",
+                                  top: projDdRect.top,
+                                  left: projDdRect.left,
+                                  width: projDdRect.width,
+                                  zIndex: 200,
+                                  pointerEvents: "auto",
+                                  minHeight: 0,
+                                  height: "auto",
+                                  display: "block",
+                                  background: "transparent",
+                                }}
+                              >
+                                <div className="ncp-project-dd ncp-open ncp-project-dd--portal" onClick={(e) => e.stopPropagation()}>
+                                  <div className="ncp-project-search">
+                                    <span style={{ opacity: 0.5 }}>🔍</span>
+                                    <input
+                                      type="search"
+                                      placeholder="Search projects…"
+                                      value={projSearch}
+                                      onChange={(e) => setProjSearch(e.target.value)}
+                                      autoFocus
+                                    />
+                                  </div>
+                                  <div
+                                    className="ncp-dd-scroll"
+                                    style={{ maxHeight: 280 }}
+                                    onWheel={(e) => e.stopPropagation()}
+                                    onTouchMove={(e) => e.stopPropagation()}
+                                  >
+                                    {filteredProjects.map((p) => (
+                                      <button
+                                        key={p.id}
+                                        type="button"
+                                        className="ncp-project-opt"
+                                        onClick={() => {
+                                          setProjectId(p.id);
+                                          setProjDdOpen(false);
+                                          setProjSearch("");
+                                        }}
+                                      >
+                                        <span className="ncp-proj-ico">{projInitials(projectDisplayNameFromProject(p))}</span>
+                                        <div>
+                                          <div style={{ fontWeight: 500, color: "var(--ncp-text-primary)" }}>{projectDisplayNameFromProject(p)}</div>
+                                          <div
+                                            style={{ fontSize: 11, color: "var(--ncp-text-muted)", fontFamily: "var(--ncp-mono)" }}
+                                          >
+                                            PRJ-{p.id}
+                                          </div>
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>,
+                              document.body,
+                            )
+                          : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className={cn("ncp-panel", step === 1 && "ncp-panel-active")}>
+                  <div className="ncp-section" style={{ marginBottom: 12 }}>
+                    <div className="ncp-section-header" style={{ cursor: "default" }}>
+                      <div className="ncp-section-icon ncp-orange">₹</div>
+                      <div>
+                        <div className="ncp-section-label">Weekly revenue forecast</div>
+                        <div className="ncp-section-desc">Amounts in ₹ Lakhs. Updates the forecast half of your weekly pack.</div>
+                      </div>
+                    </div>
+                    <div className="ncp-section-body" style={{ maxHeight: "none" }}>
+                      <div className="grid gap-0">
+                        <div className={cn("ncp-section", forecastDatesCollapsed && "ncp-collapsed")} style={{ marginBottom: 12 }}>
+                          <button
+                            type="button"
+                            className="ncp-section-header"
+                            onClick={() => setForecastDatesCollapsed((c) => !c)}
+                          >
+                            <div className="ncp-section-icon ncp-blue">📅</div>
+                            <div>
+                              <div className="ncp-section-label">Forecast period</div>
+                              <div className="ncp-section-desc">Month anchor, governance week, update date, and optional week label</div>
+                            </div>
+                            <span className="ncp-section-toggle">▾</span>
+                          </button>
+                          <div
+                            className="ncp-section-body"
+                            style={{ maxHeight: forecastDatesCollapsed ? 0 : 520, transition: "max-height 0.2s ease" }}
+                          >
+                            <div className="ncp-date-grid">
+                              <div className="ncp-date-cell">
+                                <label>Month anchor</label>
+                                <select className="ncp-prop-input" value={monthAnchor} onChange={(e) => setMonthAnchor(e.target.value)}>
+                                  {!monthOptions.includes(monthAnchor) ? (
+                                    <option value={monthAnchor}>{monthAnchorLabel(monthAnchor)}</option>
+                                  ) : null}
+                                  {monthOptions.map((m) => (
+                                    <option key={m} value={m}>
+                                      {monthAnchorLabel(m)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="ncp-date-cell">
+                                <label>Update date</label>
+                                <input type="date" value={updateDate} onChange={(e) => setUpdateDate(e.target.value)} />
+                              </div>
+                            </div>
+                            <div className="ncp-date-grid">
+                              <div className="ncp-date-cell">
+                                <label>Week start (Mon)</label>
+                                <input type="date" readOnly value={weekMonday} />
+                              </div>
+                              <div className="ncp-date-cell">
+                                <label>Week end (Sun)</label>
+                                <input type="date" readOnly value={weekEndYmd} />
+                              </div>
+                            </div>
+                            <div className="ncp-prop-row" style={{ marginTop: 4 }}>
+                              <div className="ncp-prop-label">Duration</div>
+                              <div className="ncp-computed-field">
+                                <span className="ncp-computed-label">AUTO</span>
+                                <span>7 days (governance week)</span>
+                              </div>
+                            </div>
+                            <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+                              <div className="ncp-prop-label">Week label</div>
+                              <input
+                                className="ncp-prop-input"
+                                value={weekLabel}
+                                onChange={(e) => setWeekLabel(e.target.value)}
+                                placeholder="Optional"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-3 mt-2">
+                          {(
+                            [
+                              ["Revenue forecast (L)", revenueForecastLakhs, setRevenueForecastLakhs],
+                              ["Adjustment (L)", adjustmentLakhs, setAdjustmentLakhs],
+                              ["Penalty (L)", penaltyLakhs, setPenaltyLakhs],
+                              ["Bad debts (L)", badDebtsLakhs, setBadDebtsLakhs],
+                              ["MMF (L)", mmfLakhs, setMmfLakhs],
+                              ["Open fee (L)", openFeeLakhs, setOpenFeeLakhs],
+                              ["Joiner fee (L)", joinerFeeLakhs, setJoinerFeeLakhs],
+                              ["TBO fee (L)", tboFeeLakhs, setTboFeeLakhs],
+                              ["Net revenue (L)", netRevLakhs, setNetRevLakhs],
+                              ["Open req", openReq, setOpenReq],
+                              ["Joiners", joinerCount, setJoinerCount],
+                              ["TBO count", tboCount, setTboCount],
+                              ["Achievement %", achPct, setAchPct],
+                            ] as const
+                          ).map(([label, val, set]) => (
+                            <div key={label} className="ncp-prop-row">
+                              <div className="ncp-prop-label">{label}</div>
+                              <input className="ncp-prop-input" value={val} onChange={(e) => set(e.target.value)} inputMode="decimal" />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="ncp-prop-row mt-2" style={{ alignItems: "flex-start" }}>
+                          <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
+                            Remarks
+                          </div>
+                          <textarea
+                            className="ncp-prop-input"
+                            value={remarks}
+                            onChange={(e) => setRemarks(e.target.value)}
+                            rows={3}
+                            style={{ minHeight: 72, resize: "vertical" }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
-          <div style={{ ...gridForm, marginTop: 14 }}>
-            {(
-              [
-                ["Revenue forecast (L)", revenueForecastLakhs, setRevenueForecastLakhs],
-                ["Adjustment (L)", adjustmentLakhs, setAdjustmentLakhs],
-                ["Penalty (L)", penaltyLakhs, setPenaltyLakhs],
-                ["Bad debts (L)", badDebtsLakhs, setBadDebtsLakhs],
-                ["MMF (L)", mmfLakhs, setMmfLakhs],
-                ["Open fee (L)", openFeeLakhs, setOpenFeeLakhs],
-                ["Joiner fee (L)", joinerFeeLakhs, setJoinerFeeLakhs],
-                ["TBO fee (L)", tboFeeLakhs, setTboFeeLakhs],
-                ["Net revenue (L)", netRevLakhs, setNetRevLakhs],
-              ] as const
-            ).map(([label, val, set]) => (
-              <label key={label} style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-                {label}
-                <input style={inputStyle} value={val} onChange={(e) => set(e.target.value)} inputMode="decimal" />
-              </label>
-            ))}
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Open req
-              <input style={inputStyle} value={openReq} onChange={(e) => setOpenReq(e.target.value)} />
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Joiners
-              <input style={inputStyle} value={joinerCount} onChange={(e) => setJoinerCount(e.target.value)} />
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              TBO count
-              <input style={inputStyle} value={tboCount} onChange={(e) => setTboCount(e.target.value)} />
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)" }}>
-              Achievement %
-              <input style={inputStyle} value={achPct} onChange={(e) => setAchPct(e.target.value)} />
-            </label>
-          </div>
-          <label style={{ display: "grid", gap: 4, fontSize: 10, color: "var(--text-muted)", marginTop: 14 }}>
-            Remarks
-            <textarea style={{ ...inputStyle, minHeight: 72, resize: "vertical" }} value={remarks} onChange={(e) => setRemarks(e.target.value)} />
-          </label>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+
+          <div className="ncp-footer">
+            <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => onOpenChange(false)} disabled={saving}>
               Cancel
-            </Button>
-            <Button type="submit" disabled={saving || !projectId}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
+            </button>
+            <button type="submit" form={forecastFormId} className="ncp-btn ncp-btn-primary" disabled={saving || !projectId}>
+              {saving ? "Saving…" : "Save forecast"}
+            </button>
           </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 

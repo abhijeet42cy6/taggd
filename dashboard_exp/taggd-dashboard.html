@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Taggd · Intelligence Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:             #f7f6f3;
+  --surface:        #ffffff;
+  --surface-hover:  #f7f6f3;
+  --surface-raised: #ffffff;
+
+  --border:         rgba(55, 53, 47, 0.09);
+  --border-focus:   rgba(55, 53, 47, 0.30);
+  --border-strong:  rgba(55, 53, 47, 0.18);
+
+  --text-primary:   #191817;
+  --text-secondary: rgba(55, 53, 47, 0.65);
+  --text-muted:     rgba(55, 53, 47, 0.40);
+  --text-on-accent: #ffffff;
+
+  --accent:         #e16f3d;
+  --accent-hover:   #c85f30;
+  --accent-soft:    rgba(225, 111, 61, 0.08);
+  --accent-mid:     rgba(225, 111, 61, 0.18);
+
+  --green:          #2ecc71;
+  --green-hover:    #1a7a47;
+  --green-soft:     rgba(46, 204, 113, 0.10);
+  --amber:          #f59e0b;
+  --amber-soft:     rgba(245, 158, 11, 0.10);
+  --red:            #ef4444;
+  --red-soft:       rgba(239, 68, 68, 0.10);
+  --blue:           #3884ff;
+  --blue-soft:      rgba(56, 132, 255, 0.08);
+
+  --entity-indigo:  #6366f1;
+  --entity-teal:    #14b8a6;
+  --entity-amber:   #f59e0b;
+  --entity-orange:  #e16f3d;
+
+  --font:           'DM Sans', sans-serif;
+  --mono:           'DM Mono', monospace;
+
+  --radius-sm:      4px;
+  --radius:         6px;
+  --radius-lg:      10px;
+  --radius-pill:    100px;
+
+  --shadow-sm:      0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  --shadow:         0 2px 8px rgba(0,0,0,0.08), 0 8px 32px rgba(0,0,0,0.06);
+  --shadow-lg:      0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+
+  --t-fast:         0.12s ease;
+  --t-base:         0.15s ease;
+  --t-slow:         0.25s ease;
+  --t-spring:       0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  --t-smooth:       0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:             #1a1917;
+    --surface:        #252422;
+    --surface-hover:  #2e2c2a;
+    --surface-raised: #2e2c2a;
+    --border:         rgba(255,255,255,0.08);
+    --border-focus:   rgba(255,255,255,0.25);
+    --border-strong:  rgba(255,255,255,0.14);
+    --text-primary:   #f0ede8;
+    --text-secondary: rgba(240, 237, 232, 0.60);
+    --text-muted:     rgba(240, 237, 232, 0.35);
+    --accent-soft:    rgba(225, 111, 61, 0.12);
+    --accent-mid:     rgba(225, 111, 61, 0.22);
+    --green-soft:     rgba(46, 204, 113, 0.12);
+    --amber-soft:     rgba(245, 158, 11, 0.12);
+    --red-soft:       rgba(239, 68, 68, 0.12);
+    --blue-soft:      rgba(56, 132, 255, 0.10);
+  }
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ══════════════════════
+   LAYOUT
+══════════════════════ */
+.app {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+/* ══════════════════════
+   SIDEBAR
+══════════════════════ */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 24px;
+}
+
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.sidebar-logo {
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.logo-mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.logo-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.logo-name {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+
+.logo-sub {
+  font-size: 9px;
+  font-family: var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-left: 18px;
+}
+
+.sidebar-section {
+  padding: 4px 12px 8px;
+}
+
+.sidebar-label {
+  font-size: 9.5px;
+  font-family: var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px 8px 4px;
+  display: block;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+  text-decoration: none;
+  user-select: none;
+}
+
+.sidebar-item:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.sidebar-item .item-icon {
+  font-size: 13px;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.sidebar-item.active .item-icon { opacity: 1; }
+
+.sidebar-user {
+  margin-top: auto;
+  padding: 16px 16px 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--entity-indigo);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.user-info { flex: 1; min-width: 0; }
+
+.user-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-role {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--accent);
+}
+
+.user-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.user-action-btn {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: none;
+  font-family: var(--font);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.user-action-btn:hover { color: var(--text-primary); background: var(--surface-hover); }
+
+/* ══════════════════════
+   MAIN
+══════════════════════ */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Topbar ── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  height: 56px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 16px;
+}
+
+.topbar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.topbar-breadcrumb .crumb-active {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.topbar-breadcrumb .sep { opacity: 0.4; }
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 12px;
+  width: 220px;
+  transition: border-color var(--t-base), box-shadow var(--t-base);
+}
+
+.search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search-box input {
+  border: none;
+  background: transparent;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  width: 100%;
+}
+.search-box input::placeholder { color: var(--text-muted); }
+
+.search-icon { color: var(--text-muted); font-size: 13px; }
+
+.topbar-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-mid);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--t-base);
+}
+.topbar-btn:hover { background: var(--surface-hover); border-color: var(--border-focus); color: var(--text-primary); }
+
+/* ── Page Content ── */
+.page-content {
+  padding: 32px 32px 48px;
+  flex: 1;
+  overflow-y: auto;
+  animation: fadeUp 0.4s var(--t-spring) both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Page Header ── */
+.page-header {
+  margin-bottom: 24px;
+}
+
+.page-title {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+
+.page-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.page-meta .dot { font-size: 8px; }
+
+.page-meta .live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Alert Banner ── */
+.alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--red-soft);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: #b91c1c;
+  margin-bottom: 24px;
+}
+
+.alert-icon { font-size: 14px; flex-shrink: 0; }
+
+.alert-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px;
+  opacity: 0.6;
+  transition: opacity var(--t-fast);
+}
+.alert-close:hover { opacity: 1; }
+
+/* ── Filter Bar ── */
+.filter-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.filter-row:last-child { margin-bottom: 0; }
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-label {
+  font-size: 9.5px;
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.filter-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 28px 7px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color var(--t-base), box-shadow var(--t-base);
+  min-width: 110px;
+}
+
+.filter-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.btn-reset {
+  padding: 7px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--t-base);
+  align-self: flex-end;
+}
+.btn-reset:hover { background: var(--surface-hover); border-color: var(--border-focus); }
+
+/* ── KPI Grid ── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: box-shadow var(--t-base), transform var(--t-base);
+  animation: fadeUp 0.4s var(--t-spring) both;
+}
+
+.kpi-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.kpi-card:nth-child(1) { animation-delay: 0.05s; }
+.kpi-card:nth-child(2) { animation-delay: 0.1s; }
+.kpi-card:nth-child(3) { animation-delay: 0.15s; }
+.kpi-card:nth-child(4) { animation-delay: 0.2s; }
+.kpi-card:nth-child(5) { animation-delay: 0.25s; }
+.kpi-card:nth-child(6) { animation-delay: 0.3s; }
+.kpi-card:nth-child(7) { animation-delay: 0.35s; }
+.kpi-card:nth-child(8) { animation-delay: 0.4s; }
+
+.kpi-header {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kpi-label {
+  font-size: 9.5px;
+  font-family: var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kpi-label-dot {
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.kpi-body { padding: 14px; }
+
+.kpi-value {
+  font-size: 26px;
+  font-weight: 500;
+  font-family: var(--mono);
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  margin-bottom: 10px;
+  line-height: 1;
+}
+
+.kpi-rows { display: flex; flex-direction: column; gap: 5px; }
+
+.kpi-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.kpi-row-label { color: var(--text-muted); }
+
+.kpi-row-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.kpi-row-value.positive { color: var(--green-hover); }
+.kpi-row-value.negative { color: #b91c1c; }
+.kpi-row-value.accent   { color: var(--accent); }
+
+/* color headers */
+.kpi-header.orange { background: #e16f3d; }
+.kpi-header.orange .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.orange .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+.kpi-header.teal { background: #14b8a6; }
+.kpi-header.teal .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.teal .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+.kpi-header.indigo { background: #6366f1; }
+.kpi-header.indigo .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.indigo .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+.kpi-header.red { background: #ef4444; }
+.kpi-header.red .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.red .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+.kpi-header.blue { background: #3884ff; }
+.kpi-header.blue .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.blue .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+.kpi-header.green { background: #2ecc71; }
+.kpi-header.green .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.green .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+.kpi-header.amber { background: #f59e0b; }
+.kpi-header.amber .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.amber .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+.kpi-header.purple { background: #8b5cf6; }
+.kpi-header.purple .kpi-label { color: rgba(255,255,255,0.9); }
+.kpi-header.purple .kpi-label-dot { background: rgba(255,255,255,0.4); }
+
+/* ── Section Header ── */
+.section-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  margin-top: 32px;
+}
+
+.section-hd-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-hd-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.section-hd-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.info-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  background: var(--border);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+}
+
+.btn-sm-outline {
+  padding: 5px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--t-base);
+}
+.btn-sm-outline:hover { background: var(--surface-hover); border-color: var(--border-focus); color: var(--text-primary); }
+
+/* ── Productivity Section ── */
+.productivity-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.productivity-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.productivity-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.productivity-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.empty-icon {
+  font-size: 28px;
+  margin-bottom: 10px;
+  opacity: 0.4;
+}
+
+/* ── Data Table ── */
+.data-table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table thead tr {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.data-table th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 12px 16px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.data-table tbody tr:last-child td { border-bottom: none; }
+
+.data-table tbody tr {
+  transition: background var(--t-fast);
+}
+.data-table tbody tr:hover { background: var(--surface-hover); }
+
+.data-table td.primary {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.data-table td .mono-val {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+/* ── Badge ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+}
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.badge-green  { background: var(--green-soft);  color: #1a7a47; }
+.badge-green  .badge-dot { background: var(--green); }
+.badge-amber  { background: var(--amber-soft);  color: #92600a; }
+.badge-amber  .badge-dot { background: var(--amber); }
+.badge-red    { background: var(--red-soft);    color: #b91c1c; }
+.badge-red    .badge-dot { background: var(--red); }
+.badge-blue   { background: var(--blue-soft);   color: #1d4ed8; }
+.badge-blue   .badge-dot { background: var(--blue); }
+.badge-gray   { background: var(--border);      color: var(--text-secondary); }
+.badge-gray   .badge-dot { background: var(--text-muted); }
+.badge-accent { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-mid); }
+
+/* ── Entity icon ── */
+.ent-icon {
+  width: 28px; height: 28px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.cell-entity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cell-entity-info {}
+.cell-entity-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.cell-entity-id { font-size: 10.5px; font-family: var(--mono); color: var(--accent); }
+
+/* ── Productivity stat cards ── */
+.prod-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.prod-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  animation: fadeUp 0.4s var(--t-spring) both;
+}
+
+.prod-card-label {
+  font-size: 10px;
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.prod-card-value {
+  font-size: 22px;
+  font-weight: 500;
+  font-family: var(--mono);
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.prod-card-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* Progress bar */
+.progress-wrap {
+  margin-top: 10px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.8s var(--t-spring);
+}
+
+/* table pagination */
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.table-count {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-muted);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-btn {
+  width: 28px; height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+.page-btn:hover { background: var(--surface-hover); border-color: var(--border-focus); }
+.page-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ══ SIDEBAR ══ -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">
+        <div class="logo-dot"></div>
+        <div class="logo-name">taggd</div>
+      </div>
+      <div class="logo-sub">Intelligence Platform</div>
+    </div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Overview</span>
+      <a class="sidebar-item active">
+        <span class="item-icon">◈</span> Executive Overview
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◇</span> Portfolio Intel
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Operations</span>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Clients
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Contracts
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Meetings
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Client onboarding
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Requisitions
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Candidates
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Candidate store
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Analytics</span>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Finance Command
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Revenue trackers
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Billing
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Finance validation
+      </a>
+      <a class="sidebar-item">
+        <span class="item-icon">◻</span> Revenue packs
+      </a>
+    </div>
+
+    <div class="sidebar-user">
+      <div class="user-avatar">AD</div>
+      <div class="user-info">
+        <div class="user-name">admin</div>
+        <div class="user-role">platform_admin</div>
+      </div>
+      <div class="user-actions">
+        <button class="user-action-btn">Out</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ══ MAIN ══ -->
+  <div class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Control Center</span>
+        <span class="sep">›</span>
+        <span class="crumb-active">FY2024–25</span>
+      </div>
+      <div class="topbar-right">
+        <span style="font-size:12px; color:var(--text-muted);">Compare FY</span>
+        <div class="topbar-badge">YoY: On</div>
+        <button class="topbar-btn">⬆ Upload finance data for FY chips</button>
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input type="text" placeholder="Search…">
+        </div>
+      </div>
+    </div>
+
+    <!-- Page Content -->
+    <div class="page-content">
+
+      <!-- Header -->
+      <div class="page-header">
+        <h1 class="page-title">Executive Overview</h1>
+        <div class="page-meta">
+          <div class="live-dot"></div>
+          <span>Live view</span>
+          <span class="dot">·</span>
+          <span>— clients</span>
+          <span class="dot">·</span>
+          <span>— requisitions</span>
+          <span class="dot">·</span>
+          <span>Finance · SLA · WFM</span>
+        </div>
+      </div>
+
+      <!-- Alert -->
+      <div class="alert-banner" id="alert-banner">
+        <span class="alert-icon">⚠</span>
+        <span>Unable to load dashboard KPIs. Please verify backend/API connectivity.</span>
+        <button class="alert-close" onclick="document.getElementById('alert-banner').style.display='none'">✕</button>
+      </div>
+
+      <!-- Filters -->
+      <div class="filter-bar">
+        <div class="filter-row">
+          <div class="filter-group">
+            <label class="filter-label">Period</label>
+            <select class="filter-select">
+              <option>Full year</option>
+              <option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Month</label>
+            <select class="filter-select">
+              <option>All</option>
+              <option>Apr</option><option>May</option><option>Jun</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Region</label>
+            <select class="filter-select"><option>All</option><option>North</option><option>South</option></select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Sub Region</label>
+            <select class="filter-select"><option>All</option><option>Zone A</option><option>Zone B</option></select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Region Head</label>
+            <select class="filter-select"><option>All</option><option>Priya Mehta</option></select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Practice Head</label>
+            <select class="filter-select" style="min-width:160px;"><option>All</option><option>Rohan Sharma</option></select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Vertical</label>
+            <select class="filter-select"><option>All</option><option>RPO</option><option>Staff Aug</option></select>
+          </div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-group">
+            <label class="filter-label">Account</label>
+            <select class="filter-select" style="min-width:200px;"><option>All</option><option>Accenture India</option><option>TCS</option></select>
+          </div>
+          <button class="btn-reset" onclick="resetFilters()">Reset</button>
+        </div>
+      </div>
+
+      <!-- KPI Cards Row 1 -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-header orange">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>Revenue — Actual</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">₹0</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">Budget</span>
+                <span class="kpi-row-value">₹0</span>
+              </div>
+              <div class="kpi-row">
+                <span class="kpi-row-label">Attainment</span>
+                <span class="kpi-row-value accent">0.0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header teal">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>CM % — Actual</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">0.0%</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">vs ref 35%</span>
+                <span class="kpi-row-value negative">−35.0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header indigo">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>Collection — Actual</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">₹0</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">Target</span>
+                <span class="kpi-row-value">₹0</span>
+              </div>
+              <div class="kpi-row">
+                <span class="kpi-row-label">Attainment</span>
+                <span class="kpi-row-value accent">0.0%</span>
+              </div>
+              <div class="kpi-row">
+                <span class="kpi-row-label">Pending</span>
+                <span class="kpi-row-value">₹0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header red">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>Unbilled & Bad Debt</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">₹0</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">Unbilled</span>
+                <span class="kpi-row-value">0.0% of Rev</span>
+              </div>
+              <div class="kpi-row">
+                <span class="kpi-row-label">Bad debt</span>
+                <span class="kpi-row-value">₹0</span>
+              </div>
+              <div class="kpi-row">
+                <span class="kpi-row-label">% of Coll.</span>
+                <span class="kpi-row-value">0.0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI Cards Row 2 -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-header blue">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>SLA Portfolio</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">—</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">Met / not met</span>
+                <span class="kpi-row-value">— / —</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header green">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>Headcount — WFM</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">—</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">Ideal HC</span>
+                <span class="kpi-row-value">—</span>
+              </div>
+              <div class="kpi-row">
+                <span class="kpi-row-label">Fill rate</span>
+                <span class="kpi-row-value">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header amber">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>Pipeline — Reqs</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">—</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">Offer stage</span>
+                <span class="kpi-row-value">—</span>
+              </div>
+              <div class="kpi-row">
+                <span class="kpi-row-label">Joiners (closed)</span>
+                <span class="kpi-row-value">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-header purple">
+            <div class="kpi-label"><div class="kpi-label-dot"></div>Active Clients</div>
+          </div>
+          <div class="kpi-body">
+            <div class="kpi-value">—</div>
+            <div class="kpi-rows">
+              <div class="kpi-row">
+                <span class="kpi-row-label">Total positions</span>
+                <span class="kpi-row-value">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Productivity Section -->
+      <div class="section-hd">
+        <div class="section-hd-left">
+          <div class="section-hd-title">Productivity Averages</div>
+          <span class="info-pill">ⓘ</span>
+        </div>
+      </div>
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:14px; font-family:var(--mono);">0 client-months match dashboard filters</div>
+
+      <div class="prod-grid">
+        <div class="prod-card" style="animation-delay:0.1s">
+          <div class="prod-card-label">Avg Revenue / Client-mo</div>
+          <div class="prod-card-value">—</div>
+          <div class="prod-card-sub">No data for selected period</div>
+          <div class="progress-wrap"><div class="progress-bar" style="width:0%; background:var(--accent);"></div></div>
+        </div>
+        <div class="prod-card" style="animation-delay:0.15s">
+          <div class="prod-card-label">Avg CM % / Client-mo</div>
+          <div class="prod-card-value">—</div>
+          <div class="prod-card-sub">No data for selected period</div>
+          <div class="progress-wrap"><div class="progress-bar" style="width:0%; background:var(--entity-teal);"></div></div>
+        </div>
+        <div class="prod-card" style="animation-delay:0.2s">
+          <div class="prod-card-label">Avg Collection / Client-mo</div>
+          <div class="prod-card-value">—</div>
+          <div class="prod-card-sub">No data for selected period</div>
+          <div class="progress-wrap"><div class="progress-bar" style="width:0%; background:var(--entity-indigo);"></div></div>
+        </div>
+      </div>
+
+      <!-- Client Table -->
+      <div class="section-hd">
+        <div class="section-hd-left">
+          <div class="section-hd-title">Client Performance</div>
+          <div class="section-hd-sub">FY2024–25 · Full Year</div>
+        </div>
+        <button class="btn-sm-outline">Export →</button>
+      </div>
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Contract type</th>
+              <th>Revenue</th>
+              <th>CM %</th>
+              <th>Collection</th>
+              <th>SLA</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="cell-entity">
+                  <div class="ent-icon" style="background:#6366f1;">AC</div>
+                  <div class="cell-entity-info">
+                    <div class="cell-entity-name">Accenture India</div>
+                    <div class="cell-entity-id">CLT-0041</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="badge badge-accent">RPO</span></td>
+              <td><span class="mono-val">₹ 48,00,000</span></td>
+              <td><span class="mono-val" style="color:#1a7a47;">38.2%</span></td>
+              <td><span class="mono-val">₹ 44,20,000</span></td>
+              <td><span class="badge badge-green"><span class="badge-dot"></span>Met</span></td>
+              <td><span class="badge badge-green"><span class="badge-dot"></span>Active</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-entity">
+                  <div class="ent-icon" style="background:#14b8a6;">TC</div>
+                  <div class="cell-entity-info">
+                    <div class="cell-entity-name">Tata Consultancy</div>
+                    <div class="cell-entity-id">CLT-0039</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="badge badge-accent">Staff Aug</span></td>
+              <td><span class="mono-val">₹ 32,50,000</span></td>
+              <td><span class="mono-val" style="color:#92600a;">31.0%</span></td>
+              <td><span class="mono-val">₹ 29,80,000</span></td>
+              <td><span class="badge badge-amber"><span class="badge-dot"></span>Partial</span></td>
+              <td><span class="badge badge-green"><span class="badge-dot"></span>Active</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-entity">
+                  <div class="ent-icon" style="background:#f59e0b;">WI</div>
+                  <div class="cell-entity-info">
+                    <div class="cell-entity-name">Wipro Analytics</div>
+                    <div class="cell-entity-id">CLT-0037</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="badge badge-accent">Managed Svcs</span></td>
+              <td><span class="mono-val">₹ 18,00,000</span></td>
+              <td><span class="mono-val" style="color:#b91c1c;">22.5%</span></td>
+              <td><span class="mono-val">₹ 15,60,000</span></td>
+              <td><span class="badge badge-red"><span class="badge-dot"></span>Missed</span></td>
+              <td><span class="badge badge-amber"><span class="badge-dot"></span>Pending</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-entity">
+                  <div class="ent-icon" style="background:#8b5cf6;">IN</div>
+                  <div class="cell-entity-info">
+                    <div class="cell-entity-name">Infosys BPM</div>
+                    <div class="cell-entity-id">CLT-0035</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="badge badge-accent">RPO</span></td>
+              <td><span class="mono-val">₹ 55,20,000</span></td>
+              <td><span class="mono-val" style="color:#1a7a47;">41.8%</span></td>
+              <td><span class="mono-val">₹ 53,00,000</span></td>
+              <td><span class="badge badge-green"><span class="badge-dot"></span>Met</span></td>
+              <td><span class="badge badge-green"><span class="badge-dot"></span>Active</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-entity">
+                  <div class="ent-icon" style="background:#ef4444;">HE</div>
+                  <div class="cell-entity-info">
+                    <div class="cell-entity-name">HexaWare</div>
+                    <div class="cell-entity-id">CLT-0033</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="badge badge-accent">Staff Aug</span></td>
+              <td><span class="mono-val">₹ 9,40,000</span></td>
+              <td><span class="mono-val" style="color:#b91c1c;">18.1%</span></td>
+              <td><span class="mono-val">₹ 6,20,000</span></td>
+              <td><span class="badge badge-gray"><span class="badge-dot"></span>N/A</span></td>
+              <td><span class="badge badge-red"><span class="badge-dot"></span>Expired</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="table-footer">
+          <div class="table-count">Showing 5 of 24 clients</div>
+          <div class="pagination">
+            <button class="page-btn">‹</button>
+            <button class="page-btn active">1</button>
+            <button class="page-btn">2</button>
+            <button class="page-btn">3</button>
+            <button class="page-btn">›</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /page-content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+  // Sidebar active state
+  document.querySelectorAll('.sidebar-item').forEach(item => {
+    item.addEventListener('click', function() {
+      document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+      this.classList.add('active');
+    });
+  });
+
+  // Filter reset
+  function resetFilters() {
+    document.querySelectorAll('.filter-select').forEach(sel => sel.selectedIndex = 0);
+  }
+
+  // Animate progress bars on load
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      document.querySelectorAll('.progress-bar').forEach(bar => {
+        const target = bar.getAttribute('data-target') || 0;
+        bar.style.width = target + '%';
+      });
+    }, 200);
+  });
+
+  // Pagination interaction
+  document.querySelectorAll('.page-btn').forEach(btn => {
+    if (!['‹','›'].includes(btn.textContent)) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.page-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+      });
+    }
+  });
+</script>
+</body>
+</html>

@@ -8,11 +8,11 @@ import {
 import { canAccessFinanceValidation, useAuth } from "@/lib/auth";
 import { cn, formatDate, formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
-import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { FilterX, PanelRightOpen } from "lucide-react";
+import "@/styles/new-contract-panel.css";
 
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
@@ -150,33 +150,50 @@ function eventActionLabel(action: string): string {
   return titleCaseStatus(action.replace(/-/g, "_"));
 }
 
-function FvSection({
+function FvNcpSection({
+  icon,
+  iconCls,
   title,
   description,
   children,
 }: {
+  icon: React.ReactNode;
+  iconCls: string;
   title: string;
   description?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border/70 bg-card/50 shadow-sm">
-      <div className="border-b border-border/50 px-3 py-2.5 sm:px-4">
-        <h4 className="text-sm font-semibold text-foreground tracking-tight">{title}</h4>
-        {description ? <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{description}</p> : null}
+    <div className="ncp-section" style={{ marginBottom: 12 }}>
+      <div className="ncp-section-header" style={{ cursor: "default" }}>
+        <div className={cn("ncp-section-icon", iconCls)}>{icon}</div>
+        <div style={{ minWidth: 0 }}>
+          <div className="ncp-section-label">{title}</div>
+          {description ? <div className="ncp-section-desc">{description}</div> : null}
+        </div>
       </div>
-      <div className="px-3 py-3 sm:px-4 sm:py-3.5">{children}</div>
-    </section>
+      <div className="ncp-section-body" style={{ maxHeight: "none" }}>
+        {children}
+      </div>
+    </div>
   );
 }
 
-function DlRow({ label, value, monoValue }: { label: string; value: React.ReactNode; monoValue?: boolean }) {
+function NcpReadRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4 py-2 border-b border-border/40 last:border-0 last:pb-0 first:pt-0">
-      <dt className="text-[11px] font-medium text-muted-foreground shrink-0">{label}</dt>
-      <dd className={cn("text-sm text-foreground text-left sm:text-right min-w-0 break-words", monoValue && "font-mono text-[13px]")}>
-        {value}
-      </dd>
+    <div className="ncp-prop-row">
+      <div className="ncp-prop-label">{label}</div>
+      <div
+        className={cn("ncp-prop-input", mono && "font-mono text-[13px]")}
+        style={{
+          cursor: "default",
+          display: "flex",
+          alignItems: "center",
+          minHeight: 36,
+        }}
+      >
+        {value ?? "—"}
+      </div>
     </div>
   );
 }
@@ -288,6 +305,12 @@ export function FinanceValidation() {
       setSaving(false);
     }
   };
+
+  const closeDrawer = useCallback(() => {
+    setDrawerOpen(false);
+    setSelectedId(null);
+    setDetail(null);
+  }, []);
 
   const wf = detail?.workflow as FinanceBillingWorkflowDto | undefined;
   const st = wf?.validation_status ?? "draft";
@@ -616,411 +639,540 @@ export function FinanceValidation() {
         </div>
       </PlatformSection>
 
-      <PlatformDrawer
+      <Sheet
         open={drawerOpen}
-        onClose={() => {
-          setDrawerOpen(false);
-          setSelectedId(null);
-          setDetail(null);
+        onOpenChange={(o) => {
+          if (!o) closeDrawer();
         }}
-        title={detail ? `Billing #${detail.id}` : "Billing"}
-        subtitle={drawerSubtitle}
-        className="platform-drawer--wide"
-        headerActions={
-          wf ? (
-            <Badge variant="outline" className={cn("shrink-0 border text-[10px] font-medium", workflowBadgeClass(st))}>
-              {titleCaseStatus(wf.validation_status)}
-            </Badge>
-          ) : null
-        }
-        footer={
-          detail && wf ? (
-            <div className="flex flex-col gap-2">
-              {err && drawerOpen ? <div className="text-xs text-destructive font-mono">{err}</div> : null}
-              <div className="flex flex-wrap justify-end gap-2">
-                <button type="button" className="req-drawer-btn-ghost" onClick={() => setDrawerOpen(false)} disabled={saving}>
-                  Close
-                </button>
-                {st === "submitted" ? (
-                  <button
-                    type="button"
-                    className="req-drawer-btn-primary"
-                    disabled={saving}
-                    onClick={() => run(() => queries.financeBillingWorkflowStartReview(detail.id))}
-                  >
-                    Start review
-                  </button>
-                ) : null}
-                {(st === "submitted" || st === "under_review") && (
-                  <button
-                    type="button"
-                    className="req-drawer-btn-primary"
-                    style={{ background: "var(--amber)" }}
-                    disabled={saving || !discNote.trim()}
-                    onClick={() => run(() => queries.financeBillingWorkflowDispute(detail.id, discNote.trim()))}
-                  >
-                    Dispute → practice
-                  </button>
-                )}
-                {st === "under_review" ? (
-                  <button
-                    type="button"
-                    className="req-drawer-btn-primary"
-                    disabled={saving}
-                    onClick={() => run(() => queries.financeBillingWorkflowJuniorApprove(detail.id))}
-                  >
-                    Junior validate / approve
-                  </button>
-                ) : null}
-                {st === "cfo_pending" ? (
-                  <button
-                    type="button"
-                    className="req-drawer-btn-primary"
-                    disabled={saving}
-                    onClick={() => run(() => queries.financeBillingWorkflowCfoApprove(detail.id, true))}
-                  >
-                    CFO sign-off
-                  </button>
-                ) : null}
-                {(st === "submitted" || st === "under_review" || st === "cfo_pending") && (
-                  <button
-                    type="button"
-                    className="req-drawer-btn-ghost"
-                    disabled={saving}
-                    onClick={() =>
-                      run(() => queries.financeBillingWorkflowReject(detail.id, discNote.trim() || "Rejected"))
-                    }
-                  >
-                    Reject
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : null
-        }
       >
-        {!detail ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div className="rounded-lg border border-primary/12 bg-primary/[0.04] px-3 py-2.5">
-              <p className="text-xs font-medium text-foreground">What this drawer is for</p>
-              <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-                Confirm invoice details, capture validation notes, record receipts, and move the workflow forward using the
-                buttons below. Use <strong>Audit log</strong> for a plain-English trail of what changed and when.
-              </p>
-            </div>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className={cn(
+            "flex h-full max-h-[100dvh] flex-col gap-0 border-l p-0",
+            "data-[side=right]:w-full data-[side=right]:max-w-[calc(100vw-1rem)]",
+            "sm:data-[side=right]:w-[min(calc(100vw-2rem),52rem)] sm:data-[side=right]:max-w-[min(calc(100vw-2rem),52rem)]",
+            "bg-[#f7f6f3] shadow-xl",
+          )}
+        >
+          <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+            <div className="ncp-scroll min-h-0 flex-1">
+              <div className="ncp-page">
+                <div className="ncp-header">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="ncp-breadcrumb">
+                      <span>Finance</span>
+                      <span className="ncp-breadcrumb-sep">›</span>
+                      <span>Validation</span>
+                      <span className="ncp-breadcrumb-sep">›</span>
+                      <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 10 }}>
+                        {detail ? `BIL-${detail.id}` : "—"}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                        gap: "10px 14px",
+                        marginTop: 2,
+                      }}
+                    >
+                      <h1 className="ncp-h1" style={{ margin: 0 }}>
+                        {detail ? `Billing #${detail.id}` : "Billing"}
+                      </h1>
+                      {wf ? (
+                        <Badge
+                          variant="outline"
+                          className={cn("shrink-0 border text-[10px] font-medium", workflowBadgeClass(st))}
+                        >
+                          {titleCaseStatus(wf.validation_status)}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="ncp-subtitle" style={{ marginTop: 6 }}>
+                      {drawerSubtitle ||
+                        "Open a queue row to confirm invoice details, validate, and record receipts."}
+                    </p>
+                  </div>
+                  <button type="button" className="ncp-close-btn" aria-label="Close" onClick={closeDrawer}>
+                    ✕
+                  </button>
+                </div>
 
-            <div
-              role="tablist"
-              aria-label="Billing workflow sections"
-              className="flex flex-wrap gap-1 rounded-lg bg-muted/50 p-1"
-            >
-              {DRAWER_TABS.map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === id}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                    tab === id
-                      ? "bg-background text-foreground shadow-sm ring-1 ring-border/80"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  onClick={() => setTab(id)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {tab === "summary" && detail && (
-              <div className="flex flex-col gap-3">
-                <FvSection
-                  title="Invoice & billing row"
-                  description="Core commercial fields from the TAGGD billing record."
-                >
-                  <dl>
-                    <DlRow label="Account" value={detail.account_name || "—"} />
-                    <DlRow label="Project" value={<span className="font-mono">PRJ-{detail.project_id}</span>} />
-                    <DlRow label="Invoice number" value={detail.invoice_number || "—"} monoValue />
-                    <DlRow
-                      label="Invoice amount"
-                      value={detail.invoice_amount_inr != null ? formatLargeCurrency(detail.invoice_amount_inr) : "—"}
-                      monoValue
-                    />
-                    <DlRow
-                      label="Payment due"
-                      value={detail.payment_due_date ? formatDate(detail.payment_due_date) : "—"}
-                      monoValue
-                    />
-                    <DlRow label="Update date" value={detail.update_date ? formatDate(detail.update_date) : "—"} monoValue />
-                  </dl>
-                </FvSection>
-
-                {!wf ? (
-                  <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border/70 bg-muted/10 px-3 py-6 text-center">
-                    No finance workflow envelope for this billing row yet — collections and approvals will appear after
-                    submission.
+                {!detail ? (
+                  <p className="ncp-hint" style={{ marginBottom: 14 }}>
+                    Loading…
                   </p>
                 ) : (
                   <>
-                    <FvSection
-                      title="Collections & CFO rule"
-                      description="Outstanding is derived from invoice less recorded receipts. CFO sign-off is required when the invoice amount meets or exceeds the threshold."
-                    >
-                      <dl>
-                        <DlRow
-                          label="Outstanding (calculated)"
-                          value={wf.outstanding_inr != null ? formatLargeCurrency(wf.outstanding_inr) : "—"}
-                          monoValue
-                        />
-                        <DlRow
-                          label="Recorded receipts (total)"
-                          value={
-                            wf.amount_received_inr != null ? formatLargeCurrency(wf.amount_received_inr) : "—"
-                          }
-                          monoValue
-                        />
-                        <DlRow
-                          label="CFO threshold"
-                          value={wf.cfo_threshold_inr != null ? formatLargeCurrency(wf.cfo_threshold_inr) : "—"}
-                          monoValue
-                        />
-                        <DlRow
-                          label="Partial payment"
-                          value={wf.partial_payment === true ? "Yes" : wf.partial_payment === false ? "No" : "—"}
-                        />
-                      </dl>
-                    </FvSection>
+                    <p className="ncp-hint" style={{ marginBottom: 14 }}>
+                      <span aria-hidden>●</span> What this sheet is for — confirm invoice details, capture validation notes,
+                      record receipts, and advance workflow from the footer. Use <strong>Audit log</strong> for the change
+                      trail.
+                    </p>
 
-                    <FvSection title="Approval timeline" description="Key milestones in this finance workflow.">
-                      <dl>
-                        <DlRow label="Submitted to finance" value={formatDateTimeHuman(wf.practice_submitted_at)} />
-                        <DlRow label="Review started" value={formatDateTimeHuman(wf.finance_review_started_at)} />
-                        <DlRow label="Junior validated" value={formatDateTimeHuman(wf.junior_validated_at)} />
-                        <DlRow label="CFO approved" value={formatDateTimeHuman(wf.cfo_approved_at)} />
-                        <DlRow
-                          label="CFO sign-off acknowledged"
-                          value={
-                            wf.cfo_sign_off_acknowledged === true
-                              ? "Yes"
-                              : wf.cfo_sign_off_acknowledged === false
-                                ? "No"
-                                : "—"
-                          }
+                    <div className="ncp-steps" role="tablist" aria-label="Billing workflow sections" style={{ marginBottom: 18 }}>
+                      {DRAWER_TABS.map(({ id, label }, i) => (
+                        <button
+                          key={id}
+                          type="button"
+                          role="tab"
+                          aria-selected={tab === id}
+                          className={cn("ncp-step", tab === id && "ncp-active")}
+                          onClick={() => setTab(id)}
+                        >
+                          <span className="ncp-step-num">{i + 1}</span>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className={cn("ncp-panel", tab === "summary" && "ncp-panel-active")}>
+                      <div className="flex flex-col gap-0">
+                        <FvNcpSection
+                          icon="◇"
+                          iconCls="ncp-blue"
+                          title="Invoice & billing row"
+                          description="Core commercial fields from the TAGGD billing record."
+                        >
+                          <NcpReadRow label="Account" value={detail.account_name || "—"} />
+                          <NcpReadRow label="Project" value={`PRJ-${detail.project_id}`} mono />
+                          <NcpReadRow label="Invoice number" value={detail.invoice_number || "—"} mono />
+                          <NcpReadRow
+                            label="Invoice amount"
+                            value={
+                              detail.invoice_amount_inr != null ? formatLargeCurrency(detail.invoice_amount_inr) : "—"
+                            }
+                            mono
+                          />
+                          <NcpReadRow
+                            label="Payment due"
+                            value={detail.payment_due_date ? formatDate(detail.payment_due_date) : "—"}
+                            mono
+                          />
+                          <NcpReadRow
+                            label="Update date"
+                            value={detail.update_date ? formatDate(detail.update_date) : "—"}
+                            mono
+                          />
+                        </FvNcpSection>
+
+                        {!wf ? (
+                          <p
+                            className="ncp-hint"
+                            style={{
+                              marginBottom: 12,
+                              padding: "12px 14px",
+                              border: "1px dashed var(--ncp-border)",
+                              borderRadius: "var(--ncp-radius)",
+                            }}
+                          >
+                            No finance workflow envelope for this billing row yet — collections and approvals appear after
+                            submission from Billing.
+                          </p>
+                        ) : (
+                          <>
+                            <FvNcpSection
+                              icon="◇"
+                              iconCls="ncp-amber"
+                              title="Collections & CFO rule"
+                              description="Outstanding = invoice less recorded receipts. CFO sign-off applies when amount meets threshold."
+                            >
+                              <NcpReadRow
+                                label="Outstanding (calculated)"
+                                value={
+                                  wf.outstanding_inr != null ? formatLargeCurrency(wf.outstanding_inr) : "—"
+                                }
+                                mono
+                              />
+                              <NcpReadRow
+                                label="Recorded receipts (total)"
+                                value={
+                                  wf.amount_received_inr != null
+                                    ? formatLargeCurrency(wf.amount_received_inr)
+                                    : "—"
+                                }
+                                mono
+                              />
+                              <NcpReadRow
+                                label="CFO threshold"
+                                value={
+                                  wf.cfo_threshold_inr != null ? formatLargeCurrency(wf.cfo_threshold_inr) : "—"
+                                }
+                                mono
+                              />
+                              <NcpReadRow
+                                label="Partial payment"
+                                value={
+                                  wf.partial_payment === true
+                                    ? "Yes"
+                                    : wf.partial_payment === false
+                                      ? "No"
+                                      : "—"
+                                }
+                              />
+                            </FvNcpSection>
+
+                            <FvNcpSection
+                              icon="◇"
+                              iconCls="ncp-green"
+                              title="Approval timeline"
+                              description="Key milestones in this finance workflow."
+                            >
+                              <NcpReadRow label="Submitted to finance" value={formatDateTimeHuman(wf.practice_submitted_at)} />
+                              <NcpReadRow label="Review started" value={formatDateTimeHuman(wf.finance_review_started_at)} />
+                              <NcpReadRow label="Junior validated" value={formatDateTimeHuman(wf.junior_validated_at)} />
+                              <NcpReadRow label="CFO approved" value={formatDateTimeHuman(wf.cfo_approved_at)} />
+                              <NcpReadRow
+                                label="CFO sign-off acknowledged"
+                                value={
+                                  wf.cfo_sign_off_acknowledged === true
+                                    ? "Yes"
+                                    : wf.cfo_sign_off_acknowledged === false
+                                      ? "No"
+                                      : "—"
+                                }
+                              />
+                            </FvNcpSection>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className={cn("ncp-panel", tab === "validation" && "ncp-panel-active")}>
+                      <FvNcpSection
+                        icon="◇"
+                        iconCls="ncp-red"
+                        title="Dispute & reject context"
+                        description="Required when sending back to practice (dispute). Also used if you reject from the footer."
+                      >
+                        <label className="ncp-micro-label" htmlFor="fv-disc-note" style={{ display: "block", marginBottom: 6 }}>
+                          Note to project team
+                        </label>
+                        <textarea
+                          id="fv-disc-note"
+                          className="ncp-prop-input"
+                          value={discNote}
+                          onChange={(e) => setDiscNote(e.target.value)}
+                          placeholder="e.g. GST mismatch on March invoice — please re-upload supporting…"
+                          rows={4}
                         />
-                      </dl>
-                    </FvSection>
+                      </FvNcpSection>
+
+                      <FvNcpSection
+                        icon="◇"
+                        iconCls="ncp-orange"
+                        title="Payment & tax validation"
+                        description="Saved on the workflow — use Save after edits."
+                      >
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Payment mode</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={wfForm.payment_mode}
+                            onChange={(e) => setWfForm((f) => ({ ...f, payment_mode: e.target.value }))}
+                            placeholder="NEFT, RTGS, cheque…"
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">UTR / reference</div>
+                          <input
+                            className="ncp-prop-input font-mono"
+                            value={wfForm.payment_reference_utr}
+                            onChange={(e) => setWfForm((f) => ({ ...f, payment_reference_utr: e.target.value }))}
+                            placeholder="Bank reference"
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">GST reconciliation</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={wfForm.gst_reconciliation_status}
+                            onChange={(e) => setWfForm((f) => ({ ...f, gst_reconciliation_status: e.target.value }))}
+                            placeholder="Matched, pending, mismatch…"
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">TDS deducted (INR)</div>
+                          <input
+                            className="ncp-prop-input font-mono"
+                            value={wfForm.tds_deducted_inr}
+                            onChange={(e) => setWfForm((f) => ({ ...f, tds_deducted_inr: e.target.value }))}
+                            placeholder="0"
+                          />
+                        </div>
+                        <div style={{ marginTop: 14 }}>
+                          <button
+                            type="button"
+                            className="ncp-btn ncp-btn-primary"
+                            disabled={saving || !detail}
+                            onClick={() =>
+                              detail &&
+                              run(() =>
+                                queries.financeBillingWorkflowPatch(detail.id, {
+                                  payment_mode: wfForm.payment_mode || null,
+                                  payment_reference_utr: wfForm.payment_reference_utr || null,
+                                  gst_reconciliation_status: wfForm.gst_reconciliation_status || null,
+                                  discrepancy_notes: wfForm.discrepancy_notes || null,
+                                  tds_deducted_inr: wfForm.tds_deducted_inr.trim()
+                                    ? Number(wfForm.tds_deducted_inr.replace(/,/g, ""))
+                                    : null,
+                                }),
+                              )
+                            }
+                          >
+                            Save validation fields
+                          </button>
+                        </div>
+                      </FvNcpSection>
+                    </div>
+
+                    <div className={cn("ncp-panel", tab === "payments" && "ncp-panel-active")}>
+                      <FvNcpSection
+                        icon="◇"
+                        iconCls="ncp-blue"
+                        title="Recorded receipts"
+                        description={`${(wf?.payment_receipts ?? []).length} receipt(s) on file for this billing row.`}
+                      >
+                        {(wf?.payment_receipts ?? []).length === 0 ? (
+                          <p className="ncp-hint" style={{ margin: 0 }}>
+                            No receipts yet — add one below.
+                          </p>
+                        ) : (
+                          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                            {(wf?.payment_receipts ?? []).map((p) => (
+                              <li
+                                key={p.id}
+                                className="ncp-prop-input"
+                                style={{
+                                  cursor: "default",
+                                  display: "block",
+                                  padding: "10px 12px",
+                                }}
+                              >
+                                <div style={{ fontWeight: 600, fontFamily: "var(--ncp-mono)", fontSize: 13 }}>
+                                  {formatLargeCurrency(p.amount_inr)}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: "var(--ncp-text-muted)",
+                                    marginTop: 6,
+                                    display: "flex",
+                                    flexWrap: "wrap",
+                                    gap: "4px 12px",
+                                  }}
+                                >
+                                  <span>UTR: {p.utr_reference || "—"}</span>
+                                  <span>Date: {p.received_date ? formatDate(p.received_date) : "—"}</span>
+                                  {p.partial ? <span style={{ color: "#b45309" }}>Partial</span> : null}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </FvNcpSection>
+
+                      <FvNcpSection
+                        icon="◇"
+                        iconCls="ncp-green"
+                        title="Add receipt"
+                        description="Post a bank receipt against this invoice."
+                      >
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Amount (INR)</div>
+                          <input
+                            className="ncp-prop-input font-mono"
+                            placeholder="e.g. 1850000"
+                            value={receiptAmt}
+                            onChange={(e) => setReceiptAmt(e.target.value)}
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">UTR</div>
+                          <input
+                            className="ncp-prop-input font-mono"
+                            placeholder="Bank reference"
+                            value={receiptUtr}
+                            onChange={(e) => setReceiptUtr(e.target.value)}
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Received date</div>
+                          <input className="ncp-prop-input" type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+                        </div>
+                        <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          <button
+                            type="button"
+                            className="ncp-btn ncp-btn-primary"
+                            disabled={saving || !receiptAmt.trim() || !detail}
+                            onClick={() =>
+                              detail &&
+                              run(async () => {
+                                await queries.financeBillingWorkflowAddReceipt(detail.id, {
+                                  amount_inr: Number(receiptAmt.replace(/,/g, "")),
+                                  utr_reference: receiptUtr || null,
+                                  received_date: receiptDate || null,
+                                });
+                                setReceiptAmt("");
+                                setReceiptUtr("");
+                                setReceiptDate("");
+                              })
+                            }
+                          >
+                            Add receipt
+                          </button>
+                          <button
+                            type="button"
+                            className="ncp-btn ncp-btn-ghost"
+                            disabled={saving || !detail}
+                            onClick={() => detail && run(() => queries.financeBillingWorkflowOverdueTick(detail.id))}
+                          >
+                            Log overdue escalation (stub)
+                          </button>
+                        </div>
+                      </FvNcpSection>
+                    </div>
+
+                    <div className={cn("ncp-panel", tab === "history" && "ncp-panel-active")}>
+                      <FvNcpSection
+                        icon="◇"
+                        iconCls="ncp-accent"
+                        title="Audit log"
+                        description="Immutable history of workflow actions (oldest first, API order)."
+                      >
+                        {events.length === 0 ? (
+                          <p className="ncp-hint" style={{ margin: 0 }}>
+                            No events recorded yet.
+                          </p>
+                        ) : (
+                          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                            {events.map((e) => (
+                              <li
+                                key={e.id}
+                                className="ncp-prop-row"
+                                style={{ alignItems: "flex-start", borderBottom: "1px solid var(--ncp-border)", marginBottom: 0 }}
+                              >
+                                <div
+                                  className="ncp-prop-label"
+                                  style={{ alignSelf: "flex-start", paddingTop: 4 }}
+                                  aria-hidden
+                                >
+                                  ●
+                                </div>
+                                <div style={{ minWidth: 0, paddingBottom: 12 }}>
+                                  <p style={{ fontSize: 11, color: "var(--ncp-text-muted)", margin: 0 }}>
+                                    {formatDateTimeHuman(e.created_at)}
+                                  </p>
+                                  <p style={{ fontSize: 13, fontWeight: 500, margin: "6px 0 0", color: "var(--ncp-text-primary)" }}>
+                                    {eventActionLabel(e.action)}
+                                  </p>
+                                  <p
+                                    style={{
+                                      fontSize: 11,
+                                      fontFamily: "var(--ncp-mono)",
+                                      color: "var(--ncp-text-muted)",
+                                      margin: "4px 0 0",
+                                    }}
+                                  >
+                                    {e.user_id != null ? `Actor user #${e.user_id}` : "System / unspecified user"}
+                                  </p>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </FvNcpSection>
+                    </div>
+
+                    {err && drawerOpen ? (
+                      <div
+                        style={{
+                          margin: "12px 0 0",
+                          padding: "10px 14px",
+                          background: "rgba(239,68,68,0.07)",
+                          border: "1px solid rgba(239,68,68,0.25)",
+                          borderRadius: "var(--ncp-radius)",
+                          fontSize: 12,
+                          color: "#b91c1c",
+                        }}
+                        role="alert"
+                      >
+                        {err}
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>
-            )}
+            </div>
 
-            {tab === "validation" && detail && (
-              <div className="flex flex-col gap-4">
-                <FvSection
-                  title="Dispute & reject context"
-                  description="Required when sending back to practice (dispute). Also stored if you reject from the footer."
-                >
-                  <label className="text-xs font-medium text-foreground" htmlFor="fv-disc-note">
-                    Note to project team
-                  </label>
-                  <textarea
-                    id="fv-disc-note"
-                    className="mt-1.5 w-full min-h-[80px] resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    value={discNote}
-                    onChange={(e) => setDiscNote(e.target.value)}
-                    placeholder="e.g. GST mismatch on March invoice — please re-upload supporting…"
-                  />
-                </FvSection>
-
-                <FvSection
-                  title="Payment & tax validation"
-                  description="Saved to the workflow record — use Save before leaving this tab if you edited fields."
-                >
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Payment mode</label>
-                      <input
-                        className="platform-search w-full h-9 text-sm"
-                        value={wfForm.payment_mode}
-                        onChange={(e) => setWfForm((f) => ({ ...f, payment_mode: e.target.value }))}
-                        placeholder="NEFT, RTGS, cheque…"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">UTR / reference</label>
-                      <input
-                        className="platform-search w-full h-9 text-sm font-mono"
-                        value={wfForm.payment_reference_utr}
-                        onChange={(e) => setWfForm((f) => ({ ...f, payment_reference_utr: e.target.value }))}
-                        placeholder="Bank reference"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">GST reconciliation</label>
-                      <input
-                        className="platform-search w-full h-9 text-sm"
-                        value={wfForm.gst_reconciliation_status}
-                        onChange={(e) => setWfForm((f) => ({ ...f, gst_reconciliation_status: e.target.value }))}
-                        placeholder="Matched, pending, mismatch…"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">TDS deducted (INR)</label>
-                      <input
-                        className="platform-search w-full h-9 text-sm font-mono"
-                        value={wfForm.tds_deducted_inr}
-                        onChange={(e) => setWfForm((f) => ({ ...f, tds_deducted_inr: e.target.value }))}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-                  <Separator className="my-4" />
-                  <button
-                    type="button"
-                    className="req-drawer-btn-primary text-xs"
-                    disabled={saving}
-                    onClick={() =>
-                      run(() =>
-                        queries.financeBillingWorkflowPatch(detail.id, {
-                          payment_mode: wfForm.payment_mode || null,
-                          payment_reference_utr: wfForm.payment_reference_utr || null,
-                          gst_reconciliation_status: wfForm.gst_reconciliation_status || null,
-                          discrepancy_notes: wfForm.discrepancy_notes || null,
-                          tds_deducted_inr: wfForm.tds_deducted_inr.trim()
-                            ? Number(wfForm.tds_deducted_inr.replace(/,/g, ""))
-                            : null,
-                        })
-                      )
-                    }
-                  >
-                    Save validation fields
+            {detail && wf ? (
+              <div className="ncp-footer">
+                <span style={{ fontSize: 12, color: "var(--ncp-text-muted)" }}>Esc to close</span>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", flex: 1 }}>
+                  <button type="button" className="ncp-btn ncp-btn-ghost" onClick={closeDrawer} disabled={saving}>
+                    Close
                   </button>
-                </FvSection>
-              </div>
-            )}
-
-            {tab === "payments" && detail && (
-              <div className="flex flex-col gap-3">
-                <FvSection
-                  title="Recorded receipts"
-                  description={`${(wf?.payment_receipts ?? []).length} receipt(s) on file for this billing row.`}
-                >
-                  {(wf?.payment_receipts ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No receipts yet — add one below.</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {(wf?.payment_receipts ?? []).map((p) => (
-                        <li
-                          key={p.id}
-                          className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-sm"
-                        >
-                          <div className="font-semibold font-mono">{formatLargeCurrency(p.amount_inr)}</div>
-                          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                            <span>UTR: {p.utr_reference || "—"}</span>
-                            <span>Date: {p.received_date ? formatDate(p.received_date) : "—"}</span>
-                            {p.partial ? <span className="text-amber-700">Partial</span> : null}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </FvSection>
-
-                <FvSection title="Add receipt" description="Post a bank receipt against this invoice.">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Amount (INR)</label>
-                      <input
-                        className="platform-search h-9 text-sm font-mono"
-                        placeholder="e.g. 1850000"
-                        value={receiptAmt}
-                        onChange={(e) => setReceiptAmt(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">UTR</label>
-                      <input
-                        className="platform-search h-9 text-sm font-mono"
-                        placeholder="Bank reference"
-                        value={receiptUtr}
-                        onChange={(e) => setReceiptUtr(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5 sm:col-span-2">
-                      <label className="text-xs font-medium text-muted-foreground">Received date</label>
-                      <input
-                        className="platform-search h-9 text-sm w-full max-w-xs"
-                        type="date"
-                        value={receiptDate}
-                        onChange={(e) => setReceiptDate(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  {st === "submitted" ? (
                     <button
                       type="button"
-                      className="req-drawer-btn-primary text-xs"
-                      disabled={saving || !receiptAmt.trim()}
+                      className="ncp-btn ncp-btn-primary"
+                      disabled={saving}
+                      onClick={() => run(() => queries.financeBillingWorkflowStartReview(detail.id))}
+                    >
+                      Start review
+                    </button>
+                  ) : null}
+                  {(st === "submitted" || st === "under_review") && (
+                    <button
+                      type="button"
+                      className="ncp-btn ncp-btn-primary"
+                      style={{ background: "#f59e0b", boxShadow: "0 1px 3px rgba(245,158,11,0.35)" }}
+                      disabled={saving || !discNote.trim()}
+                      onClick={() => run(() => queries.financeBillingWorkflowDispute(detail.id, discNote.trim()))}
+                    >
+                      Dispute → practice
+                    </button>
+                  )}
+                  {st === "under_review" ? (
+                    <button
+                      type="button"
+                      className="ncp-btn ncp-btn-primary"
+                      disabled={saving}
+                      onClick={() => run(() => queries.financeBillingWorkflowJuniorApprove(detail.id))}
+                    >
+                      Junior validate / approve
+                    </button>
+                  ) : null}
+                  {st === "cfo_pending" ? (
+                    <button
+                      type="button"
+                      className="ncp-btn ncp-btn-primary"
+                      disabled={saving}
+                      onClick={() => run(() => queries.financeBillingWorkflowCfoApprove(detail.id, true))}
+                    >
+                      CFO sign-off
+                    </button>
+                  ) : null}
+                  {(st === "submitted" || st === "under_review" || st === "cfo_pending") && (
+                    <button
+                      type="button"
+                      className="ncp-btn ncp-btn-ghost"
+                      disabled={saving}
                       onClick={() =>
-                        run(async () => {
-                          await queries.financeBillingWorkflowAddReceipt(detail.id, {
-                            amount_inr: Number(receiptAmt.replace(/,/g, "")),
-                            utr_reference: receiptUtr || null,
-                            received_date: receiptDate || null,
-                          });
-                          setReceiptAmt("");
-                          setReceiptUtr("");
-                          setReceiptDate("");
-                        })
+                        run(() => queries.financeBillingWorkflowReject(detail.id, discNote.trim() || "Rejected"))
                       }
                     >
-                      Add receipt
+                      Reject
                     </button>
-                    <button
-                      type="button"
-                      className="req-drawer-btn-ghost text-xs"
-                      disabled={saving}
-                      onClick={() => run(() => queries.financeBillingWorkflowOverdueTick(detail.id))}
-                    >
-                      Log overdue escalation (stub)
-                    </button>
-                  </div>
-                </FvSection>
+                  )}
+                </div>
               </div>
-            )}
-
-            {tab === "history" && (
-              <FvSection title="Audit log" description="Immutable history of workflow actions (oldest at top, same order as from the API).">
-                {events.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No events recorded yet.</p>
-                ) : (
-                  <ul className="space-y-4">
-                    {events.map((e) => (
-                      <li key={e.id} className="flex gap-3">
-                        <div
-                          className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_0_3px_var(--background)]"
-                          aria-hidden
-                        />
-                        <div className="min-w-0 flex-1 border-b border-border/50 pb-4 last:border-0 last:pb-0">
-                          <p className="text-[11px] text-muted-foreground">{formatDateTimeHuman(e.created_at)}</p>
-                          <p className="text-sm font-medium text-foreground mt-0.5">{eventActionLabel(e.action)}</p>
-                          <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
-                            {e.user_id != null ? `Actor user #${e.user_id}` : "System / unspecified user"}
-                          </p>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </FvSection>
-            )}
+            ) : null}
           </div>
-        )}
-      </PlatformDrawer>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

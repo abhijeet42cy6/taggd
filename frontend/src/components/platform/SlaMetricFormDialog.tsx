@@ -1,19 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { queries, slaMetricsApi, type Project, type SlaMetricRecord } from "@/lib/api";
+import { adminApi, queries, slaMetricsApi, type Project, type SlaMetricRecord } from "@/lib/api";
 import {
   SearchableMetricOptionPicker,
-  SearchableProjectPicker,
   SearchableStringPicker,
   type MetricOption,
 } from "@/components/platform/searchable-pickers";
+import { UserPickerDropdown, type PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
+import "@/styles/new-contract-panel.css";
 
 export type SlaMetricOption = MetricOption;
 
@@ -24,6 +20,21 @@ type Props = {
   metricOptions: SlaMetricOption[];
   onSaved: () => void;
 };
+
+const SLA_TABS = [
+  { label: "Scope", num: "1" },
+  { label: "Definition", num: "2" },
+  { label: "Period snapshot", num: "3" },
+] as const;
+
+/** Metric type / nature — fixed vocabulary for SLA catalogue rows. */
+const SLA_METRIC_NATURE_OPTIONS = [
+  "Contractual",
+  "Non-Contratual",
+  "Penalty",
+  "Non-Penatly",
+  "Internal",
+] as const;
 
 const emptyForm = {
   projectId: "" as string | number,
@@ -36,6 +47,7 @@ const emptyForm = {
   formula: "",
   sourceSystem: "",
   reportingMonth: "",
+  fiscalYearLabel: "",
   score: "",
   ragStatus: "" as string,
 };
@@ -57,6 +69,15 @@ export function SlaMetricFormDialog({ open, onOpenChange, metricOptions, onSaved
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [slaTab, setSlaTab] = useState(0);
+  const [assignableUsers, setAssignableUsers] = useState<PlatformUserLite[]>([]);
+  const [slaPmUserId, setSlaPmUserId] = useState("");
+  const [projDdOpen, setProjDdOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState("");
+  const [projDdRect, setProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const projWrapRef = useRef<HTMLDivElement>(null);
+  const projBtnRef = useRef<HTMLButtonElement>(null);
+  const projPortalRef = useRef<HTMLDivElement>(null);
 
   const accountsInMetrics = useMemo(() => {
     const s = new Set<string>();
@@ -77,22 +98,256 @@ export function SlaMetricFormDialog({ open, onOpenChange, metricOptions, onSaved
     setMode("create");
     setEditId(null);
     setEditAccount("");
+    setSlaPmUserId("");
     setForm({ ...emptyForm, reportingMonth: defaultMonth() });
   }, []);
+
+  const selectedProject = useMemo(() => {
+    const pid = Number(form.projectId);
+    return Number.isFinite(pid) && pid > 0 ? projects.find((p) => p.id === pid) ?? null : null;
+  }, [form.projectId, projects]);
+
+  const filteredProjects = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = `prj-${p.id} ${p.account_name || p.filename || ""}`.toLowerCase();
+      return lab.includes(q);
+    });
+  }, [projects, projSearch]);
+
+  useLayoutEffect(() => {
+    if (!projDdOpen) {
+      setProjDdRect(null);
+      return;
+    }
+    const measure = () => {
+      const btn = projBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (projBtnRef.current) ro.observe(projBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [projDdOpen]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (projWrapRef.current?.contains(t) || projPortalRef.current?.contains(t)) return;
+      setProjDdOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, [open]);
+
+  const slaSection = (
+    icon: React.ReactNode,
+    colorCls: string,
+    title: string,
+    desc: string,
+    body: React.ReactNode,
+  ) => (
+    <div className="ncp-section" style={{ marginBottom: 12 }}>
+      <div className="ncp-section-header" style={{ cursor: "default" }}>
+        <div className={cn("ncp-section-icon", colorCls)}>{icon}</div>
+        <div>
+          <div className="ncp-section-label">{title}</div>
+          <div className="ncp-section-desc">{desc}</div>
+        </div>
+      </div>
+      <div className="ncp-section-body" style={{ maxHeight: "none" }}>
+        {body}
+      </div>
+    </div>
+  );
+
+  const projectPickerBlock = (
+    <div ref={projWrapRef} className="ncp-project-wrap" style={{ borderTop: "none" }}>
+      <button
+        ref={projBtnRef}
+        type="button"
+        disabled={loadingProjects}
+        className={cn("ncp-project-btn", selectedProject && "ncp-selected")}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!loadingProjects) setProjDdOpen((o) => !o);
+        }}
+      >
+        {selectedProject ? (
+          <>
+            <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)" }}>
+              PRJ-{selectedProject.id}
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)" }}>
+              {selectedProject.account_name || selectedProject.filename || "—"}
+            </span>
+          </>
+        ) : (
+          <>
+            <span>＋</span>
+            <span>{loadingProjects ? "Loading projects…" : "Search or select a project (PRJ-···)"}</span>
+          </>
+        )}
+        <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)" }}>▾</span>
+      </button>
+      {projDdOpen &&
+        projDdRect &&
+        createPortal(
+          <div
+            ref={projPortalRef}
+            className="new-contract-sheet"
+            style={{
+              position: "fixed",
+              top: projDdRect.top,
+              left: projDdRect.left,
+              width: projDdRect.width,
+              zIndex: 200,
+              pointerEvents: "auto",
+              minHeight: 0,
+              height: "auto",
+              display: "block",
+              background: "transparent",
+            }}
+          >
+            <div className="ncp-project-dd ncp-open ncp-project-dd--portal" onClick={(e) => e.stopPropagation()}>
+              <div className="ncp-project-search">
+                <span style={{ opacity: 0.5 }}>🔍</span>
+                <input
+                  type="search"
+                  placeholder="Search projects…"
+                  value={projSearch}
+                  onChange={(e) => setProjSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div
+                className="ncp-dd-scroll"
+                onWheel={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+              >
+                {filteredProjects.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={cn(
+                      "ncp-project-opt",
+                      Number(form.projectId) === p.id && "ncp-selected",
+                    )}
+                    onClick={() => {
+                      setForm((f) => ({ ...f, projectId: p.id }));
+                      setProjDdOpen(false);
+                      setProjSearch("");
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--ncp-mono)",
+                        fontSize: 11,
+                        color: "var(--ncp-accent)",
+                        minWidth: 52,
+                      }}
+                    >
+                      PRJ-{p.id}
+                    </span>
+                    <span>{p.account_name || p.filename || `Project ${p.id}`}</span>
+                  </button>
+                ))}
+                {filteredProjects.length === 0 && (
+                  <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--ncp-text-muted)" }}>
+                    {projects.length === 0 ? "No projects in scope." : `No projects match “${projSearch.trim()}”.`}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+
+  const periodDetailRows = (
+    <>
+      <div className="ncp-prop-row">
+        <div className="ncp-prop-label">Update date</div>
+        <input
+          type="date"
+          className="ncp-prop-input"
+          value={form.reportingMonth.length >= 7 ? `${form.reportingMonth.slice(0, 7)}-01` : ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            setForm((f) => ({ ...f, reportingMonth: v.length >= 7 ? v.slice(0, 7) : "" }));
+          }}
+        />
+      </div>
+      <div className="ncp-prop-row">
+        <div className="ncp-prop-label">Fiscal year</div>
+        <input
+          className="ncp-prop-input"
+          value={form.fiscalYearLabel}
+          onChange={(e) => setForm((f) => ({ ...f, fiscalYearLabel: e.target.value }))}
+          placeholder="e.g. FY 2025-26"
+        />
+      </div>
+      <div className="ncp-prop-row">
+        <div className="ncp-prop-label">Project manager</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <UserPickerDropdown
+            value={slaPmUserId}
+            onChange={setSlaPmUserId}
+            users={assignableUsers}
+            placeholder={Number(form.projectId) > 0 ? "— Optional —" : "Select a project first"}
+          />
+        </div>
+      </div>
+    </>
+  );
 
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setSlaTab(0);
     setMode("create");
     setEditId(null);
     setEditAccount("");
     setForm({ ...emptyForm, reportingMonth: defaultMonth() });
+    setSlaPmUserId("");
+    setProjDdOpen(false);
+    setProjSearch("");
     setLoadingProjects(true);
     queries
       .projects()
       .then(setProjects)
       .catch(() => setProjects([]))
       .finally(() => setLoadingProjects(false));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    Promise.all([
+      queries.taskAssignableUsers().catch(() => [] as PlatformUserLite[]),
+      adminApi.listUsers().catch(() => []),
+    ]).then(([a, b]) => {
+      const map = new Map<number, PlatformUserLite>();
+      const add = (u: { id: number; email: string; role: string }) =>
+        map.set(u.id, { id: u.id, email: u.email, role: u.role });
+      a.forEach(add);
+      b.forEach((u) => add({ id: u.id, email: u.email, role: u.role }));
+      if (!cancelled) setAssignableUsers([...map.values()]);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -107,6 +362,7 @@ export function SlaMetricFormDialog({ open, onOpenChange, metricOptions, onSaved
     slaMetricsApi
       .get(editId)
       .then((m: SlaMetricRecord) => {
+        setSlaPmUserId("");
         setForm({
           projectId: m.project_id,
           metricLabel: m.metric_label || "",
@@ -118,6 +374,7 @@ export function SlaMetricFormDialog({ open, onOpenChange, metricOptions, onSaved
           formula: m.formula || "",
           sourceSystem: m.source_system || "",
           reportingMonth: defaultMonth(),
+          fiscalYearLabel: "",
           score: "",
           ragStatus: "",
         });
@@ -151,20 +408,24 @@ export function SlaMetricFormDialog({ open, onOpenChange, metricOptions, onSaved
       rm.length >= 7 || form.score.trim().length > 0 || form.ragStatus.trim().length > 0;
     if (hasSnap && rm.length < 7) {
       setError("Set reporting month for the period snapshot when you enter score or RAG status.");
+      setSlaTab(2);
       return;
     }
     if (mode === "create") {
       const pid = Number(form.projectId);
       if (!pid || Number.isNaN(pid)) {
         setError("Select a client / project from the list.");
+        setSlaTab(0);
         return;
       }
       if (!projects.some((p) => p.id === pid)) {
         setError("Choose a valid client from the list.");
+        setSlaTab(0);
         return;
       }
       if (!form.metricLabel.trim()) {
         setError("Performance measure (label) is required.");
+        setSlaTab(0);
         return;
       }
       setSaving(true);
@@ -195,10 +456,12 @@ export function SlaMetricFormDialog({ open, onOpenChange, metricOptions, onSaved
 
     if (!editAccount.trim()) {
       setError("Select a client first.");
+      setSlaTab(0);
       return;
     }
     if (!editId) {
       setError("Select an existing KPI to update.");
+      setSlaTab(0);
       return;
     }
     setSaving(true);
@@ -224,272 +487,412 @@ export function SlaMetricFormDialog({ open, onOpenChange, metricOptions, onSaved
     }
   };
 
+  const scopeBlockedCreate =
+    mode === "create" &&
+    (!form.projectId || !projects.some((p) => p.id === Number(form.projectId)));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
         className={cn(
-          "platform-dialog platform-dialog--xl",
-          "!fixed !left-1/2 !top-[4vh] !z-50 !max-h-[92vh] !h-[92vh] !translate-x-[-50%] !translate-y-0 !gap-0",
-          "flex flex-col overflow-hidden",
+          "flex h-full max-h-[100dvh] flex-col gap-0 border-l p-0",
+          "data-[side=right]:w-full data-[side=right]:max-w-[calc(100vw-1rem)]",
+          "sm:data-[side=right]:w-[min(calc(100vw-2rem),52rem)] sm:data-[side=right]:max-w-[min(calc(100vw-2rem),52rem)]",
+          "bg-[#f7f6f3] shadow-xl",
         )}
       >
-        <DialogHeader className="platform-dialog__header shrink-0 border-b border-border/60 px-5 py-4">
-          <div className="platform-dialog__eyebrow">SLA · Metric definition</div>
-          <DialogTitle className="platform-dialog__title">Add or update SLA metric</DialogTitle>
-          <DialogDescription className="platform-dialog__desc">
-            Choose a client, then enter the performance measure and optional catalogue fields. Add a month snapshot
-            (reporting month, score, Met / Not Met) to write or upsert period data in the database.
-          </DialogDescription>
-        </DialogHeader>
+        <form
+          onSubmit={handleSubmit}
+          className="new-contract-sheet flex min-h-0 flex-1 flex-col"
+        >
+          <div className="ncp-scroll min-h-0 flex-1">
+            <div className="ncp-page">
+              <div className="ncp-header">
+                <div style={{ minWidth: 0 }}>
+                  <div className="ncp-breadcrumb">
+                    <span>Insights</span>
+                    <span className="ncp-breadcrumb-sep">›</span>
+                    <span>SLA</span>
+                    <span className="ncp-breadcrumb-sep">›</span>
+                    <span>Metric</span>
+                  </div>
+                  <h1 className="ncp-h1">Add or update SLA metric</h1>
+                  <p className="ncp-subtitle" style={{ marginTop: 4 }}>
+                    Choose a client, then enter the performance measure and optional catalogue fields. Add a month
+                    snapshot (reporting month, score, Met / Not Met) to write or upsert period data in the database.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ncp-close-btn"
+                  aria-label="Close"
+                  onClick={() => onOpenChange(false)}
+                >
+                  ✕
+                </button>
+              </div>
 
-        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-          <div className="platform-dialog__body platform-dialog__body--tall min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-            <div className="flex flex-wrap gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-xs">
-                <input
-                  type="radio"
-                  name="sla-m-mode"
-                  checked={mode === "create"}
-                  onChange={() => {
+              <div className="ncp-flow-toggle-row">
+                <button
+                  type="button"
+                  className={cn("ncp-flow-pill", mode === "create" && "ncp-flow-pill--active")}
+                  onClick={() => {
                     setMode("create");
                     setEditId(null);
                     setEditAccount("");
                     resetForCreate();
                   }}
-                />
-                Create new metric
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs">
-                <input
-                  type="radio"
-                  name="sla-m-mode"
-                  checked={mode === "edit"}
-                  onChange={() => {
+                >
+                  Create new metric
+                </button>
+                <button
+                  type="button"
+                  className={cn("ncp-flow-pill", mode === "edit" && "ncp-flow-pill--active")}
+                  onClick={() => {
                     setMode("edit");
                     setEditId(null);
                     setEditAccount("");
+                    setSlaPmUserId("");
                     setForm({ ...emptyForm, reportingMonth: defaultMonth() });
                   }}
                   disabled={metricOptions.length === 0}
-                />
-                Update existing metric
-                {metricOptions.length === 0 ? (
-                  <span className="text-muted-foreground">(no metrics loaded yet)</span>
-                ) : null}
-              </label>
-            </div>
+                >
+                  Update existing
+                  {metricOptions.length === 0 ? " (no metrics)" : ""}
+                </button>
+              </div>
 
-            {mode === "edit" && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-1 md:min-w-0">
-                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Client *
-                  </label>
-                  <SearchableStringPicker
-                    items={accountsInMetrics}
-                    value={editAccount}
-                    onChange={(acc) => {
-                      setEditAccount(acc);
-                      setEditId(null);
-                    }}
-                    placeholder="Type to search clients…"
-                    emptyHint={accountsInMetrics.length === 0 ? "No clients in SLA data yet." : undefined}
-                  />
-                </div>
-                <div className="space-y-1 md:min-w-0">
-                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Existing KPI *
-                  </label>
-                  <SearchableMetricOptionPicker
-                    options={metricsForAccount}
-                    metricId={editId}
-                    onMetricIdChange={setEditId}
-                    disabled={!editAccount}
-                  />
-                  {!editAccount ? (
-                    <p className="text-muted-foreground mt-1 text-[10px]">Choose a client first.</p>
-                  ) : metricsForAccount.length === 0 ? (
-                    <p className="text-muted-foreground mt-1 text-[10px]">No KPIs for this client.</p>
-                  ) : null}
-                </div>
-              </div>
-            )}
-
-            {mode === "create" && (
-              <div className="space-y-1">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Client / project *
-                </label>
-                <SearchableProjectPicker
-                  projects={projects}
-                  loading={loadingProjects}
-                  projectId={form.projectId === "" ? "" : Number(form.projectId)}
-                  onProjectIdChange={(id) => setForm((f) => ({ ...f, projectId: id === "" ? "" : id }))}
-                />
-                <p className="text-muted-foreground text-[10px]">
-                  Type to filter the list, then click a row to select the client.
-                </p>
-              </div>
-            )}
-
-            {mode === "edit" && loadingMetric && (
-              <p className="text-xs text-muted-foreground">Loading metric…</p>
-            )}
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Performance measure (label) *
-                </label>
-                <input
-                  className="platform-search w-full max-w-none"
-                  value={form.metricLabel}
-                  onChange={(e) => setField("metricLabel", e.target.value)}
-                  placeholder="e.g. Time to Hire"
-                  required
-                  disabled={mode === "edit" && loadingMetric}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Metric group
-                </label>
-                <input
-                  className="platform-search w-full max-w-none"
-                  value={form.metricGroup}
-                  onChange={(e) => setField("metricGroup", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Metric type / nature
-                </label>
-                <input
-                  className="platform-search w-full max-w-none"
-                  value={form.metricNature}
-                  onChange={(e) => setField("metricNature", e.target.value)}
-                  placeholder="e.g. Non-Penalty"
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Target
-                </label>
-                <input
-                  className="platform-search w-full max-w-none"
-                  value={form.targetThreshold}
-                  onChange={(e) => setField("targetThreshold", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Definition
-                </label>
-                <textarea
-                  className="platform-search min-h-[72px] w-full max-w-none resize-y font-sans"
-                  value={form.definition}
-                  onChange={(e) => setField("definition", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Calculation method
-                </label>
-                <textarea
-                  className="platform-search min-h-[56px] w-full max-w-none resize-y font-sans"
-                  value={form.calculationMethod}
-                  onChange={(e) => setField("calculationMethod", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Formula
-                </label>
-                <textarea
-                  className="platform-search min-h-[56px] w-full max-w-none resize-y font-sans"
-                  value={form.formula}
-                  onChange={(e) => setField("formula", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Measurement system
-                </label>
-                <input
-                  className="platform-search w-full max-w-none"
-                  value={form.sourceSystem}
-                  onChange={(e) => setField("sourceSystem", e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="border-t border-border/60 pt-4">
-              <div className="platform-dialog__section-label mb-2">Period snapshot (optional)</div>
-              <p className="text-muted-foreground mb-3 text-[11px] leading-relaxed">
-                Fills or updates one row in SLA performance for the selected reporting month. Leave all empty to only
-                save the metric definition.
-              </p>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Reporting month
-                  </label>
-                  <input
-                    type="month"
-                    className="platform-search w-full max-w-none"
-                    value={form.reportingMonth}
-                    onChange={(e) => setField("reportingMonth", e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Score</label>
-                  <input
-                    className="platform-search w-full max-w-none"
-                    value={form.score}
-                    onChange={(e) => setField("score", e.target.value)}
-                    placeholder="e.g. 90"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">RAG status</label>
-                  <select
-                    className="platform-search w-full max-w-none"
-                    value={form.ragStatus}
-                    onChange={(e) => setField("ragStatus", e.target.value)}
+              <div className="ncp-steps" role="tablist" style={{ marginBottom: 18 }}>
+                {SLA_TABS.map(({ label, num }, i) => (
+                  <button
+                    key={label}
+                    type="button"
+                    role="tab"
+                    aria-selected={slaTab === i}
+                    className={cn(
+                      "ncp-step",
+                      slaTab === i && "ncp-active",
+                      slaTab > i && "ncp-done",
+                    )}
+                    onClick={() => setSlaTab(i)}
                   >
-                    <option value="">—</option>
-                    <option value="Met">Met</option>
-                    <option value="Not Met">Not Met</option>
-                    <option value="NOT MET">NOT MET</option>
-                    <option value="Not Reported">Not Reported</option>
-                  </select>
+                    <span className="ncp-step-num">{slaTab > i ? "✓" : num}</span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab 0 — Scope */}
+              <div className={cn("ncp-panel", slaTab === 0 && "ncp-panel-active")}>
+                {mode === "create" && scopeBlockedCreate ? (
+                  <p className="ncp-hint" style={{ color: "var(--ncp-accent)", marginBottom: 12 }}>
+                    <span aria-hidden>●</span> Client / project selection is required to continue.
+                  </p>
+                ) : null}
+                {mode === "edit" && !editAccount ? (
+                  <p className="ncp-hint" style={{ color: "var(--ncp-accent)", marginBottom: 12 }}>
+                    <span aria-hidden>●</span> Choose a client and KPI to load the catalogue fields.
+                  </p>
+                ) : null}
+
+                {mode === "edit" &&
+                  slaSection(
+                    "◇",
+                    "ncp-orange",
+                    "Client & KPI",
+                    "Choose a client and existing KPI to update catalogue fields.",
+                    <>
+                      <div className="ncp-tag-grid" style={{ borderTop: "none" }}>
+                        <div>
+                          <span className="ncp-micro-label">Client *</span>
+                          <SearchableStringPicker
+                            items={accountsInMetrics}
+                            value={editAccount}
+                            onChange={(acc) => {
+                              setEditAccount(acc);
+                              setEditId(null);
+                            }}
+                            placeholder="Type to search clients…"
+                            emptyHint={accountsInMetrics.length === 0 ? "No clients in SLA data yet." : undefined}
+                          />
+                        </div>
+                        <div>
+                          <span className="ncp-micro-label">Existing KPI *</span>
+                          <SearchableMetricOptionPicker
+                            options={metricsForAccount}
+                            metricId={editId}
+                            onMetricIdChange={setEditId}
+                            disabled={!editAccount}
+                          />
+                          {!editAccount ? (
+                            <p className="ncp-hint" style={{ marginTop: 6 }}>
+                              Choose a client first.
+                            </p>
+                          ) : metricsForAccount.length === 0 ? (
+                            <p className="ncp-hint" style={{ marginTop: 6 }}>
+                              No KPIs for this client.
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                      {periodDetailRows}
+                    </>,
+                  )}
+
+                {mode === "create" &&
+                  slaSection(
+                    "◇",
+                    "ncp-orange",
+                    "Client & project",
+                    "Linked project and reporting period",
+                    <>
+                      {projectPickerBlock}
+                      {periodDetailRows}
+                    </>,
+                  )}
+
+                {mode === "edit" && loadingMetric && (
+                  <p className="ncp-hint" style={{ marginBottom: 12 }}>
+                    Loading metric…
+                  </p>
+                )}
+
+                <div className="ncp-stack-card">
+                  <div className="ncp-stack-card-head">
+                    <span className="ncp-stack-card-title">Metric identity</span>
+                  </div>
+                  <div className="ncp-section-body" style={{ padding: "0 0 4px", maxHeight: "none" }}>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Performance measure (label) *</div>
+                      <input
+                        className="ncp-prop-input"
+                        value={form.metricLabel}
+                        onChange={(e) => setField("metricLabel", e.target.value)}
+                        placeholder="e.g. Time to Hire"
+                        required
+                        disabled={mode === "edit" && loadingMetric}
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Metric group</div>
+                      <input
+                        className="ncp-prop-input"
+                        value={form.metricGroup}
+                        onChange={(e) => setField("metricGroup", e.target.value)}
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Metric type / nature</div>
+                      <select
+                        className="ncp-prop-input"
+                        value={form.metricNature}
+                        onChange={(e) => setField("metricNature", e.target.value)}
+                        disabled={mode === "edit" && loadingMetric}
+                      >
+                        <option value="">— Select —</option>
+                        {SLA_METRIC_NATURE_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                        {form.metricNature &&
+                        !SLA_METRIC_NATURE_OPTIONS.includes(form.metricNature as (typeof SLA_METRIC_NATURE_OPTIONS)[number]) ? (
+                          <option value={form.metricNature}>{form.metricNature} (legacy)</option>
+                        ) : null}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {error ? (
-              <div className="platform-dialog__alert" role="alert">
-                {error}
+              {/* Tab 1 — Definition */}
+              <div className={cn("ncp-panel", slaTab === 1 && "ncp-panel-active")}>
+                <div className="ncp-stack-card">
+                  <div className="ncp-stack-card-head">
+                    <div>
+                      <div className="ncp-stack-card-title">Threshold &amp; documentation</div>
+                      <div style={{ fontSize: 12, color: "var(--ncp-text-muted)" }}>
+                        Target, narrative definition, and how the metric is calculated.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="ncp-section-body" style={{ padding: "0 0 4px", maxHeight: "none" }}>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Target</div>
+                      <input
+                        className="ncp-prop-input"
+                        value={form.targetThreshold}
+                        onChange={(e) => setField("targetThreshold", e.target.value)}
+                        disabled={mode === "edit" && loadingMetric}
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Definition</div>
+                      <textarea
+                        className="ncp-prop-input"
+                        value={form.definition}
+                        onChange={(e) => setField("definition", e.target.value)}
+                        rows={3}
+                        disabled={mode === "edit" && loadingMetric}
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Calculation method</div>
+                      <textarea
+                        className="ncp-prop-input"
+                        value={form.calculationMethod}
+                        onChange={(e) => setField("calculationMethod", e.target.value)}
+                        rows={2}
+                        disabled={mode === "edit" && loadingMetric}
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Formula</div>
+                      <textarea
+                        className="ncp-prop-input"
+                        value={form.formula}
+                        onChange={(e) => setField("formula", e.target.value)}
+                        rows={2}
+                        disabled={mode === "edit" && loadingMetric}
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Measurement system</div>
+                      <input
+                        className="ncp-prop-input"
+                        value={form.sourceSystem}
+                        onChange={(e) => setField("sourceSystem", e.target.value)}
+                        disabled={mode === "edit" && loadingMetric}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-            ) : null}
+
+              {/* Tab 2 — Period snapshot */}
+              <div className={cn("ncp-panel", slaTab === 2 && "ncp-panel-active")}>
+                <div className="ncp-stack-card">
+                  <div className="ncp-stack-card-head">
+                    <div>
+                      <div className="ncp-stack-card-title">Period snapshot (optional)</div>
+                      <div style={{ fontSize: 12, color: "var(--ncp-text-muted)" }}>
+                        Fills or updates one row in SLA performance for the reporting month. Leave empty to only save the
+                        metric definition.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="ncp-section-body" style={{ padding: "0 0 4px", maxHeight: "none" }}>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Reporting month</div>
+                      <input
+                        type="month"
+                        className="ncp-prop-input"
+                        value={form.reportingMonth}
+                        onChange={(e) => setField("reportingMonth", e.target.value)}
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Score</div>
+                      <input
+                        className="ncp-prop-input"
+                        value={form.score}
+                        onChange={(e) => setField("score", e.target.value)}
+                        placeholder="e.g. 90"
+                        inputMode="decimal"
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">RAG status</div>
+                      <select
+                        className="ncp-prop-input"
+                        value={form.ragStatus}
+                        onChange={(e) => setField("ragStatus", e.target.value)}
+                      >
+                        <option value="">—</option>
+                        <option value="Met">Met</option>
+                        <option value="Not Met">Not Met</option>
+                        <option value="NOT MET">NOT MET</option>
+                        <option value="Not Reported">Not Reported</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {error ? (
+                <div
+                  style={{
+                    margin: "12px 0 0",
+                    padding: "10px 14px",
+                    background: "rgba(239,68,68,0.07)",
+                    border: "1px solid rgba(239,68,68,0.25)",
+                    borderRadius: "var(--ncp-radius)",
+                    fontSize: 12,
+                    color: "#b91c1c",
+                  }}
+                  role="alert"
+                >
+                  {error}
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          <div className="platform-dialog__footer mt-0 shrink-0 flex flex-row justify-end gap-2 border-t border-border/60">
-            <button
-              type="button"
-              className="platform-dialog__btn"
-              onClick={() => onOpenChange(false)}
-              disabled={saving}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="platform-dialog__btn platform-dialog__btn--primary" disabled={saving}>
-              {saving ? "Saving…" : mode === "create" ? "Create metric" : "Save changes"}
-            </button>
+          <div className="ncp-footer">
+            <span style={{ fontSize: 12, color: "var(--ncp-text-muted)" }}>Esc to cancel</span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="ncp-btn ncp-btn-ghost"
+                onClick={() => onOpenChange(false)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              {slaTab > 0 ? (
+                <button
+                  type="button"
+                  className="ncp-btn ncp-btn-ghost"
+                  onClick={() => setSlaTab((t) => t - 1)}
+                  disabled={saving}
+                >
+                  ← Back
+                </button>
+              ) : null}
+              {slaTab < SLA_TABS.length - 1 ? (
+                <button
+                  type="button"
+                  className="ncp-btn ncp-btn-secondary"
+                  onClick={() => setSlaTab((t) => t + 1)}
+                  disabled={
+                    saving ||
+                    (slaTab === 0 &&
+                      mode === "create" &&
+                      (!form.projectId || !projects.some((p) => p.id === Number(form.projectId)))) ||
+                    (slaTab === 0 && mode === "edit" && (!editAccount || !editId || loadingMetric))
+                  }
+                >
+                  Next →
+                </button>
+              ) : null}
+              <button
+                type="submit"
+                className="ncp-btn ncp-btn-primary"
+                disabled={
+                  saving ||
+                  (mode === "create" &&
+                    (!form.projectId || !projects.some((p) => p.id === Number(form.projectId)))) ||
+                  (mode === "edit" && (!editAccount || !editId || loadingMetric))
+                }
+              >
+                {saving ? "Saving…" : mode === "create" ? "Create metric" : "Save changes"}
+              </button>
+            </div>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

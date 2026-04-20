@@ -8,6 +8,7 @@ import "@/styles/new-contract-panel.css";
 
 /** Matches backend `auth/profile.py` VERTICAL_KEYS — order is UI-only. */
 export const VERTICAL_MODULES: { key: string; label: string }[] = [
+  { key: "executive_dashboard", label: "Executive Overview (dashboard)" },
   { key: "finance", label: "Finance" },
   { key: "sla", label: "SLA" },
   { key: "wfm", label: "WFM" },
@@ -353,6 +354,35 @@ function MultiProjectPicker({
   );
 }
 
+function avatarInitials(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local.split(/[._\-+]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return local.slice(0, 2).toUpperCase();
+}
+
+function displayName(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  return local
+    .split(/[._\-+]+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+const ROLE_PILL_VARIANTS: Record<string, string> = {
+  platform_admin: "admin",
+  admin: "admin",
+  executive: "exec",
+  operations: "ops",
+  project_head: "ph",
+  manager: "ph",
+  recruiter: "recruiter",
+  client_user: "client",
+};
+function rolePillVariant(role: string): string {
+  return ROLE_PILL_VARIANTS[(role || "").toLowerCase()] ?? "default";
+}
+
 export function AdminUsers() {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -585,44 +615,189 @@ export function AdminUsers() {
     return m ? `${m.email} (#${managerId})` : `#${managerId}`;
   }
 
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | "active" | "inactive">("");
+  const [sortBy, setSortBy] = useState<"email" | "role">("email");
+
+  const filteredUsers = useMemo(() => {
+    let list = users;
+    // text search
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (u) =>
+          u.email.toLowerCase().includes(q) ||
+          u.role.toLowerCase().includes(q) ||
+          effectiveRoleLabel(u.role).toLowerCase().includes(q) ||
+          String(u.id).includes(q),
+      );
+    }
+    // role filter
+    if (roleFilter) {
+      list = list.filter((u) =>
+        rolePillVariant(u.role) === roleFilter ||
+        u.role.toLowerCase() === roleFilter.toLowerCase(),
+      );
+    }
+    // status filter
+    if (statusFilter === "active") list = list.filter((u) => u.is_active);
+    else if (statusFilter === "inactive") list = list.filter((u) => !u.is_active);
+    // sort
+    if (sortBy === "role") list = [...list].sort((a, b) => a.role.localeCompare(b.role));
+    return list;
+  }, [users, search, roleFilter, statusFilter, sortBy]);
+
+  const groupedUsers = useMemo(() => {
+    const sorted = [...filteredUsers].sort((a, b) =>
+      sortBy === "role" ? a.role.localeCompare(b.role) : a.email.localeCompare(b.email),
+    );
+    if (sortBy === "role") {
+      const groups = new Map<string, AdminUserRow[]>();
+      for (const u of sorted) {
+        const key = effectiveRoleLabel(u.role);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(u);
+      }
+      return groups;
+    }
+    const groups = new Map<string, AdminUserRow[]>();
+    for (const u of sorted) {
+      const letter = u.email[0]?.toUpperCase() ?? "#";
+      if (!groups.has(letter)) groups.set(letter, []);
+      groups.get(letter)!.push(u);
+    }
+    return groups;
+  }, [filteredUsers, sortBy]);
+
+  const hasFilters = !!(search || roleFilter || statusFilter);
+
+  const activeCount  = useMemo(() => users.filter((u) => u.is_active).length, [users]);
+  const inactiveCount = useMemo(() => users.filter((u) => !u.is_active).length, [users]);
+
   return (
-    <div style={{ padding: "0 4px 32px" }}>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 700, margin: "0 0 6px" }}>
-          Users & access
-        </h1>
-        <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", maxWidth: 720, lineHeight: 1.5 }}>
-          Create accounts, assign{" "}
-          <strong>roles</strong> (including <strong>client portal</strong> read-only logins),{" "}
-          <strong>project assignments</strong>, optional <strong>reports-to</strong> hierarchy, and for{" "}
-          <strong>operations</strong>, <strong>executive</strong>, <strong>project head</strong>,{" "}
-          <strong>recruiter</strong>, and <strong>client portal</strong> users a <strong>vertical allow-list</strong>{" "}
-          (which app sections and APIs they may use). Leave all modules checked or clear the saved list only when you
-          intend full access (null in DB). Client portal accounts cannot modify data; gated APIs use the same keys.
-        </p>
+    <div style={{ padding: "0 4px 48px" }}>
+      {/* ── Page header ── */}
+      <div className="au-header">
+        <div className="au-header-left">
+          <h1 className="au-page-title">Users &amp; access</h1>
+          <p className="au-page-sub">
+            Manage platform logins, roles, module access and project assignments.
+          </p>
+        </div>
+        <div className="au-header-actions">
+          <div className="au-search-wrap">
+            <span className="au-search-icon" aria-hidden>🔍</span>
+            <input
+              className="au-search-input"
+              type="search"
+              placeholder="Search members…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="au-add-btn"
+            disabled={busy}
+            onClick={openCreateSheet}
+          >
+            + Add user
+          </button>
+        </div>
       </div>
 
-      {loadError ? <div style={{ color: "var(--red)", marginBottom: 12 }}>{loadError}</div> : null}
+      {/* ── Filter bar ── */}
+      <div className="dashboard-filter-bar au-filter-bar">
+        {/* Role */}
+        <div className="dashboard-filter-field">
+          <span className="dashboard-filter-label">Role</span>
+          <select
+            className="dashboard-filter-select"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+          >
+            <option value="">All roles</option>
+            <option value="admin">Platform admin</option>
+            <option value="exec">Executive</option>
+            <option value="ph">Project head</option>
+            <option value="ops">Operations</option>
+            <option value="recruiter">Recruiter</option>
+            <option value="client">Client portal</option>
+          </select>
+        </div>
 
-      <div
-        style={{
-          marginBottom: 28,
-          padding: "14px 16px",
-          borderRadius: 12,
-          border: "1px solid var(--border)",
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 14,
-        }}
-      >
-        <button type="button" className="platform-chip active" disabled={busy} style={{ cursor: "pointer" }} onClick={openCreateSheet}>
-          Add user
-        </button>
-        <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", maxWidth: 560, lineHeight: 1.5 }}>
-          Opens a side panel with the same step-by-step layout as contract creation: credentials, role, module access, then review before creating the account.
-        </p>
+        {/* Status */}
+        <div className="dashboard-filter-field">
+          <span className="dashboard-filter-label">Status</span>
+          <select
+            className="dashboard-filter-select"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as "" | "active" | "inactive")}
+          >
+            <option value="">All ({users.length})</option>
+            <option value="active">Active ({activeCount})</option>
+            <option value="inactive">Inactive ({inactiveCount})</option>
+          </select>
+        </div>
+
+        {/* Sort */}
+        <div className="dashboard-filter-field">
+          <span className="dashboard-filter-label">Sort by</span>
+          <select
+            className="dashboard-filter-select"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as "email" | "role")}
+          >
+            <option value="email">Email A–Z</option>
+            <option value="role">Role</option>
+          </select>
+        </div>
+
+        {/* Active chip-strip */}
+        <div className="au-filter-status-chips">
+          <button
+            type="button"
+            className={cn("au-status-chip", !statusFilter && "au-status-chip--active")}
+            onClick={() => setStatusFilter("")}
+          >
+            All
+            <span className="au-status-chip__count">{users.length}</span>
+          </button>
+          <button
+            type="button"
+            className={cn("au-status-chip au-status-chip--on", statusFilter === "active" && "au-status-chip--active")}
+            onClick={() => setStatusFilter(statusFilter === "active" ? "" : "active")}
+          >
+            <span className="au-status-dot au-status-dot--on" />
+            Active
+            <span className="au-status-chip__count">{activeCount}</span>
+          </button>
+          <button
+            type="button"
+            className={cn("au-status-chip au-status-chip--off", statusFilter === "inactive" && "au-status-chip--active")}
+            onClick={() => setStatusFilter(statusFilter === "inactive" ? "" : "inactive")}
+          >
+            <span className="au-status-dot au-status-dot--off" />
+            Inactive
+            <span className="au-status-chip__count">{inactiveCount}</span>
+          </button>
+        </div>
+
+        {hasFilters ? (
+          <button
+            type="button"
+            className="dashboard-filter-reset"
+            onClick={() => { setSearch(""); setRoleFilter(""); setStatusFilter(""); }}
+          >
+            Reset filters
+          </button>
+        ) : null}
       </div>
+
+      {loadError ? (
+        <div style={{ color: "var(--red)", marginBottom: 12, fontSize: 12 }}>{loadError}</div>
+      ) : null}
 
       <Sheet open={createSheetOpen} onOpenChange={(o) => { if (!o) { setCreateSheetOpen(false); resetCreateSheet(); } }}>
         <SheetContent
@@ -877,55 +1052,60 @@ export function AdminUsers() {
         </SheetContent>
       </Sheet>
 
-      <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid var(--border)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 920 }}>
-          <thead>
-            <tr style={{ textAlign: "left", background: "color-mix(in srgb, var(--accent) 8%, transparent)" }}>
-              <th style={{ padding: "10px 12px" }}>ID</th>
-              <th style={{ padding: "10px 12px" }}>Email</th>
-              <th style={{ padding: "10px 12px" }}>Role (stored)</th>
-              <th style={{ padding: "10px 12px" }}>Effective</th>
-              <th style={{ padding: "10px 12px" }}>Active</th>
-              <th style={{ padding: "10px 12px" }}>Reports to</th>
-              <th style={{ padding: "10px 12px" }}>Verticals</th>
-              <th style={{ padding: "10px 12px" }}>Projects</th>
-              <th style={{ padding: "10px 12px" }} />
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id} style={{ borderTop: "1px solid var(--border)" }}>
-                <td style={{ padding: "10px 12px", fontFamily: "'DM Mono',monospace" }}>{u.id}</td>
-                <td style={{ padding: "10px 12px" }}>{u.email}</td>
-                <td style={{ padding: "10px 12px", fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{u.role}</td>
-                <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>{effectiveRoleLabel(u.role)}</td>
-                <td style={{ padding: "10px 12px" }}>{u.is_active ? "yes" : "no"}</td>
-                <td style={{ padding: "10px 12px", fontSize: 11, maxWidth: 180 }} title={managerEmail(u.manager_user_id ?? undefined)}>
-                  {managerEmail(u.manager_user_id ?? undefined)}
-                </td>
-                <td style={{ padding: "10px 12px", fontSize: 11, color: "var(--text-muted)", maxWidth: 200 }} title={verticalSummary(u.vertical_access)}>
-                  {verticalSummary(u.vertical_access)}
-                </td>
-                <td style={{ padding: "10px 12px", fontFamily: "'DM Mono',monospace", fontSize: 11 }}>
-                  {u.project_ids.length ? u.project_ids.join(", ") : "—"}
-                </td>
-                <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+      {/* ── Grouped contact list ── */}
+      <div className="au-list">
+        {groupedUsers.size === 0 && !loadError ? (
+          <div className="au-empty">No users found.</div>
+        ) : null}
+        {[...groupedUsers.entries()].map(([letter, rows]) => (
+          <div key={letter} className="au-group">
+            <div className="au-group-letter">{letter}</div>
+            {rows.map((u) => (
+              <div key={u.id} className={cn("au-row", !u.is_active && "au-row--inactive")}>
+                <div className="au-avatar" data-role={u.role}>
+                  {avatarInitials(u.email)}
+                </div>
+                <div className="au-identity">
+                  <span className="au-name">{displayName(u.email)}</span>
+                  <span className="au-email">{u.email}</span>
+                </div>
+                <div className="au-role-col">
+                  <span className={cn("au-role-pill", `au-role-pill--${rolePillVariant(u.role)}`)}>
+                    {effectiveRoleLabel(u.role)}
+                  </span>
+                </div>
+                <div className="au-reports-col">
+                  {u.manager_user_id != null ? (
+                    <span className="au-reports-to">
+                      ↑ {managerEmail(u.manager_user_id)}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="au-actions">
+                  <label className="au-toggle" title={u.is_active ? "Disable account" : "Enable account"}>
+                    <input
+                      type="checkbox"
+                      checked={u.is_active}
+                      onChange={() => void toggleActive(u)}
+                      disabled={busy}
+                    />
+                    <span className="au-toggle-track" />
+                  </label>
                   <button
                     type="button"
-                    className="platform-chip"
-                    style={{ cursor: "pointer", marginRight: 6 }}
+                    className="au-edit-btn"
+                    aria-label="Edit access"
                     onClick={() => openAccessModal(u)}
                   >
-                    Edit access
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden>
+                      <path d="M11.5 1.5a1.414 1.414 0 0 1 2 2l-9 9-2.5.5.5-2.5 9-9Z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
                   </button>
-                  <button type="button" className="platform-chip" style={{ cursor: "pointer", marginRight: 6 }} onClick={() => void toggleActive(u)}>
-                    {u.is_active ? "Disable" : "Enable"}
-                  </button>
-                </td>
-              </tr>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        ))}
       </div>
 
       <Sheet open={!!accessModalUser} onOpenChange={(o) => { if (!o) closeAccessModal(); }}>

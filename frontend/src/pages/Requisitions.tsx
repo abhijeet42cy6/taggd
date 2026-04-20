@@ -126,15 +126,6 @@ export function Requisitions() {
   // Department donut from current page's records (updates as user pages/searches)
   const deptData = useMemo(() => buildDeptData(records), [records]);
 
-  const createReqProjects = useMemo(() => {
-    return projects.map((p) => {
-      const fn = p.filename || "Project";
-      const shortFn = fn.length > 40 ? `${fn.slice(0, 37)}…` : fn;
-      const clientName = (p.account_name && String(p.account_name).trim()) || `Project ${p.id}`;
-      return { id: p.id, label: `${clientName} · PRJ-${p.id} · ${shortFn}` };
-    });
-  }, [projects]);
-
   const onRequisitionSaved = useCallback((updated: RecordRow) => {
     setSelected(updated);
     setResult((prev) => {
@@ -246,7 +237,7 @@ export function Requisitions() {
         title={`Requisition Master Table — ${totalRecords.toLocaleString()} records`}
         action="Export"
         headerRight={
-          createReqProjects.length > 0 ? (
+          projects.length > 0 ? (
             <button
               type="button"
               className="req-drawer-btn-edit"
@@ -350,7 +341,7 @@ export function Requisitions() {
       <RequisitionCreateDrawer
         open={addReqOpen}
         onClose={() => setAddReqOpen(false)}
-        projects={createReqProjects}
+        projects={projects}
         onCreated={(r) => {
           setAddReqOpen(false);
           setSelected(r);

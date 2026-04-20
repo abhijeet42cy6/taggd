@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { queries, type Project, type TaskRow } from "@/lib/api";
@@ -20,7 +21,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import "@/styles/new-contract-panel.css";
+import "@/styles/tasks-page.css";
 import { Check, Search } from "lucide-react";
 
 function getApiErrorMessage(e: unknown): string {
@@ -68,6 +72,22 @@ const CATEGORIES = [
   { value: "adhoc", label: "Ad hoc" },
 ];
 
+/** Four named priority levels stored as `p0`–`p3` on the task record. */
+const TASK_PRIORITY_LEVELS = [
+  { value: "p0", label: "P0 · Critical" },
+  { value: "p1", label: "P1 · High" },
+  { value: "p2", label: "P2 · Normal" },
+  { value: "p3", label: "P3 · Low" },
+] as const;
+
+function taskPrioritySelectValue(priority: string): string {
+  const raw = priority.trim();
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (["p0", "p1", "p2", "p3"].includes(lower)) return lower;
+  return raw;
+}
+
 function localDatetimeInput(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -109,6 +129,184 @@ function avatarHue(email: string): number {
 function formatRoleLabel(role: string): string {
   if (!role) return "—";
   return role.replace(/_/g, " ");
+}
+
+function taskSheetSection(icon: string, iconCls: string, title: string, subtitle: string, body: React.ReactNode) {
+  return (
+    <div className="ncp-section">
+      <div className="ncp-section-header" style={{ cursor: "default" }}>
+        <div className={cn("ncp-section-icon", iconCls)}>{icon}</div>
+        <div className="ncp-section-title">
+          <div className="ncp-section-name">{title}</div>
+          <div className="ncp-section-sub">{subtitle}</div>
+        </div>
+      </div>
+      <div className="ncp-section-body">{body}</div>
+    </div>
+  );
+}
+
+function TaskSheetProjectPicker({
+  projects,
+  projectId,
+  onProjectChange,
+}: {
+  projects: Project[];
+  projectId: string;
+  onProjectChange: (pid: string) => void;
+}) {
+  const [projDdOpen, setProjDdOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState("");
+  const [projDdRect, setProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const projWrapRef = useRef<HTMLDivElement>(null);
+  const projBtnRef = useRef<HTMLButtonElement>(null);
+  const projPortalRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!projDdOpen) {
+      setProjDdRect(null);
+      return;
+    }
+    const measure = () => {
+      const btn = projBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (projBtnRef.current) ro.observe(projBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [projDdOpen]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (projWrapRef.current?.contains(t) || projPortalRef.current?.contains(t)) return;
+      setProjDdOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
+
+  const filteredProjects = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = `prj-${p.id} ${p.account_name || p.engagement_name || p.filename || ""}`.toLowerCase();
+      return lab.includes(q);
+    });
+  }, [projects, projSearch]);
+
+  const selectedProject = useMemo(() => {
+    const pid = parseInt(projectId, 10);
+    return Number.isFinite(pid) && pid > 0 ? projects.find((p) => p.id === pid) ?? null : null;
+  }, [projectId, projects]);
+
+  return (
+    <div ref={projWrapRef} className="ncp-prop-row" style={{ alignItems: "center" }}>
+      <div className="ncp-prop-label">Project</div>
+      <div style={{ flex: 1, position: "relative" }}>
+        <button
+          ref={projBtnRef}
+          type="button"
+          className={cn("ncp-project-btn", selectedProject && "ncp-selected")}
+          style={{ padding: "8px 12px", height: 36 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setProjDdOpen((o) => !o);
+          }}
+        >
+          {selectedProject ? (
+            <>
+              <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)" }}>PRJ-{selectedProject.id}</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)" }}>
+                {selectedProject.account_name || selectedProject.engagement_name || selectedProject.filename || "—"}
+              </span>
+            </>
+          ) : (
+            <span style={{ color: "var(--ncp-text-muted)", fontSize: 13 }}>— None / optional —</span>
+          )}
+          <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)" }}>▾</span>
+        </button>
+        {projDdOpen && projDdRect
+          ? createPortal(
+              <div
+                ref={projPortalRef}
+                className="new-contract-sheet"
+                style={{
+                  position: "fixed",
+                  top: projDdRect.top,
+                  left: projDdRect.left,
+                  width: projDdRect.width,
+                  zIndex: 200,
+                  pointerEvents: "auto",
+                  minHeight: 0,
+                  height: "auto",
+                  display: "block",
+                  background: "transparent",
+                }}
+              >
+                <div className="ncp-project-dd ncp-open ncp-project-dd--portal" onClick={(e) => e.stopPropagation()}>
+                  <div className="ncp-project-search">
+                    <Search className="size-3.5 shrink-0 opacity-50" aria-hidden />
+                    <input
+                      type="search"
+                      placeholder="Search projects…"
+                      value={projSearch}
+                      onChange={(e) => setProjSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="ncp-dd-scroll" onWheel={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="ncp-project-opt"
+                      onClick={() => {
+                        onProjectChange("");
+                        setProjDdOpen(false);
+                        setProjSearch("");
+                      }}
+                    >
+                      <span style={{ fontSize: 11, color: "var(--ncp-text-muted)" }}>— None —</span>
+                    </button>
+                    {filteredProjects.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={cn("ncp-project-opt", projectId === String(p.id) && "ncp-selected")}
+                        onClick={() => {
+                          onProjectChange(String(p.id));
+                          setProjDdOpen(false);
+                          setProjSearch("");
+                        }}
+                      >
+                        <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)", minWidth: 52 }}>
+                          PRJ-{p.id}
+                        </span>
+                        <span>{p.account_name || p.engagement_name || p.filename || `Project ${p.id}`}</span>
+                      </button>
+                    ))}
+                    {filteredProjects.length === 0 && (
+                      <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--ncp-text-muted)" }}>
+                        {`No projects match "${projSearch}"`}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+      </div>
+    </div>
+  );
 }
 
 /** Shown when the API returns no rows so the board stays demonstrable. IDs are negative — never sent to PATCH/DELETE. */
@@ -448,6 +646,8 @@ export function Tasks() {
   const [dueLocal, setDueLocal] = useState("");
   const [assigneeIds, setAssigneeIds] = useState<Set<number>>(new Set());
   const [assigneeSearch, setAssigneeSearch] = useState("");
+  /** People picker starts collapsed (same NCP pattern as contract sections). */
+  const [peopleSectionOpen, setPeopleSectionOpen] = useState(false);
 
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [pendingMove, setPendingMove] = useState<{ task: TaskRow; nextStatus: string } | null>(null);
@@ -560,6 +760,7 @@ export function Tasks() {
     setDueLocal("");
     setAssigneeIds(new Set());
     setAssigneeSearch("");
+    setPeopleSectionOpen(false);
   }
 
   function openCreate() {
@@ -571,6 +772,7 @@ export function Tasks() {
   function openEdit(t: TaskRow) {
     setSaveError(null);
     setAssigneeSearch("");
+    setPeopleSectionOpen(false);
     setEditing(t);
     setTitle(t.title);
     setDescription(t.description ?? "");
@@ -741,334 +943,310 @@ export function Tasks() {
     !isDemoTask(t) &&
     (isPlatformAdminRole(role) || role === "executive" || (uid != null && t.created_by_user_id === uid));
 
-  const lbl = (t: string) => (
-    <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{t}</span>
-  );
+  /* ── helpers for new design-guide card rendering ── */
+  function priorityCls(p: string): string {
+    const lower = (p ?? "").toLowerCase().trim();
+    if (lower === "p0") return "tsk-priority--p0";
+    if (lower === "p1") return "tsk-priority--p1";
+    if (lower === "p2") return "tsk-priority--p2";
+    if (lower === "p3") return "tsk-priority--p3";
+    return lower ? "tsk-priority--other" : "";
+  }
+
+  function priorityLabel(p: string): string {
+    const lower = (p ?? "").toLowerCase().trim();
+    if (lower === "p0") return "P0 · Critical";
+    if (lower === "p1") return "P1 · High";
+    if (lower === "p2") return "P2 · Normal";
+    if (lower === "p3") return "P3 · Low";
+    return p || "";
+  }
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-        <PageHeader
-          title="Tasks"
-          subtitle={
-            recruiterView
-              ? "Your queue: tasks you created, are assigned to, or on projects you have access to — start here each day."
-              : "Cross-cutting work: deadlines, assignees, links to ingestion, requisitions, contracts, meetings, billing, and more."
-          }
-        />
-        {!readOnlyPortal ? (
-          <button
-            type="button"
-            className="platform-dialog__btn platform-dialog__btn--primary"
-            style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
-            onClick={() => openCreate()}
-          >
-            + New task
-          </button>
-        ) : null}
-      </div>
-      {readOnlyPortal ? (
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -6 }}>
-          View only — this client portal account cannot create, edit, or move tasks.
+    <div className="tsk-page">
+      {/* ── PAGE HEADER ─────────────────────────────── */}
+      <div className="tsk-header">
+        <div className="tsk-header-left">
+          <h1 className="tsk-page-title">Tasks</h1>
+          <p className="tsk-page-sub">
+            {recruiterView
+              ? "Your queue — tasks you created, are assigned to, or that touch your projects."
+              : "Cross-cutting work: deadlines, assignees, and links to ingestion, contracts, meetings, billing and more."}
+          </p>
         </div>
-      ) : null}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          {!readOnlyPortal ? (
+            <button type="button" className="tsk-btn-primary" onClick={() => openCreate()}>
+              + New task
+            </button>
+          ) : null}
+          {readOnlyPortal ? (
+            <span className="tsk-readonly-notice">⚠ View only — cannot create or edit tasks</span>
+          ) : null}
+        </div>
+      </div>
 
+      {/* ── KPI STRIP ─────────────────────────────────── */}
       {loading ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+        <div className="tsk-skeleton-strip">
           {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} height={72} />
+            <Skeleton key={i} height={68} />
           ))}
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-          <PlatformKpi label="Visible tasks" value={displayRows.length} accent="blue" subtext="Current filters" />
-          <PlatformKpi label="Open / active" value={openCount} accent="teal" subtext="Not done or cancelled" />
-          <PlatformKpi label="Overdue (in list)" value={overdueCount} accent={overdueCount > 0 ? "red" : "amber"} subtext="Due in past & open" />
+        <div className="tsk-kpi-strip">
+          <div className="tsk-kpi tsk-kpi--blue">
+            <span className="tsk-kpi-label">Visible tasks</span>
+            <span className="tsk-kpi-value">{displayRows.length}</span>
+            <span className="tsk-kpi-sub">Current filters</span>
+          </div>
+          <div className="tsk-kpi tsk-kpi--teal">
+            <span className="tsk-kpi-label">Open / active</span>
+            <span className="tsk-kpi-value">{openCount}</span>
+            <span className="tsk-kpi-sub">Not done or cancelled</span>
+          </div>
+          <div className={cn("tsk-kpi", overdueCount > 0 ? "tsk-kpi--red" : "tsk-kpi--amber")}>
+            <span className="tsk-kpi-label">Overdue (in list)</span>
+            <span className="tsk-kpi-value">{overdueCount}</span>
+            <span className="tsk-kpi-sub">Due in past &amp; open</span>
+          </div>
         </div>
       )}
 
-      <PlatformSection title="Task board" action="Refresh" onAction={() => void refresh()}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
+      {/* ── BOARD SHELL ───────────────────────────────── */}
+      <div className="tsk-board-shell">
+        {/* toolbar */}
+        <div className="tsk-board-toolbar">
+          <span className="tsk-board-toolbar-title">Task board</span>
+        </div>
+
+        {/* filters */}
+        <div className="tsk-filters">
           <select
-            className="platform-search"
-            style={{ minWidth: 140 }}
+            className={cn("tsk-filter-select", filterStatus && "tsk-filter-active")}
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
           >
             <option value="">All statuses</option>
             {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
+              <option key={s} value={s}>{s}</option>
             ))}
           </select>
+
           <select
-            className="platform-search"
-            style={{ minWidth: 180 }}
+            className={cn("tsk-filter-select", filterProjectId && "tsk-filter-active")}
             value={filterProjectId}
             onChange={(e) => setFilterProjectId(e.target.value)}
           >
             <option value="">All projects</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
-                PRJ-{p.id} · {(p.engagement_name || p.account_name || "").slice(0, 36)}
+                PRJ-{p.id} · {(p.engagement_name || p.account_name || "").slice(0, 32)}
               </option>
             ))}
           </select>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-            <input type="checkbox" checked={filterMine} onChange={(e) => setFilterMine(e.target.checked)} />
-            Mine only
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-            <input type="checkbox" checked={filterOverdue} onChange={(e) => setFilterOverdue(e.target.checked)} />
-            Overdue
-          </label>
+
           <select
-            className="platform-search"
-            style={{ minWidth: 200 }}
+            className={cn("tsk-filter-select", filterCategory && "tsk-filter-active")}
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
           >
             <option value="">All categories</option>
             {CATEGORIES.filter((c) => c.value).map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
-              </option>
+              <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
+
           <select
-            className="platform-search"
-            style={{ minWidth: 220 }}
+            className={cn("tsk-filter-select", filterLinkKind && "tsk-filter-active")}
             value={filterLinkKind}
             onChange={(e) => setFilterLinkKind(e.target.value)}
           >
             <option value="">All link types</option>
             {PLATFORM_TASK_LINK_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>
-                {k.label}
-              </option>
+              <option key={k.value} value={k.value}>{k.label}</option>
             ))}
           </select>
+
+          <label className="tsk-filter-toggle">
+            <input type="checkbox" checked={filterMine} onChange={(e) => setFilterMine(e.target.checked)} />
+            Mine only
+          </label>
+          <label className="tsk-filter-toggle">
+            <input type="checkbox" checked={filterOverdue} onChange={(e) => setFilterOverdue(e.target.checked)} />
+            Overdue
+          </label>
         </div>
 
         {usingSampleBoard && (
-          <div
-            style={{
-              marginBottom: 14,
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid var(--border)",
-              background: "rgba(59, 130, 246, 0.06)",
-              fontSize: 11,
-              color: "var(--text-muted)",
-              lineHeight: 1.45,
-            }}
-          >
-            Showing <strong style={{ color: "var(--text)" }}>sample tasks</strong> — realistic placeholders for an empty workspace. Create a task or sync live data to replace this board.
-            <span style={{ display: "block", marginTop: 6 }}>Drag a card into another column to change status; you’ll confirm in a short dialog.</span>
-          </div>
-        )}
-
-        {!usingSampleBoard && !loading && (
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
-            Drag cards between columns to change status (confirm to save).
+          <div className="tsk-sample-notice">
+            Showing <strong>sample tasks</strong> — realistic placeholders for an empty workspace. Create a task or sync live data to replace this board.
+            <span style={{ display: "block", marginTop: 4 }}>
+              Drag a card into another column to change status; confirm in the dialog.
+            </span>
           </div>
         )}
 
         {!loading && displayRows.length === 0 && (
-          <div style={{ color: "var(--text-muted)", padding: 28, textAlign: "center", fontSize: 12 }}>
-            No tasks match filters.
+          <div className="tsk-empty-state">
+            <div className="tsk-empty-state-icon">✓</div>
+            No tasks match the current filters.
           </div>
         )}
 
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            overflowX: "auto",
-            paddingBottom: 6,
-            alignItems: "stretch",
-          }}
-        >
+        {/* ── KANBAN BOARD ──────────────────────────── */}
+        <div className="tsk-board">
           {COLUMN_STATUS_META.map((col) => {
             const list = tasksByStatus.get(col.status) ?? [];
             const colActive = dragOverColumn === col.status;
             return (
               <div
                 key={col.status}
+                className={cn("tsk-col", colActive && "tsk-col--drag-over")}
                 onDragOver={(e) => handleColumnDragOver(e, col.status)}
                 onDrop={(e) => handleColumnDrop(e, col.status)}
-                style={{
-                  flex: "0 0 min(280px, 85vw)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                  minHeight: 200,
-                  maxHeight: "min(72vh, 680px)",
-                  borderRadius: 12,
-                  outline: colActive ? "2px dashed var(--accent)" : "none",
-                  outlineOffset: 4,
-                  transition: "outline-color 0.12s ease",
-                }}
               >
-                <div
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "1px solid var(--border)",
-                    background: "var(--surface-elevated, rgba(255,255,255,0.02))",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: "0.02em" }}>{col.label}</span>
-                    <span
-                      style={{
-                        fontFamily: "'DM Mono',monospace",
-                        fontSize: 10,
-                        color: "var(--text-muted)",
-                        background: "rgba(255,255,255,0.04)",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                      }}
-                    >
-                      {list.length}
+                <div className="tsk-col-head">
+                  <div className="tsk-col-head-row">
+                    <span className="tsk-col-name">
+                      <span className={`tsk-col-dot tsk-col-dot--${col.status}`} />
+                      {col.label}
                     </span>
+                    <span className="tsk-col-count">{list.length}</span>
                   </div>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{col.hint}</div>
+                  <div className="tsk-col-hint">{col.hint}</div>
                 </div>
-                <div
-                  style={{
-                    flex: 1,
-                    overflowY: "auto",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                    paddingRight: 4,
-                  }}
-                >
+
+                <div className="tsk-col-list">
+                  {list.length === 0 && !loading && (
+                    <div className="tsk-col-empty">Drop cards here</div>
+                  )}
                   {list.map((t) => {
                     const pr = t.project_id != null ? projects.find((p) => p.id === t.project_id) : undefined;
-                    const prLabel =
-                      pr != null
-                        ? `PRJ-${t.project_id} · ${(pr.engagement_name || pr.account_name || "").slice(0, 22)}`
-                        : t.project_id != null
-                          ? `PRJ-${t.project_id}`
-                          : null;
+                    const prLabel = pr != null
+                      ? `PRJ-${t.project_id} · ${(pr.engagement_name || pr.account_name || "").slice(0, 22)}`
+                      : t.project_id != null ? `PRJ-${t.project_id}` : null;
                     const linkHref = platformTaskLinkHref(t.linked_resource_type, t.linked_resource_id);
                     const linkSummary = platformTaskLinkSummary(t.linked_resource_type, t.linked_resource_id);
-                    const legacyLinkLabel =
-                      t.linked_resource_type && t.linked_resource_id
-                        ? `${t.linked_resource_type}:${t.linked_resource_id}`
-                        : null;
-                    const overdue =
-                      t.due_at &&
-                      new Date(t.due_at).getTime() < Date.now() &&
-                      !["done", "cancelled"].includes(t.status);
-                    const catLabel = CATEGORIES.find((c) => c.value === (t.task_category ?? ""))?.label ?? t.task_category ?? "—";
+                    const legacyLinkLabel = t.linked_resource_type && t.linked_resource_id
+                      ? `${t.linked_resource_type}:${t.linked_resource_id}` : null;
+                    const overdue = t.due_at && new Date(t.due_at).getTime() < Date.now() && !["done", "cancelled"].includes(t.status);
+                    const catLabel = CATEGORIES.find((c) => c.value === (t.task_category ?? ""))?.label ?? t.task_category ?? null;
                     const demo = isDemoTask(t);
+                    const prio = t.priority?.trim() ?? "";
+
                     return (
                       <div
                         key={t.id}
+                        className={cn("tsk-card", `tsk-card--${t.status}`)}
                         draggable={!loading && !readOnlyPortal}
                         onDragStart={(e) => handleTaskDragStart(e, t)}
                         onDragEnd={() => setDragOverColumn(null)}
-                        style={{
-                          border: "1px solid var(--border)",
-                          borderRadius: 12,
-                          padding: "12px 12px 10px",
-                          background: "var(--surface, rgba(0,0,0,0.2))",
-                          display: "grid",
-                          gap: 8,
-                          boxShadow: "0 1px 0 rgba(255,255,255,0.03)",
-                          cursor: loading ? "default" : "grab",
-                        }}
+                        style={{ cursor: loading || readOnlyPortal ? "default" : undefined }}
                       >
-                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, color: "var(--accent)" }}>
-                            {demo ? "DEMO" : `TSK-${t.id}`}
-                          </span>
-                          {t.priority && (
-                            <span className="platform-badge" style={{ fontSize: 9 }}>
-                              {t.priority}
-                            </span>
-                          )}
-                          {overdue && (
-                            <span
-                              className="platform-badge"
-                              style={{ fontSize: 9, background: "rgba(255,79,107,0.15)", color: "var(--red)" }}
-                            >
-                              Overdue
-                            </span>
-                          )}
-                          {demo && (
-                            <span className="platform-badge" style={{ fontSize: 9, opacity: 0.85 }}>
-                              Sample
-                            </span>
-                          )}
+                        <div className="tsk-card-title-block">
+                          <h3 className="tsk-card-title">{t.title}</h3>
+                          <div className="tsk-card-kicker">
+                            <span className="tsk-card-id">{demo ? "DEMO" : `TSK-${t.id}`}</span>
+                            {prio && (
+                              <span className={cn("tsk-priority", priorityCls(prio))}>
+                                {priorityLabel(prio)}
+                              </span>
+                            )}
+                            {overdue && <span className="tsk-badge-overdue">Overdue</span>}
+                            {demo && <span className="tsk-badge-sample">Sample</span>}
+                          </div>
                         </div>
-                        <div style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.35 }}>{t.title}</div>
+
                         {t.description && (
-                          <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                            {t.description}
-                          </p>
+                          <p className="tsk-card-desc">{t.description}</p>
                         )}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                          <StatusTag status={t.status} />
-                          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{catLabel}</span>
+
+                        <div className="tsk-card-meta">
+                          <span className={cn("tsk-badge", "tsk-badge-dot", `tsk-badge--${t.status}`)}>
+                            {COLUMN_STATUS_META.find((c) => c.status === t.status)?.label ?? t.status}
+                          </span>
+                          {catLabel && <span className="tsk-cat-chip">{catLabel}</span>}
                           {t.task_subtype?.trim() ? (
-                            <span className="platform-badge" style={{ fontSize: 9, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }} title={t.task_subtype}>
-                              {t.task_subtype}
-                            </span>
+                            <span className="tsk-subtype-chip" title={t.task_subtype}>{t.task_subtype}</span>
                           ) : null}
                         </div>
-                        <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-                          Due {fmtWhen(t.due_at)}
+
+                        <div className="tsk-card-props">
+                          <div className={cn("tsk-card-prop", overdue && "tsk-card-prop--warn")}>
+                            <span className="tsk-card-prop-label">Due</span>
+                            <span className="tsk-card-prop-value">{fmtWhen(t.due_at)}</span>
+                          </div>
+                          {prLabel ? (
+                            <div className="tsk-card-prop">
+                              <span className="tsk-card-prop-label">Project</span>
+                              <span className="tsk-card-prop-value tsk-card-prop-value--accent">{prLabel}</span>
+                            </div>
+                          ) : null}
                         </div>
+
                         {(t.assignees ?? []).length > 0 && (
-                          <div style={{ fontSize: 10, color: "var(--text-muted)" }} title={(t.assignees ?? []).map((a) => a.email).join(", ")}>
-                            {(t.assignees ?? []).map((a) => a.email.split("@")[0]).join(" · ")}
+                          <div
+                            className="tsk-card-assignees"
+                            title={(t.assignees ?? []).map((a) => a.email).join(", ")}
+                          >
+                            <span className="tsk-card-prop-label">People</span>
+                            <div className="tsk-avatars">
+                              {(t.assignees ?? []).slice(0, 4).map((a) => {
+                                const hue = avatarHue(a.email);
+                                return (
+                                  <span
+                                    key={a.user_id}
+                                    className="tsk-avatar"
+                                    style={{ background: `hsl(${hue} 52% 42%)` }}
+                                    title={a.email}
+                                  >
+                                    {initialsFromEmail(a.email)}
+                                  </span>
+                                );
+                              })}
+                              {(t.assignees ?? []).length > 4 && (
+                                <span
+                                  className="tsk-avatar"
+                                  style={{ background: "var(--border2, rgba(24,24,27,0.16))", color: "var(--text-muted)", fontSize: 9 }}
+                                >
+                                  +{(t.assignees ?? []).length - 4}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         )}
-                        {prLabel && <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{prLabel}</div>}
+
                         {(linkHref || legacyLinkLabel) && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                          <div className="tsk-link-row">
                             {linkHref ? (
                               <Link
                                 to={linkHref}
-                                style={{
-                                  fontSize: 10,
-                                  fontWeight: 600,
-                                  color: "var(--accent)",
-                                  textDecoration: "none",
-                                  borderBottom: "1px solid color-mix(in srgb, var(--accent) 40%, transparent)",
-                                }}
+                                className="tsk-platform-link"
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                Open in platform →
+                                Open in platform
                               </Link>
                             ) : null}
-                            <span style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", color: "var(--text-muted)", wordBreak: "break-all" }} title={legacyLinkLabel ?? ""}>
+                            <span className="tsk-link-meta" title={legacyLinkLabel ?? ""}>
                               {linkHref ? linkSummary : legacyLinkLabel}
                             </span>
                           </div>
                         )}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+
+                        <div className="tsk-card-actions">
                           <button
                             type="button"
-                            className="platform-dialog__btn"
-                            style={{ fontSize: 10, padding: "4px 10px" }}
+                            className="tsk-action-btn"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => {
-                              if (!readOnlyPortal) openEdit(t);
-                            }}
+                            onClick={() => { if (!readOnlyPortal) openEdit(t); }}
                           >
-                            Update task
+                            Edit
                           </button>
                           {canDelete(t) && (
                             <button
                               type="button"
-                              className="platform-dialog__btn"
-                              style={{ fontSize: 10, padding: "4px 10px", color: "var(--red)", borderColor: "rgba(255,79,107,0.35)" }}
+                              className="tsk-action-btn tsk-action-btn--danger"
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={() => void removeTask(t)}
                             >
@@ -1084,9 +1262,9 @@ export function Tasks() {
             );
           })}
         </div>
-      </PlatformSection>
+      </div>
 
-      <Dialog
+      <Sheet
         open={dialogOpen}
         onOpenChange={(o) => {
           if (!o) resetForm();
@@ -1094,21 +1272,12 @@ export function Tasks() {
           setDialogOpen(o);
         }}
       >
-        <DialogContent showCloseButton className={cn("platform-dialog platform-dialog--wide max-h-[92vh] overflow-y-auto")}>
-          <DialogHeader className="platform-dialog__header">
-            <div className="platform-dialog__eyebrow">
-              {editing ? (isDemoTask(editing) ? "Edit · DEMO sample" : `Edit · TSK-${editing.id}`) : "New task"}
-            </div>
-            <DialogTitle className="platform-dialog__title">{editing ? "Update task" : "Create task"}</DialogTitle>
-            <DialogDescription className="platform-dialog__desc">
-              Assign one or more users. Managers can only assign people who share a project with them (or themselves). Mark done to set completion time.
-              {editing && isDemoTask(editing) ? (
-                <span style={{ display: "block", marginTop: 8, color: "var(--amber, #fbbf24)", fontSize: 11 }}>
-                  This is a sample card — saving creates a new live task (samples are not updated in place).
-                </span>
-              ) : null}
-            </DialogDescription>
-          </DialogHeader>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="new-contract-sheet flex min-h-0 flex-1 flex-col p-0 max-h-[100dvh]"
+          aria-labelledby="task-sheet-title"
+        >
           <form
             className="flex min-h-0 min-w-0 flex-1 flex-col"
             onSubmit={(e) => {
@@ -1116,227 +1285,421 @@ export function Tasks() {
               void save();
             }}
           >
-          <div className="platform-dialog__body space-y-3" style={{ display: "grid", gap: 10 }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Title *")}
-              <input className="platform-search" value={title} onChange={(e) => setTitle(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Description")}
-              <textarea className="platform-search" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
-            </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Status")}
-                <select className="platform-search" value={status} onChange={(e) => setStatus(e.target.value)}>
-                  {STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Priority (e.g. p0)")}
-                <input className="platform-search" value={priority} onChange={(e) => setPriority(e.target.value)} placeholder="p0 / p1 / high" />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Category")}
-                <select className="platform-search" value={category} onChange={(e) => setCategory(e.target.value)}>
-                  {CATEGORIES.map((c) => (
-                    <option key={c.value || "none"} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Subtype / verb (optional)")}
-              <input className="platform-search" value={subtype} onChange={(e) => setSubtype(e.target.value)} placeholder="e.g. pack_review, sla_upload_review" />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Link to platform module")}
-              <select
-                className="platform-search"
-                value={linkPreset}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setLinkPreset(v);
-                  if (v === "") {
-                    setLinkedType("");
-                    setLinkedId("");
-                    return;
-                  }
-                  if (v === CUSTOM_LINK_PRESET) return;
-                  setLinkedType(v);
-                  const dc = defaultCategoryForLinkKind(v);
-                  if (dc) setCategory((prev) => (prev.trim() ? prev : dc));
-                }}
-              >
-                <option value="">— Not linked —</option>
-                {PLATFORM_TASK_LINK_KINDS.map((k) => (
-                  <option key={k.value} value={k.value}>
-                    {k.label}
-                  </option>
-                ))}
-                <option value={CUSTOM_LINK_PRESET}>Custom (advanced)…</option>
-              </select>
-              {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
-                <p style={{ margin: 0, fontSize: 10, color: "var(--text-muted)", lineHeight: 1.45 }}>
-                  {PLATFORM_TASK_LINK_KINDS.find((k) => k.value === linkPreset)?.hint ?? ""}
-                </p>
-              ) : null}
-            </label>
-            {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Resource id (when applicable)")}
-                <input className="platform-search" value={linkedId} onChange={(e) => setLinkedId(e.target.value)} placeholder="e.g. submission id, project id, record id" />
-              </label>
-            ) : null}
-            {linkPreset === CUSTOM_LINK_PRESET ? (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {lbl("Linked resource type")}
-                  <input className="platform-search" value={linkedType} onChange={(e) => setLinkedType(e.target.value)} placeholder="any canonical type string" />
-                </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {lbl("Linked resource id")}
-                  <input className="platform-search" value={linkedId} onChange={(e) => setLinkedId(e.target.value)} placeholder="id or composite key" />
-                </label>
-              </div>
-            ) : null}
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Project (optional)")}
-              <select className="platform-search" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                <option value="">— None —</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    PRJ-{p.id} · {(p.engagement_name || p.account_name || p.filename || "").slice(0, 48)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Due date & time")}
-              <input className="platform-search" type="datetime-local" value={dueLocal} onChange={(e) => setDueLocal(e.target.value)} />
-            </label>
-            <div className="min-w-0">
-              <div className="mb-1.5 flex flex-wrap items-end justify-between gap-2">
-                {lbl("Assignees")}
-                <span
-                  className="rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums"
-                  style={{
-                    background: "rgba(255, 107, 53, 0.12)",
-                    color: "var(--accent, #ff6b35)",
-                    fontFamily: "'DM Mono',monospace",
-                  }}
-                >
-                  {assigneeIds.size} selected
-                </span>
-              </div>
-              <div
-                className="overflow-hidden rounded-xl border border-border/80 bg-muted/20 shadow-sm"
-                style={{ marginTop: 6 }}
-              >
-                <div className="relative border-b border-border/60 bg-background/80 px-2 py-2">
-                  <Search
-                    className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <input
-                    type="search"
-                    className="platform-search h-9 w-full rounded-lg border border-border/70 bg-background pl-9 pr-3 text-xs outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-                    placeholder="Search by email or role…"
-                    value={assigneeSearch}
-                    onChange={(e) => setAssigneeSearch(e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
-                <div
-                  className="max-h-[min(240px,40vh)] overflow-y-auto p-1.5"
-                  role="listbox"
-                  aria-label="Task assignees"
-                  aria-multiselectable="true"
-                >
-                  {filteredAssignable.length === 0 ? (
-                    <p className="px-3 py-8 text-center text-[11px] text-muted-foreground">
-                      {assignable.length === 0
-                        ? "No assignable users loaded."
-                        : "No users match your search."}
+            <div className="ncp-scroll min-h-0 flex-1">
+              <div className="ncp-page">
+                <div className="ncp-header">
+                  <div>
+                    <div className="ncp-breadcrumb">
+                      <span>TASKS</span>
+                      <span>›</span>
+                      <span>
+                        {editing
+                          ? isDemoTask(editing)
+                            ? "DEMO SAMPLE"
+                            : `EDIT · TSK-${editing.id}`
+                          : "NEW"}
+                      </span>
+                    </div>
+                    <h1 id="task-sheet-title" className="ncp-title">
+                      {editing ? "Update task" : "New task"}
+                    </h1>
+                    <p className="ncp-subtitle">
+                      Assign teammates (managers only see people who share a project with them, or themselves). Set status
+                      to <strong>done</strong> to record completion. All API fields are still here — grouped for a calmer
+                      flow.
+                      {editing && isDemoTask(editing) ? (
+                        <span style={{ display: "block", marginTop: 8, color: "var(--ncp-accent)" }}>
+                          Sample card: saving creates a new live task; the demo card is not updated in place.
+                        </span>
+                      ) : null}
                     </p>
-                  ) : (
-                    <ul className="m-0 flex list-none flex-col gap-1 p-0">
-                      {filteredAssignable.map((u) => {
-                        const selected = assigneeIds.has(u.id);
-                        const hue = avatarHue(u.email);
-                        return (
-                          <li key={u.id}>
-                            <button
-                              type="button"
-                              role="option"
-                              aria-selected={selected}
-                              onClick={() => toggleAssignee(u.id)}
-                              className={cn(
-                                "flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
-                                selected
-                                  ? "bg-accent/10 ring-1 ring-accent/35"
-                                  : "hover:bg-muted/60 active:bg-muted/80",
-                              )}
-                            >
-                              <span
-                                className="flex size-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase tracking-tight text-white shadow-inner"
-                                style={{
-                                  background: `linear-gradient(145deg, hsl(${hue} 58% 46%) 0%, hsl(${hue} 52% 34%) 100%)`,
-                                }}
-                                aria-hidden
-                              >
-                                {initialsFromEmail(u.email)}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span
-                                  className="block truncate text-[12px] font-medium leading-tight"
-                                  style={{ fontFamily: "'DM Mono',monospace" }}
-                                >
-                                  {u.email}
-                                </span>
-                                <span className="mt-0.5 inline-block max-w-full truncate rounded-md bg-muted/80 px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">
-                                  {formatRoleLabel(u.role)}
-                                </span>
-                              </span>
-                              <span
-                                className={cn(
-                                  "flex size-6 shrink-0 items-center justify-center rounded-full border text-muted-foreground transition-colors",
-                                  selected
-                                    ? "border-accent bg-accent text-accent-foreground"
-                                    : "border-border/80 bg-background/60",
-                                )}
-                                aria-hidden
-                              >
-                                {selected ? <Check className="size-3.5 stroke-[2.5]" /> : null}
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+                  </div>
+                  <button type="button" className="ncp-close" onClick={() => setDialogOpen(false)} aria-label="Close">
+                    ✕
+                  </button>
                 </div>
+
+                {taskSheetSection(
+                  "✓",
+                  "ncp-accent",
+                  "What to do",
+                  "Title is required. Description supports context, links, and checklists.",
+                  <>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Title *</div>
+                      <input
+                        className="ncp-prop-input"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="Short, actionable title"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                      <div className="ncp-prop-label" style={{ paddingTop: 8 }}>
+                        Description
+                      </div>
+                      <textarea
+                        className="ncp-prop-input"
+                        rows={4}
+                        style={{ resize: "vertical", minHeight: 88 }}
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        placeholder="Optional — scope, links, acceptance criteria…"
+                      />
+                    </div>
+                  </>,
+                )}
+
+                <div className={cn("ncp-section", !peopleSectionOpen && "ncp-collapsed")}>
+                  <button
+                    type="button"
+                    className="ncp-section-header"
+                    aria-expanded={peopleSectionOpen}
+                    onClick={() => setPeopleSectionOpen((o) => !o)}
+                  >
+                    <div className="ncp-section-icon ncp-green">👥</div>
+                    <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                      <div className="ncp-section-label">People</div>
+                      <div className="ncp-section-desc">
+                        {assigneeIds.size === 0
+                          ? "Collapsed — click to search and assign teammates"
+                          : `${assigneeIds.size} selected — click to change`}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--ncp-mono)",
+                        color: "var(--ncp-accent)",
+                        background: "var(--ncp-accent-soft)",
+                        border: "1px solid var(--ncp-accent-mid)",
+                        borderRadius: 999,
+                        padding: "2px 10px",
+                        flexShrink: 0,
+                        marginRight: 4,
+                      }}
+                    >
+                      {assigneeIds.size}
+                    </span>
+                    <span className="ncp-section-toggle">▾</span>
+                  </button>
+                  <div className="ncp-section-body">
+                    <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--ncp-text-muted)", lineHeight: 1.45 }}>
+                      Search and tap to toggle. Managers only see people who share a project with them (or themselves).
+                    </p>
+                    <div
+                      className="overflow-hidden"
+                      style={{
+                        borderRadius: "var(--ncp-radius-lg)",
+                        border: "1px solid var(--ncp-border)",
+                        background: "var(--ncp-surface)",
+                      }}
+                    >
+                      <div className="relative border-b px-2 py-2" style={{ borderColor: "var(--ncp-border)" }}>
+                        <Search
+                          className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 opacity-50"
+                          aria-hidden
+                        />
+                        <input
+                          type="search"
+                          className="ncp-prop-input"
+                          style={{ paddingLeft: 36 }}
+                          placeholder="Search by email or role…"
+                          value={assigneeSearch}
+                          onChange={(e) => setAssigneeSearch(e.target.value)}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div
+                        className="max-h-[min(220px,38vh)] overflow-y-auto p-1.5"
+                        role="listbox"
+                        aria-label="Task assignees"
+                        aria-multiselectable="true"
+                      >
+                        {filteredAssignable.length === 0 ? (
+                          <p style={{ margin: 0, padding: "20px 12px", textAlign: "center", fontSize: 12, color: "var(--ncp-text-muted)" }}>
+                            {assignable.length === 0 ? "No assignable users loaded." : "No users match your search."}
+                          </p>
+                        ) : (
+                          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                            {filteredAssignable.map((u) => {
+                              const selected = assigneeIds.has(u.id);
+                              const hue = avatarHue(u.email);
+                              return (
+                                <li key={u.id}>
+                                  <button
+                                    type="button"
+                                    role="option"
+                                    aria-selected={selected}
+                                    onClick={() => toggleAssignee(u.id)}
+                                    className={cn(
+                                      "flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
+                                      selected ? "ring-1" : "hover:opacity-90",
+                                    )}
+                                    style={
+                                      selected
+                                        ? { background: "var(--ncp-accent-soft)", boxShadow: "inset 0 0 0 1px var(--ncp-accent-mid)" }
+                                        : { background: "transparent" }
+                                    }
+                                  >
+                                    <span
+                                      className="flex size-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase text-white"
+                                      style={{
+                                        background: `linear-gradient(145deg, hsl(${hue} 58% 46%) 0%, hsl(${hue} 52% 34%) 100%)`,
+                                      }}
+                                      aria-hidden
+                                    >
+                                      {initialsFromEmail(u.email)}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span
+                                        className="block truncate text-[12px] font-medium leading-tight"
+                                        style={{ fontFamily: "var(--ncp-mono)" }}
+                                      >
+                                        {u.email}
+                                      </span>
+                                      <span
+                                        className="mt-0.5 inline-block max-w-full truncate rounded-md px-1.5 py-0.5 text-[10px] capitalize"
+                                        style={{ color: "var(--ncp-text-muted)", background: "color-mix(in srgb, var(--ncp-border) 40%, transparent)" }}
+                                      >
+                                        {formatRoleLabel(u.role)}
+                                      </span>
+                                    </span>
+                                    <span
+                                      className="flex size-6 shrink-0 items-center justify-center rounded-full border text-muted-foreground"
+                                      style={{
+                                        borderColor: "var(--ncp-border)",
+                                        background: selected ? "var(--ncp-accent)" : "var(--ncp-surface)",
+                                        color: selected ? "#fff" : "var(--ncp-text-muted)",
+                                      }}
+                                      aria-hidden
+                                    >
+                                      {selected ? <Check className="size-3.5 stroke-[2.5]" /> : null}
+                                    </span>
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {taskSheetSection(
+                  "⏱",
+                  "ncp-amber",
+                  "Schedule & scope",
+                  "Due date, status, and priority in one place.",
+                  <>
+                    <div className="ncp-date-grid" style={{ borderTop: "none" }}>
+                      <div className="ncp-date-cell" style={{ gridColumn: "1 / -1" }}>
+                        <label htmlFor="task-due-local">Due date</label>
+                        <input
+                          id="task-due-local"
+                          type="datetime-local"
+                          value={dueLocal}
+                          onChange={(e) => setDueLocal(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                        gap: 10,
+                      }}
+                    >
+                      <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+                        <div className="ncp-prop-label">Status</div>
+                        <select className="ncp-prop-input" value={status} onChange={(e) => setStatus(e.target.value)}>
+                          {STATUSES.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+                        <div className="ncp-prop-label">Priority</div>
+                        <select
+                          className="ncp-prop-input"
+                          value={taskPrioritySelectValue(priority)}
+                          onChange={(e) => setPriority(e.target.value)}
+                        >
+                          <option value="">— None —</option>
+                          {TASK_PRIORITY_LEVELS.map((lvl) => (
+                            <option key={lvl.value} value={lvl.value}>
+                              {lvl.label}
+                            </option>
+                          ))}
+                          {(() => {
+                            const raw = priority.trim();
+                            const lower = raw.toLowerCase();
+                            if (!raw || ["p0", "p1", "p2", "p3"].includes(lower)) return null;
+                            return (
+                              <option key="__legacy_priority__" value={raw}>
+                                {raw} (from record)
+                              </option>
+                            );
+                          })()}
+                        </select>
+                      </div>
+                    </div>
+                  </>,
+                )}
+
+                {taskSheetSection(
+                  "📁",
+                  "ncp-blue",
+                  "Project",
+                  "Optional — link this task to a client project for context and reporting.",
+                  <TaskSheetProjectPicker projects={projects} projectId={projectId} onProjectChange={setProjectId} />,
+                )}
+
+                {taskSheetSection(
+                  "🏷",
+                  "ncp-green",
+                  "Category",
+                  "Optional — choose a workflow lane for filters and automation.",
+                  <div className="ncp-prop-row" style={{ borderTop: "none", alignItems: "center" }}>
+                    <div className="ncp-prop-label">Category</div>
+                    <select className="ncp-prop-input" value={category} onChange={(e) => setCategory(e.target.value)}>
+                      {CATEGORIES.map((c) => (
+                        <option key={c.value || "none"} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>,
+                )}
+
+                {taskSheetSection(
+                  "🔗",
+                  "ncp-blue",
+                  "Deep link & subtype",
+                  "Optional: tie this task to a platform record, or add a subtype verb for automation and filters.",
+                  <>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Subtype</div>
+                      <input
+                        className="ncp-prop-input"
+                        value={subtype}
+                        onChange={(e) => setSubtype(e.target.value)}
+                        placeholder="e.g. pack_review, sla_upload_review"
+                      />
+                    </div>
+                    <div className="ncp-prop-row">
+                      <div className="ncp-prop-label">Link preset</div>
+                      <select
+                        className="ncp-prop-input"
+                        value={linkPreset}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setLinkPreset(v);
+                          if (v === "") {
+                            setLinkedType("");
+                            setLinkedId("");
+                            return;
+                          }
+                          if (v === CUSTOM_LINK_PRESET) return;
+                          setLinkedType(v);
+                          const dc = defaultCategoryForLinkKind(v);
+                          if (dc) setCategory((prev) => (prev.trim() ? prev : dc));
+                        }}
+                      >
+                        <option value="">— Not linked —</option>
+                        {PLATFORM_TASK_LINK_KINDS.map((k) => (
+                          <option key={k.value} value={k.value}>
+                            {k.label}
+                          </option>
+                        ))}
+                        <option value={CUSTOM_LINK_PRESET}>Custom (advanced)…</option>
+                      </select>
+                    </div>
+                    {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
+                      <p style={{ margin: "0 0 8px", fontSize: 11, color: "var(--ncp-text-muted)", lineHeight: 1.45 }}>
+                        {PLATFORM_TASK_LINK_KINDS.find((k) => k.value === linkPreset)?.hint ?? ""}
+                      </p>
+                    ) : null}
+                    {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Resource id</div>
+                        <input
+                          className="ncp-prop-input"
+                          value={linkedId}
+                          onChange={(e) => setLinkedId(e.target.value)}
+                          placeholder="When the preset needs an id (submission, project, record…)"
+                        />
+                      </div>
+                    ) : null}
+                    {linkPreset === CUSTOM_LINK_PRESET ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                          gap: 10,
+                        }}
+                      >
+                        <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+                          <div className="ncp-prop-label">Resource type</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={linkedType}
+                            onChange={(e) => setLinkedType(e.target.value)}
+                            placeholder="Canonical type string"
+                          />
+                        </div>
+                        <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+                          <div className="ncp-prop-label">Resource id</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={linkedId}
+                            onChange={(e) => setLinkedId(e.target.value)}
+                            placeholder="Id or composite key"
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </>,
+                )}
+
+                {saveError ? (
+                  <div
+                    style={{
+                      margin: "12px 0",
+                      padding: "10px 14px",
+                      background: "rgba(239,68,68,0.08)",
+                      border: "1px solid rgba(239,68,68,0.2)",
+                      borderRadius: "var(--ncp-radius)",
+                      fontSize: 13,
+                      color: "#b91c1c",
+                    }}
+                  >
+                    {saveError}
+                  </div>
+                ) : null}
               </div>
             </div>
-          </div>
-          {saveError ? <div className="platform-dialog__alert mx-5 mb-0 mt-1 shrink-0">{saveError}</div> : null}
-          <DialogFooter className="platform-dialog__footer">
-            <button type="button" className="platform-dialog__btn" onClick={() => setDialogOpen(false)} disabled={saving}>
-              Cancel
-            </button>
-            <button type="submit" className="platform-dialog__btn platform-dialog__btn--primary" disabled={saving}>
-              {saving ? "Saving…" : editing ? "Save changes" : "Create"}
-            </button>
-          </DialogFooter>
+
+            <div className="ncp-footer">
+              <span className="ncp-hint" style={{ alignSelf: "center" }}>
+                <kbd className="ncp-kbd">Esc</kbd> closes
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setDialogOpen(false)} disabled={saving}>
+                  Cancel
+                </button>
+                <button type="submit" className="ncp-btn ncp-btn-primary" disabled={saving}>
+                  {saving ? "Saving…" : editing ? "Save changes" : "Create task"}
+                </button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <Dialog
         open={moveDialogOpen}

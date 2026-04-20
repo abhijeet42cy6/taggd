@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   queries,
   type CandidateCreate,
@@ -7,7 +8,18 @@ import {
   type Project,
   type RecordRow,
 } from "@/lib/api";
-import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { UserPickerDropdown, type PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
+import { cn } from "@/lib/utils";
+import "@/styles/new-contract-panel.css";
+
+const CANDIDATE_TABS = [
+  { icon: "◇", label: "Mandate" },
+  { icon: "👤", label: "Person" },
+  { icon: "📋", label: "Profile" },
+  { icon: "📊", label: "Pipeline" },
+  { icon: "⚙", label: "More" },
+] as const;
 
 export type CandidateFormDrawerProps = {
   open: boolean;
@@ -359,16 +371,40 @@ function buildPatchBody(f: Form): CandidatePatch {
   return rest as CandidatePatch;
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="req-drawer-field-label">{label}</label>
-      {children}
-    </div>
-  );
+/** Apply server-side resume parse into form state (does not change project / mandate fields). */
+function mergeResumeFieldsIntoForm(prev: Form, fields: Record<string, unknown>): Form {
+  const next: Form = { ...prev };
+  const putStr = (key: keyof Form, v: unknown) => {
+    if (typeof v === "string" && v.trim()) (next as Record<string, string>)[key] = v.trim();
+  };
+  const putNumStr = (key: keyof Form, v: unknown) => {
+    if (typeof v === "number" && Number.isFinite(v)) (next as Record<string, string>)[key] = String(v);
+    else if (typeof v === "string" && v.trim()) (next as Record<string, string>)[key] = v.trim();
+  };
+  putStr("full_name", fields.full_name);
+  putStr("email_id", fields.email_id);
+  putStr("contact_no", fields.contact_no);
+  putStr("alternate_contact_no", fields.alternate_contact_no);
+  putStr("current_location", fields.current_location);
+  putStr("gender", fields.gender);
+  putStr("qualification", fields.qualification);
+  putStr("specialization", fields.specialization);
+  putNumStr("total_experience_yrs", fields.total_experience_yrs);
+  putStr("current_organization", fields.current_organization);
+  putStr("current_designation", fields.current_designation);
+  putNumStr("notice_period_days", fields.notice_period_days);
+  putNumStr("current_ctc_lpa", fields.current_ctc_lpa);
+  putNumStr("expected_ctc_lpa", fields.expected_ctc_lpa);
+  putStr("professional_summary", fields.professional_summary);
+  if (Array.isArray(fields.professional_experience_json)) {
+    try {
+      next.professional_experience_json = JSON.stringify(fields.professional_experience_json, null, 2);
+    } catch {
+      /* ignore */
+    }
+  }
+  return next;
 }
-
-const inp = { width: "100%", boxSizing: "border-box" as const };
 
 export function CandidateFormDrawer({
   open,
@@ -379,13 +415,26 @@ export function CandidateFormDrawer({
   defaultProjectId,
   onSuccess,
 }: CandidateFormDrawerProps) {
-  const firstPid = projects[0]?.id != null ? String(projects[0].id) : "";
-  const [form, setForm] = useState<Form>(() => emptyForm(firstPid));
+  const [tab, setTab] = useState(0);
+  const [form, setForm] = useState<Form>(() => emptyForm(""));
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [loadingCandidate, setLoadingCandidate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [assignableUsers, setAssignableUsers] = useState<PlatformUserLite[]>([]);
+
+  const [projDdOpen, setProjDdOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState("");
+  const [projDdRect, setProjDdRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const projWrapRef = useRef<HTMLDivElement>(null);
+  const projBtnRef = useRef<HTMLButtonElement>(null);
+  const projPortalRef = useRef<HTMLDivElement>(null);
+  const cvFileRef = useRef<HTMLInputElement>(null);
+  const [pendingCvFile, setPendingCvFile] = useState<File | null>(null);
+  const [resumeBusy, setResumeBusy] = useState(false);
+  const [resumeHint, setResumeHint] = useState<string | null>(null);
 
   const loadRecords = useCallback(async (pid: number) => {
     setLoadingRecords(true);
@@ -402,11 +451,15 @@ export function CandidateFormDrawer({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setTab(0);
+    setProjDdOpen(false);
+    setProjSearch("");
+    setPendingCvFile(null);
+    setResumeHint(null);
+    setResumeBusy(false);
     if (mode === "create") {
       const dp =
-        defaultProjectId != null && projects.some((p) => p.id === defaultProjectId)
-          ? String(defaultProjectId)
-          : firstPid;
+        defaultProjectId != null && projects.some((p) => p.id === defaultProjectId) ? String(defaultProjectId) : "";
       setForm(emptyForm(dp));
       if (dp) void loadRecords(Number(dp));
       else setRecords([]);
@@ -423,10 +476,89 @@ export function CandidateFormDrawer({
         .catch((e) => setError(e instanceof Error ? e.message : "Could not load candidate"))
         .finally(() => setLoadingCandidate(false));
     }
-  }, [open, mode, candidateId, projects, defaultProjectId, firstPid, loadRecords]);
+  }, [open, mode, candidateId, projects, defaultProjectId, loadRecords]);
+
+  useEffect(() => {
+    if (!open) return;
+    const pid = parseInt(form.project_id, 10);
+    if (!Number.isFinite(pid) || pid <= 0) {
+      setAssignableUsers([]);
+      return;
+    }
+    let cancelled = false;
+    void queries
+      .taskAssignableUsers({ project_id: pid })
+      .then((list) => {
+        if (!cancelled) setAssignableUsers(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignableUsers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, form.project_id]);
+
+  const selectedProject = useMemo(() => {
+    const t = form.project_id.trim();
+    if (!t) return null;
+    const pid = parseInt(t, 10);
+    if (!Number.isFinite(pid)) return null;
+    return projects.find((p) => p.id === pid) ?? null;
+  }, [form.project_id, projects]);
+
+  const filteredProjects = useMemo(() => {
+    const q = projSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const lab = `prj-${p.id} ${p.account_name || p.filename || ""}`.toLowerCase();
+      return lab.includes(q);
+    });
+  }, [projects, projSearch]);
+
+  useLayoutEffect(() => {
+    if (!projDdOpen) {
+      setProjDdRect(null);
+      return;
+    }
+    const measure = () => {
+      const btn = projBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setProjDdRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (projBtnRef.current) ro.observe(projBtnRef.current);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [projDdOpen]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (projWrapRef.current?.contains(t) || projPortalRef.current?.contains(t)) return;
+      setProjDdOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
 
   const onProjectChange = (pid: string) => {
-    setForm((f) => ({ ...f, project_id: pid, record_id: "" }));
+    setForm((f) => ({
+      ...f,
+      project_id: pid,
+      record_id: "",
+      assigned_recruiter_user_id: "",
+      assigned_recruiter: "",
+      hiring_manager_user_id: "",
+      hiring_manager: "",
+    }));
     if (pid) void loadRecords(Number(pid));
     else setRecords([]);
   };
@@ -437,11 +569,17 @@ export function CandidateFormDrawer({
     try {
       if (mode === "create") {
         const body = buildCreateBody(form);
-        await queries.createCandidate(body);
+        const created = await queries.createCandidate(body);
+        if (pendingCvFile) {
+          await queries.candidateUploadCv(created.id, pendingCvFile);
+        }
       } else {
         if (candidateId == null) throw new Error("Missing candidate");
         const body = buildPatchBody(form);
         await queries.patchCandidate(candidateId, body);
+        if (pendingCvFile) {
+          await queries.candidateUploadCv(candidateId, pendingCvFile);
+        }
       }
       onSuccess();
       onClose();
@@ -450,7 +588,9 @@ export function CandidateFormDrawer({
     } finally {
       setSaving(false);
     }
-  }, [mode, form, candidateId, onSuccess, onClose]);
+  }, [mode, form, candidateId, onSuccess, onClose, pendingCvFile]);
+
+  const setF = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const title = mode === "create" ? "Add candidate" : `Edit candidate #${candidateId ?? ""}`;
   const subtitle =
@@ -458,626 +598,836 @@ export function CandidateFormDrawer({
       ? "Creates a pipeline row on the selected project and requisition. Client candidate ID must be unique per project."
       : "Update mandate-level fields. Project and client candidate ID cannot be changed here.";
 
-  return (
-    <PlatformDrawer
-      open={open}
-      className="platform-drawer--req platform-drawer--req-edit"
-      title={title}
-      subtitle={subtitle}
-      onClose={onClose}
-      width={Math.min(560, typeof window !== "undefined" ? window.innerWidth - 24 : 560)}
-      footer={
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {error ? <div style={{ fontSize: 12, color: "var(--red)", lineHeight: 1.4 }}>{error}</div> : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" className="req-drawer-btn-ghost" onClick={onClose} disabled={saving}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="req-drawer-btn-primary"
-              onClick={() => void submit()}
-              disabled={saving || loadingCandidate || !projects.length}
-            >
-              {saving ? "Saving…" : mode === "create" ? "Create candidate" : "Save changes"}
-            </button>
-          </div>
+  const section = (icon: string, colorCls: string, label: string, desc: string, body: React.ReactNode) => (
+    <div className="ncp-section" style={{ marginBottom: 12 }}>
+      <div className="ncp-section-header" style={{ cursor: "default" }}>
+        <div className={cn("ncp-section-icon", colorCls)}>{icon}</div>
+        <div>
+          <div className="ncp-section-label">{label}</div>
+          <div className="ncp-section-desc">{desc}</div>
         </div>
-      }
-    >
-      <div className="req-drawer req-drawer-form-grid">
-        {!projects.length ? (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>No projects available.</p>
-        ) : loadingCandidate ? (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>Loading candidate…</p>
+      </div>
+      <div className="ncp-section-body" style={{ maxHeight: "none" }}>
+        {body}
+      </div>
+    </div>
+  );
+
+  const projectPicker = (
+    <div ref={projWrapRef} className="ncp-project-wrap" style={{ borderTop: "none" }}>
+      <button
+        ref={projBtnRef}
+        type="button"
+        className={cn("ncp-project-btn", selectedProject && "ncp-selected")}
+        disabled={mode === "edit"}
+        style={mode === "edit" ? { opacity: 0.92, cursor: "default" } : undefined}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (mode === "edit") return;
+          setProjDdOpen((o) => !o);
+        }}
+      >
+        {selectedProject ? (
+          <>
+            <span className="ncp-project-icon" style={{ fontSize: 12 }}>
+              PRJ
+            </span>
+            <div className="ncp-project-meta">
+              <strong>{selectedProject.account_name || selectedProject.filename || `Project ${selectedProject.id}`}</strong>
+              <span style={{ fontFamily: "var(--ncp-mono)", color: "var(--ncp-accent)" }}>PRJ-{selectedProject.id}</span>
+            </div>
+          </>
         ) : (
           <>
-            <Row label="Project *">
-              <select
-                className="platform-search"
-                value={form.project_id}
-                onChange={(e) => onProjectChange(e.target.value)}
-                disabled={mode === "edit"}
-                style={inp}
-              >
-                <option value="">Select project</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    PRJ-{p.id} {p.account_name || p.filename || ""}
-                  </option>
-                ))}
-              </select>
-            </Row>
-
-            <Row label="Requisition (record) *">
-              <select
-                className="platform-search"
-                value={form.record_id}
-                onChange={(e) => setForm((f) => ({ ...f, record_id: e.target.value }))}
-                disabled={!form.project_id || loadingRecords}
-                style={inp}
-              >
-                <option value="">{loadingRecords ? "Loading…" : "Select mandate row"}</option>
-                {records.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    REQ-{r.id} — {r.position_title || "Position"}{r.candidate_name ? ` (${r.candidate_name})` : ""}
-                  </option>
-                ))}
-              </select>
-            </Row>
-
-            <Row label="Client candidate ID *">
-              <input
-                className="platform-search"
-                value={form.client_candidate_id}
-                onChange={(e) => setForm((f) => ({ ...f, client_candidate_id: e.target.value }))}
-                disabled={mode === "edit"}
-                style={inp}
-                placeholder="Unique per project, e.g. CLI-001"
-              />
-            </Row>
-
-            <h4 className="req-drawer-section-title" style={{ margin: "12px 0 4px", fontSize: 12, opacity: 0.85 }}>
-              Identity & contact
-            </h4>
-            <Row label="Full name">
-              <input
-                className="platform-search"
-                value={form.full_name}
-                onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
-                style={inp}
-              />
-            </Row>
-            <Row label="Email">
-              <input
-                className="platform-search"
-                type="email"
-                value={form.email_id}
-                onChange={(e) => setForm((f) => ({ ...f, email_id: e.target.value }))}
-                style={inp}
-              />
-            </Row>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Row label="Phone">
-                <input
-                  className="platform-search"
-                  value={form.contact_no}
-                  onChange={(e) => setForm((f) => ({ ...f, contact_no: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Alt. phone">
-                <input
-                  className="platform-search"
-                  value={form.alternate_contact_no}
-                  onChange={(e) => setForm((f) => ({ ...f, alternate_contact_no: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Row label="Gender">
-                <input
-                  className="platform-search"
-                  value={form.gender}
-                  onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Location">
-                <input
-                  className="platform-search"
-                  value={form.current_location}
-                  onChange={(e) => setForm((f) => ({ ...f, current_location: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-
-            <h4 className="req-drawer-section-title" style={{ margin: "12px 0 4px", fontSize: 12, opacity: 0.85 }}>
-              Role & compensation
-            </h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Row label="Current organization">
-                <input
-                  className="platform-search"
-                  value={form.current_organization}
-                  onChange={(e) => setForm((f) => ({ ...f, current_organization: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Current designation">
-                <input
-                  className="platform-search"
-                  value={form.current_designation}
-                  onChange={(e) => setForm((f) => ({ ...f, current_designation: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              <Row label="Total exp. (yrs)">
-                <input
-                  className="platform-search"
-                  inputMode="decimal"
-                  value={form.total_experience_yrs}
-                  onChange={(e) => setForm((f) => ({ ...f, total_experience_yrs: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Notice (days)">
-                <input
-                  className="platform-search"
-                  inputMode="numeric"
-                  value={form.notice_period_days}
-                  onChange={(e) => setForm((f) => ({ ...f, notice_period_days: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Current CTC (₹L)">
-                <input
-                  className="platform-search"
-                  inputMode="decimal"
-                  value={form.current_ctc_lpa}
-                  onChange={(e) => setForm((f) => ({ ...f, current_ctc_lpa: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-            <Row label="Expected CTC (₹L)">
-              <input
-                className="platform-search"
-                inputMode="decimal"
-                value={form.expected_ctc_lpa}
-                onChange={(e) => setForm((f) => ({ ...f, expected_ctc_lpa: e.target.value }))}
-                style={inp}
-              />
-            </Row>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Row label="Qualification">
-                <input
-                  className="platform-search"
-                  value={form.qualification}
-                  onChange={(e) => setForm((f) => ({ ...f, qualification: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Specialization">
-                <input
-                  className="platform-search"
-                  value={form.specialization}
-                  onChange={(e) => setForm((f) => ({ ...f, specialization: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-
-            <h4 className="req-drawer-section-title" style={{ margin: "12px 0 4px", fontSize: 12, opacity: 0.85 }}>
-              Professional profile
-            </h4>
-            <Row label="Professional summary">
-              <textarea
-                className="platform-search"
-                value={form.professional_summary}
-                onChange={(e) => setForm((f) => ({ ...f, professional_summary: e.target.value }))}
-                style={{ ...inp, minHeight: 88, resize: "vertical" }}
-                placeholder="Narrative / headline profile"
-              />
-            </Row>
-            <Row label='Experience (JSON array, e.g. [{"company":"…","title":"…","start_date":"2020-01"}])'>
-              <textarea
-                className="platform-search"
-                value={form.professional_experience_json}
-                onChange={(e) => setForm((f) => ({ ...f, professional_experience_json: e.target.value }))}
-                style={{ ...inp, minHeight: 120, resize: "vertical", fontFamily: "ui-monospace, monospace", fontSize: 11 }}
-              />
-            </Row>
-
-            <h4 className="req-drawer-section-title" style={{ margin: "12px 0 4px", fontSize: 12, opacity: 0.85 }}>
-              Assignment
-            </h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Row label="Assigned recruiter (text)">
-                <input
-                  className="platform-search"
-                  value={form.assigned_recruiter}
-                  onChange={(e) => setForm((f) => ({ ...f, assigned_recruiter: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Hiring manager (text)">
-                <input
-                  className="platform-search"
-                  value={form.hiring_manager}
-                  onChange={(e) => setForm((f) => ({ ...f, hiring_manager: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Row label="Recruiter user ID">
-                <input
-                  className="platform-search"
-                  inputMode="numeric"
-                  value={form.assigned_recruiter_user_id}
-                  onChange={(e) => setForm((f) => ({ ...f, assigned_recruiter_user_id: e.target.value }))}
-                  style={inp}
-                  placeholder="Platform user id"
-                />
-              </Row>
-              <Row label="Hiring manager user ID">
-                <input
-                  className="platform-search"
-                  inputMode="numeric"
-                  value={form.hiring_manager_user_id}
-                  onChange={(e) => setForm((f) => ({ ...f, hiring_manager_user_id: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Row label="Source of hire">
-                <input
-                  className="platform-search"
-                  value={form.source_of_hire}
-                  onChange={(e) => setForm((f) => ({ ...f, source_of_hire: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-              <Row label="Sub-source">
-                <input
-                  className="platform-search"
-                  value={form.sub_source}
-                  onChange={(e) => setForm((f) => ({ ...f, sub_source: e.target.value }))}
-                  style={inp}
-                />
-              </Row>
-            </div>
-
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                Pipeline, offer & dates
-              </summary>
-              <div className="req-drawer-form-grid" style={{ marginTop: 10 }}>
-                <Row label="Current stage">
-                  <input
-                    className="platform-search"
-                    value={form.current_stage}
-                    onChange={(e) => setForm((f) => ({ ...f, current_stage: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Global status">
-                  <input
-                    className="platform-search"
-                    value={form.global_status}
-                    onChange={(e) => setForm((f) => ({ ...f, global_status: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Resume screening">
-                  <input
-                    className="platform-search"
-                    value={form.resume_screening}
-                    onChange={(e) => setForm((f) => ({ ...f, resume_screening: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Offer CTC (₹L)">
-                  <input
-                    className="platform-search"
-                    inputMode="decimal"
-                    value={form.offer_ctc_lpa}
-                    onChange={(e) => setForm((f) => ({ ...f, offer_ctc_lpa: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Row label="Offer release">
-                    <input
-                      className="platform-search"
-                      type="datetime-local"
-                      value={form.offer_release_date}
-                      onChange={(e) => setForm((f) => ({ ...f, offer_release_date: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="Expected DOJ">
-                    <input
-                      className="platform-search"
-                      type="datetime-local"
-                      value={form.expected_doj}
-                      onChange={(e) => setForm((f) => ({ ...f, expected_doj: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Row label="Actual DOJ">
-                    <input
-                      className="platform-search"
-                      type="datetime-local"
-                      value={form.actual_doj}
-                      onChange={(e) => setForm((f) => ({ ...f, actual_doj: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="Selection date">
-                    <input
-                      className="platform-search"
-                      type="datetime-local"
-                      value={form.selection_date}
-                      onChange={(e) => setForm((f) => ({ ...f, selection_date: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Row label="LOI issue">
-                    <input
-                      className="platform-search"
-                      type="datetime-local"
-                      value={form.loi_issue_date}
-                      onChange={(e) => setForm((f) => ({ ...f, loi_issue_date: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="CB closure">
-                    <input
-                      className="platform-search"
-                      type="datetime-local"
-                      value={form.cb_closure_date}
-                      onChange={(e) => setForm((f) => ({ ...f, cb_closure_date: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-                <Row label="Offer acceptance">
-                  <input
-                    className="platform-search"
-                    value={form.offer_acceptance}
-                    onChange={(e) => setForm((f) => ({ ...f, offer_acceptance: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Offer date">
-                  <input
-                    className="platform-search"
-                    type="datetime-local"
-                    value={form.offer_date}
-                    onChange={(e) => setForm((f) => ({ ...f, offer_date: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Offer accepted flag">
-                  <input
-                    className="platform-search"
-                    value={form.offer_accepted_flag}
-                    onChange={(e) => setForm((f) => ({ ...f, offer_accepted_flag: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Decline reason">
-                  <input
-                    className="platform-search"
-                    value={form.decline_reason}
-                    onChange={(e) => setForm((f) => ({ ...f, decline_reason: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Joining status">
-                  <input
-                    className="platform-search"
-                    value={form.joining_status}
-                    onChange={(e) => setForm((f) => ({ ...f, joining_status: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <Row label="Check-in 30d">
-                    <input
-                      className="platform-search"
-                      value={form.checkin_30_day}
-                      onChange={(e) => setForm((f) => ({ ...f, checkin_30_day: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="Check-in 60d">
-                    <input
-                      className="platform-search"
-                      value={form.checkin_60_day}
-                      onChange={(e) => setForm((f) => ({ ...f, checkin_60_day: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="Check-in 90d">
-                    <input
-                      className="platform-search"
-                      value={form.checkin_90_day}
-                      onChange={(e) => setForm((f) => ({ ...f, checkin_90_day: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-                <Row label="Early exit risk">
-                  <input
-                    className="platform-search"
-                    value={form.early_exit_risk}
-                    onChange={(e) => setForm((f) => ({ ...f, early_exit_risk: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <Row label="Offered gross CTC">
-                    <input
-                      className="platform-search"
-                      inputMode="decimal"
-                      value={form.offered_gross_ctc}
-                      onChange={(e) => setForm((f) => ({ ...f, offered_gross_ctc: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="Offered STVs">
-                    <input
-                      className="platform-search"
-                      inputMode="decimal"
-                      value={form.offered_stvs}
-                      onChange={(e) => setForm((f) => ({ ...f, offered_stvs: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="Hike % offered">
-                    <input
-                      className="platform-search"
-                      inputMode="decimal"
-                      value={form.hike_pct_offered}
-                      onChange={(e) => setForm((f) => ({ ...f, hike_pct_offered: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-              </div>
-            </details>
-
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>BGV, IDs &amp; extras</summary>
-              <div className="req-drawer-form-grid" style={{ marginTop: 10 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Row label="BGV date">
-                    <input
-                      className="platform-search"
-                      type="datetime-local"
-                      value={form.bgv_date}
-                      onChange={(e) => setForm((f) => ({ ...f, bgv_date: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="BGV status">
-                    <input
-                      className="platform-search"
-                      value={form.bgv_status}
-                      onChange={(e) => setForm((f) => ({ ...f, bgv_status: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-                <Row label="Medical initiation">
-                  <input
-                    className="platform-search"
-                    type="datetime-local"
-                    value={form.medical_initiation_date}
-                    onChange={(e) => setForm((f) => ({ ...f, medical_initiation_date: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Row label="Candidate staff no.">
-                    <input
-                      className="platform-search"
-                      value={form.candidate_staff_no}
-                      onChange={(e) => setForm((f) => ({ ...f, candidate_staff_no: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="MSIL staff no.">
-                    <input
-                      className="platform-search"
-                      value={form.msil_staff_no}
-                      onChange={(e) => setForm((f) => ({ ...f, msil_staff_no: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Row label="Sourcer">
-                    <input
-                      className="platform-search"
-                      value={form.sourcer_name}
-                      onChange={(e) => setForm((f) => ({ ...f, sourcer_name: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                  <Row label="Taggd PM">
-                    <input
-                      className="platform-search"
-                      value={form.taggd_pm}
-                      onChange={(e) => setForm((f) => ({ ...f, taggd_pm: e.target.value }))}
-                      style={inp}
-                    />
-                  </Row>
-                </div>
-                <Row label="Fingerprint">
-                  <input
-                    className="platform-search"
-                    value={form.fingerprint}
-                    onChange={(e) => setForm((f) => ({ ...f, fingerprint: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-                <Row label="Excel row index">
-                  <input
-                    className="platform-search"
-                    inputMode="numeric"
-                    value={form.excel_row_index}
-                    onChange={(e) => setForm((f) => ({ ...f, excel_row_index: e.target.value }))}
-                    style={inp}
-                  />
-                </Row>
-              </div>
-            </details>
-
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Advanced JSON</summary>
-              <div className="req-drawer-form-grid" style={{ marginTop: 10 }}>
-                <Row label="candidate_extras (object)">
-                  <textarea
-                    className="platform-search"
-                    value={form.candidate_extras_json}
-                    onChange={(e) => setForm((f) => ({ ...f, candidate_extras_json: e.target.value }))}
-                    style={{ ...inp, minHeight: 72, fontFamily: "ui-monospace, monospace", fontSize: 11 }}
-                  />
-                </Row>
-                <Row label="revenue_results (object)">
-                  <textarea
-                    className="platform-search"
-                    value={form.revenue_results_json}
-                    onChange={(e) => setForm((f) => ({ ...f, revenue_results_json: e.target.value }))}
-                    style={{ ...inp, minHeight: 72, fontFamily: "ui-monospace, monospace", fontSize: 11 }}
-                  />
-                </Row>
-                <Row label="offer_onboarding_extras (object)">
-                  <textarea
-                    className="platform-search"
-                    value={form.offer_onboarding_extras_json}
-                    onChange={(e) => setForm((f) => ({ ...f, offer_onboarding_extras_json: e.target.value }))}
-                    style={{ ...inp, minHeight: 72, fontFamily: "ui-monospace, monospace", fontSize: 11 }}
-                  />
-                </Row>
-              </div>
-            </details>
+            <span>＋</span>
+            <span>Search or select a project (PRJ-···)</span>
           </>
         )}
-      </div>
-    </PlatformDrawer>
+        <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)" }}>▾</span>
+      </button>
+      {mode === "create" &&
+        projDdOpen &&
+        projDdRect &&
+        createPortal(
+          <div
+            ref={projPortalRef}
+            className="new-contract-sheet"
+            style={{
+              position: "fixed",
+              top: projDdRect.top,
+              left: projDdRect.left,
+              width: projDdRect.width,
+              zIndex: 200,
+              pointerEvents: "auto",
+              minHeight: 0,
+              height: "auto",
+              display: "block",
+              background: "transparent",
+            }}
+          >
+            <div className="ncp-project-dd ncp-open ncp-project-dd--portal" onClick={(e) => e.stopPropagation()}>
+              <div className="ncp-project-search">
+                <span style={{ opacity: 0.5 }}>🔍</span>
+                <input
+                  type="search"
+                  placeholder="Search projects…"
+                  value={projSearch}
+                  onChange={(e) => setProjSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="ncp-dd-scroll" onWheel={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()}>
+                {filteredProjects.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={cn("ncp-project-opt", String(p.id) === form.project_id && "ncp-selected")}
+                    onClick={() => {
+                      onProjectChange(String(p.id));
+                      setProjDdOpen(false);
+                      setProjSearch("");
+                    }}
+                  >
+                    <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11, color: "var(--ncp-accent)", minWidth: 52 }}>PRJ-{p.id}</span>
+                    <span>{p.account_name || p.filename || `Project ${p.id}`}</span>
+                  </button>
+                ))}
+                {filteredProjects.length === 0 && (
+                  <div style={{ padding: "12px 14px", fontSize: 12, color: "var(--ncp-text-muted)" }}>No projects match “{projSearch}”</div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+
+  const canSave = projects.length > 0 && !loadingCandidate;
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className={cn(
+          "flex h-full max-h-[100dvh] flex-col gap-0 border-l p-0",
+          "data-[side=right]:w-full data-[side=right]:max-w-[calc(100vw-1rem)]",
+          "sm:data-[side=right]:w-[min(calc(100vw-2rem),56rem)] sm:data-[side=right]:max-w-[min(calc(100vw-2rem),56rem)]",
+          "bg-[#f7f6f3] shadow-xl",
+        )}
+      >
+        <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+          <div className="ncp-scroll min-h-0 flex-1">
+            <div className="ncp-page">
+              <div className="ncp-header">
+                <div style={{ minWidth: 0 }}>
+                  <div className="ncp-breadcrumb">
+                    <span>Candidates</span>
+                    <span className="ncp-breadcrumb-sep">›</span>
+                    <span>{mode === "create" ? "New" : `CAN-${candidateId ?? "—"}`}</span>
+                  </div>
+                  <h1 className="ncp-h1">{title}</h1>
+                  <p className="ncp-subtitle" style={{ marginTop: 4 }}>
+                    {subtitle}
+                  </p>
+                </div>
+                <button type="button" className="ncp-close-btn" aria-label="Close" onClick={onClose}>
+                  ✕
+                </button>
+              </div>
+
+              {projects.length > 0 && !loadingCandidate ? (
+                <div className="ncp-section" style={{ marginBottom: 14 }}>
+                  <div className="ncp-section-header" style={{ cursor: "default" }}>
+                    <div className={cn("ncp-section-icon", "ncp-blue")}>📄</div>
+                    <div>
+                      <div className="ncp-section-label">Resume / CV</div>
+                      <div className="ncp-section-desc">
+                        Upload PDF or Word. We extract text to autofill Person, Role &amp; compensation, and Profile (including
+                        experience JSON). The same file is stored on the candidate when you save.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="ncp-section-body" style={{ maxHeight: "none" }}>
+                    <input
+                      ref={cvFileRef}
+                      type="file"
+                      accept=".pdf,.doc,.docx,application/pdf"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!f) return;
+                        setPendingCvFile(f);
+                        setResumeHint(null);
+                        setResumeBusy(true);
+                        void queries
+                          .parseResumePreview(f)
+                          .then((res) => {
+                            if (res.fields && typeof res.fields === "object") {
+                              setForm((prev) => mergeResumeFieldsIntoForm(prev, res.fields as Record<string, unknown>));
+                            }
+                            setResumeHint(`Parsed “${f.name}”. Review every tab before saving.`);
+                          })
+                          .catch((err) => {
+                            setResumeHint(
+                              `${err instanceof Error ? err.message : "Could not parse resume"}. The file will still be attached when you save.`,
+                            );
+                          })
+                          .finally(() => setResumeBusy(false));
+                      }}
+                    />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="ncp-btn ncp-btn-secondary"
+                        disabled={resumeBusy}
+                        onClick={() => cvFileRef.current?.click()}
+                      >
+                        {resumeBusy ? "Reading…" : pendingCvFile ? "Replace CV & re-parse" : "Upload resume / CV"}
+                      </button>
+                      {pendingCvFile ? (
+                        <span style={{ fontSize: 12, color: "var(--ncp-text-secondary)" }}>
+                          {pendingCvFile.name}
+                          {pendingCvFile.size > 0 ? ` (${Math.round(pendingCvFile.size / 1024)} KB)` : ""}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="ncp-btn ncp-btn-ghost"
+                        style={{ fontSize: 12 }}
+                        disabled={!pendingCvFile}
+                        onClick={() => {
+                          setPendingCvFile(null);
+                          setResumeHint(null);
+                        }}
+                      >
+                        Clear file
+                      </button>
+                    </div>
+                    {resumeHint ? (
+                      <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--ncp-text-secondary)", lineHeight: 1.45 }}>
+                        {resumeHint}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {!projects.length ? (
+                <p style={{ margin: 0, fontSize: 13, color: "var(--ncp-text-secondary)" }}>No projects available.</p>
+              ) : loadingCandidate ? (
+                <p style={{ margin: 0, fontSize: 13, color: "var(--ncp-text-secondary)" }}>Loading candidate…</p>
+              ) : (
+                <>
+                  <div className="ncp-steps" role="tablist" style={{ marginBottom: 18 }}>
+                    {CANDIDATE_TABS.map(({ icon, label }, i) => (
+                      <button
+                        key={label}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === i}
+                        className={cn("ncp-step", tab === i && "ncp-active", i < tab && "ncp-done")}
+                        onClick={() => setTab(i)}
+                      >
+                        <span
+                          className="ncp-step-num"
+                          style={{
+                            fontSize: 14,
+                            background: tab === i ? "rgba(255,255,255,0.22)" : i < tab ? "var(--ncp-green)" : "var(--ncp-border)",
+                            color: i < tab && tab !== i ? "#fff" : undefined,
+                          }}
+                        >
+                          {i < tab ? "✓" : icon}
+                        </span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className={cn("ncp-panel", tab === 0 && "ncp-panel-active")}>
+                    {section("◇", "ncp-orange", "Project & mandate", "Choose the project, requisition row, and a unique client candidate ID.", (
+                      <>
+                        {projectPicker}
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Requisition (record) *</div>
+                          <select
+                            className="ncp-prop-input"
+                            value={form.record_id}
+                            onChange={(e) => setF("record_id", e.target.value)}
+                            disabled={!form.project_id || loadingRecords}
+                          >
+                            <option value="">{loadingRecords ? "Loading…" : "Select mandate row"}</option>
+                            {records.map((r) => (
+                              <option key={r.id} value={String(r.id)}>
+                                REQ-{r.id} — {r.position_title || "Position"}
+                                {r.candidate_name ? ` (${r.candidate_name})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Client candidate ID *</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={form.client_candidate_id}
+                            onChange={(e) => setF("client_candidate_id", e.target.value)}
+                            disabled={mode === "edit"}
+                            placeholder="Unique per project, e.g. CLI-001"
+                          />
+                        </div>
+                      </>
+                    ))}
+                  </div>
+
+                  <div className={cn("ncp-panel", tab === 1 && "ncp-panel-active")}>
+                    {section("👤", "ncp-blue", "Identity & contact", "Basics used for search and comms.", (
+                      <>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Full name</div>
+                          <input className="ncp-prop-input" value={form.full_name} onChange={(e) => setF("full_name", e.target.value)} />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Email</div>
+                          <input
+                            className="ncp-prop-input"
+                            type="email"
+                            value={form.email_id}
+                            onChange={(e) => setF("email_id", e.target.value)}
+                          />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row" style={{ gridColumn: "span 1" }}>
+                            <div className="ncp-prop-label">Phone</div>
+                            <input className="ncp-prop-input" value={form.contact_no} onChange={(e) => setF("contact_no", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row" style={{ gridColumn: "span 1" }}>
+                            <div className="ncp-prop-label">Alt. phone</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.alternate_contact_no}
+                              onChange={(e) => setF("alternate_contact_no", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Gender</div>
+                            <input className="ncp-prop-input" value={form.gender} onChange={(e) => setF("gender", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Location</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.current_location}
+                              onChange={(e) => setF("current_location", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ))}
+                    {section("🏢", "ncp-green", "Role & compensation", "Current role, notice, and pay bands (₹ lakhs).", (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Current organization</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.current_organization}
+                              onChange={(e) => setF("current_organization", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Current designation</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.current_designation}
+                              onChange={(e) => setF("current_designation", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Total exp. (yrs)</div>
+                            <input
+                              className="ncp-prop-input"
+                              inputMode="decimal"
+                              value={form.total_experience_yrs}
+                              onChange={(e) => setF("total_experience_yrs", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Notice (days)</div>
+                            <input
+                              className="ncp-prop-input"
+                              inputMode="numeric"
+                              value={form.notice_period_days}
+                              onChange={(e) => setF("notice_period_days", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Current CTC (₹L)</div>
+                            <input
+                              className="ncp-prop-input"
+                              inputMode="decimal"
+                              value={form.current_ctc_lpa}
+                              onChange={(e) => setF("current_ctc_lpa", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Expected CTC (₹L)</div>
+                          <input
+                            className="ncp-prop-input"
+                            inputMode="decimal"
+                            value={form.expected_ctc_lpa}
+                            onChange={(e) => setF("expected_ctc_lpa", e.target.value)}
+                          />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Qualification</div>
+                            <input className="ncp-prop-input" value={form.qualification} onChange={(e) => setF("qualification", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Specialization</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.specialization}
+                              onChange={(e) => setF("specialization", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ))}
+                  </div>
+
+                  <div className={cn("ncp-panel", tab === 2 && "ncp-panel-active")}>
+                    {section("📋", "ncp-amber", "Professional narrative", "Summary and structured experience JSON.", (
+                      <>
+                        <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                          <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
+                            Professional summary
+                          </div>
+                          <textarea
+                            className="ncp-prop-input"
+                            value={form.professional_summary}
+                            onChange={(e) => setF("professional_summary", e.target.value)}
+                            placeholder="Narrative / headline profile"
+                            style={{ minHeight: 88, resize: "vertical" }}
+                          />
+                        </div>
+                        <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                          <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
+                            Experience (JSON array)
+                          </div>
+                          <textarea
+                            className="ncp-prop-input"
+                            value={form.professional_experience_json}
+                            onChange={(e) => setF("professional_experience_json", e.target.value)}
+                            spellCheck={false}
+                            placeholder='e.g. [{"company":"…","title":"…","start_date":"2020-01"}]'
+                            style={{ minHeight: 120, resize: "vertical", fontFamily: "var(--ncp-mono)", fontSize: 12 }}
+                          />
+                        </div>
+                      </>
+                    ))}
+                    {section(
+                      "👥",
+                      "ncp-blue",
+                      "Assignment & sourcing",
+                      "Choose recruiter and hiring manager from users assigned to this project. Emails are stored for legacy display; user IDs drive access and reporting.",
+                      <>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Assigned recruiter</div>
+                          <div style={{ flex: 1, minWidth: 0, width: "100%" }}>
+                            <UserPickerDropdown
+                              value={form.assigned_recruiter_user_id}
+                              onChange={(v) => {
+                                const u = assignableUsers.find((x) => String(x.id) === v);
+                                setForm((f) => ({
+                                  ...f,
+                                  assigned_recruiter_user_id: v,
+                                  assigned_recruiter: v === "" ? "" : u ? u.email : f.assigned_recruiter,
+                                }));
+                              }}
+                              users={assignableUsers}
+                              placeholder={form.project_id.trim() ? "— None / not assigned —" : "Select a project first"}
+                            />
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Hiring manager</div>
+                          <div style={{ flex: 1, minWidth: 0, width: "100%" }}>
+                            <UserPickerDropdown
+                              value={form.hiring_manager_user_id}
+                              onChange={(v) => {
+                                const u = assignableUsers.find((x) => String(x.id) === v);
+                                setForm((f) => ({
+                                  ...f,
+                                  hiring_manager_user_id: v,
+                                  hiring_manager: v === "" ? "" : u ? u.email : f.hiring_manager,
+                                }));
+                              }}
+                              users={assignableUsers}
+                              placeholder={form.project_id.trim() ? "— None / not assigned —" : "Select a project first"}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Source of hire</div>
+                            <input className="ncp-prop-input" value={form.source_of_hire} onChange={(e) => setF("source_of_hire", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Sub-source</div>
+                            <input className="ncp-prop-input" value={form.sub_source} onChange={(e) => setF("sub_source", e.target.value)} />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className={cn("ncp-panel", tab === 3 && "ncp-panel-active")}>
+                    {section("📊", "ncp-orange", "Pipeline & screening", "Stage, status, and screening notes.", (
+                      <>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Current stage</div>
+                          <input className="ncp-prop-input" value={form.current_stage} onChange={(e) => setF("current_stage", e.target.value)} />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Global status</div>
+                          <input className="ncp-prop-input" value={form.global_status} onChange={(e) => setF("global_status", e.target.value)} />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Resume screening</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={form.resume_screening}
+                            onChange={(e) => setF("resume_screening", e.target.value)}
+                          />
+                        </div>
+                      </>
+                    ))}
+                    {section("💼", "ncp-green", "Offer & compensation", "Offer amounts and commercial follow-ups.", (
+                      <>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Offer CTC (₹L)</div>
+                          <input
+                            className="ncp-prop-input"
+                            inputMode="decimal"
+                            value={form.offer_ctc_lpa}
+                            onChange={(e) => setF("offer_ctc_lpa", e.target.value)}
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Offer acceptance</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={form.offer_acceptance}
+                            onChange={(e) => setF("offer_acceptance", e.target.value)}
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Offer accepted flag</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={form.offer_accepted_flag}
+                            onChange={(e) => setF("offer_accepted_flag", e.target.value)}
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Decline reason</div>
+                          <input className="ncp-prop-input" value={form.decline_reason} onChange={(e) => setF("decline_reason", e.target.value)} />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Joining status</div>
+                          <input className="ncp-prop-input" value={form.joining_status} onChange={(e) => setF("joining_status", e.target.value)} />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Offered gross CTC</div>
+                            <input
+                              className="ncp-prop-input"
+                              inputMode="decimal"
+                              value={form.offered_gross_ctc}
+                              onChange={(e) => setF("offered_gross_ctc", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Offered STVs</div>
+                            <input
+                              className="ncp-prop-input"
+                              inputMode="decimal"
+                              value={form.offered_stvs}
+                              onChange={(e) => setF("offered_stvs", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Hike % offered</div>
+                            <input
+                              className="ncp-prop-input"
+                              inputMode="decimal"
+                              value={form.hike_pct_offered}
+                              onChange={(e) => setF("hike_pct_offered", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Early exit risk</div>
+                          <input className="ncp-prop-input" value={form.early_exit_risk} onChange={(e) => setF("early_exit_risk", e.target.value)} />
+                        </div>
+                      </>
+                    ))}
+                    {section("📅", "ncp-amber", "Dates & milestones", "Datetime fields for offer cycle and joining.", (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Offer release</div>
+                            <input
+                              className="ncp-prop-input"
+                              type="datetime-local"
+                              value={form.offer_release_date}
+                              onChange={(e) => setF("offer_release_date", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Expected DOJ</div>
+                            <input
+                              className="ncp-prop-input"
+                              type="datetime-local"
+                              value={form.expected_doj}
+                              onChange={(e) => setF("expected_doj", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Actual DOJ</div>
+                            <input
+                              className="ncp-prop-input"
+                              type="datetime-local"
+                              value={form.actual_doj}
+                              onChange={(e) => setF("actual_doj", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Selection date</div>
+                            <input
+                              className="ncp-prop-input"
+                              type="datetime-local"
+                              value={form.selection_date}
+                              onChange={(e) => setF("selection_date", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">LOI issue</div>
+                            <input
+                              className="ncp-prop-input"
+                              type="datetime-local"
+                              value={form.loi_issue_date}
+                              onChange={(e) => setF("loi_issue_date", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">CB closure</div>
+                            <input
+                              className="ncp-prop-input"
+                              type="datetime-local"
+                              value={form.cb_closure_date}
+                              onChange={(e) => setF("cb_closure_date", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Offer date</div>
+                          <input
+                            className="ncp-prop-input"
+                            type="datetime-local"
+                            value={form.offer_date}
+                            onChange={(e) => setF("offer_date", e.target.value)}
+                          />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Check-in 30d</div>
+                            <input className="ncp-prop-input" value={form.checkin_30_day} onChange={(e) => setF("checkin_30_day", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Check-in 60d</div>
+                            <input className="ncp-prop-input" value={form.checkin_60_day} onChange={(e) => setF("checkin_60_day", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Check-in 90d</div>
+                            <input className="ncp-prop-input" value={form.checkin_90_day} onChange={(e) => setF("checkin_90_day", e.target.value)} />
+                          </div>
+                        </div>
+                      </>
+                    ))}
+                  </div>
+
+                  <div className={cn("ncp-panel", tab === 4 && "ncp-panel-active")}>
+                    {section("🛡", "ncp-blue", "BGV & medical", "Compliance checkpoints.", (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">BGV date</div>
+                            <input
+                              className="ncp-prop-input"
+                              type="datetime-local"
+                              value={form.bgv_date}
+                              onChange={(e) => setF("bgv_date", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">BGV status</div>
+                            <input className="ncp-prop-input" value={form.bgv_status} onChange={(e) => setF("bgv_status", e.target.value)} />
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Medical initiation</div>
+                          <input
+                            className="ncp-prop-input"
+                            type="datetime-local"
+                            value={form.medical_initiation_date}
+                            onChange={(e) => setF("medical_initiation_date", e.target.value)}
+                          />
+                        </div>
+                      </>
+                    ))}
+                    {section("🏷", "ncp-green", "IDs & tracking", "Internal references and upload metadata.", (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Candidate staff no.</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.candidate_staff_no}
+                              onChange={(e) => setF("candidate_staff_no", e.target.value)}
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">MSIL staff no.</div>
+                            <input className="ncp-prop-input" value={form.msil_staff_no} onChange={(e) => setF("msil_staff_no", e.target.value)} />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Sourcer</div>
+                            <input className="ncp-prop-input" value={form.sourcer_name} onChange={(e) => setF("sourcer_name", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Taggd PM</div>
+                            <input className="ncp-prop-input" value={form.taggd_pm} onChange={(e) => setF("taggd_pm", e.target.value)} />
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Fingerprint</div>
+                          <input className="ncp-prop-input" value={form.fingerprint} onChange={(e) => setF("fingerprint", e.target.value)} />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Excel row index</div>
+                          <input
+                            className="ncp-prop-input"
+                            inputMode="numeric"
+                            value={form.excel_row_index}
+                            onChange={(e) => setF("excel_row_index", e.target.value)}
+                          />
+                        </div>
+                      </>
+                    ))}
+                    {section("🧩", "ncp-amber", "Advanced JSON", "Optional structured payloads for integrations.", (
+                      <>
+                        <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                          <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
+                            candidate_extras
+                          </div>
+                          <textarea
+                            className="ncp-prop-input"
+                            value={form.candidate_extras_json}
+                            onChange={(e) => setF("candidate_extras_json", e.target.value)}
+                            spellCheck={false}
+                            style={{ minHeight: 72, fontFamily: "var(--ncp-mono)", fontSize: 12 }}
+                          />
+                        </div>
+                        <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                          <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
+                            revenue_results
+                          </div>
+                          <textarea
+                            className="ncp-prop-input"
+                            value={form.revenue_results_json}
+                            onChange={(e) => setF("revenue_results_json", e.target.value)}
+                            spellCheck={false}
+                            style={{ minHeight: 72, fontFamily: "var(--ncp-mono)", fontSize: 12 }}
+                          />
+                        </div>
+                        <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                          <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
+                            offer_onboarding_extras
+                          </div>
+                          <textarea
+                            className="ncp-prop-input"
+                            value={form.offer_onboarding_extras_json}
+                            onChange={(e) => setF("offer_onboarding_extras_json", e.target.value)}
+                            spellCheck={false}
+                            style={{ minHeight: 72, fontFamily: "var(--ncp-mono)", fontSize: 12 }}
+                          />
+                        </div>
+                      </>
+                    ))}
+                  </div>
+
+                  {error ? (
+                    <div
+                      style={{
+                        margin: "12px 0 0",
+                        padding: "10px 14px",
+                        background: "rgba(239,68,68,0.07)",
+                        border: "1px solid rgba(239,68,68,0.25)",
+                        borderRadius: "var(--ncp-radius)",
+                        fontSize: 12,
+                        color: "#b91c1c",
+                      }}
+                    >
+                      {error}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="ncp-footer">
+            <button type="button" className="ncp-btn ncp-btn-ghost" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {tab > 0 && (
+                <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setTab((t) => t - 1)} disabled={saving}>
+                  ← Back
+                </button>
+              )}
+              {tab < CANDIDATE_TABS.length - 1 && (
+                <button type="button" className="ncp-btn ncp-btn-secondary" onClick={() => setTab((t) => t + 1)} disabled={saving}>
+                  Next →
+                </button>
+              )}
+              <button
+                type="button"
+                className="ncp-btn ncp-btn-primary"
+                onClick={() => void submit()}
+                disabled={saving || !canSave}
+              >
+                {saving ? "Saving…" : mode === "create" ? "Create candidate ✓" : "Save changes ✓"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

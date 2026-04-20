@@ -56,6 +56,18 @@ from .core.budget_forecast_ledger import (
 # Initialize DB
 init_db()
 
+# Valid `records.source_joiner_type` values (requisition manual create / PATCH).
+RECORD_SOURCE_JOINER_TYPES = frozenset(
+    {
+        "taggd_rpo",
+        "taggd_direct",
+        "nontaggd_employee_referral",
+        "nontaggd_internal_job_portal",
+        "nontaggd_campus",
+        "nontaggd_transferred",
+    }
+)
+
 
 def finalize_ingest_column_mapping(mapping_result, headers: list) -> dict:
     """Universal + RPO `record_fields`, merged LLM + heuristic; persisted as column_mapping v2."""
@@ -390,6 +402,7 @@ class RecordPatch(BaseModel):
     global_status: Optional[str] = None
     candidate_name: Optional[str] = None
     position_title: Optional[str] = None
+    source_joiner_type: Optional[str] = None
     hiring_manager: Optional[str] = None
     hiring_manager_user_id: Optional[int] = None
     assigned_recruiter_user_id: Optional[int] = None
@@ -408,6 +421,7 @@ class RecordCreate(BaseModel):
     project_id: int
     candidate_name: str
     position_title: str
+    source_joiner_type: str
     position_code: Optional[str] = None
     status: Optional[str] = "Open"
     global_status: Optional[str] = "ACTIVE"
@@ -1704,6 +1718,19 @@ def patch_record(
         val = patch[key]
         setattr(r, key, (val.strip() if isinstance(val, str) else val) or None)
 
+    if "source_joiner_type" in patch:
+        raw_sj = patch["source_joiner_type"]
+        if raw_sj is None:
+            r.source_joiner_type = None
+        else:
+            sj = str(raw_sj).strip()
+            if sj and sj not in RECORD_SOURCE_JOINER_TYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid source_joiner_type; expected one of: {sorted(RECORD_SOURCE_JOINER_TYPES)}",
+                )
+            r.source_joiner_type = sj or None
+
     def _validate_user_fk(uid: Optional[int]) -> None:
         if uid is None:
             return
@@ -1801,6 +1828,15 @@ def create_record(
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    sj = (body.source_joiner_type or "").strip()
+    if not sj:
+        raise HTTPException(status_code=400, detail="source_joiner_type is required (joiner source)")
+    if sj not in RECORD_SOURCE_JOINER_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source_joiner_type; expected one of: {sorted(RECORD_SOURCE_JOINER_TYPES)}",
+        )
+
     today = datetime.datetime.utcnow()
     creation_dt = _parse_optional_datetime(body.creation_date) or today
     joining_dt = _parse_optional_datetime(body.joining_date)
@@ -1832,6 +1868,7 @@ def create_record(
         excel_provided_id=pc or None,
         excel_row_index=-1,
         client_req_id=(body.client_req_id or "").strip() or None,
+        source_joiner_type=sj,
     )
     if body.rpo is not None:
         _apply_record_rpo_patch(r, body.rpo)
@@ -2864,12 +2901,15 @@ async def get_sla_details(
         latest = perf_map.get(m.id)
         project = m.project
         ph = (project.practice_head or "").strip() if project else ""
+        rh = (project.regional_head or "").strip() if project else ""
         mn = (m.metric_nature or "").strip() if m.metric_nature else ""
         res.append({
             "id": m.id,
+            "project_id": m.project_id,
             "account_name": project.account_name if project else "Unknown",
             "region": project.region if project else "Unknown",
             "practice_head": ph or None,
+            "regional_head": rh or None,
             "metric_nature": mn or None,
             "metric_label": m.metric_label,
             "metric_group": m.metric_group,

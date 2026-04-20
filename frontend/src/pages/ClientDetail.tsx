@@ -824,24 +824,6 @@ export function ClientDetail() {
 
   const projectIds = clientVm?.projectIds ?? [];
 
-  const addRequisitionProjects = useMemo(() => {
-    const projs = clientVm?.projects ?? [];
-    const multi = projs.length > 1;
-    return projs.map((p) => {
-      const fn = p.filename || "Project";
-      const shortFn = fn.length > 40 ? `${fn.slice(0, 37)}…` : fn;
-      const clientName =
-        (p.engagement_name && String(p.engagement_name).trim()) ||
-        (p.account_name && String(p.account_name).trim()) ||
-        displayClientName;
-      const base = `${clientName} · PRJ-${p.id}`;
-      return {
-        id: p.id,
-        label: multi ? `${base} · ${shortFn}` : base,
-      };
-    });
-  }, [clientVm?.projects, displayClientName]);
-
   function refreshProjects() {
     if (numericClientId != null && numericClientId > 0) {
       return queries.clientDetail(numericClientId).then((g) => {
@@ -1697,7 +1679,7 @@ export function ClientDetail() {
       <RequisitionCreateDrawer
         open={addReqOpen}
         onClose={() => setAddReqOpen(false)}
-        projects={addRequisitionProjects}
+        projects={clientVm?.projects ?? []}
         onCreated={(r) => {
           setAllRecords((prev) => [r, ...prev]);
           setSelectedReq(r);

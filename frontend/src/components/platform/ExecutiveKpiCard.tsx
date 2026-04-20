@@ -3,12 +3,12 @@ import React from "react";
 type Accent = "orange" | "teal" | "red" | "green" | "blue" | "amber";
 
 const HEADER_BG: Record<Accent, string> = {
-  orange: "linear-gradient(90deg, #ea580c, #fb923c)",
-  teal: "linear-gradient(90deg, #0d9488, #14b8a6)",
-  red: "linear-gradient(90deg, #dc2626, #f87171)",
-  green: "linear-gradient(90deg, #16a34a, #4ade80)",
-  blue: "linear-gradient(90deg, #2563eb, #60a5fa)",
-  amber: "linear-gradient(90deg, #d97706, #fbbf24)",
+  orange: "#e16f3d",
+  teal: "#14b8a6",
+  red: "#ef4444",
+  green: "#2ecc71",
+  blue: "#3884ff",
+  amber: "#f59e0b",
 };
 
 export function ExecutiveKpiCard({
@@ -16,12 +16,15 @@ export function ExecutiveKpiCard({
   accent = "orange",
   primary,
   sublines = [],
+  band,
   footer = [],
 }: {
   title: string;
   accent?: Accent;
   primary: React.ReactNode;
   sublines?: { label: string; value: React.ReactNode; tone?: "default" | "green" | "red" | "amber" }[];
+  /** Optional strip between sublines and footer (e.g. quarterly plan vs actual). */
+  band?: React.ReactNode;
   footer?: { label: string; value: React.ReactNode }[];
 }) {
   return (
@@ -41,6 +44,7 @@ export function ExecutiveKpiCard({
             ))}
           </div>
         )}
+        {band ? <div className="exec-kpi-card__band">{band}</div> : null}
         {footer.length > 0 && (
           <div className="exec-kpi-card__footer">
             {footer.map((f, i) => (

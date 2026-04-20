@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   BrowserRouter as Router,
   NavLink,
@@ -8,6 +8,38 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
+import {
+  ArrowRightLeft,
+  Archive,
+  Bot,
+  Calendar,
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
+  CircleDot,
+  ClipboardList,
+  Database,
+  FileText,
+  Gauge,
+  KeyRound,
+  Landmark,
+  LayoutDashboard,
+  LineChart,
+  LogOut,
+  Package,
+  PieChart,
+  Receipt,
+  ScrollText,
+  ShieldCheck,
+  Upload,
+  User,
+  UserCog,
+  UserCircle,
+  Users,
+  Users2,
+  type LucideIcon,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import { PersonaProvider, usePersona } from "@/lib/persona";
 import {
   AuthProvider,
@@ -64,6 +96,41 @@ function ClientPortalNoAccess() {
 
 type NavItem = { label: string; path: string };
 type NavGroup = { title: string; items: NavItem[] };
+
+const SIDEBAR_COLLAPSED_KEY = "platform_sidebar_collapsed";
+
+/** Lucide icons for collapsed rail + visual scan when expanded (design system: icon + label). */
+const NAV_PATH_ICONS: Record<string, LucideIcon> = {
+  "/": LayoutDashboard,
+  "/portfolio": PieChart,
+  "/clients": Users,
+  "/client-contracts": FileText,
+  "/meetings": Calendar,
+  "/transitions": ArrowRightLeft,
+  "/requisitions": ClipboardList,
+  "/candidates": UserCircle,
+  "/candidate-store": Archive,
+  "/finance": Landmark,
+  "/revenue-trackers": LineChart,
+  "/billing": Receipt,
+  "/finance-validation": ShieldCheck,
+  "/revenue-governance": Package,
+  "/vendor-licenses": KeyRound,
+  "/sla-performance": Gauge,
+  "/wfm": Users2,
+  "/profile": User,
+  "/tasks": CheckSquare,
+  "/agent": Bot,
+  "/data-operations": Database,
+  "/ingestion": Upload,
+  "/activity": ScrollText,
+  "/admin/users": UserCog,
+};
+
+function NavPathIcon({ path }: { path: string }) {
+  const Icon = NAV_PATH_ICONS[path] ?? CircleDot;
+  return <Icon className="platform-nav-icon" size={18} strokeWidth={2} aria-hidden />;
+}
 
 /** Recruiter-focused IA: work queue first, then accounts, then data & audit. */
 const RECRUITER_NAV_GROUPS: NavGroup[] = [
@@ -187,6 +254,22 @@ function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return typeof window !== "undefined" && window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarCollapsed]);
+
   const role = user?.role ?? "";
   const effectiveRole = user?.effectiveRole ?? role;
   const verticalAccess = user?.verticalAccess ?? null;
@@ -238,13 +321,26 @@ function AppShell() {
   return (
     <div className="platform-app">
       <div className="platform-layout">
-        <aside className="platform-sidebar">
-          <div className="platform-logo">
-            <img src={taggdLogo} alt="Taggd" className="platform-logo-img" />
-            <div className="platform-logo-tagline">{isRecruiter ? "Recruiting workspace" : "Intelligence Platform"}</div>
+        <aside className={cn("platform-sidebar", sidebarCollapsed && "platform-sidebar--collapsed")}>
+          <div className="platform-sidebar-head">
+            <div className="platform-sidebar-head-row">
+              <div className="platform-logo-inner">
+                <img src={taggdLogo} alt="Taggd" className="platform-logo-img" />
+                <div className="platform-logo-tagline">{isRecruiter ? "Recruiting workspace" : "Intelligence Platform"}</div>
+              </div>
+              <button
+                type="button"
+                className="platform-sidebar-toggle"
+                aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+                aria-expanded={!sidebarCollapsed}
+                onClick={() => setSidebarCollapsed((c) => !c)}
+              >
+                {sidebarCollapsed ? <ChevronRight size={18} strokeWidth={2} /> : <ChevronLeft size={18} strokeWidth={2} />}
+              </button>
+            </div>
           </div>
 
-          <div style={{ flex: 1, overflow: "auto" }}>
+          <div className="no-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
             {filteredGroups.map((g) => (
               <div key={g.title} className="nav-section">
                 <div className="platform-nav-group-title">{g.title}</div>
@@ -253,41 +349,35 @@ function AppShell() {
                     key={item.path}
                     to={item.path}
                     end={item.path === "/"}
+                    title={item.label}
                     className={({ isActive }) => `platform-nav-item${isActive ? " active" : ""}`}
                   >
-                    <span style={{ flex: 1 }}>{item.label}</span>
+                    <NavPathIcon path={item.path} />
+                    <span className="platform-nav-label">{item.label}</span>
                   </NavLink>
                 ))}
               </div>
             ))}
           </div>
 
-          <div
-            style={{
-              borderTop: "1px solid var(--border)",
-              padding: "10px 14px",
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-            }}
-          >
+          <div className={cn("platform-sidebar-footer", sidebarCollapsed && "is-collapsed")}>
             <UserAvatarImg
               userId={user?.id}
               hasAvatar={user?.hasAvatar}
-              size={28}
+              size={sidebarCollapsed ? 36 : 32}
               fallback={
                 <div
                   style={{
-                    width: 28,
-                    height: 28,
+                    width: sidebarCollapsed ? 36 : 32,
+                    height: sidebarCollapsed ? 36 : 32,
                     borderRadius: "50%",
                     flexShrink: 0,
-                    background: `linear-gradient(135deg, ${persona.accentColor}, var(--accent2))`,
+                    background: "var(--entity-indigo)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: 10,
-                    fontWeight: 700,
+                    fontSize: 12,
+                    fontWeight: 600,
                     color: "#fff",
                   }}
                 >
@@ -295,78 +385,105 @@ function AppShell() {
                 </div>
               }
             />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: 500,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {displayName || email || "—"}
+            {!sidebarCollapsed ? (
+              <>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: "var(--text)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {displayName || email || "—"}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--accent)", fontFamily: "var(--mono)" }}>
+                    {effectiveRole || user?.role || ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    type="button"
+                    title="My profile"
+                    onClick={() => navigate("/profile")}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--text-subtle)",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      padding: "2px 4px",
+                      borderRadius: "var(--radius-sm)",
+                      fontFamily: "var(--font)",
+                      transition: "color var(--t-fast), background var(--t-fast)",
+                    }}
+                  >
+                    Profile
+                  </button>
+                  <button
+                    type="button"
+                    title="Log out"
+                    onClick={() => {
+                      logout();
+                      navigate("/login", { replace: true });
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--text-subtle)",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      padding: "2px 4px",
+                      borderRadius: "var(--radius-sm)",
+                      fontFamily: "var(--font)",
+                      transition: "color var(--t-fast), background var(--t-fast)",
+                    }}
+                  >
+                    Log out
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="platform-sidebar-footer-collapsed-btns">
+                <button type="button" title="My profile" onClick={() => navigate("/profile")}>
+                  <User size={16} strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  title="Log out"
+                  onClick={() => {
+                    logout();
+                    navigate("/login", { replace: true });
+                  }}
+                >
+                  <LogOut size={16} strokeWidth={2} />
+                </button>
               </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--text-muted)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {email}
-              </div>
-              <div style={{ fontSize: 9, color: "var(--accent)", fontFamily: "'DM Mono',monospace" }}>
-                {effectiveRole || user?.role || ""}
-              </div>
-            </div>
-            <button
-              type="button"
-              title="My profile"
-              onClick={() => navigate("/profile")}
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                fontSize: 11,
-                cursor: "pointer",
-                padding: "0 4px",
-              }}
-            >
-              Profile
-            </button>
-            <button
-              type="button"
-              title="Log out"
-              onClick={() => {
-                logout();
-                navigate("/login", { replace: true });
-              }}
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
-            >
-              Out
-            </button>
+            )}
           </div>
         </aside>
 
         <main className="platform-main">
           <header className="platform-topbar">
-            <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "'Syne',sans-serif" }}>
-              {isRecruiter ? "Recruiting" : "Control Center"}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "var(--mono)", fontSize: 13, letterSpacing: "0.02em", color: "var(--text-subtle)" }}>
+              <span style={{ color: "var(--text)", fontWeight: 500 }}>
+                {isRecruiter ? "Recruiting" : "Control Centre"}
+              </span>
+              <span style={{ opacity: 0.4 }}>›</span>
+              <span>{isRecruiter ? "Work queue" : "FY 2024-25"}</span>
             </div>
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-              {isRecruiter ? "/ Your queue & accounts" : "/ FY2024-25"}
-            </span>
             <div style={{ flex: 1 }} />
-            <input className="platform-search" placeholder="⌕  Search..." />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--surface-page)", border: "1px solid var(--border)", borderRadius: "var(--radius-base)", padding: "7px 12px", width: 220, transition: "border-color var(--t-base), box-shadow var(--t-base)" }}>
+              <span style={{ color: "var(--text-subtle)", fontSize: 13 }}>⌕</span>
+              <input
+                className="platform-search"
+                placeholder="Search…"
+                style={{ border: "none", background: "transparent", padding: 0, fontSize: 13, flex: 1, minWidth: 0 }}
+              />
+            </div>
           </header>
 
           <section className="platform-content">

@@ -408,11 +408,214 @@
   box-sizing: border-box;
 }
 
+/* Advanced portfolio filters (design system: dashboard-filter-bar + accent title) */
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters {
+  margin-bottom: 16px;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__head-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__head-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent, var(--sla-accent));
+  flex-shrink: 0;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__head-title {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent, var(--sla-accent));
+  letter-spacing: -0.02em;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__head--toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+  margin: 0;
+  padding: 4px 2px 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-base, 6px);
+  transition: background 0.15s ease;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__head--toggle:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__shell--expanded .sla-adv-filters__head--toggle {
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__chev {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text-muted, rgba(55, 53, 47, 0.5));
+  transition: transform 0.2s ease;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__chev--open {
+  transform: rotate(180deg);
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__panel[hidden] {
+  display: none !important;
+}
+/* Advanced filters: column shell + explicit rows so NCP pickers never share a flex row with multiselects */
+.finance-exec-scope.sla-kpi-fin-bridge .dashboard-filter-bar.sla-adv-filters__shell {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  align-content: stretch;
+  gap: 0;
+  padding: 14px 18px 16px;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__row--3col {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 18px;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__row--full {
+  width: 100%;
+  min-width: 0;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__row--2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 14px 18px;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 960px) {
+  .finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__row--3col {
+    grid-template-columns: 1fr;
+  }
+  .finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__row--2col {
+    grid-template-columns: 1fr;
+  }
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__shell .sla-adv-filters__field {
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  flex: none;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__shell .sla-adv-filters__field--multi {
+  max-width: none;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__lbl-icon {
+  width: 11px;
+  height: 11px;
+  margin-right: 5px;
+  vertical-align: -0.1em;
+  opacity: 0.72;
+  display: inline-block;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__label-row {
+  display: inline-flex;
+  align-items: center;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-gf-multiselect {
+  min-height: 72px;
+  max-height: 120px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  line-height: 1.35;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__panel .sla-adv-filters__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__apply,
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__btn-ic {
+  width: 16px;
+  height: 16px;
+}
+
+/* NCP-style pickers embedded in filter bar (inherits .new-contract-sheet token rules) */
+.finance-exec-scope.sla-kpi-fin-bridge .new-contract-sheet.sla-gf-ncp-embed {
+  min-height: 0;
+  display: block;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  width: 100%;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .new-contract-sheet.sla-gf-ncp-embed--cell {
+  min-width: 0;
+  width: 100%;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-adv-filters__field--month-range .sla-adv-filters__field-hint {
+  font-size: 11px;
+  color: var(--text-muted, rgba(55, 53, 47, 0.55));
+  margin: 0 0 8px;
+  line-height: 1.45;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-gf-month-range.ncp-date-grid {
+  grid-template-columns: 1fr 1fr;
+}
+.finance-exec-scope.sla-kpi-fin-bridge .sla-gf-month-range .ncp-date-cell input[type="month"] {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: var(--font, system-ui, sans-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+@media (max-width: 640px) {
+  .finance-exec-scope.sla-kpi-fin-bridge .sla-gf-month-range.ncp-date-grid {
+    grid-template-columns: 1fr;
+  }
+}
+/* Narrow screens: sidebar is removed from flow when collapsed; when open it stays in the flex row
+   so main content shifts right instead of sitting under an overlay. */
 @media (max-width: 900px) {
-  .finance-exec-scope.sla-kpi-fin-bridge .fin-dash-sidebar {
+  .finance-exec-scope.sla-kpi-fin-bridge .fin-dash-app {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .finance-exec-scope.sla-kpi-fin-bridge .fin-dash-app.sidebar-collapsed .fin-dash-sidebar {
     display: none;
   }
-  .finance-exec-scope.sla-kpi-fin-bridge .fin-dash-app {
-    flex-direction: column;
+  .finance-exec-scope.sla-kpi-fin-bridge .fin-dash-app:not(.sidebar-collapsed) .fin-dash-sidebar {
+    display: flex;
+    position: relative;
+    flex-shrink: 0;
+    align-self: stretch;
+    width: min(280px, 88vw);
+    min-width: min(280px, 88vw);
+    max-width: min(280px, 88vw);
+    z-index: auto;
+    box-shadow: none;
   }
 }

@@ -1,0 +1,476 @@
+/**
+ * Billing “All billing rows” table — light theme using the same structure and
+ * measurements as design_style_guide.html (§ spec-table, § STATUS / BADGES, § section-card).
+ * Scoped under .billing-ds so tokens match the guide without polluting the app.
+ */
+.billing-ds {
+  --ds-font: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --ds-mono: "DM Mono", ui-monospace, monospace;
+  --ds-surface: #ffffff;
+  --ds-surface-hover: #f7f6f3;
+  --ds-border: rgba(55, 53, 47, 0.09);
+  --ds-text-primary: #191817;
+  --ds-text-secondary: rgba(55, 53, 47, 0.65);
+  --ds-text-muted: rgba(55, 53, 47, 0.4);
+  --ds-accent: #e16f3d;
+  --ds-accent-soft: rgba(225, 111, 61, 0.08);
+  --ds-accent-mid: rgba(225, 111, 61, 0.18);
+  --ds-green: #2ecc71;
+  --ds-green-soft: rgba(46, 204, 113, 0.1);
+  --ds-amber: #f59e0b;
+  --ds-amber-soft: rgba(245, 158, 11, 0.1);
+  --ds-red: #ef4444;
+  --ds-red-soft: rgba(239, 68, 68, 0.1);
+  --ds-blue: #3884ff;
+  --ds-blue-soft: rgba(56, 132, 255, 0.08);
+  --ds-teal: #14b8a6;
+  --ds-teal-soft: rgba(20, 184, 166, 0.12);
+  --ds-radius: 6px;
+  --ds-radius-lg: 10px;
+  --ds-radius-pill: 100px;
+  --ds-t-base: 0.15s ease;
+}
+
+/* section-card — guide §8 */
+.billing-ds-section-card {
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  overflow: hidden;
+  transition: box-shadow var(--ds-t-base);
+}
+
+.billing-ds-section-card:focus-within {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  border-color: rgba(55, 53, 47, 0.3);
+}
+
+.billing-ds-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+}
+
+/* input-field — guide §6 */
+.billing-ds-input {
+  flex: 1 1 220px;
+  max-width: 400px;
+  min-width: 180px;
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius);
+  padding: 10px 12px;
+  width: 100%;
+  font-family: var(--ds-font);
+  font-size: 14px;
+  color: var(--ds-text-primary);
+  outline: none;
+  transition: border-color var(--ds-t-base), box-shadow var(--ds-t-base);
+}
+
+.billing-ds-input::placeholder {
+  color: var(--ds-text-muted);
+}
+
+.billing-ds-input:focus {
+  border-color: var(--ds-accent);
+  box-shadow: 0 0 0 3px var(--ds-accent-soft);
+}
+
+.billing-ds-select {
+  padding: 10px 12px;
+  border-radius: var(--ds-radius);
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text-primary);
+  font-size: 13px;
+  font-family: var(--ds-mono);
+  cursor: pointer;
+  min-width: 130px;
+  outline: none;
+  transition: border-color var(--ds-t-base), box-shadow var(--ds-t-base);
+}
+
+.billing-ds-select:focus {
+  border-color: var(--ds-accent);
+  box-shadow: 0 0 0 3px var(--ds-accent-soft);
+}
+
+.billing-ds-meta {
+  font-size: 10.5px;
+  font-family: var(--ds-mono);
+  color: var(--ds-text-muted);
+  margin-left: auto;
+}
+
+.billing-ds-table-scroll {
+  overflow: auto;
+  max-height: min(58vh, 520px);
+}
+
+/* spec-table — guide § spec-table */
+.billing-ds-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: var(--ds-font);
+  background: var(--ds-surface);
+  margin: 0;
+}
+
+.billing-ds-table thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ds-text-muted);
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--ds-border);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--ds-surface);
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--ds-border);
+}
+
+.billing-ds-table thead th.billing-ds-th-end {
+  text-align: right;
+}
+
+.billing-ds-table tbody td {
+  padding: 12px 12px 12px 16px;
+  color: var(--ds-text-secondary);
+  border-bottom: 1px solid var(--ds-border);
+  vertical-align: middle;
+  line-height: 1.5;
+}
+
+.billing-ds-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.billing-ds-table tbody tr:hover td {
+  background: var(--ds-surface-hover);
+}
+
+.billing-ds-mono {
+  font-family: var(--ds-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.billing-ds-id {
+  color: var(--ds-accent);
+  font-weight: 500;
+  font-size: 12px;
+  font-family: var(--ds-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.billing-ds-project-name {
+  color: var(--ds-text-primary);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.billing-ds-project-sub {
+  font-family: var(--ds-mono);
+  font-size: 11px;
+  color: var(--ds-accent);
+  margin-top: 2px;
+}
+
+.billing-ds-td-end {
+  text-align: right;
+}
+
+.billing-ds-num {
+  font-family: var(--ds-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-text-primary);
+}
+
+.billing-ds-invoice {
+  font-family: var(--ds-mono);
+  font-size: 12px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.billing-ds-invoice--set {
+  color: var(--ds-accent);
+}
+
+.billing-ds-invoice--empty {
+  color: var(--ds-text-muted);
+}
+
+.billing-ds-pm {
+  font-size: 12px;
+  color: var(--ds-text-secondary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.billing-ds-fy {
+  font-size: 12px;
+  color: var(--ds-text-secondary);
+}
+
+/* badge + badge-dot — guide §7 STATUS / BADGES */
+.billing-ds-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--ds-radius-pill);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.billing-ds-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.billing-ds-badge-green {
+  background: var(--ds-green-soft);
+  color: #1a7a47;
+}
+.billing-ds-badge-green .billing-ds-badge-dot {
+  background: var(--ds-green);
+}
+
+.billing-ds-badge-amber {
+  background: var(--ds-amber-soft);
+  color: #92600a;
+}
+.billing-ds-badge-amber .billing-ds-badge-dot {
+  background: var(--ds-amber);
+}
+
+.billing-ds-badge-red {
+  background: var(--ds-red-soft);
+  color: #b91c1c;
+}
+.billing-ds-badge-red .billing-ds-badge-dot {
+  background: var(--ds-red);
+}
+
+.billing-ds-badge-blue {
+  background: var(--ds-blue-soft);
+  color: #1d4ed8;
+}
+.billing-ds-badge-blue .billing-ds-badge-dot {
+  background: var(--ds-blue);
+}
+
+.billing-ds-badge-gray {
+  background: var(--ds-border);
+  color: var(--ds-text-secondary);
+}
+.billing-ds-badge-gray .billing-ds-badge-dot {
+  background: var(--ds-text-muted);
+}
+
+.billing-ds-badge-accent {
+  background: var(--ds-accent-soft);
+  color: var(--ds-accent);
+  border: 1px solid var(--ds-accent-mid);
+}
+.billing-ds-badge-accent .billing-ds-badge-dot {
+  background: var(--ds-accent);
+}
+
+.billing-ds-badge-teal {
+  background: var(--ds-teal-soft);
+  color: #0f766e;
+}
+.billing-ds-badge-teal .billing-ds-badge-dot {
+  background: var(--ds-teal);
+}
+
+.billing-ds-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.billing-ds-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--ds-radius);
+  font-family: var(--ds-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text-secondary);
+  cursor: pointer;
+  transition: background var(--ds-t-base), border-color var(--ds-t-base);
+}
+
+.billing-ds-filter-btn:hover {
+  background: var(--ds-surface-hover);
+  border-color: rgba(55, 53, 47, 0.3);
+}
+
+.billing-ds-empty-msg {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ds-text-secondary);
+}
+
+.billing-ds-link-btn {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--ds-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ds-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.billing-ds-link-btn:hover {
+  color: #c85f30;
+}
+
+/* ── Filters & actions toolbar (Billing page) — design_style_guide §5–6, platform tokens ── */
+.platform-app .billing-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.platform-app .billing-toolbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* NCP project combobox — width aligned with former native select */
+.platform-app .billing-toolbar-field--project {
+  flex: 1 1 280px;
+  max-width: 400px;
+  min-width: min(100%, 240px);
+}
+
+.platform-app .billing-toolbar-label {
+  font-size: 10px;
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.platform-app .billing-toolbar-select {
+  min-width: min(100%, 280px);
+  max-width: 360px;
+  width: 100%;
+  padding: 10px 32px 10px 12px;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--mono);
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: border-color var(--t-base), box-shadow var(--t-base);
+}
+
+.platform-app .billing-toolbar-select:hover {
+  border-color: var(--border2);
+}
+
+.platform-app .billing-toolbar-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.platform-app .billing-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 18px;
+  border-radius: var(--radius-base);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  transition: background var(--t-base), border-color var(--t-base), color var(--t-base), box-shadow var(--t-base);
+}
+
+.platform-app .billing-toolbar-btn:hover:not(:disabled) {
+  background: var(--surface-muted);
+  border-color: var(--border-focus);
+  color: var(--text);
+}
+
+.platform-app .billing-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.platform-app .billing-toolbar-btn--primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: none;
+  box-shadow: 0 1px 3px rgba(225, 111, 61, 0.3);
+}
+
+.platform-app .billing-toolbar-btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 2px 8px rgba(225, 111, 61, 0.4);
+}
+
+.platform-app .billing-toolbar-count {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-subtle);
+  letter-spacing: 0.02em;
+  padding-bottom: 2px;
+}
+
+@media (max-width: 640px) {
+  .platform-app .billing-toolbar-count {
+    margin-left: 0;
+    width: 100%;
+    padding-top: 4px;
+  }
+}

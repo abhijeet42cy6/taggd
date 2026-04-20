@@ -4,14 +4,12 @@ import { formatCurrency } from "@/lib/utils";
 import { PageHeader, PlatformKpi, PlatformSection } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 function numOrUndef(s: string): number | null | undefined {
   const t = s.trim();
@@ -212,7 +210,7 @@ export function VendorLicenses() {
   }
 
   const lbl = (t: string) => (
-    <span style={{ color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{t}</span>
+    <span style={{ color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 12, fontWeight: 500 }}>{t}</span>
   );
 
   return (
@@ -326,121 +324,123 @@ export function VendorLicenses() {
         </div>
       </PlatformSection>
 
-      <Dialog
+      <Sheet
         open={dialogOpen}
         onOpenChange={(o) => {
           if (!o) resetForm();
           setDialogOpen(o);
         }}
       >
-        <DialogContent showCloseButton className={cn("platform-dialog platform-dialog--wide max-h-[92vh] overflow-y-auto")}>
-          <DialogHeader className="platform-dialog__header">
-            <div className="platform-dialog__eyebrow">{editingId != null ? `Edit · VND-${editingId}` : "New row"}</div>
-            <DialogTitle className="platform-dialog__title">{editingId != null ? "Update vendor license" : "Add vendor license"}</DialogTitle>
-            <DialogDescription className="platform-dialog__desc">
-              Independent of projects. Use sort order to control table sequence. Leave numeric fields blank if not applicable.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="platform-dialog__body space-y-3" style={{ display: "grid", gap: 10 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Job board / vendor *")}
-                <input className="platform-search" value={vendorName} onChange={(e) => setVendorName(e.target.value)} placeholder="e.g. Naukri – Taggd (Main)" />
+        <SheetContent className="new-contract-sheet flex min-h-0 flex-1 flex-col" side="right" showCloseButton>
+          <div className="ncp-scroll min-h-0 flex-1" style={{ overflowY: "auto" }}>
+            <SheetHeader className="platform-dialog__header" style={{ padding: "20px 24px 16px" }}>
+              <div className="platform-dialog__eyebrow">{editingId != null ? `VENDOR LICENSES · EDIT · VND-${editingId}` : "VENDOR LICENSES · NEW ROW"}</div>
+              <SheetTitle className="platform-dialog__title">{editingId != null ? "Update vendor license" : "Add vendor license"}</SheetTitle>
+              <SheetDescription className="platform-dialog__desc">
+                Independent of projects. Use sort order to control table sequence. Leave numeric fields blank if not applicable.
+              </SheetDescription>
+            </SheetHeader>
+            <div style={{ padding: "20px 24px", display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Job board / vendor *")}
+                  <input className="platform-search" value={vendorName} onChange={(e) => setVendorName(e.target.value)} placeholder="e.g. Naukri – Taggd (Main)" />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Login IDs (count)")}
+                  <input className="platform-search" inputMode="numeric" value={loginIdsCount} onChange={(e) => setLoginIdsCount(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Sort order")}
+                  <input className="platform-search" inputMode="numeric" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
+                </label>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Resume inventory")}
+                  <input className="platform-search" value={resumeInventory} onChange={(e) => setResumeInventory(e.target.value)} placeholder="300,000 / Unlimited" />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Job postings")}
+                  <input className="platform-search" inputMode="numeric" value={jobPostings} onChange={(e) => setJobPostings(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Naukri invites")}
+                  <input className="platform-search" inputMode="numeric" value={naukriInvites} onChange={(e) => setNaukriInvites(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Utilization")}
+                  <input className="platform-search" value={utilization} onChange={(e) => setUtilization(e.target.value)} />
+                </label>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Start date")}
+                  <input className="platform-search" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("End date")}
+                  <input className="platform-search" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Duration (months)")}
+                  <input className="platform-search" inputMode="numeric" value={durationMonths} onChange={(e) => setDurationMonths(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Cost (INR)")}
+                  <input className="platform-search" inputMode="decimal" value={costInr} onChange={(e) => setCostInr(e.target.value)} placeholder="49150120" />
+                </label>
+              </div>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {lbl("Fiscal year label")}
+                <input className="platform-search" value={fyLabel} onChange={(e) => setFyLabel(e.target.value)} />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Login IDs (count)")}
-                <input className="platform-search" inputMode="numeric" value={loginIdsCount} onChange={(e) => setLoginIdsCount(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Sort order")}
-                <input className="platform-search" inputMode="numeric" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
+              <div style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "var(--mono)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Primary person</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Name")}
+                  <input className="platform-search" value={primaryName} onChange={(e) => setPrimaryName(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Phone")}
+                  <input className="platform-search" value={primaryPhone} onChange={(e) => setPrimaryPhone(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Email")}
+                  <input className="platform-search" value={primaryEmail} onChange={(e) => setPrimaryEmail(e.target.value)} />
+                </label>
+              </div>
+              <div style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "var(--mono)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Secondary person</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Name")}
+                  <input className="platform-search" value={secondaryName} onChange={(e) => setSecondaryName(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Phone")}
+                  <input className="platform-search" value={secondaryPhone} onChange={(e) => setSecondaryPhone(e.target.value)} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {lbl("Email")}
+                  <input className="platform-search" value={secondaryEmail} onChange={(e) => setSecondaryEmail(e.target.value)} />
+                </label>
+              </div>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {lbl("Remarks")}
+                <textarea className="platform-search" rows={3} value={remarks} onChange={(e) => setRemarks(e.target.value)} style={{ resize: "vertical" }} />
               </label>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Resume inventory")}
-                <input className="platform-search" value={resumeInventory} onChange={(e) => setResumeInventory(e.target.value)} placeholder="300,000 / Unlimited" />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Job postings")}
-                <input className="platform-search" inputMode="numeric" value={jobPostings} onChange={(e) => setJobPostings(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Naukri invites")}
-                <input className="platform-search" inputMode="numeric" value={naukriInvites} onChange={(e) => setNaukriInvites(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Utilization")}
-                <input className="platform-search" value={utilization} onChange={(e) => setUtilization(e.target.value)} />
-              </label>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Start date")}
-                <input className="platform-search" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("End date")}
-                <input className="platform-search" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Duration (months)")}
-                <input className="platform-search" inputMode="numeric" value={durationMonths} onChange={(e) => setDurationMonths(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Cost (INR)")}
-                <input className="platform-search" inputMode="decimal" value={costInr} onChange={(e) => setCostInr(e.target.value)} placeholder="49150120" />
-              </label>
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Fiscal year label")}
-              <input className="platform-search" value={fyLabel} onChange={(e) => setFyLabel(e.target.value)} />
-            </label>
-            <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Primary person</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Name")}
-                <input className="platform-search" value={primaryName} onChange={(e) => setPrimaryName(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Phone")}
-                <input className="platform-search" value={primaryPhone} onChange={(e) => setPrimaryPhone(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Email")}
-                <input className="platform-search" value={primaryEmail} onChange={(e) => setPrimaryEmail(e.target.value)} />
-              </label>
-            </div>
-            <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Secondary person</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Name")}
-                <input className="platform-search" value={secondaryName} onChange={(e) => setSecondaryName(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Phone")}
-                <input className="platform-search" value={secondaryPhone} onChange={(e) => setSecondaryPhone(e.target.value)} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {lbl("Email")}
-                <input className="platform-search" value={secondaryEmail} onChange={(e) => setSecondaryEmail(e.target.value)} />
-              </label>
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {lbl("Remarks")}
-              <textarea className="platform-search" rows={3} value={remarks} onChange={(e) => setRemarks(e.target.value)} />
-            </label>
           </div>
-          <DialogFooter className="platform-dialog__footer">
+          <div className="platform-dialog__footer" style={{ flexShrink: 0 }}>
             <button type="button" className="platform-dialog__btn" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
             </button>
             <button type="button" className="platform-dialog__btn platform-dialog__btn--primary" onClick={() => void save()} disabled={saving}>
               {saving ? "Saving…" : editingId != null ? "Save" : "Create"}
             </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

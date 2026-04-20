@@ -10,36 +10,36 @@
   }
 
   :root {
-    /* Light shell + orange primary (aligned with platform.css :root tokens) */
-    --background: 0 0% 98%;
-    --foreground: 240 6% 10%;
+    /* Warm shell + terracotta accent (aligned with design_style_guide.html) */
+    --background: 40 9% 96%;
+    --foreground: 30 6% 9%;
     --card: 0 0% 100%;
-    --card-foreground: 240 6% 10%;
+    --card-foreground: 30 6% 9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 6% 10%;
-    --primary: 21 90% 48%;
+    --popover-foreground: 30 6% 9%;
+    --primary: 19 73% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 6% 10%;
-    --muted: 240 5% 96%;
-    --muted-foreground: 240 4% 46%;
-    --accent: 33 100% 96%;
-    --accent-foreground: 21 90% 40%;
-    --destructive: 0 84% 50%;
+    --secondary: 40 9% 96%;
+    --secondary-foreground: 30 6% 9%;
+    --muted: 40 9% 96%;
+    --muted-foreground: 30 5% 35%;
+    --accent: 40 9% 96%;
+    --accent-foreground: 19 73% 44%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
-    --ring: 21 90% 48%;
-    --radius: 0.5rem;
+    --border: 30 5% 88%;
+    --input: 30 5% 88%;
+    --ring: 19 73% 56%;
+    --radius: 0.375rem;
 
-    --sidebar: 0 0% 98%;
-    --sidebar-foreground: 240 6% 10%;
-    --sidebar-primary: 21 90% 48%;
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 30 6% 9%;
+    --sidebar-primary: 19 73% 56%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 33 100% 96%;
-    --sidebar-accent-foreground: 21 90% 40%;
-    --sidebar-border: 240 6% 90%;
-    --sidebar-ring: 21 90% 48%;
+    --sidebar-accent: 19 73% 56% / 0.08;
+    --sidebar-accent-foreground: 19 73% 44%;
+    --sidebar-border: 30 5% 88%;
+    --sidebar-ring: 19 73% 56%;
   }
 }
 

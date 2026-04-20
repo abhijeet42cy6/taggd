@@ -60,6 +60,7 @@ export function financeStatsVm(raw: any) {
   const collection_pending_inr = normalizeMaybeNumeric(raw.collection_pending);
   return {
     revenue_budget_inr,
+    revenue_forecast_inr: normalizeMaybeNumeric(raw.revenue_forecast) ?? 0,
     revenue_actual_inr,
     total_cm_inr,
     total_unbilled_inr,

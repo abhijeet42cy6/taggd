@@ -355,6 +355,7 @@ export function homePathAfterAuth(user: AuthUser | null | undefined): string {
 
 /** Backend `VERTICAL_KEYS` → app routes (client portal allow-list). */
 const VERTICAL_TO_NAV_PATHS: Record<string, string[]> = {
+  executive_dashboard: ["/"],
   finance: ["/finance"],
   sla: ["/sla-performance"],
   wfm: ["/wfm"],
@@ -408,8 +409,10 @@ const STAFF_PATH_VERTICAL_PREFIXES: [string, string][] = [
 ];
 
 function verticalKeyForStaffPath(pathname: string): string | null {
+  const p = pathname === "" ? "/" : pathname;
+  if (p === "/") return "executive_dashboard";
   for (const [prefix, key] of STAFF_PATH_VERTICAL_PREFIXES) {
-    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return key;
+    if (p === prefix || p.startsWith(`${prefix}/`)) return key;
   }
   return null;
 }

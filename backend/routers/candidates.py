@@ -395,6 +395,34 @@ def list_candidates(
     return {"items": [_serialize_candidate(x, db) for x in rows], "total": total, "limit": limit, "offset": offset}
 
 
+@router.post("/parse-resume")
+async def parse_resume_preview(
+    file: UploadFile = File(...),
+    _user: User = Depends(get_current_user),
+):
+    """Extract text from PDF/DOCX and return best-effort field suggestions for candidate autofill."""
+    from backend.core.resume_parse import extract_resume_text, parse_resume_text
+
+    orig = file.filename or "cv.pdf"
+    ext = os.path.splitext(orig)[1].lower() or ".pdf"
+    if ext not in _CV_ALLOWED_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type {ext!r}; allowed: {', '.join(sorted(_CV_ALLOWED_EXT))}",
+        )
+    data = await file.read()
+    if len(data) > _MAX_CV_BYTES:
+        raise HTTPException(status_code=413, detail=f"CV exceeds {_MAX_CV_BYTES // (1024 * 1024)} MiB limit")
+    try:
+        text = extract_resume_text(orig, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {e}") from e
+    fields = parse_resume_text(text)
+    return {"ok": True, "fields": fields}
+
+
 @router.get("/{candidate_id}/cv")
 def download_candidate_cv(
     candidate_id: int,

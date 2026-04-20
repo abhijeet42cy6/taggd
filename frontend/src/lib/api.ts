@@ -746,6 +746,8 @@ export type RecordRpoPatch = {
   billing_month?: string;
   fy_label?: string;
   requisition_extras?: Record<string, unknown>;
+  /** Taggd vs non-Taggd joiner source (requisition create). */
+  source_joiner_type?: string | null;
 };
 
 export type RecordRow = {
@@ -778,6 +780,7 @@ export type RecordPatch = {
   global_status?: string | null;
   candidate_name?: string | null;
   position_title?: string | null;
+  source_joiner_type?: string | null;
   hiring_manager?: string | null;
   department?: string | null;
   location?: string | null;
@@ -793,6 +796,7 @@ export type RecordCreate = {
   project_id: number;
   candidate_name: string;
   position_title: string;
+  source_joiner_type: string;
   position_code?: string | null;
   status?: string | null;
   global_status?: string | null;
@@ -1465,6 +1469,15 @@ export const queries = {
   },
 
   candidate: (id: number) => api.get<CandidateRow>(`/candidates/${id}`).then((r) => r.data),
+
+  /** PDF/DOCX → heuristic field suggestions (does not persist; use create + candidateUploadCv). */
+  parseResumePreview: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api
+      .post<{ ok: boolean; fields: Record<string, unknown> }>("/candidates/parse-resume", fd)
+      .then((r) => r.data);
+  },
 
   createCandidate: (body: CandidateCreate) =>
     api.post<CandidateRow>("/candidates", body).then((r) => {
