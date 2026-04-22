@@ -32,10 +32,9 @@ tar -czf "${TAR_PATH}" \
   --exclude='.venv' \
   --exclude='venv' \
   --exclude='excel_files' \
-  --exclude='excel_files_imp' \
   --exclude='revenue_generator.db' \
   --exclude='*.tar.gz' \
-  backend frontend \
+  backend frontend excel_files_imp scripts \
   Dockerfile.backend Dockerfile.frontend \
   docker-compose.yml nginx.conf requirements.txt .env.example
 

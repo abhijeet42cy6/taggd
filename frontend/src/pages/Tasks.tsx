@@ -975,14 +975,14 @@ export function Tasks() {
           </p>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-          {!readOnlyPortal ? (
+        {!readOnlyPortal ? (
             <button type="button" className="tsk-btn-primary" onClick={() => openCreate()}>
-              + New task
-            </button>
-          ) : null}
-          {readOnlyPortal ? (
+            + New task
+          </button>
+        ) : null}
+      {readOnlyPortal ? (
             <span className="tsk-readonly-notice">⚠ View only — cannot create or edit tasks</span>
-          ) : null}
+      ) : null}
         </div>
       </div>
 
@@ -1124,7 +1124,7 @@ export function Tasks() {
                   {list.map((t) => {
                     const pr = t.project_id != null ? projects.find((p) => p.id === t.project_id) : undefined;
                     const prLabel = pr != null
-                      ? `PRJ-${t.project_id} · ${(pr.engagement_name || pr.account_name || "").slice(0, 22)}`
+                        ? `PRJ-${t.project_id} · ${(pr.engagement_name || pr.account_name || "").slice(0, 22)}`
                       : t.project_id != null ? `PRJ-${t.project_id}` : null;
                     const linkHref = platformTaskLinkHref(t.linked_resource_type, t.linked_resource_id);
                     const linkSummary = platformTaskLinkSummary(t.linked_resource_type, t.linked_resource_id);
@@ -1151,11 +1151,11 @@ export function Tasks() {
                             {prio && (
                               <span className={cn("tsk-priority", priorityCls(prio))}>
                                 {priorityLabel(prio)}
-                              </span>
-                            )}
+                            </span>
+                          )}
                             {overdue && <span className="tsk-badge-overdue">Overdue</span>}
                             {demo && <span className="tsk-badge-sample">Sample</span>}
-                          </div>
+                        </div>
                         </div>
 
                         {t.description && (
@@ -1165,7 +1165,7 @@ export function Tasks() {
                         <div className="tsk-card-meta">
                           <span className={cn("tsk-badge", "tsk-badge-dot", `tsk-badge--${t.status}`)}>
                             {COLUMN_STATUS_META.find((c) => c.status === t.status)?.label ?? t.status}
-                          </span>
+                            </span>
                           {catLabel && <span className="tsk-cat-chip">{catLabel}</span>}
                           {t.task_subtype?.trim() ? (
                             <span className="tsk-subtype-chip" title={t.task_subtype}>{t.task_subtype}</span>
@@ -1176,7 +1176,7 @@ export function Tasks() {
                           <div className={cn("tsk-card-prop", overdue && "tsk-card-prop--warn")}>
                             <span className="tsk-card-prop-label">Due</span>
                             <span className="tsk-card-prop-value">{fmtWhen(t.due_at)}</span>
-                          </div>
+                        </div>
                           {prLabel ? (
                             <div className="tsk-card-prop">
                               <span className="tsk-card-prop-label">Project</span>
@@ -1515,12 +1515,12 @@ export function Tasks() {
                       <div className="ncp-prop-row" style={{ borderTop: "none" }}>
                         <div className="ncp-prop-label">Status</div>
                         <select className="ncp-prop-input" value={status} onChange={(e) => setStatus(e.target.value)}>
-                          {STATUSES.map((s) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
+                  {STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
                       </div>
                       <div className="ncp-prop-row" style={{ borderTop: "none" }}>
                         <div className="ncp-prop-label">Priority</div>
@@ -1567,12 +1567,12 @@ export function Tasks() {
                   <div className="ncp-prop-row" style={{ borderTop: "none", alignItems: "center" }}>
                     <div className="ncp-prop-label">Category</div>
                     <select className="ncp-prop-input" value={category} onChange={(e) => setCategory(e.target.value)}>
-                      {CATEGORIES.map((c) => (
-                        <option key={c.value || "none"} value={c.value}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
+                  {CATEGORIES.map((c) => (
+                    <option key={c.value || "none"} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
                   </div>,
                 )}
 
@@ -1590,41 +1590,41 @@ export function Tasks() {
                         onChange={(e) => setSubtype(e.target.value)}
                         placeholder="e.g. pack_review, sla_upload_review"
                       />
-                    </div>
+            </div>
                     <div className="ncp-prop-row">
                       <div className="ncp-prop-label">Link preset</div>
-                      <select
+              <select
                         className="ncp-prop-input"
-                        value={linkPreset}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setLinkPreset(v);
-                          if (v === "") {
-                            setLinkedType("");
-                            setLinkedId("");
-                            return;
-                          }
-                          if (v === CUSTOM_LINK_PRESET) return;
-                          setLinkedType(v);
-                          const dc = defaultCategoryForLinkKind(v);
-                          if (dc) setCategory((prev) => (prev.trim() ? prev : dc));
-                        }}
-                      >
-                        <option value="">— Not linked —</option>
-                        {PLATFORM_TASK_LINK_KINDS.map((k) => (
-                          <option key={k.value} value={k.value}>
-                            {k.label}
-                          </option>
-                        ))}
-                        <option value={CUSTOM_LINK_PRESET}>Custom (advanced)…</option>
-                      </select>
+                value={linkPreset}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setLinkPreset(v);
+                  if (v === "") {
+                    setLinkedType("");
+                    setLinkedId("");
+                    return;
+                  }
+                  if (v === CUSTOM_LINK_PRESET) return;
+                  setLinkedType(v);
+                  const dc = defaultCategoryForLinkKind(v);
+                  if (dc) setCategory((prev) => (prev.trim() ? prev : dc));
+                }}
+              >
+                <option value="">— Not linked —</option>
+                {PLATFORM_TASK_LINK_KINDS.map((k) => (
+                  <option key={k.value} value={k.value}>
+                    {k.label}
+                  </option>
+                ))}
+                <option value={CUSTOM_LINK_PRESET}>Custom (advanced)…</option>
+              </select>
                     </div>
-                    {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
+              {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
                       <p style={{ margin: "0 0 8px", fontSize: 11, color: "var(--ncp-text-muted)", lineHeight: 1.45 }}>
-                        {PLATFORM_TASK_LINK_KINDS.find((k) => k.value === linkPreset)?.hint ?? ""}
-                      </p>
-                    ) : null}
-                    {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
+                  {PLATFORM_TASK_LINK_KINDS.find((k) => k.value === linkPreset)?.hint ?? ""}
+                </p>
+              ) : null}
+            {linkPreset && linkPreset !== CUSTOM_LINK_PRESET ? (
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">Resource id</div>
                         <input
@@ -1634,8 +1634,8 @@ export function Tasks() {
                           placeholder="When the preset needs an id (submission, project, record…)"
                         />
                       </div>
-                    ) : null}
-                    {linkPreset === CUSTOM_LINK_PRESET ? (
+            ) : null}
+            {linkPreset === CUSTOM_LINK_PRESET ? (
                       <div
                         style={{
                           display: "grid",
@@ -1661,14 +1661,14 @@ export function Tasks() {
                             placeholder="Id or composite key"
                           />
                         </div>
-                      </div>
-                    ) : null}
+              </div>
+            ) : null}
                   </>,
                 )}
 
                 {saveError ? (
-                  <div
-                    style={{
+              <div
+                style={{
                       margin: "12px 0",
                       padding: "10px 14px",
                       background: "rgba(239,68,68,0.08)",
@@ -1679,10 +1679,10 @@ export function Tasks() {
                     }}
                   >
                     {saveError}
-                  </div>
-                ) : null}
               </div>
+                ) : null}
             </div>
+          </div>
 
             <div className="ncp-footer">
               <span className="ncp-hint" style={{ alignSelf: "center" }}>
@@ -1690,11 +1690,11 @@ export function Tasks() {
               </span>
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setDialogOpen(false)} disabled={saving}>
-                  Cancel
-                </button>
+              Cancel
+            </button>
                 <button type="submit" className="ncp-btn ncp-btn-primary" disabled={saving}>
                   {saving ? "Saving…" : editing ? "Save changes" : "Create task"}
-                </button>
+            </button>
               </div>
             </div>
           </form>

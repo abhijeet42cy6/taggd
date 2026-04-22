@@ -54,6 +54,30 @@
   color: var(--text-subtle);
 }
 
+.exec-compare-select {
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  min-width: 148px;
+}
+
+.exec-compare-select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.exec-heatmap-footnote {
+  margin: 14px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  font-family: var(--sans, system-ui, sans-serif);
+}
+
 /* ── Filter bar ── */
 .exec-filter-bar {
   background: var(--surface-raised);
@@ -658,8 +682,34 @@
   gap: 14px;
 }
 
+.exec-bottom-grid--single {
+  grid-template-columns: 1fr;
+}
+
 @media (max-width: 900px) {
   .exec-bottom-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Portfolio monitor (requisition / pipeline; not FY ledger) ── */
+.exec-monitor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.exec-monitor-section__intro {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+.exec-monitor-section__drilldown {
+  margin-top: 2px;
 }
 
 /* ── Empty state ── */

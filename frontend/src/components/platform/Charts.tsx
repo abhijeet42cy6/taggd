@@ -7,7 +7,7 @@ import { formatNumber, formatPercent } from "@/lib/utils";
 import type { YoYRevPoint, YoYCmPoint, RegionBarDatum } from "@/lib/dashboard-aggregates";
 import {
   LineChart, Line, BarChart, Bar, ComposedChart,
-  XAxis, YAxis, CartesianGrid,   Tooltip, Legend, ReferenceLine,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, LabelList,
   ResponsiveContainer, Cell, PieChart, Pie, RadialBarChart, RadialBar,
   ScatterChart, Scatter, ZAxis,
 } from "recharts";
@@ -882,6 +882,20 @@ export function ComplianceMatrix({ months, rows }: { months: string[]; rows: Mat
   );
 }
 
+/** Budget bar value labels — dark ink so they read on pale slate bars (avoid theme white/--text on light fills). */
+const YOY_BUDGET_LABEL_STYLE: React.CSSProperties = {
+  fill: "#1e293b",
+  fontSize: 8,
+  fontWeight: 600,
+  fontFamily: "'DM Mono', monospace",
+};
+
+function formatYoyBudgetCr(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n >= 10 ? `${n.toFixed(0)}` : n >= 1 ? `${n.toFixed(1)}` : `${n.toFixed(2)}`;
+}
+
 // ─── EXECUTIVE DASHBOARD: REVENUE YoY (₹ Cr) ─────────────────────────────────
 export function ExecutiveRevenueYoYChart({
   data,
@@ -899,7 +913,7 @@ export function ExecutiveRevenueYoYChart({
   }
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <ComposedChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+      <ComposedChart data={data} style={CHART_STYLE} margin={{ top: 10, right: 8, left: 4, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
         <XAxis dataKey="month" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
         <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false}
@@ -909,7 +923,21 @@ export function ExecutiveRevenueYoYChart({
           formatter={(v: number, name: string) => [`₹${Number(v).toFixed(2)} Cr`, name]}
         />
         <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        <Bar dataKey="budget" name="Budget" fill="color-mix(in srgb, var(--text-subtle) 25%, transparent)" radius={[2, 2, 0, 0]} />
+        {/* Slate bars: strong enough vs page bg; neutral hue avoids clashing with prior-year blue line */}
+        <Bar
+          dataKey="budget"
+          name="Budget"
+          fill="#64748b"
+          fillOpacity={0.48}
+          radius={[2, 2, 0, 0]}
+        >
+          <LabelList
+            dataKey="budget"
+            position="insideTop"
+            formatter={formatYoyBudgetCr}
+            style={YOY_BUDGET_LABEL_STYLE}
+          />
+        </Bar>
         <Line type="monotone" dataKey="actual" name="Actual" stroke={COLORS.accent} strokeWidth={2.5} dot={{ r: 2 }} />
         <Line type="monotone" dataKey="forecast" name="Forecast" stroke={COLORS.amber} strokeWidth={1.8} strokeDasharray="5 4" dot={{ r: 1.5 }} />
         <Line
@@ -927,7 +955,14 @@ export function ExecutiveRevenueYoYChart({
 }
 
 // ─── EXECUTIVE DASHBOARD: CM% YoY ───────────────────────────────────────────
-export function ExecutiveCmYoYChart({ data }: { data: YoYCmPoint[] }) {
+export function ExecutiveCmYoYChart({
+  data,
+  compareLabel = "Comparison FY",
+}: {
+  data: YoYCmPoint[];
+  /** Legend + tooltip name for the dashed comparison series (e.g. "FY24–25 Actual") */
+  compareLabel?: string;
+}) {
   if (!data.length) {
     return (
       <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
@@ -955,7 +990,7 @@ export function ExecutiveCmYoYChart({ data }: { data: YoYCmPoint[] }) {
         <Line
           type="monotone"
           dataKey="priorActualPct"
-          name="CM% Prior FY"
+          name={compareLabel}
           stroke="#2563eb"
           strokeWidth={2}
           strokeDasharray="6 4"
@@ -967,6 +1002,35 @@ export function ExecutiveCmYoYChart({ data }: { data: YoYCmPoint[] }) {
 }
 
 // ─── REGIONAL REVENUE (grouped bar) ──────────────────────────────────────────
+/** Budget series: high-contrast neutral (reads on light + dark surfaces). */
+const REGIONAL_BUDGET_FILL = "color-mix(in srgb, var(--text) 42%, var(--border2))";
+const REGIONAL_BUDGET_STROKE = "color-mix(in srgb, var(--text) 55%, var(--border))";
+/** Actual: full accent + stroke so bars read clearly vs budget. */
+const REGIONAL_ACTUAL_FILL = "var(--accent)";
+const REGIONAL_ACTUAL_STROKE = "color-mix(in srgb, var(--accent) 82%, #1c1917)";
+
+const axisTickMuted = { fill: "var(--text-muted)", fontSize: 10, fontWeight: 500, fontFamily: "'DM Mono', monospace" };
+const regionalLegendStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: "var(--text)",
+  fontFamily: "'DM Mono', monospace",
+  paddingTop: 8,
+};
+
+const regionalLabelStyle: React.CSSProperties = {
+  fill: "var(--text)",
+  fontSize: 9,
+  fontWeight: 600,
+  fontFamily: "'DM Mono', monospace",
+};
+
+function regionalCrLabel(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n >= 10 ? `${n.toFixed(0)}` : n >= 1 ? `${n.toFixed(1)}` : `${n.toFixed(2)}`;
+}
+
 export function RegionalRevenueBarChart({ data }: { data: RegionBarDatum[] }) {
   if (!data.length) {
     return (
@@ -975,16 +1039,60 @@ export function RegionalRevenueBarChart({ data }: { data: RegionBarDatum[] }) {
       </div>
     );
   }
+  const peakCr = Math.max(0.01, ...data.map((d) => Math.max(d.actual, d.budget)));
+  const yMaxCr = Math.ceil(peakCr * 1.14 * 10) / 10;
+
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 8, left: 4, bottom: 48 }}>
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data} style={CHART_STYLE} margin={{ top: 18, right: 10, left: 2, bottom: 36 }} barCategoryGap="18%" barGap={4}>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis dataKey="region" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-25} textAnchor="end" height={56} />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} tickFormatter={(v) => `₹${v}`} width={44} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`₹${Number(v).toFixed(2)} Cr`, ""]} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        <Bar dataKey="budget" name="Budget" fill="color-mix(in srgb, var(--text-subtle) 30%, transparent)" radius={[2, 2, 0, 0]} />
-        <Bar dataKey="actual" name="Actual" fill="color-mix(in srgb, var(--accent) 75%, transparent)" radius={[2, 2, 0, 0]} />
+        <XAxis
+          dataKey="region"
+          tick={axisTickMuted}
+          axisLine={{ stroke: "var(--border2)" }}
+          tickLine={false}
+          interval={0}
+          angle={-18}
+          textAnchor="end"
+          height={52}
+        />
+        <YAxis
+          tick={axisTickMuted}
+          tickFormatter={(v) => `₹${v} Cr`}
+          width={52}
+          axisLine={false}
+          tickLine={false}
+          domain={[0, yMaxCr]}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          cursor={{ fill: "color-mix(in srgb, var(--accent) 8%, transparent)" }}
+          formatter={(v: number, name: string) => [`₹${Number(v).toFixed(2)} Cr`, name]}
+          labelStyle={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}
+        />
+        <Legend verticalAlign="bottom" height={28} iconType="square" iconSize={10} wrapperStyle={regionalLegendStyle} />
+        <Bar
+          dataKey="budget"
+          name="Budget"
+          fill={REGIONAL_BUDGET_FILL}
+          stroke={REGIONAL_BUDGET_STROKE}
+          strokeWidth={1}
+          radius={[3, 3, 0, 0]}
+          maxBarSize={40}
+        >
+          <LabelList dataKey="budget" position="top" formatter={regionalCrLabel} style={regionalLabelStyle} />
+        </Bar>
+        <Bar
+          dataKey="actual"
+          name="Actual"
+          fill={REGIONAL_ACTUAL_FILL}
+          stroke={REGIONAL_ACTUAL_STROKE}
+          strokeWidth={1}
+          radius={[3, 3, 0, 0]}
+          maxBarSize={40}
+        >
+          <LabelList dataKey="actual" position="top" formatter={regionalCrLabel} style={regionalLabelStyle} />
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );

@@ -207,43 +207,61 @@ export const Dashboard = () => {
   const [filters, setFilters] = useState<DF>(DEFAULT_DASHBOARD_FILTERS);
   const [fyCompare, setFyCompare] = useState(true);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
+  /** null = auto-pick most recent FY in data that is &lt; selected primary FY */
+  const [compareFyOverride, setCompareFyOverride] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
+      const withTimeout = <T,>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
+        Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
+
+      /** Ledger + monitor endpoints can be slow on large DBs; keep above axios timeout. */
+      const T_HEAVY = 90_000;
+      const T_STD = 60_000;
+
       try {
-        const [sRes, mRes] = await Promise.allSettled([queries.globalStats(), queries.globalMonitor()]);
+        const [
+          sRes,
+          mRes,
+          proj,
+          fStats,
+          fRows,
+          sStats,
+          wfm,
+          rk,
+          dd,
+        ] = await Promise.allSettled([
+          withTimeout(queries.globalStats(), T_STD, null),
+          withTimeout(queries.globalMonitor(), T_HEAVY, null),
+          withTimeout(queries.projects(), T_STD, []),
+          withTimeout(queries.financeStats(), T_STD, null),
+          withTimeout(queries.financeData(), T_HEAVY, []),
+          withTimeout(queries.slaStats(), T_STD, null),
+          withTimeout(queries.wfmStats(), T_STD, null),
+          withTimeout(queries.requisitionKpis(), T_STD, null),
+          withTimeout(queries.globalDrilldown("hiring_manager"), T_STD, []),
+        ]);
         if (!mounted) return;
-        if (sRes.status === "fulfilled") setStats(sRes.value);
-        if (mRes.status === "fulfilled") setMonitor(mRes.value);
-        if (sRes.status === "rejected" && mRes.status === "rejected")
+
+        if (sRes.status === "fulfilled" && sRes.value != null) setStats(sRes.value);
+        if (mRes.status === "fulfilled" && mRes.value != null) setMonitor(mRes.value);
+        if (sRes.status === "rejected" && mRes.status === "rejected") {
           setCoreError("Unable to load dashboard KPIs — verify API connectivity.");
+        }
+
+        if (proj.status === "fulfilled") setProjects(proj.value || []);
+        if (fStats.status === "fulfilled" && fStats.value) setFinanceStatsApi(financeStatsVm(fStats.value));
+        if (fRows.status === "fulfilled" && fRows.value) setFinanceRows(financeRowsVm(fRows.value as any[]));
+        if (sStats.status === "fulfilled" && sStats.value) setSlaStats(slaStatsVm(sStats.value));
+        if (wfm.status === "fulfilled") setWfmStats(wfm.value);
+        if (rk.status === "fulfilled") setReqKpis(rk.value as RequisitionKpis);
+        if (dd.status === "fulfilled") setDrilldown((dd.value as any) || []);
       } catch {
         if (mounted) setCoreError("Unable to load KPIs — check backend connectivity.");
       } finally {
         if (mounted) setLoadingCore(false);
       }
-
-      const withTimeout = <T,>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
-        Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
-
-      const [proj, fStats, fRows, sStats, wfm, rk, dd] = await Promise.allSettled([
-        withTimeout(queries.projects(), 8_000, []),
-        withTimeout(queries.financeStats(), 8_000, null),
-        withTimeout(queries.financeData(), 8_000, []),
-        withTimeout(queries.slaStats(), 8_000, null),
-        withTimeout(queries.wfmStats(), 8_000, null),
-        withTimeout(queries.requisitionKpis(), 8_000, null),
-        withTimeout(queries.globalDrilldown("hiring_manager"), 8_000, []),
-      ]);
-      if (!mounted) return;
-      if (proj.status === "fulfilled") setProjects(proj.value || []);
-      if (fStats.status === "fulfilled" && fStats.value) setFinanceStatsApi(financeStatsVm(fStats.value));
-      if (fRows.status === "fulfilled" && fRows.value) setFinanceRows(financeRowsVm(fRows.value as any[]));
-      if (sStats.status === "fulfilled" && sStats.value) setSlaStats(slaStatsVm(sStats.value));
-      if (wfm.status === "fulfilled") setWfmStats(wfm.value);
-      if (rk.status === "fulfilled") setReqKpis(rk.value as RequisitionKpis);
-      if (dd.status === "fulfilled") setDrilldown((dd.value as any) || []);
     })();
     return () => { mounted = false; };
   }, []);
@@ -263,7 +281,35 @@ export const Dashboard = () => {
     }
   }, [fyYears, selectedFyStart]);
 
+  useEffect(() => {
+    if (
+      compareFyOverride != null &&
+      (compareFyOverride === selectedFyStart || !fyYears.includes(compareFyOverride))
+    ) {
+      setCompareFyOverride(null);
+    }
+  }, [selectedFyStart, compareFyOverride, fyYears]);
+
   const filteredRows = useMemo(() => filterFinanceRows(financeRows, projects, filters), [financeRows, projects, filters]);
+
+  const autoCompareFy = useMemo(() => {
+    const older = fyYears.filter((y) => y < selectedFyStart).sort((a, b) => b - a);
+    if (older.length) return older[0];
+    return selectedFyStart - 1;
+  }, [fyYears, selectedFyStart]);
+
+  const effectiveCompareFy = useMemo(() => {
+    if (
+      compareFyOverride != null &&
+      fyYears.includes(compareFyOverride) &&
+      compareFyOverride !== selectedFyStart
+    ) {
+      return compareFyOverride;
+    }
+    return autoCompareFy;
+  }, [compareFyOverride, fyYears, selectedFyStart, autoCompareFy]);
+
+  const compareFyLabel = fyShortLabel(effectiveCompareFy);
 
   const kpiRows = useMemo(() => {
     if (!fyYears.length) return filteredRows;
@@ -277,9 +323,9 @@ export const Dashboard = () => {
     if (!fyYears.length) return [] as FinanceRowVm[];
     return filteredRows.filter((r) => {
       const d = parseMonthSort(r.month_sort);
-      return d && fiscalYearStart(d) === selectedFyStart - 1;
+      return d && fiscalYearStart(d) === effectiveCompareFy;
     });
-  }, [filteredRows, fyYears.length, selectedFyStart]);
+  }, [filteredRows, fyYears.length, effectiveCompareFy]);
 
   const priorFinance = useMemo(() => aggregateFinanceFromRows(priorKpiRows), [priorKpiRows]);
 
@@ -290,8 +336,8 @@ export const Dashboard = () => {
   }, [kpiRows, financeStatsApi]);
 
   const { revenue: yoyRev, cm: yoyCm } = useMemo(
-    () => buildYoYRevenueSeries(filteredRows, selectedFyStart),
-    [filteredRows, selectedFyStart],
+    () => buildYoYRevenueSeries(filteredRows, selectedFyStart, effectiveCompareFy),
+    [filteredRows, selectedFyStart, effectiveCompareFy],
   );
 
   const priorFYTotalCr = (priorFinance?.revenue_actual_inr ?? 0) / 1e7;
@@ -355,8 +401,6 @@ export const Dashboard = () => {
   const bdPctColl = coll > 0 ? (bd / coll) * 100 : 0;
   const collAtt = ct > 0 ? (coll / ct) * 100 : 0;
   const revAtt = displayFinance?.rev_attainment ?? 0;
-
-  const priorFyLabel = `${fyShortLabel(selectedFyStart - 1)}`;
 
   /* ── Quarter chart ── */
   const maxQPlan = Math.max(...revQuarters.map((q) => q.planInr), 1);
@@ -428,6 +472,22 @@ export const Dashboard = () => {
           >
             {fyCompare ? "YoY: On" : "YoY: Off"}
           </button>
+          <select
+            className="exec-compare-select"
+            aria-label="Comparison fiscal year"
+            value={compareFyOverride ?? ""}
+            onChange={(e) => setCompareFyOverride(e.target.value === "" ? null : Number(e.target.value))}
+            disabled={!fyCompare || fyYears.filter((y) => y !== selectedFyStart).length === 0}
+          >
+            <option value="">Auto ({fyShortLabel(autoCompareFy)})</option>
+            {fyYears
+              .filter((y) => y !== selectedFyStart)
+              .map((y) => (
+                <option key={y} value={y}>
+                  {fyShortLabel(y)}
+                </option>
+              ))}
+          </select>
           <div style={{ display: "flex", gap: 4 }}>
             {fyYears.map((y) => (
               <button
@@ -472,7 +532,7 @@ export const Dashboard = () => {
             meta={[
               { label: "Full-year forecast", value: formatLargeCurrency(displayFinance?.revenue_forecast_inr ?? 0) },
               ...(fyCompare && priorFinance
-                ? [{ label: `${priorFyLabel} Actual`, value: formatLargeCurrency(priorFinance.revenue_actual_inr) }]
+                ? [{ label: `${compareFyLabel} Actual`, value: formatLargeCurrency(priorFinance.revenue_actual_inr) }]
                 : []),
               ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
             ]}
@@ -502,7 +562,7 @@ export const Dashboard = () => {
             meta={[
               { label: "Target CM%", value: "35.0%" },
               ...(fyCompare && cmPriorPct != null
-                ? [{ label: `${priorFyLabel} CM%`, value: formatPercent(cmPriorPct) }]
+                ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(cmPriorPct) }]
                 : []),
               { label: "CM value", value: formatLargeCurrency(displayFinance?.total_cm_inr ?? 0) },
             ]}
@@ -627,7 +687,7 @@ export const Dashboard = () => {
       <div className="exec-charts">
         <SectionCard
           tag="Finance"
-          title={`Monthly Revenue — Actual vs Budget vs Forecast${fyCompare ? ` vs ${priorFyLabel}` : ""}`}
+          title={`Monthly Revenue — Actual vs Budget vs Forecast${fyCompare ? ` vs ${compareFyLabel}` : ""}`}
           noPad
         >
           <div style={{ padding: "16px 20px" }}>
@@ -636,18 +696,21 @@ export const Dashboard = () => {
             ) : (
               <ExecutiveRevenueYoYChart
                 data={fyCompare ? yoyRev : yoyRev.map((p) => ({ ...p, priorActual: 0 }))}
-                priorLabel={`${priorFyLabel} Actual`}
+                priorLabel={`${compareFyLabel} Actual`}
               />
             )}
           </div>
         </SectionCard>
 
-        <SectionCard tag="Margin" title={`CM% — ${fyShortLabel(selectedFyStart)}${fyCompare ? ` vs ${priorFyLabel}` : ""}`} noPad>
+        <SectionCard tag="Margin" title={`CM% — ${fyShortLabel(selectedFyStart)}${fyCompare ? ` vs ${compareFyLabel}` : ""}`} noPad>
           <div style={{ padding: "16px 20px" }}>
             {yoyCm.length === 0 || !filteredRows.length ? (
               <div className="exec-empty">No CM data</div>
             ) : (
-              <ExecutiveCmYoYChart data={fyCompare ? yoyCm : yoyCm.map((p) => ({ ...p, priorActualPct: 0 }))} />
+              <ExecutiveCmYoYChart
+                data={fyCompare ? yoyCm : yoyCm.map((p) => ({ ...p, priorActualPct: 0 }))}
+                compareLabel={`CM% (${compareFyLabel})`}
+              />
             )}
           </div>
         </SectionCard>
@@ -656,142 +719,12 @@ export const Dashboard = () => {
       {/* ══ SECTION: PRODUCTIVITY ══ */}
       <ProductivityAveragesSection rows={filteredRows} loading={loadingCore} externalFilters />
 
-      {/* ══ SECTION: CLIENT INTELLIGENCE ══ */}
-      <div className="exec-section-label">Client intelligence</div>
-
-      <div className="exec-intel">
-        {/* Risk heatmap */}
-        <SectionCard
-          tag="Risk radar"
-          title="Client health snapshot"
-          action="Full view"
-          onAction={() => setHeatmapFullOpen(true)}
-          noPad
-        >
-          <div style={{ overflowX: "auto" }}>
-            <table className="exec-risk-table">
-              <thead>
-                <tr>
-                  <th style={{ width: "30%" }}>Client</th>
-                  <th>Finance</th>
-                  <th>SLA</th>
-                  <th>WFM</th>
-                  <th>Hiring</th>
-                  <th style={{ textAlign: "right" }}>Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {riskRows.slice(0, 8).map((p) => {
-                  const c = clientRiskColors(p);
-                  return (
-                    <tr key={p.id} onClick={() => setDrawerClient(p.name)}>
-                      <td>
-                        <div className="exec-risk-table__name" title={p.name}>{p.name}</div>
-                      </td>
-                      <td><span className={riskDotCls(c.fin)}>{riskLabel[c.fin]}</span></td>
-                      <td><span className={riskDotCls(c.sla)}>{riskLabel[c.sla]}</span></td>
-                      <td><span className={riskDotCls(c.wfm)}>{riskLabel[c.wfm]}</span></td>
-                      <td><span className={riskDotCls(c.hiring)}>{riskLabel[c.hiring]}</span></td>
-                      <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
-                          <div style={{
-                            width: 48, height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden",
-                          }}>
-                            <div style={{
-                              width: `${Math.min(100, p.score)}%`,
-                              height: "100%",
-                              background: p.score >= 70 ? "var(--green)" : p.score >= 50 ? "var(--amber)" : "var(--red)",
-                              borderRadius: 100,
-                            }} />
-                          </div>
-                          <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-muted)", minWidth: 24 }}>
-                            {p.score}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {riskRows.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="exec-empty">No client data yet</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-
-        {/* Attention required */}
-        <SectionCard tag="Action needed" title="Accounts requiring attention">
-          {interventions.length === 0 ? (
-            <div className="exec-empty" style={{ padding: 24 }}>
-              ✓ All accounts within normal thresholds
-            </div>
-          ) : (
-            <div className="exec-interventions">
-              {interventions.map((p) => {
-                const domain = worstDomain(p);
-                return (
-                  <div
-                    key={p.id}
-                    className="exec-intervention-card"
-                    onClick={() => setDrawerClient(p.name)}
-                  >
-                    <div className="exec-intervention-card__top">
-                      <div className="exec-intervention-card__name">{p.name}</div>
-                      <span className={`exec-intervention-card__domain exec-intervention-card__domain--${domain}`}>
-                        {domain}
-                      </span>
-                    </div>
-                    <div className="exec-intervention-card__score-row">
-                      <span className="exec-intervention-card__score-label">
-                        {p.risk === "HIGH" ? "High risk" : "Moderate"}
-                      </span>
-                      <div className="exec-intervention-card__score-track">
-                        <div
-                          className={`exec-intervention-card__score-fill exec-intervention-card__score-fill--${p.risk === "HIGH" ? "high" : "med"}`}
-                          style={{ width: `${Math.min(100, p.score)}%` }}
-                        />
-                      </div>
-                      <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--text-subtle)", minWidth: 24 }}>
-                        {p.score}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </SectionCard>
-      </div>
-
-      {/* ══ SECTION: REGIONAL + PIPELINE ══ */}
-      <div className="exec-bottom-grid">
+      {/* ══ SECTION: REGIONAL (finance ledger / filters) ══ */}
+      <div className="exec-bottom-grid exec-bottom-grid--single">
         <SectionCard tag="Geography" title="Revenue by region — Actual vs Budget" noPad>
           <div style={{ padding: "16px 20px" }}>
             <RegionalRevenueBarChart data={regional} />
           </div>
-        </SectionCard>
-
-        <SectionCard tag="Drilldown" title="Top hiring managers by revenue">
-          <table className="exec-drilldown-table">
-            <thead>
-              <tr><th>Hiring manager</th><th style={{ textAlign: "right" }}>Revenue</th><th style={{ textAlign: "right" }}>Reqs</th></tr>
-            </thead>
-            <tbody>
-              {drilldown.slice(0, 8).map((d) => (
-                <tr key={d.name}>
-                  <td>{d.name}</td>
-                  <td style={{ textAlign: "right", fontFamily: "var(--mono)" }}>{formatCurrency(d.revenue)}</td>
-                  <td style={{ textAlign: "right" }}>{d.count}</td>
-                </tr>
-              ))}
-              {drilldown.length === 0 && (
-                <tr><td colSpan={3} className="exec-empty">—</td></tr>
-              )}
-            </tbody>
-          </table>
         </SectionCard>
       </div>
 
@@ -810,7 +743,7 @@ export const Dashboard = () => {
                   <th>Actual</th>
                   <th>Var vs Budget</th>
                   <th>Var vs Fcst</th>
-                  <th>{priorFyLabel}</th>
+                  <th>{compareFyLabel}</th>
                   <th>YoY</th>
                 </tr>
               </thead>
@@ -842,6 +775,143 @@ export const Dashboard = () => {
           </div>
         )}
       </SectionCard>
+
+      {/* ══ SECTION: PORTFOLIO MONITOR — requisition / pipeline (not FY ledger) ══ */}
+      <div className="exec-monitor-section">
+        <div className="exec-section-label">Portfolio monitor and pipeline</div>
+        <p className="exec-monitor-section__intro">
+          Client risk columns (Finance, SLA, WFM, Hiring), intervention cards, and the hiring-manager table
+          use portfolio monitor and requisition heuristics. They are not tied to the fiscal year chips,
+          compare-year selector, or finance ledger uploads above.
+        </p>
+
+        <div className="exec-intel">
+          <SectionCard
+            tag="Risk radar"
+            title="Client health snapshot"
+            action="Full view"
+            onAction={() => setHeatmapFullOpen(true)}
+            noPad
+          >
+            <div style={{ overflowX: "auto" }}>
+              <table className="exec-risk-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: "30%" }}>Client</th>
+                    <th>Finance</th>
+                    <th>SLA</th>
+                    <th>WFM</th>
+                    <th>Hiring</th>
+                    <th style={{ textAlign: "right" }}>Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {riskRows.slice(0, 8).map((p) => {
+                    const c = clientRiskColors(p);
+                    return (
+                      <tr key={p.id} onClick={() => setDrawerClient(p.name)}>
+                        <td>
+                          <div className="exec-risk-table__name" title={p.name}>{p.name}</div>
+                        </td>
+                        <td><span className={riskDotCls(c.fin)}>{riskLabel[c.fin]}</span></td>
+                        <td><span className={riskDotCls(c.sla)}>{riskLabel[c.sla]}</span></td>
+                        <td><span className={riskDotCls(c.wfm)}>{riskLabel[c.wfm]}</span></td>
+                        <td><span className={riskDotCls(c.hiring)}>{riskLabel[c.hiring]}</span></td>
+                        <td style={{ textAlign: "right" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                            <div style={{
+                              width: 48, height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden",
+                            }}>
+                              <div style={{
+                                width: `${Math.min(100, p.score)}%`,
+                                height: "100%",
+                                background: p.score >= 70 ? "var(--green)" : p.score >= 50 ? "var(--amber)" : "var(--red)",
+                                borderRadius: 100,
+                              }} />
+                            </div>
+                            <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-muted)", minWidth: 24 }}>
+                              {p.score}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {riskRows.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="exec-empty">No client data yet</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+
+          <SectionCard tag="Action needed" title="Accounts requiring attention">
+            {interventions.length === 0 ? (
+              <div className="exec-empty" style={{ padding: 24 }}>
+                ✓ All accounts within normal thresholds
+              </div>
+            ) : (
+              <div className="exec-interventions">
+                {interventions.map((p) => {
+                  const domain = worstDomain(p);
+                  return (
+                    <div
+                      key={p.id}
+                      className="exec-intervention-card"
+                      onClick={() => setDrawerClient(p.name)}
+                    >
+                      <div className="exec-intervention-card__top">
+                        <div className="exec-intervention-card__name">{p.name}</div>
+                        <span className={`exec-intervention-card__domain exec-intervention-card__domain--${domain}`}>
+                          {domain}
+                        </span>
+                      </div>
+                      <div className="exec-intervention-card__score-row">
+                        <span className="exec-intervention-card__score-label">
+                          {p.risk === "HIGH" ? "High risk" : "Moderate"}
+                        </span>
+                        <div className="exec-intervention-card__score-track">
+                          <div
+                            className={`exec-intervention-card__score-fill exec-intervention-card__score-fill--${p.risk === "HIGH" ? "high" : "med"}`}
+                            style={{ width: `${Math.min(100, p.score)}%` }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--text-subtle)", minWidth: 24 }}>
+                          {p.score}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </div>
+
+        <div className="exec-bottom-grid exec-bottom-grid--single exec-monitor-section__drilldown">
+          <SectionCard tag="Drilldown" title="Top hiring managers by revenue">
+            <table className="exec-drilldown-table">
+              <thead>
+                <tr><th>Hiring manager</th><th style={{ textAlign: "right" }}>Revenue</th><th style={{ textAlign: "right" }}>Reqs</th></tr>
+              </thead>
+              <tbody>
+                {drilldown.slice(0, 8).map((d) => (
+                  <tr key={d.name}>
+                    <td>{d.name}</td>
+                    <td style={{ textAlign: "right", fontFamily: "var(--mono)" }}>{formatCurrency(d.revenue)}</td>
+                    <td style={{ textAlign: "right" }}>{d.count}</td>
+                  </tr>
+                ))}
+                {drilldown.length === 0 && (
+                  <tr><td colSpan={3} className="exec-empty">—</td></tr>
+                )}
+              </tbody>
+            </table>
+          </SectionCard>
+        </div>
+      </div>
 
       {/* ── Client drawer ── */}
       <PlatformDrawer open={Boolean(drawerClient)} title={`◎ ${drawerClient}`} onClose={() => setDrawerClient(null)}>
@@ -906,6 +976,9 @@ export const Dashboard = () => {
             </tbody>
           </table>
         </div>
+        <p className="exec-heatmap-footnote">
+          Same scope as the Portfolio monitor and pipeline section at the bottom of this page.
+        </p>
       </PlatformDrawer>
     </div>
   );

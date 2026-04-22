@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { COMPANY_VALUES_SESSION_FLAG } from "./company-values";
 import { api, clearApiCache } from "./api";
 
 const TOKEN_KEY = "tgddata_access_token";
@@ -72,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
     applyToken(t);
+    /** Shorter than global API timeout so the shell does not sit on “Loading…” for two minutes if the API is wedged. */
     const { data } = await api.get<{
       id: number;
       email: string;
@@ -85,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       family_name?: string | null;
       phone?: string | null;
       has_avatar?: boolean;
-    }>("/auth/me");
+    }>("/auth/me", { timeout: 25_000 });
     const authUser: AuthUser = {
       id: data.id,
       email: data.email,
@@ -127,17 +129,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(
     async (email: string, password: string): Promise<AuthUser | null> => {
       clearApiCache();
+      /** Login returns the same shape as GET /auth/me so we avoid a second HTTP round-trip. */
       const { data } = await api.post<{
         access_token: string;
         token_type: string;
-        user: AuthUser;
-      }>("/auth/login", { email, password });
+        id: number;
+        email: string;
+        role: string;
+        project_ids: number[] | null;
+        effective_role?: string;
+        vertical_access?: string[] | null;
+        manager_user_id?: number | null;
+        is_read_only?: boolean;
+        given_name?: string | null;
+        family_name?: string | null;
+        phone?: string | null;
+        has_avatar?: boolean;
+      }>("/auth/login", { email, password }, { timeout: 30_000 });
       applyToken(data.access_token);
-      const me = await refreshMe();
-      clearApiCache();
-      return me;
+      const authUser: AuthUser = {
+        id: data.id,
+        email: data.email,
+        role: data.role,
+        effectiveRole: data.effective_role,
+        verticalAccess: data.vertical_access,
+        managerUserId: data.manager_user_id,
+        isReadOnly: data.is_read_only,
+        givenName: data.given_name,
+        familyName: data.family_name,
+        phone: data.phone,
+        hasAvatar: data.has_avatar,
+      };
+      setUser(authUser);
+      setProjectIds(data.project_ids);
+      try {
+        sessionStorage.setItem(COMPANY_VALUES_SESSION_FLAG, "1");
+      } catch {
+        /* ignore storage */
+      }
+      return authUser;
     },
-    [applyToken, refreshMe]
+    [applyToken]
   );
 
   const logout = useCallback(() => {
@@ -173,6 +205,7 @@ export function useAuth() {
 export const ROLE_NAV_PATHS: Record<string, string[]> = {
   admin: [
     "/",
+    "/ceo-view",
     "/portfolio",
     "/clients",
     "/client-contracts",
@@ -187,6 +220,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
+    "/revenue-leakage",
     "/wfm",
     "/data-operations",
     "/ingestion",
@@ -198,6 +232,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
   ],
   platform_admin: [
     "/",
+    "/ceo-view",
     "/portfolio",
     "/clients",
     "/client-contracts",
@@ -212,6 +247,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
+    "/revenue-leakage",
     "/wfm",
     "/data-operations",
     "/ingestion",
@@ -223,6 +259,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
   ],
   executive: [
     "/",
+    "/ceo-view",
     "/portfolio",
     "/clients",
     "/client-contracts",
@@ -237,6 +274,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
+    "/revenue-leakage",
     "/wfm",
     "/data-operations",
     "/ingestion",
@@ -259,6 +297,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/billing",
     "/vendor-licenses",
     "/sla-performance",
+    "/revenue-leakage",
     "/wfm",
     "/ingestion",
     "/tasks",
@@ -279,6 +318,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/billing",
     "/vendor-licenses",
     "/sla-performance",
+    "/revenue-leakage",
     "/wfm",
     "/ingestion",
     "/tasks",
@@ -301,6 +341,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/finance-validation",
     "/vendor-licenses",
     "/sla-performance",
+    "/revenue-leakage",
     "/wfm",
     "/data-operations",
     "/ingestion",

@@ -31,6 +31,8 @@ import {
   Receipt,
   ScrollText,
   ShieldCheck,
+  TrendingDown,
+  TrendingUp,
   Upload,
   User,
   UserCog,
@@ -61,6 +63,7 @@ import { VendorLicenses } from "./pages/VendorLicenses";
 import { Tasks } from "./pages/Tasks";
 import { Agent } from "./pages/Agent";
 import { Dashboard } from "./pages/Dashboard";
+import { CeoView } from "./pages/CeoView";
 import { DataOperations } from "./pages/DataOperations";
 import { FiscalPerformance } from "./pages/FiscalPerformance";
 import { RevenueTrackers } from "./pages/RevenueTrackers";
@@ -74,12 +77,15 @@ import { Requisitions } from "./pages/Requisitions";
 import { Candidates } from "./pages/Candidates";
 import { CandidateStore } from "./pages/CandidateStore";
 import { SLAPerformance } from "./pages/SLAPerformance";
+import { RevenueLeakage } from "./pages/RevenueLeakage";
 import { WorkforceManagement } from "./pages/WorkforceManagement";
 import { Login } from "./pages/Login";
 import { AdminUsers } from "./pages/AdminUsers";
 import { Profile } from "./pages/Profile";
 import { Transitions } from "./pages/Transitions";
 import taggdLogo from "@/assets/taggd-logo.png";
+import { CompanyValuesModal } from "@/components/CompanyValuesModal";
+import { COMPANY_VALUES_SESSION_FLAG } from "@/lib/company-values";
 import "./styles/platform.css";
 
 function ClientPortalNoAccess() {
@@ -117,7 +123,9 @@ const NAV_PATH_ICONS: Record<string, LucideIcon> = {
   "/revenue-governance": Package,
   "/vendor-licenses": KeyRound,
   "/sla-performance": Gauge,
+  "/revenue-leakage": TrendingDown,
   "/wfm": Users2,
+  "/ceo-view": TrendingUp,
   "/profile": User,
   "/tasks": CheckSquare,
   "/agent": Bot,
@@ -170,6 +178,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     title: "Overview",
     items: [
       { label: "Executive Overview", path: "/" },
+      { label: "CEO's View", path: "/ceo-view" },
       { label: "Portfolio Intel", path: "/portfolio" },
     ],
   },
@@ -195,6 +204,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { label: "Revenue packs", path: "/revenue-governance" },
       { label: "Vendor licenses", path: "/vendor-licenses" },
       { label: "SLA Performance", path: "/sla-performance" },
+      { label: "Revenue Leakage", path: "/revenue-leakage" },
       { label: "Workforce Mgmt", path: "/wfm" },
     ],
   },
@@ -232,9 +242,34 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 /** Remount persona when the logged-in user changes so UI prefs don’t leak across accounts. */
 function AuthenticatedApp() {
   const { user } = useAuth();
+  const [missionVisionOpen, setMissionVisionOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      if (sessionStorage.getItem(COMPANY_VALUES_SESSION_FLAG) === "1") {
+        setMissionVisionOpen(true);
+      }
+    } catch {
+      /* ignore storage */
+    }
+  }, [user?.id]);
+
+  const onMissionVisionOpenChange = (open: boolean) => {
+    setMissionVisionOpen(open);
+    if (!open) {
+      try {
+        sessionStorage.removeItem(COMPANY_VALUES_SESSION_FLAG);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
   return (
     <PersonaProvider key={user?.id ?? "user"}>
-      <AppShell />
+      <CompanyValuesModal open={missionVisionOpen} onOpenChange={onMissionVisionOpenChange} />
+      <AppShell onOpenMissionVision={() => setMissionVisionOpen(true)} />
     </PersonaProvider>
   );
 }
@@ -248,7 +283,7 @@ function RoleHome() {
   return <Dashboard />;
 }
 
-function AppShell() {
+function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) {
   const { user, logout } = useAuth();
   const { persona } = usePersona();
   const navigate = useNavigate();
@@ -326,7 +361,13 @@ function AppShell() {
             <div className="platform-sidebar-head-row">
               <div className="platform-logo-inner">
                 <img src={taggdLogo} alt="Taggd" className="platform-logo-img" />
-                <div className="platform-logo-tagline">{isRecruiter ? "Recruiting workspace" : "Intelligence Platform"}</div>
+                <button
+                  type="button"
+                  className="platform-logo-tagline platform-logo-tagline--action"
+                  onClick={onOpenMissionVision}
+                >
+                  Mission &amp; Vision
+                </button>
               </div>
               <button
                 type="button"
@@ -492,6 +533,7 @@ function AppShell() {
               <Route path="/profile" element={<Profile />} />
               <Route path="/transitions" element={<Transitions />} />
               <Route path="/" element={<RoleHome />} />
+              <Route path="/ceo-view" element={<CeoView />} />
               <Route path="/portfolio" element={<PortfolioIntelligence />} />
               <Route path="/clients" element={<ClientsHub />} />
               <Route path="/clients/:clientId" element={<ClientDetail />} />
@@ -507,6 +549,7 @@ function AppShell() {
               <Route path="/revenue-governance" element={<RevenueGovernance />} />
               <Route path="/vendor-licenses" element={<VendorLicenses />} />
               <Route path="/sla-performance" element={<SLAPerformance />} />
+              <Route path="/revenue-leakage" element={<RevenueLeakage />} />
               <Route path="/wfm" element={<WorkforceManagement />} />
               <Route path="/data-operations" element={<DataOperations />} />
               <Route path="/ingestion" element={<IngestionCenter />} />

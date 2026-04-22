@@ -7,8 +7,8 @@ import {
   type AuthUser,
 } from "@/lib/auth";
 import { VERTICAL_MODULES } from "@/pages/AdminUsers";
-import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import { UserAvatarImg } from "@/components/UserAvatarImg";
+import "@/styles/profile-page.css";
 
 const verticalLabel = (key: string) =>
   VERTICAL_MODULES.find((m) => m.key.toLowerCase() === key.toLowerCase())?.label ?? key;
@@ -51,31 +51,14 @@ export function Profile() {
     return projects.filter((p) => set.has(p.id));
   }, [projects, projectIds]);
 
-  const permissionsLines = useMemo(() => {
-    if (!user) return [];
-    const er = user.effectiveRole ?? user.role;
-    const lines: string[] = [`Effective role: ${er}`];
-    if (user.verticalAccess == null) {
-      lines.push("Modules: all (not restricted by vertical list)");
-    } else if (user.verticalAccess.length === 0) {
-      lines.push("Modules: none in allow-list");
-    } else {
-      lines.push(`Modules: ${user.verticalAccess.map(verticalLabel).join(", ")}`);
-    }
-    if (projectIds == null) {
-      lines.push("Projects: full org (not restricted to assignments)");
-    } else if (projectIds.length === 0) {
-      lines.push("Projects: none assigned");
-    } else {
-      lines.push(`Projects (${projectIds.length}): ${scopedProjects.map((p) => p.account_name || `PRJ-${p.id}`).join(", ") || projectIds.map((id) => `#${id}`).join(", ")}`);
-    }
-    if (user.managerUserId != null) {
-      lines.push(`Reports to user id: ${user.managerUserId}`);
-    }
-    if (user.isReadOnly) {
-      lines.push("Account type: read-only client portal (business data cannot be changed; profile can be edited)");
-    }
-    return lines;
+  const projectsSummary = useMemo(() => {
+    if (!user) return "";
+    if (projectIds == null) return "Full org — not restricted to project assignments.";
+    if (projectIds.length === 0) return "No projects assigned.";
+    const names =
+      scopedProjects.map((p) => p.account_name || `PRJ-${p.id}`).join(", ") ||
+      projectIds.map((id) => `#${id}`).join(", ");
+    return `${projectIds.length} project(s): ${names}`;
   }, [user, projectIds, scopedProjects]);
 
   const onSaveProfile = useCallback(async () => {
@@ -155,33 +138,36 @@ export function Profile() {
 
   if (!user) return null;
 
+  const effectiveRole = user.effectiveRole ?? user.role;
+  const showLegacyRole = user.effectiveRole != null && user.effectiveRole !== user.role;
+
   return (
-    <div style={{ display: "grid", gap: 18, maxWidth: 720 }}>
-      <PageHeader title="My profile" subtitle="Your display details and a read-only summary of your access." />
+    <div className="profile-page">
+      <header className="profile-page__header">
+        <div className="profile-page__eyebrow">Account</div>
+        <h1 className="profile-page__title">My profile</h1>
+        <p className="profile-page__lead">
+          Your display name, contact details, and a read-only summary of workspace access. Permissions are assigned by an
+          administrator.
+        </p>
+      </header>
 
-      {err ? (
-        <div className="platform-dialog__alert" style={{ margin: 0 }}>
-          {err}
-        </div>
-      ) : null}
-      {msg ? (
-        <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-          {msg}
-        </div>
-      ) : null}
+      {err ? <div className="profile-page__alert">{err}</div> : null}
+      {msg ? <div className="profile-page__flash">{msg}</div> : null}
 
-      <PlatformSection title="Photo">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
-          <UserAvatarImg
-            userId={user.id}
-            hasAvatar={user.hasAvatar}
-            fallback={initialsEl(user)}
-            size={96}
-            borderRadius={12}
-          />
-          <div style={{ display: "grid", gap: 8 }}>
-            <label style={{ fontSize: 11 }}>
-              <span style={{ color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Upload (JPEG, PNG, WebP, max 2MB)</span>
+      <div className="profile-page__grid">
+        <aside className="profile-page__aside">
+          <div className="profile-page__avatar-card">
+            <span className="profile-page__avatar-label">Photo</span>
+            <UserAvatarImg
+              userId={user.id}
+              hasAvatar={user.hasAvatar}
+              fallback={initialsEl(user)}
+              size={96}
+              borderRadius={12}
+            />
+            <div className="profile-page__upload">
+              <span className="profile-page__upload-hint">JPEG, PNG, or WebP · max 2MB</span>
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -192,63 +178,153 @@ export function Profile() {
                   if (f) void onAvatar(f);
                 }}
               />
-            </label>
-            {user.hasAvatar ? (
+              {user.hasAvatar ? (
+                <button
+                  type="button"
+                  className="platform-dialog__btn"
+                  disabled={avatarBusy}
+                  onClick={() => void onRemoveAvatar()}
+                >
+                  Remove photo
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </aside>
+
+        <div className="profile-page__main">
+          <section className="profile-page__section" aria-labelledby="profile-contact-heading">
+            <h2 id="profile-contact-heading" className="profile-page__section-title">
+              Contact
+            </h2>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Email</div>
+              <div className="profile-page__field-value profile-page__field-value--mono">{user.email}</div>
+            </div>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Given name</div>
+              <div className="profile-page__field-value">
+                <input
+                  className="profile-page__input"
+                  value={givenName}
+                  onChange={(e) => setGivenName(e.target.value)}
+                  autoComplete="given-name"
+                />
+              </div>
+            </div>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Family name</div>
+              <div className="profile-page__field-value">
+                <input
+                  className="profile-page__input"
+                  value={familyName}
+                  onChange={(e) => setFamilyName(e.target.value)}
+                  autoComplete="family-name"
+                />
+              </div>
+            </div>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Phone</div>
+              <div className="profile-page__field-value">
+                <input
+                  className="profile-page__input"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  autoComplete="tel"
+                  inputMode="tel"
+                />
+              </div>
+            </div>
+            <div className="profile-page__actions">
               <button
                 type="button"
-                className="platform-dialog__btn"
-                disabled={avatarBusy}
-                onClick={() => void onRemoveAvatar()}
+                className="platform-dialog__btn platform-dialog__btn--primary"
+                disabled={saving}
+                onClick={() => void onSaveProfile()}
               >
-                Remove photo
+                {saving ? "Saving…" : "Save details"}
               </button>
+            </div>
+          </section>
+
+          <hr className="profile-page__divider" />
+
+          <section className="profile-page__section" aria-labelledby="profile-access-heading">
+            <h2 id="profile-access-heading" className="profile-page__section-title">
+              Access &amp; permissions
+            </h2>
+            <div className="profile-page__callout">
+              <strong>Read-only summary</strong>
+              Role, module access, and project scope are managed by a platform administrator. Use this section to verify what
+              is active for your sign-in.
+            </div>
+
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Display name</div>
+              <div className="profile-page__field-value">{displayNameFromUser(user)}</div>
+            </div>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">User ID</div>
+              <div className="profile-page__field-value profile-page__field-value--mono">{user.id}</div>
+            </div>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Effective role</div>
+              <div className="profile-page__field-value">
+                <span className="profile-page__tag profile-page__tag--accent">{effectiveRole}</span>
+              </div>
+            </div>
+            {showLegacyRole ? (
+              <div className="profile-page__field">
+                <div className="profile-page__field-label">Stored role</div>
+                <div className="profile-page__field-value profile-page__field-value--mono">{user.role}</div>
+              </div>
             ) : null}
-          </div>
-        </div>
-      </PlatformSection>
 
-      <PlatformSection title="Contact">
-        <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-          <div>
-            <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>Email (read-only)</div>
-            <div style={{ fontSize: 13 }}>{user.email}</div>
-          </div>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Given name</span>
-            <input className="platform-search" value={givenName} onChange={(e) => setGivenName(e.target.value)} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Family name</span>
-            <input className="platform-search" value={familyName} onChange={(e) => setFamilyName(e.target.value)} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Phone</span>
-            <input className="platform-search" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </label>
-          <div>
-            <button
-              type="button"
-              className="platform-dialog__btn platform-dialog__btn--primary"
-              disabled={saving}
-              onClick={() => void onSaveProfile()}
-            >
-              {saving ? "Saving…" : "Save details"}
-            </button>
-          </div>
-        </div>
-      </PlatformSection>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Modules</div>
+              <div className="profile-page__field-value">
+                {user.verticalAccess == null ? (
+                  <span className="profile-page__tag profile-page__tag--accent">All modules</span>
+                ) : user.verticalAccess.length === 0 ? (
+                  <span className="profile-page__tag">None (empty allow-list)</span>
+                ) : (
+                  <div className="profile-page__tag-row">
+                    {user.verticalAccess.map((k) => (
+                      <span key={k} className="profile-page__tag">
+                        {verticalLabel(k)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
 
-      <PlatformSection title="Permissions (read-only)">
-        <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
-          Role, modules, and project scope are managed by a platform administrator. Display name in the shell:{" "}
-          <strong>{displayNameFromUser(user)}</strong>
-        </p>
-        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.65 }}>
-          {permissionsLines.map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
-        </ul>
-      </PlatformSection>
+            <div className="profile-page__field">
+              <div className="profile-page__field-label">Projects</div>
+              <div className="profile-page__field-value profile-page__projects">{projectsSummary}</div>
+            </div>
+
+            {user.managerUserId != null ? (
+              <div className="profile-page__field">
+                <div className="profile-page__field-label">Reports to</div>
+                <div className="profile-page__field-value profile-page__field-value--mono">User #{user.managerUserId}</div>
+              </div>
+            ) : null}
+
+            {user.isReadOnly ? (
+              <div className="profile-page__field">
+                <div className="profile-page__field-label">Portal mode</div>
+                <div className="profile-page__field-value">
+                  <span className="profile-page__tag">Read-only client portal</span>
+                  <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                    Business data cannot be changed from this account; you can still update your profile and photo.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

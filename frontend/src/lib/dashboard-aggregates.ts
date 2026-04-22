@@ -117,6 +117,8 @@ export type YoYCmPoint = {
 export function buildYoYRevenueSeries(
   rows: FinanceRowVm[],
   primaryFyStart: number,
+  /** Fiscal year start (calendar year of April) for the comparison overlay; e.g. FY25–26 vs FY24–25 → compareFyStart = 2024 */
+  compareFyStart: number,
 ): { revenue: YoYRevPoint[]; cm: YoYCmPoint[] } {
   type Agg = { b: number; a: number; f: number; cm: number; ra: number };
   const bucket = new Map<string, Agg>();
@@ -142,7 +144,7 @@ export function buildYoYRevenueSeries(
   for (let mi = 0; mi < 12; mi++) {
     const label = FY_MONTH_ORDER[mi];
     const pk = `${primaryFyStart}-${mi}`;
-    const prevK = `${primaryFyStart - 1}-${mi}`;
+    const prevK = `${compareFyStart}-${mi}`;
     const cur = bucket.get(pk) || { b: 0, a: 0, f: 0, cm: 0, ra: 0 };
     const prev = bucket.get(prevK) || { b: 0, a: 0, f: 0, cm: 0, ra: 0 };
     revenue.push({

@@ -2,8 +2,10 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { homePathAfterAuth, useAuth } from "@/lib/auth";
 import taggdLogo from "@/assets/taggd-logo.png";
-import loginBg from "@/assets/taggd-login-bg.png";
 import "@/styles/platform.css";
+
+/** `Group 14004.png` in repo root, copied to `public/group-14004.png` (served as static asset). */
+const loginBg = "/group-14004.png";
 
 const loginShellStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -11,7 +13,7 @@ const loginShellStyle: React.CSSProperties = {
   placeItems: "center",
   padding: 24,
   backgroundColor: "#e8e8ea",
-  backgroundImage: `linear-gradient(180deg, rgba(250,250,252,0.35) 0%, rgba(245,245,248,0.2) 100%), url(${loginBg})`,
+  backgroundImage: `linear-gradient(180deg, rgba(250,250,252,0.42) 0%, rgba(245,245,248,0.25) 100%), url(${loginBg})`,
   backgroundSize: "cover",
   backgroundPosition: "center",
   backgroundRepeat: "no-repeat",

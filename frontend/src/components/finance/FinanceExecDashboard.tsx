@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -16,6 +16,7 @@ import { Bar } from "react-chartjs-2";
 import { Menu } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { financeStatsVm, type FinanceRowVm } from "@/lib/view-models/finance";
+import { fiscalYearStart, parseMonthSort } from "@/lib/dashboard-aggregates";
 import "@/styles/finance-exec-dashboard.css";
 
 ChartJS.register(
@@ -127,6 +128,11 @@ function fmtCr(inr: number | null | undefined): string {
   return `₹${v.toFixed(2)} Cr`;
 }
 
+/** Indian FY label: start year 2025 → FY25–26 (Apr–Mar). */
+function fyShortLabel(start: number): string {
+  return `FY${String(start).slice(2)}–${String(start + 1).slice(2)}`;
+}
+
 function KpiTile(props: {
   theme: "t-blue" | "t-green" | "t-purple" | "t-teal" | "t-dpurple" | "t-orange" | "t-cyan" | "t-red";
   icon: string;
@@ -175,8 +181,12 @@ export function FinanceExecDashboard({
 }: FinanceExecDashboardProps) {
   const [page, setPage] = useState<FinPage>("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  /** UI toggle reserved for future YoY overlays; charts do not read this yet. */
   const [compareOn, setCompareOn] = useState(true);
   const [quarter, setQuarter] = useState<"ALL" | "Q1" | "Q2" | "Q3" | "Q4">("ALL");
+  /** "all" = every FY in ledger; otherwise Apr–Mar FY start year (calendar year of April). */
+  const [fyFilter, setFyFilter] = useState<number | "all">("all");
+  const fyAutoPicked = useRef(false);
   const [region, setRegion] = useState<string>("");
   const [vertical, setVertical] = useState<string>("");
   const [account, setAccount] = useState<string>("");
@@ -197,8 +207,33 @@ export function FinanceExecDashboard({
     };
   }, []);
 
+  const fyYears = useMemo(() => {
+    const s = new Set<number>();
+    for (const r of rows) {
+      const d = parseMonthSort(r.month_sort);
+      if (d) s.add(fiscalYearStart(d));
+    }
+    return Array.from(s).sort((a, b) => b - a);
+  }, [rows]);
+
+  useEffect(() => {
+    if (fyAutoPicked.current || fyYears.length === 0) return;
+    setFyFilter(fyYears[0]);
+    fyAutoPicked.current = true;
+  }, [fyYears]);
+
+  useEffect(() => {
+    if (fyFilter !== "all" && fyYears.length > 0 && !fyYears.includes(fyFilter)) {
+      setFyFilter(fyYears[0] ?? "all");
+    }
+  }, [fyYears, fyFilter]);
+
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
+      if (fyFilter !== "all") {
+        const d = parseMonthSort(r.month_sort);
+        if (!d || fiscalYearStart(d) !== fyFilter) return false;
+      }
       if (quarter !== "ALL") {
         const m = rowFyMonthAbbr(r.month ?? "");
         if (!m || !Q_MONTHS[quarter].has(m)) return false;
@@ -208,7 +243,7 @@ export function FinanceExecDashboard({
       if (region && (r.practice_head || "") !== region && (r.project_head || "") !== region) return false;
       return true;
     });
-  }, [rows, quarter, vertical, account, region]);
+  }, [rows, fyFilter, quarter, vertical, account, region]);
 
   const verticalOptions = useMemo(() => {
     const s = new Set<string>();
@@ -240,7 +275,11 @@ export function FinanceExecDashboard({
   }, [rows]);
 
   const hasActiveFilters =
-    quarter !== "ALL" || Boolean(vertical.trim()) || Boolean(account.trim()) || Boolean(region.trim());
+    fyFilter !== "all" ||
+    quarter !== "ALL" ||
+    Boolean(vertical.trim()) ||
+    Boolean(account.trim()) ||
+    Boolean(region.trim());
 
   const displayStats = useMemo((): FinanceStats | null => {
     if (!hasActiveFilters) return stats;
@@ -822,13 +861,16 @@ export function FinanceExecDashboard({
             <div className="tb-title platform-page-title" id="page-title">
               Finance <span>Command</span>
             </div>
-            <div className="tb-fy">
-              <span className="tb-fy-btn active">Live FY</span>
+            <div className="tb-fy" title="Matches Fiscal year filter below (Indian FY Apr–Mar)">
+              <span className="tb-fy-btn active">
+                {fyFilter === "all" ? "All FYs" : fyShortLabel(fyFilter)}
+              </span>
             </div>
             <button
               type="button"
               className={`btn btn-outline ${compareOn ? "active" : ""}`}
               onClick={() => setCompareOn((v) => !v)}
+              title="Placeholder for future year-over-year chart overlays"
             >
               <i className="fas fa-code-branch" aria-hidden />
               <span>{compareOn ? "FY Compare: ON" : "FY Compare: OFF"}</span>
@@ -842,6 +884,24 @@ export function FinanceExecDashboard({
 
           <div className="fin-dash-filterbar">
             <div className="dashboard-filter-bar">
+              <label className="dashboard-filter-field" style={{ minWidth: 140 }}>
+                <span className="dashboard-filter-label">Fiscal year</span>
+                <select
+                  className="dashboard-filter-select"
+                  value={fyFilter === "all" ? "all" : String(fyFilter)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFyFilter(v === "all" ? "all" : Number(v));
+                  }}
+                >
+                  <option value="all">All FYs</option>
+                  {fyYears.map((y) => (
+                    <option key={y} value={y}>
+                      {fyShortLabel(y)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="dashboard-filter-field fin-filter-period" style={{ flex: "1 1 260px", minWidth: 200 }}>
                 <span className="dashboard-filter-label">Period</span>
                 <div className="fin-period-strip">
@@ -900,6 +960,7 @@ export function FinanceExecDashboard({
                 type="button"
                 className="dashboard-filter-reset"
                 onClick={() => {
+                  setFyFilter(fyYears[0] ?? "all");
                   setQuarter("ALL");
                   setVertical("");
                   setAccount("");

@@ -4,6 +4,8 @@ const AUTH_TOKEN_KEY = "tgddata_access_token";
 
 export const api = axios.create({
   baseURL: "/api",
+  /** Large portfolios + SQLite can exceed short UI races; avoid indefinite hangs. */
+  timeout: 120_000,
 });
 
 api.interceptors.request.use((config) => {
@@ -2188,4 +2190,68 @@ export const wfmBenchmarkApi = {
     api
       .post<{ status: string; project_id: number; reporting_date: string }>("/wfm/benchmark-upsert", body)
       .then((r) => r.data),
+};
+
+// ─── Revenue Leakage ────────────────────────────────────────────────────────
+
+export type RevenueLeakageRow = {
+  id: number;
+  project_id: number;
+  req_number: string;
+  candidate_name: string;
+  position_title: string;
+  hiring_manager: string;
+  recruiter: string;
+  department: string;
+  location: string;
+  region: string;
+  creation_date: string | null;
+  intake_date: string | null;
+  approved_date: string | null;
+  last_update_date: string | null;
+  days_open: number | null;
+  ageing_days: number | null;
+  ageing_bucket: string;
+  cancellation_reason: string;
+  sla_48h: "Met" | "Not Met" | "No Data";
+  source_of_hire: string;
+  commercial_class: "Beneficial" | "Loss";
+  direct_indirect: string;
+  global_status: string;
+  status: string;
+};
+
+export type RevenueLeakageSummary = {
+  total_cancelled: number;
+  avg_ageing_days: number | null;
+  sla_48h_met: number;
+  sla_48h_not_met: number;
+  sla_48h_no_data: number;
+  sla_48h_pct: number | null;
+  month: string | null;
+};
+
+export type RevenueLeakageBucket = { bucket: string; count: number };
+export type RevenueLeakageSohItem = { label: string; count: number; commercial_class: "Beneficial" | "Loss" };
+export type RevenueLeakageCancelReason = { reason: string; count: number };
+
+export type RevenueLeakageResponse = {
+  summary: RevenueLeakageSummary;
+  ageing_buckets: RevenueLeakageBucket[];
+  source_of_hire: RevenueLeakageSohItem[];
+  cancel_reasons: RevenueLeakageCancelReason[];
+  rows: RevenueLeakageRow[];
+};
+
+export const revenueLeakageApi = {
+  get: (params: { month?: string; project_id?: number; source_of_hire?: string }) =>
+    api
+      .get<RevenueLeakageResponse>("/revenue-leakage", { params })
+      .then((r) => r.data),
+};
+
+/** CEO board deck JSON — Gemini applies a natural-language instruction (server needs GEMINI_API_KEY). */
+export const ceoDeckAiApi = {
+  edit: (body: { current_json: string; instruction: string }) =>
+    api.post<{ deck_json: string }>("/ceo-deck/ai-edit", body).then((r) => r.data),
 };

@@ -13,26 +13,39 @@ export function PortfolioIntelligence() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.allSettled([queries.globalMonitor(), queries.projects()]).then(([monitor, projects]) => {
-      if (monitor.status !== "fulfilled") { setLoading(false); return; }
-      const stats = monitor.value.project_stats ?? [];
-
-      // Build projectId → clean account_name
-      const nameMap = new Map<number, string>();
-      if (projects.status === "fulfilled") {
-        for (const p of projects.value) {
-          nameMap.set(p.id, p.account_name || p.filename?.replace(".xlsx", "") || `Project-${p.id}`);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [monitor, projects] = await Promise.allSettled([queries.globalMonitor(), queries.projects()]);
+        if (cancelled) return;
+        if (monitor.status !== "fulfilled") {
+          setRows([]);
+          return;
         }
+        const stats = monitor.value.project_stats ?? [];
+
+        const nameMap = new Map<number, string>();
+        if (projects.status === "fulfilled") {
+          for (const p of projects.value) {
+            nameMap.set(p.id, p.account_name || p.filename?.replace(".xlsx", "") || `Project-${p.id}`);
+          }
+        }
+
+        const enriched = stats.map((s) => ({
+          ...s,
+          name: nameMap.get(s.id) ?? s.name?.replace(".xlsx", "") ?? `Project-${s.id}`,
+        }));
+
+        setRows(portfolioCompositeVm(enriched, []));
+      } catch {
+        if (!cancelled) setRows([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      const enriched = stats.map((s) => ({
-        ...s,
-        name: nameMap.get(s.id) ?? s.name?.replace(".xlsx", "") ?? `Project-${s.id}`,
-      }));
-
-      setRows(portfolioCompositeVm(enriched, []));
-      setLoading(false);
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Bubble: fill % (x) vs activity % (y), bubble size = revenue

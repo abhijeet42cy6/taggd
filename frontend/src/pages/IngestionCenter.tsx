@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, queries, columnMappingEntryCount, type IngestionEventRow } from "@/lib/api";
+import { api, invalidateCache, queries, columnMappingEntryCount, type IngestionEventRow } from "@/lib/api";
 import { isPlatformAdminRole, isRecruiterUser, useAuth } from "@/lib/auth";
 import { PlatformSection, PageHeader, Tabs } from "@/components/platform/PlatformBlocks";
 import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
@@ -46,6 +46,13 @@ const FINANCE_STEPS: string[] = [
   "Saving file",
   "Parsing finance ledger",
   "Validating Lacs values",
+  "Committing to DB",
+];
+
+const REVENUE_TRACKERS_STEPS: string[] = [
+  "Saving workbook(s)",
+  "Parsing forecast & visibility sheets",
+  "Resolving projects & upserting rows",
   "Committing to DB",
 ];
 
@@ -438,6 +445,7 @@ const KIND_LABEL: Record<string, string> = {
   sla: "SLA",
   wfm: "WFM",
   finance: "Finance",
+  revenue_trackers: "Revenue trackers",
 };
 
 const INGESTION_TABS = [
@@ -584,6 +592,12 @@ export function IngestionCenter() {
   // ── finance ──
   const finance = useIngestionRun(FINANCE_STEPS);
   const [financeResult, setFinanceResult] = useState<Record<string, any> | null>(null);
+
+  // ── revenue forecast + visibility (Express tab) ──
+  const revenueTrackers = useIngestionRun(REVENUE_TRACKERS_STEPS);
+  const [revForecastFile, setRevForecastFile] = useState<File | null>(null);
+  const [revVisibilityFile, setRevVisibilityFile] = useState<File | null>(null);
+  const [revenueIngestResult, setRevenueIngestResult] = useState<Record<string, any> | null>(null);
 
   // ── SIMULATE STEPS with actual API call ──────────────────────────────────────
   async function simulateSteps(
@@ -744,6 +758,42 @@ export function IngestionCenter() {
     }
   }
 
+  async function handleRevenueTrackersIngest() {
+    if (!revForecastFile && !revVisibilityFile) return;
+    const desc = [revForecastFile?.name, revVisibilityFile?.name].filter(Boolean).join(" + ");
+    revenueTrackers.appendLog(`[${tsNow()}] Revenue templates: ${desc}`);
+    revenueTrackers.appendLog(`[${tsNow()}] Posting to /revenue-trackers/ingest-upload…`);
+    setRevenueIngestResult(null);
+    try {
+      const form = new FormData();
+      if (revForecastFile) form.append("forecast_file", revForecastFile);
+      if (revVisibilityFile) form.append("visibility_file", revVisibilityFile);
+      const result = await simulateSteps(
+        revenueTrackers,
+        REVENUE_TRACKERS_STEPS,
+        2,
+        async () => {
+          const r = await api.post("/revenue-trackers/ingest-upload", form);
+          return r.data;
+        },
+      );
+      setRevenueIngestResult(result);
+      const fc = result?.forecast?.rows_upserted;
+      const vis = result?.visibility?.rows_upserted;
+      const parts: string[] = [];
+      if (fc != null) parts.push(`forecast ${fc} rows`);
+      if (vis != null) parts.push(`visibility ${vis} rows`);
+      revenueTrackers.appendLog(`[${tsNow()}] ✓ Done — ${parts.join(", ") || "committed"}`, "success");
+      invalidateCache("revenue-trackers/");
+      setRevForecastFile(null);
+      setRevVisibilityFile(null);
+    } catch (err: any) {
+      revenueTrackers.appendLog(`[${tsNow()}] ✗ ${err?.response?.data?.detail || err.message}`, "error");
+    } finally {
+      void refreshIngestionEvents();
+    }
+  }
+
   // ── RENDER ────────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -794,8 +844,12 @@ export function IngestionCenter() {
               >
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>How it works</div>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: "var(--text-subtle)", lineHeight: 1.65 }}>
-                  <li>Supports Requisitions, Placement, and Offer trackers.</li>
-                  <li>AI identifies sheets, maps columns, and synthesizes revenue logic.</li>
+                  <li>Supports Requisitions, Placement, and Offer trackers (top drop zone).</li>
+                  <li>
+                    <strong>Revenue weekly templates</strong> (below): forecast + visibility workbooks → same ingest as the
+                    CLI script.
+                  </li>
+                  <li>AI identifies sheets, maps columns, and synthesizes revenue logic for tracker uploads.</li>
                   <li>Progress and logs appear below after you upload.</li>
                 </ul>
               </div>
@@ -821,6 +875,182 @@ export function IngestionCenter() {
               </button>
             </div>
           )}
+
+          <div
+            style={{
+              marginTop: 22,
+              paddingTop: 20,
+              borderTop: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                marginBottom: 12,
+                fontFamily: "'Syne',sans-serif",
+                color: "var(--text)",
+              }}
+            >
+              Revenue weekly templates (forecast and visibility)
+            </div>
+            {revenueTrackers.job === "idle" && (
+              <div className="platform-grid-2" style={{ gap: 16, alignItems: "stretch" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <DropZone
+                    title="Weekly forecast workbook"
+                    subtitle={"Sheet: Revenue Forecast Data\nRevenue_Forecast_Template*.xlsx"}
+                    icon="📊"
+                    accent="#c2410c"
+                    onFile={(f) => setRevForecastFile(f)}
+                    disabled={false}
+                  />
+                  <DropZone
+                    title="Revenue visibility workbook"
+                    subtitle={"Sheet: Revenue Tracker\nRevenue_Visibility_Tracker.xlsx"}
+                    icon="👁"
+                    accent="#0d9488"
+                    onFile={(f) => setRevVisibilityFile(f)}
+                    disabled={false}
+                  />
+                  {(revForecastFile || revVisibilityFile) && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
+                        {revForecastFile ? (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>Forecast: {revForecastFile.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setRevForecastFile(null)}
+                              style={{ flexShrink: 0, fontSize: 10, border: "none", background: "none", color: "var(--accent)", cursor: "pointer" }}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        ) : null}
+                        {revVisibilityFile ? (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>Visibility: {revVisibilityFile.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setRevVisibilityFile(null)}
+                              style={{ flexShrink: 0, fontSize: 10, border: "none", background: "none", color: "var(--accent)", cursor: "pointer" }}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleRevenueTrackersIngest()}
+                        disabled={!revForecastFile && !revVisibilityFile}
+                        style={{
+                          padding: "10px 16px",
+                          borderRadius: 8,
+                          border: "none",
+                          cursor: revForecastFile || revVisibilityFile ? "pointer" : "not-allowed",
+                          background: revForecastFile || revVisibilityFile ? "var(--accent)" : "var(--surface-muted)",
+                          color: revForecastFile || revVisibilityFile ? "var(--text-on-accent)" : "var(--text-muted)",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          fontFamily: "'Syne',sans-serif",
+                        }}
+                      >
+                        Run revenue ingest
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div
+                  style={{
+                    padding: "18px 16px",
+                    borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    background: "var(--surface-raised, #fff)",
+                    boxShadow: "0 2px 12px rgba(15, 23, 42, 0.06)",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>How it works</div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: "var(--text-subtle)", lineHeight: 1.65 }}>
+                    <li>Requires the <strong>revenue_forecast</strong> module on your account (same as Revenue trackers).</li>
+                    <li>Upload <strong>one or both</strong> workbooks; the server uses the same parser as{" "}
+                      <code style={{ fontSize: 10 }}>backend/scripts/ingest_revenue_trackers.py</code>.</li>
+                    <li>Data lands in <code style={{ fontSize: 10 }}>revenue_forecast_weekly</code> and{" "}
+                      <code style={{ fontSize: 10 }}>revenue_visibility_snapshot</code>.</li>
+                    <li>Runs appear in <strong>Recent ingestion activity</strong> below as Revenue trackers.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+            {revenueTrackers.job !== "idle" && (
+              <>
+                <StepTracker steps={revenueTrackers.steps} percent={revenueTrackers.percent} />
+                <LogPanel log={revenueTrackers.log} />
+              </>
+            )}
+            {revenueTrackers.job === "done" && revenueIngestResult && (
+              <div className="platform-card" style={{ marginTop: 12, padding: "12px 14px" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6 }}>Revenue ingest complete</div>
+                <div style={{ fontSize: 10.5, color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace", lineHeight: 1.6 }}>
+                  {revenueIngestResult.forecast != null && (
+                    <div>
+                      Forecast: {revenueIngestResult.forecast.rows_upserted} rows (
+                      {revenueIngestResult.forecast.sheet})
+                    </div>
+                  )}
+                  {revenueIngestResult.visibility != null && (
+                    <div>
+                      Visibility: {revenueIngestResult.visibility.rows_upserted} rows (
+                      {revenueIngestResult.visibility.sheet})
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    revenueTrackers.reset();
+                    setRevenueIngestResult(null);
+                  }}
+                  style={{
+                    marginTop: 10,
+                    background: "none",
+                    border: "1px solid var(--border)",
+                    padding: "5px 14px",
+                    borderRadius: 7,
+                    cursor: "pointer",
+                    fontSize: 11,
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            {revenueTrackers.job === "error" && (
+              <div style={{ marginTop: 10 }}>
+                <div className="alert-banner red">Revenue ingest failed — see log above</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    revenueTrackers.reset();
+                    setRevenueIngestResult(null);
+                  }}
+                  style={{
+                    marginTop: 8,
+                    background: "none",
+                    border: "1px solid var(--red)",
+                    color: "var(--red)",
+                    padding: "5px 14px",
+                    borderRadius: 7,
+                    cursor: "pointer",
+                    fontSize: 11,
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+          </div>
         </PlatformSection>
       )}
 
@@ -974,6 +1204,7 @@ export function IngestionCenter() {
         <PlatformSection title="All Run Logs">
           {[
             { label: "Express", log: express.log },
+            { label: "Revenue trackers", log: revenueTrackers.log },
             { label: "Pro Inspect", log: proInspect.log },
             { label: "Pro Pipeline", log: proRun.log },
             { label: "SLA", log: sla.log },
@@ -992,8 +1223,11 @@ export function IngestionCenter() {
               </div>
             </div>
           ))}
-          {[express.log, proInspect.log, proRun.log, sla.log, wfm.log, finance.log].every((l) => !l.length) && (
-            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 24 }}>No run events yet — start an upload from Express, Pro, SLA, WFM, or Finance tabs to see logs here.</div>
+          {[express.log, revenueTrackers.log, proInspect.log, proRun.log, sla.log, wfm.log, finance.log].every((l) => !l.length) && (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 24 }}>
+              No run events yet — start an upload from Express (trackers or revenue templates), Pro, SLA, WFM, or Finance
+              tabs to see logs here.
+            </div>
           )}
         </PlatformSection>
       )}

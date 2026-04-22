@@ -388,6 +388,19 @@ export function RevenueTrackers() {
     return visibility.filter((r) => r.as_of_date === effectiveAsOf);
   }, [visibility, effectiveAsOf]);
 
+  /** API returned no forecast/visibility rows — almost always project scope, not missing ingest. */
+  const emptyScopeData = !loading && !err && forecast.length === 0 && visibility.length === 0;
+  /** Forecast rows exist but no visibility snapshots in scope (ingest visibility workbook or check assignments). */
+  const emptyScopeVisibilityOnly = !loading && !err && visibility.length === 0 && forecast.length > 0;
+  /** Visibility rows exist but no weekly forecast rows in scope. */
+  const emptyScopeForecastOnly = !loading && !err && forecast.length === 0 && visibility.length > 0;
+  const emptyAsOfSlice =
+    !loading &&
+    !err &&
+    mainTab === "Revenue visibility" &&
+    visibility.length > 0 &&
+    visibilityForCut.length === 0;
+
   const visibilityTotals = useMemo(() => {
     const rows = visibilityForCut;
     let mmf = 0,
@@ -881,6 +894,107 @@ export function RevenueTrackers() {
           </button>
         ))}
       </div>
+
+      {emptyScopeData ? (
+        <div
+          className="platform-card"
+          style={{
+            margin: "12px 0 0",
+            padding: "14px 18px",
+            borderLeft: "4px solid var(--amber)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--text)",
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: 6 }}>No revenue rows in your access scope</strong>
+          <span style={{ color: "var(--text-muted)" }}>
+            Data from <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px]">Revenue_Forecast_Template_1.xlsx</code>{" "}
+            and <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px]">Revenue_Visibility_Tracker.xlsx</code> is stored in
+            the database as <code className="font-mono text-[11px]">revenue_forecast_weekly</code> and{" "}
+            <code className="font-mono text-[11px]">revenue_visibility_snapshot</code>. This page only loads rows for{" "}
+            <strong>projects you are allowed to see</strong> (and needs the <strong>revenue_forecast</strong> vertical for
+            operations users). If you are <strong>operations</strong> with no assignments, add{" "}
+            <strong>User → Project assignments</strong> in Admin, or switch to a platform admin / executive account with
+            portfolio access. Template snapshots often use <strong>April 2025</strong> dates—once rows appear, pick that
+            date under <strong>Visibility as-of</strong>. Load both workbooks with{" "}
+            <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px]">
+              python3 backend/scripts/ingest_revenue_trackers.py
+            </code>{" "}
+            (defaults include <code className="font-mono text-[11px]">excel_files_imp/Revenue_Visibility_Tracker.xlsx</code>).
+          </span>
+        </div>
+      ) : null}
+
+      {!emptyScopeData && emptyScopeVisibilityOnly && mainTab === "Revenue visibility" ? (
+        <div
+          className="platform-card"
+          style={{
+            margin: "12px 0 0",
+            padding: "14px 18px",
+            borderLeft: "4px solid var(--amber)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--text)",
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: 6 }}>No revenue visibility rows in your access scope</strong>
+          <span style={{ color: "var(--text-muted)" }}>
+            Weekly forecast data is present, but nothing from <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px]">Revenue_Visibility_Tracker.xlsx</code>{" "}
+            (sheet <strong>Revenue Tracker</strong>) is visible for your projects. That file ingests into{" "}
+            <code className="font-mono text-[11px]">revenue_visibility_snapshot</code>, keyed by the{" "}
+            <strong>Updated Date</strong> on each row (use <strong>Visibility as-of</strong> to match). Run{" "}
+            <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px]">
+              python3 backend/scripts/ingest_revenue_trackers.py --visibility excel_files_imp/Revenue_Visibility_Tracker.xlsx
+            </code>{" "}
+            or the default two-file ingest from the repo root. If ingest already ran, confirm project assignments or use a
+            platform admin account so all projects are in scope.
+          </span>
+        </div>
+      ) : null}
+
+      {!emptyScopeData && emptyScopeForecastOnly && mainTab === "Revenue forecast" ? (
+        <div
+          className="platform-card"
+          style={{
+            margin: "12px 0 0",
+            padding: "14px 18px",
+            borderLeft: "4px solid var(--amber)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--text)",
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: 6 }}>No weekly forecast rows in your access scope</strong>
+          <span style={{ color: "var(--text-muted)" }}>
+            Visibility snapshots exist, but <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px]">Revenue_Forecast_Template_1.xlsx</code>{" "}
+            (sheet <strong>Revenue Forecast Data</strong>) has not been ingested for your projects into{" "}
+            <code className="font-mono text-[11px]">revenue_forecast_weekly</code>, or those rows are outside your assignment
+            scope. Run{" "}
+            <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px]">
+              python3 backend/scripts/ingest_revenue_trackers.py --forecast excel_files_imp/Revenue_Forecast_Template_1.xlsx
+            </code>{" "}
+            from the repo root (or omit flags to ingest both default files).
+          </span>
+        </div>
+      ) : null}
+
+      {emptyAsOfSlice ? (
+        <div
+          className="platform-card"
+          style={{
+            margin: "12px 0 0",
+            padding: "12px 16px",
+            fontSize: 12,
+            color: "var(--amber)",
+            fontFamily: "var(--mono)",
+          }}
+        >
+          No rows for the selected <strong>Visibility as-of</strong> date. Choose another date in the filter bar—the
+          workbook <strong>Updated Date</strong> column becomes each snapshot as-of (e.g.{" "}
+          <code className="font-mono text-[11px]">2025-04-20</code> in the sample template).
+        </div>
+      ) : null}
 
       {/* ─────────── Revenue visibility ─────────── */}
       {mainTab === "Revenue visibility" ? (
