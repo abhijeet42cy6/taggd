@@ -1718,9 +1718,10 @@ def init_db():
     _ensure_revenue_tracker_indexes()
     _ensure_revenue_weekly_submission_schema()
     try:
-        from backend.auth.bootstrap import bootstrap_default_admin
+        from backend.auth.bootstrap import bootstrap_default_admin, normalize_platform_admin_emails
 
         bootstrap_default_admin()
+        normalize_platform_admin_emails()
     except Exception as e:
         import logging
 

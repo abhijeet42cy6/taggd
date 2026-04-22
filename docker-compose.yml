@@ -8,6 +8,8 @@ services:
       dockerfile: Dockerfile.backend
     volumes:
       - sqlite_data:/app/db_data
+      # Repo Excel masters (CLI ingest scripts use paths under excel_files_imp/)
+      - ./excel_files_imp:/app/excel_files_imp
     environment:
       DATABASE_URL: sqlite:////app/db_data/revenue_generator.db
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

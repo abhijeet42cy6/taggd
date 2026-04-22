@@ -9,11 +9,13 @@
 
 **Capability labels used in this document**
 
-| Label | Meaning |
-| ----- | ------- |
-| **Shipped** | Available in the product today (may still mature). |
-| **Near-term** | Bounded, incremental work—typically rules, notifications, fields, or a focused UI flow on existing data. |
-| **Roadmap** | Valuable target; requires a defined phase—often integrations, new services, or research (not implied as complete in the current build). |
+
+| Label         | Meaning                                                                                                                                 |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Shipped**   | Available in the product today (may still mature).                                                                                      |
+| **Near-term** | Bounded, incremental work—typically rules, notifications, fields, or a focused UI flow on existing data.                                |
+| **Roadmap**   | Valuable target; requires a defined phase—often integrations, new services, or research (not implied as complete in the current build). |
+
 
 ---
 
@@ -35,7 +37,7 @@ The platform exists so **no critical operational signal lives only in someone’
 
 - **Portfolio health** — requisition volume, lifecycle mix, ageing, revenue/fees from tracker logic, finance attainment, SLA compliance, WFM stress.  
 - **Account and project lens** — same metrics **scoped** to a client / project for client managers and delivery leads.  
-- **Risk surfacing** — anomalies and integrity issues (e.g. closed reqs with no revenue, missing joins, split identities) are **visible and queueable** for remediation—not only visible after a monthly close.  
+- **Risk surfacing** — anomalies and integrity issues (e.g. closed reqs with no revenue, missing joins, split identities) are **visible and queueable** for remediation—not only visible after a monthly close.
 
 ### 2.2 Central logging
 
@@ -57,7 +59,7 @@ They use the platform to:
 - Spot **projects at risk** using **composite health signals**, explicit **data-quality queues**, and **failing or weak KPIs** (e.g. SLA “not met”, finance variance, open-pipeline ageing).  
 - Understand **underperformance** in context: which **account**, which **metric family** (hiring vs SLA vs finance vs capacity), and **evidence rows** where applicable.  
 - Assess **capacity / understaffing proxies** via **WFM benchmarks**, resource-gap data, and productivity-style finance fields **where populated**—not as a full HRIS replacement.  
-- Use the **Agent** (**Shipped**, read-only) to ask **natural-language questions** over **live** metrics and definitions already in the system—suitable for **guided analysis**, not autonomous decisions.  
+- Use the **Agent** (**Shipped**, read-only) to ask **natural-language questions** over **live** metrics and definitions already in the system—suitable for **guided analysis**, not autonomous decisions.
 
 **Near-term (easy to specify):** saved **executive views** (filter presets), **pinned “at-risk” lists** driven by simple thresholds on existing aggregates, and **short rationale strings** on why a project appears on a risk list (rule-based, not black-box).
 
@@ -70,11 +72,12 @@ They use the platform to:
 - Enter or refresh **weekly revenue forecast** and **visibility** lines (**Shipped** — revenue trackers).  
 - Maintain **requisitions**—**create, update, delete** where permitted—and keep **status** and dates aligned with reality so **downstream KPIs** stay honest.  
 - Rely on **ingestion** for bulk updates from Excel when that is faster than row-by-row UI work.  
-- Contribute to **finance and planning** through finance master uploads and, where enabled, **manual ledger corrections** for stewards.  
+- Contribute to **finance and planning** through finance master uploads and, where enabled, **manual ledger corrections** for stewards.
 
 **Near-term (implementable):**  
+
 - **Weekly update obligation** for client managers: a **lightweight checklist or attestation** (“forecast updated”, “pipeline reviewed”) tied to **project + week**, stored as structured events in the **activity** model—**no** heavy project-management product required.  
-- **Goal-risk notifications** to client managers: **email** (or in-app first, email second) when **simple rules** fire—e.g. forecast vs target band, SLA deterioration, or **stale weekly update**—using **existing** KPIs and timestamps. Rules should start **narrow** (one or two thresholds) and expand.  
+- **Goal-risk notifications** to client managers: **email** (or in-app first, email second) when **simple rules** fire—e.g. forecast vs target band, SLA deterioration, or **stale weekly update**—using **existing** KPIs and timestamps. Rules should start **narrow** (one or two thresholds) and expand.
 
 **Roadmap:** richer **nudging** (digest emails, escalation paths)—still rule-based before any ML.
 
@@ -93,15 +96,17 @@ Every user should experience the product according to **policy**: **which data i
 
 ### 4.1 What “policy” means in the product
 
-| Layer | Intent | Status |
-| ----- | ------ | ------ |
-| **Authentication** | Known user, secure session | **Shipped** |
-| **Role** (admin / executive / manager) | Baseline permissions | **Shipped** |
-| **Project scope** | Managers (and optionally scoped executives) see **only assigned** projects | **Shipped** |
-| **Persona / emphasis** (UI) | Navigation emphasis for CEO vs Finance vs WFM, etc. | **Shipped** (emphasis only; **not** a security boundary) |
-| **Per-user profile** | Name, contact, timezone, notification preferences | **Roadmap** — start with **email on user record** + **opt-in flags** (small schema change). |
-| **Per-user agenda** | Tasks, due items, “your weekly update due” | **Near-term** — backed by **activity + due_date** or a minimal **tasks** table; avoid full Gantt. |
-| **Fine-grained permissions** (e.g. recruiter vs PM vs CM) | Separate **policies** beyond the three roles | **Roadmap** — phase as **additional roles** or **capability flags** once requirements stabilize. |
+
+| Layer                                                     | Intent                                                                     | Status                                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **Authentication**                                        | Known user, secure session                                                 | **Shipped**                                                                                       |
+| **Role** (admin / executive / manager)                    | Baseline permissions                                                       | **Shipped**                                                                                       |
+| **Project scope**                                         | Managers (and optionally scoped executives) see **only assigned** projects | **Shipped**                                                                                       |
+| **Persona / emphasis** (UI)                               | Navigation emphasis for CEO vs Finance vs WFM, etc.                        | **Shipped** (emphasis only; **not** a security boundary)                                          |
+| **Per-user profile**                                      | Name, contact, timezone, notification preferences                          | **Roadmap** — start with **email on user record** + **opt-in flags** (small schema change).       |
+| **Per-user agenda**                                       | Tasks, due items, “your weekly update due”                                 | **Near-term** — backed by **activity + due_date** or a minimal **tasks** table; avoid full Gantt. |
+| **Fine-grained permissions** (e.g. recruiter vs PM vs CM) | Separate **policies** beyond the three roles                               | **Roadmap** — phase as **additional roles** or **capability flags** once requirements stabilize.  |
+
 
 ### 4.2 Principle
 
@@ -116,7 +121,7 @@ Every user should experience the product according to **policy**: **which data i
 **Shipped foundations:** Executive Overview, Portfolio Intelligence, Clients, Data Operations, Finance Command, SLA, WFM, requisition KPIs, and integrity lists give executives:
 
 - **Which projects lag** on fill, hold-heavy pipelines, revenue per position, finance variance, or SLA failure rates—via **existing** charts, tables, and quality queues.  
-- **Actionable next steps** that stay honest: open **evidence** lists, go to **client cockpit**, drill **requisitions**, or push **recalculate / metadata** fixes—rather than claiming automated remediation.  
+- **Actionable next steps** that stay honest: open **evidence** lists, go to **client cockpit**, drill **requisitions**, or push **recalculate / metadata** fixes—rather than claiming automated remediation.
 
 **Near-term:** explicit **“At risk”** badges on project lists when **documented rules** pass (e.g. SLA not-met rate, ageing bucket, finance attainment below X%)—implemented as **configuration** over existing aggregates.
 
@@ -147,6 +152,7 @@ Every user should experience the product according to **policy**: **which data i
 **Shipped:** Portfolio **requisition** views with **search, filter, pagination**, and **create / edit / delete** subject to policy; **pipeline KPIs** (open, offer-stage, joiners, totals) at portfolio level.
 
 **Intelligence (Shipped + Near-term):**  
+
 - **Shipped:** drilldowns, per-project stats, dashboard aggregates.  
 - **Near-term:** saved **views** and **simple alerts** when counts cross thresholds (e.g. open reqs above N for a project).
 
@@ -178,12 +184,14 @@ The system should support **continuity**: who **joined**, who was **in play** (a
 
 ### 8.1 Phased approach (implementable promises)
 
-| Phase | What we deliver | Effort band |
-| ----- | ---------------- | ----------- |
-| **A — Meeting record** | Create a **meeting** object: title, date, attendees (user ids), **optional link** to agenda doc URL, **status**. | Small |
-| **B — Actions from meetings** | **Action items**: text, owner user, due date, link to `project_id` optional; list on **profile / agenda** view; reminders via **email** optional. | Small–medium |
-| **C — Agent assist (async)** | After meeting, paste **notes** or upload **text**; Agent proposes **action items** for **human confirm** before save—**no** live audio requirement. | Medium |
-| **D — Live meeting Agent** | Real-time **transcription + agent** in call: **Roadmap** / vendor-dependent; **not** a near-term commitment without speech pipeline and privacy sign-off. | Large |
+
+| Phase                         | What we deliver                                                                                                                                           | Effort band  |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| **A — Meeting record**        | Create a **meeting** object: title, date, attendees (user ids), **optional link** to agenda doc URL, **status**.                                          | Small        |
+| **B — Actions from meetings** | **Action items**: text, owner user, due date, link to `project_id` optional; list on **profile / agenda** view; reminders via **email** optional.         | Small–medium |
+| **C — Agent assist (async)**  | After meeting, paste **notes** or upload **text**; Agent proposes **action items** for **human confirm** before save—**no** live audio requirement.       | Medium       |
+| **D — Live meeting Agent**    | Real-time **transcription + agent** in call: **Roadmap** / vendor-dependent; **not** a near-term commitment without speech pipeline and privacy sign-off. | Large        |
+
 
 This ordering keeps **promises easy to implement**: **A + B** deliver most operational value; **C** adds intelligence without hardware integration; **D** stays explicitly **future**.
 
@@ -194,9 +202,10 @@ This ordering keeps **promises easy to implement**: **A + B** deliver most opera
 **Need:** Onboarding (with the **client**) produces a **transition / ways-of-working document** so **recruiters** adopt **client-specific** process, tone, and SLAs.
 
 **Near-term (MVP):**  
+
 - **Attach** one or more **files** (PDF/DOCX) to a **project** with **metadata** (title, version, effective date).  
 - **ACL:** roles **recruiter / PM / CM** (once defined) or existing **manager** scope can **view** documents for projects they own.  
-- **Activity log** entry on publish/update.  
+- **Activity log** entry on publish/update.
 
 **Roadmap:** **Collaborative editing**, templates, and **e-sign**—out of scope for first slice.
 
@@ -204,15 +213,17 @@ This ordering keeps **promises easy to implement**: **A + B** deliver most opera
 
 ## 10. What it is used for today (summary table)
 
-| Use case | Who benefits | What they do in the product |
-| -------- | ------------ | ---------------------------- |
-| **Org-wide monitoring** | Executives | Executive Overview, Portfolio Intel, finance/SLA/WFM summaries, Data Operations, Agent Q&A |
-| **Account oversight** | Client / project managers | Clients, client detail, scoped requisitions and trackers |
-| **Operational input** | Recruiters, PMs, CMs | Requisitions CRUD, weekly revenue trackers, uploads |
-| **Finance & risk** | Finance, leadership | Finance Command, unbilled/bad debt/collections views |
-| **SLA / WFM** | Account mgmt, WFM | SLA and WFM surfaces + uploads |
-| **Quality & logging** | Platform ops | Ingestion Center, Data Operations, Activity log |
-| **Administration** | Admins | Users & access |
+
+| Use case                | Who benefits              | What they do in the product                                                                |
+| ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------ |
+| **Org-wide monitoring** | Executives                | Executive Overview, Portfolio Intel, finance/SLA/WFM summaries, Data Operations, Agent Q&A |
+| **Account oversight**   | Client / project managers | Clients, client detail, scoped requisitions and trackers                                   |
+| **Operational input**   | Recruiters, PMs, CMs      | Requisitions CRUD, weekly revenue trackers, uploads                                        |
+| **Finance & risk**      | Finance, leadership       | Finance Command, unbilled/bad debt/collections views                                       |
+| **SLA / WFM**           | Account mgmt, WFM         | SLA and WFM surfaces + uploads                                                             |
+| **Quality & logging**   | Platform ops              | Ingestion Center, Data Operations, Activity log                                            |
+| **Administration**      | Admins                    | Users & access                                                                             |
+
 
 ---
 
@@ -230,37 +241,43 @@ This ordering keeps **promises easy to implement**: **A + B** deliver most opera
 
 ### 12.1 Primary user groups
 
-| User group | Needs | How the product serves them |
-| ---------- | ----- | ---------------------------- |
-| **Executive / leadership** | Portfolio pulse, risk, KPI failures | Dashboards, quality queues, finance/SLA/WFM, Agent (read-only) |
-| **Regional / practice leadership** | Rollups and filters | Same surfaces + filters; optional project scope |
-| **Client / delivery managers** | Account health, forecasts, weekly cadence | Clients, requisitions, revenue trackers; **Near-term:** attestations + nudges |
-| **Recruiters / coordinators** | Req hygiene, client context | Requisitions; **Near-term:** transition docs on project |
-| **Finance & commercial** | Budget, actual, CM, collections, unbilled, bad debt | Finance Command, uploads |
-| **WFM / HR analytics** | Capacity signals | WFM |
-| **Onboarding** | Handover artefacts | **Near-term:** document attach + ACL (**§9**) |
-| **Platform / data stewards** | Ingestion, integrity | Ingestion Center, Data Operations |
-| **Administrators** | Users & policy | Admin UI |
+
+| User group                         | Needs                                               | How the product serves them                                                   |
+| ---------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Executive / leadership**         | Portfolio pulse, risk, KPI failures                 | Dashboards, quality queues, finance/SLA/WFM, Agent (read-only)                |
+| **Regional / practice leadership** | Rollups and filters                                 | Same surfaces + filters; optional project scope                               |
+| **Client / delivery managers**     | Account health, forecasts, weekly cadence           | Clients, requisitions, revenue trackers; **Near-term:** attestations + nudges |
+| **Recruiters / coordinators**      | Req hygiene, client context                         | Requisitions; **Near-term:** transition docs on project                       |
+| **Finance & commercial**           | Budget, actual, CM, collections, unbilled, bad debt | Finance Command, uploads                                                      |
+| **WFM / HR analytics**             | Capacity signals                                    | WFM                                                                           |
+| **Onboarding**                     | Handover artefacts                                  | **Near-term:** document attach + ACL (**§9**)                                 |
+| **Platform / data stewards**       | Ingestion, integrity                                | Ingestion Center, Data Operations                                             |
+| **Administrators**                 | Users & policy                                      | Admin UI                                                                      |
+
 
 ### 12.2 Roles (access control)
 
-| Role | In practice |
-| ---- | ----------- |
-| **Admin** | Full access; user and assignment management |
+
+| Role          | In practice                                     |
+| ------------- | ----------------------------------------------- |
+| **Admin**     | Full access; user and assignment management     |
 | **Executive** | Org-wide unless restricted to assigned projects |
-| **Manager** | Assigned projects only |
+| **Manager**   | Assigned projects only                          |
+
 
 ---
 
 ## 13. Product goals (concise)
 
-| Goal | Success looks like |
-| ---- | ------------------- |
-| **Single operational hub** | Monitoring + logging + inputs in one authenticated place |
-| **Policy-correct experience** | Each user sees and edits only what policy allows |
-| **Proactive operations** | Near-term: **timely nudges** and **weekly discipline** without spreadsheet policing |
-| **Trust in numbers** | Data Operations + ingestion feedback; finance and tracker coherence understood |
-| **Auditability** | Activity and ingestion history support reviews |
+
+| Goal                          | Success looks like                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| **Single operational hub**    | Monitoring + logging + inputs in one authenticated place                            |
+| **Policy-correct experience** | Each user sees and edits only what policy allows                                    |
+| **Proactive operations**      | Near-term: **timely nudges** and **weekly discipline** without spreadsheet policing |
+| **Trust in numbers**          | Data Operations + ingestion feedback; finance and tracker coherence understood      |
+| **Auditability**              | Activity and ingestion history support reviews                                      |
+
 
 ---
 
@@ -306,21 +323,23 @@ Project-attached **transition documents** with permissions (**§9**).
 
 ## 15. Where to work in the app (information map)
 
-| Area | Route | Primary jobs-to-be-done |
-| ---- | ----- | ------------------------ |
-| Executive Overview | `/` | Org monitoring, charts |
-| Portfolio Intel | `/portfolio` | Compare accounts |
-| Clients | `/clients`, `/clients/:clientId` | Account cockpit |
-| Requisitions | `/requisitions` | Req operations + intelligence |
-| Finance Command | `/finance` | Money, unbilled, bad debt |
-| Revenue trackers | `/revenue-trackers` | Weekly forecast & visibility |
-| SLA Performance | `/sla-performance` | Contract SLA |
-| Workforce Mgmt | `/wfm` | Capacity signals |
-| Data Operations | `/data-operations` | Risk & integrity |
-| Ingestion Center | `/ingestion` | All uploads |
-| Activity log | `/activity` | Audit narrative |
-| Agent | `/agent` | Read-only analysis |
-| Users & access | `/admin/users` | Provisioning |
+
+| Area               | Route                            | Primary jobs-to-be-done       |
+| ------------------ | -------------------------------- | ----------------------------- |
+| Executive Overview | `/`                              | Org monitoring, charts        |
+| Portfolio Intel    | `/portfolio`                     | Compare accounts              |
+| Clients            | `/clients`, `/clients/:clientId` | Account cockpit               |
+| Requisitions       | `/requisitions`                  | Req operations + intelligence |
+| Finance Command    | `/finance`                       | Money, unbilled, bad debt     |
+| Revenue trackers   | `/revenue-trackers`              | Weekly forecast & visibility  |
+| SLA Performance    | `/sla-performance`               | Contract SLA                  |
+| Workforce Mgmt     | `/wfm`                           | Capacity signals              |
+| Data Operations    | `/data-operations`               | Risk & integrity              |
+| Ingestion Center   | `/ingestion`                     | All uploads                   |
+| Activity log       | `/activity`                      | Audit narrative               |
+| Agent              | `/agent`                         | Read-only analysis            |
+| Users & access     | `/admin/users`                   | Provisioning                  |
+
 
 ---
 
@@ -328,7 +347,7 @@ Project-attached **transition documents** with permissions (**§9**).
 
 - Excel remains a **primary input**; the platform is the **system of record after ingestion**.  
 - Indian FY and INR presentation remain first-class.  
-- **Tracker revenue** and **finance master** can differ; users must know which view answers which question.  
+- **Tracker revenue** and **finance master** can differ; users must know which view answers which question.
 
 ---
 
@@ -337,7 +356,7 @@ Project-attached **transition documents** with permissions (**§9**).
 - **Not** a full HRIS, ATS replacement, or invoicing system.  
 - **Not** autonomous Agent actions without human approval.  
 - **Live meeting listening Agent** — **not** a current commitment (**§8**).  
-- **SSO/MFA** — not required in base repo spec (may be added at deploy layer).  
+- **SSO/MFA** — not required in base repo spec (may be added at deploy layer).
 
 ---
 

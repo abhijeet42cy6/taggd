@@ -7,16 +7,16 @@ This document describes the application database as defined in SQLAlchemy (`back
 ## Design overview
 
 
-| Theme                  | Detail                                                                                                                                                                                                                                                                                                |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **ORM**                | SQLAlchemy declarative `Base`; `init_db()` runs `create_all`, finance dedupe, SLA / client backfills, optional candidate-master backfill (`CANDIDATE_MASTER_BACKFILL_ON_INIT`), then idempotent SQLite DDL for indexes and `revenue_weekly_submission`.                                               |
-| **Spine**              | `**clients`** → `**projects`** → `**records`** (requisitions) and `**candidates`** (mandate-level people rows). Optional `**candidate_masters`** + `**candidate_master_links`** cross-link pipeline rows to an enterprise-wide talent identity.                                                       |
-| **Auth & RBAC**        | `**users`** (extended profile + `manager_user_id` self-FK, `vertical_access_json`) + `**user_project_assignments`**; application-layer scope. `**project_head_user_id`** on projects; `**hiring_manager_user_id**` / `**assigned_recruiter_user_id**` on records and candidates.                      |
-| **Audit**              | `**ingestion_events`**, `**activity_log`**; `**AuditMixin**` on ingest-heavy domain tables (see *Audit mixin*). Several newer tables use explicit `created_at` / `updated_at` instead of the mixin.                                                                                                   |
-| **Commercial**         | `**project_contracts`**; `**taggd_revenue_billing*`* with optional 1:1 `**finance_billing_workflow*`* (validation, TDS/GST/partial payment fields), `**finance_payment_receipts*`*, `**finance_billing_validation_events**`, `**finance_tds_certificates**`, stub `**finance_bank_statement_lines**`. |
-| **Governance & ops**   | `**platform_meetings`** + `**meeting_action_items`** (MoM-style); `**project_transitions`** (client onboarding milestones, one row per project); `**platform_tasks**` + `**task_assignees**` (cross-cutting work queue); `**resume_supplier_licenses**` (org-level vendor spend).                     |
-| **Finance & planning** | `**finance_monthly_ledger`** / `**finance_cash_flow`** / `**finance_efficiency_kpis`**; **budget/forecast template** rows use finer `metric_category` on the ledger (see *Budget / forecast template*).                                                                                               |
-| **RevOps cadence**     | `**revenue_forecast_weekly`** and `**revenue_visibility_snapshot`** (unique per project + week / as-of); both may reference `**revenue_weekly_submission`** (draft → submit → review → approve).                                                                                                      |
+| Theme                  | Detail                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ORM**                | SQLAlchemy declarative `Base`; `init_db()` runs `create_all`, finance dedupe, SLA / client backfills, optional candidate-master backfill (`CANDIDATE_MASTER_BACKFILL_ON_INIT`), then idempotent SQLite DDL for indexes and `revenue_weekly_submission`.                                                                                                                                              |
+| **Spine**              | `**clients`** (optional `lifecycle_state`, org-chart `hierarchy_tag_*`) → `**projects`** (optional `parent_project_id` BU→SBU tree, `org_unit_kind`, per-project `hierarchy_tag_*`) → `**records`** (requisitions) and `**candidates`** (mandate-level people rows). Optional `**candidate_masters`** + `**candidate_master_links`** cross-link pipeline rows to an enterprise-wide talent identity. |
+| **Auth & RBAC**        | `**users`** (extended profile + `manager_user_id` self-FK, `vertical_access_json`) + `**user_project_assignments`**; application-layer scope. `**project_head_user_id`** on projects; `**hiring_manager_user_id**` / `**assigned_recruiter_user_id**` on records and candidates.                                                                                                                     |
+| **Audit**              | `**ingestion_events`**, `**activity_log`**; `**AuditMixin**` on ingest-heavy domain tables (see *Audit mixin*). Several newer tables use explicit `created_at` / `updated_at` instead of the mixin.                                                                                                                                                                                                  |
+| **Commercial**         | `**project_contracts`*; `**taggd_revenue_billing`* with optional 1:1 `**finance_billing_workflow**` (validation, TDS/GST/partial payment fields), `**finance_payment_receipts*`*, `**finance_billing_validation_events*`*, `**finance_tds_certificates**`, stub `**finance_bank_statement_lines**`.                                                                                                  |
+| **Governance & ops**   | `**platform_meetings`** + `**meeting_action_items`** (MoM-style); `**project_transitions`** (client onboarding milestones, one row per project); `**platform_tasks`** + `**task_assignees`** (cross-cutting work queue); `**resume_supplier_licenses`** (org-level vendor spend).                                                                                                                    |
+| **Finance & planning** | `**finance_monthly_ledger`** / `**finance_cash_flow`** / `**finance_efficiency_kpis`**; **budget/forecast template** rows use finer `metric_category` on the ledger (see *Budget / forecast template*).                                                                                                                                                                                              |
+| **RevOps cadence**     | `**revenue_forecast_weekly`** and `**revenue_visibility_snapshot`** (unique per project + week / as-of); both may reference `**revenue_weekly_submission`** (draft → submit → review → approve).                                                                                                                                                                                                     |
 
 
 ---
@@ -34,6 +34,7 @@ This document describes the application database as defined in SQLAlchemy (`back
 | `activity_log`                                | `users`                                 | `user_id`                                                                    | `SET NULL`              | **W** append-only, **R** timeline                                 |
 | `activity_log`                                | `projects`                              | `project_id`                                                                 | `SET NULL`              | **W** / **R**                                                     |
 | `projects`                                    | `clients`                               | `client_id`                                                                  | `RESTRICT`              | **R/W** spine                                                     |
+| `projects`                                    | `projects`                              | `parent_project_id`                                                          | `SET NULL`              | **R/W** BU → SBU hierarchy (self-FK)                              |
 | `projects`                                    | `users`                                 | `project_head_user_id`                                                       | `SET NULL`              | **R/W** accountable head (FK user)                                |
 | `project_contracts`                           | `projects`                              | `project_id`                                                                 | `CASCADE`               | **R/W** contracts                                                 |
 | `project_contracts`                           | `clients`                               | `client_id`                                                                  | `SET NULL`              | **R/W** optional                                                  |
@@ -109,6 +110,10 @@ This document describes the application database as defined in SQLAlchemy (`back
 | `ix_projects_client_id`               | `projects`                    | Index on `client_id` (migration)                                                                            |
 | `ix_projects_engagement_name`         | `projects`                    | Index on `engagement_name` (`_ensure_clients_and_project_client_columns`)                                   |
 | `ix_candidates_created_by_user_id`    | `candidates`                  | Index on `created_by_user_id` (`_ensure_candidates_profile_columns`)                                        |
+| `ix_clients_lifecycle_state`          | `clients`                     | Index on `lifecycle_state` (`_ensure_client_lifecycle_and_project_hierarchy_columns`)                       |
+| `ix_projects_parent_project_id`       | `projects`                    | Index on `parent_project_id` (same migration)                                                               |
+| `ix_projects_org_unit_kind`           | `projects`                    | Index on `org_unit_kind` (same migration)                                                                   |
+| `ix_project_contracts_pipeline_stage` | `project_contracts`           | Index on `pipeline_stage` (same migration)                                                                  |
 
 
 ---
@@ -118,25 +123,29 @@ This document describes the application database as defined in SQLAlchemy (`back
 These run on application startup so **older SQLite files** gain columns and indexes without a separate Alembic revision. Order is significant where noted.
 
 
-| Step | Function / call                                                                                  | Purpose                                                                                                                            |
-| ---- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | `migrate_legacy_project_budget_forecast_tables`                                                  | If legacy `project_budgets` / `project_forecasts` exist, copy to `finance_monthly_ledger` and `DROP` legacy tables.                |
-| 2    | `_ensure_clients_and_project_client_columns`                                                     | `projects.client_id`, `engagement_name` + indexes `ix_projects_client_id`, `ix_projects_engagement_name`.                          |
-| 3    | `_ensure_records_rpo_columns`                                                                    | Full RPO / mandate column set on `records` when missing.                                                                           |
-| 4    | `_ensure_candidates_profile_columns`                                                             | CV / experience / `created_by_user_id` on `candidates` + index.                                                                    |
-| 5    | `_ensure_projects_project_head_column`                                                           | String `project_head` on `projects`.                                                                                               |
-| 6    | `_ensure_user_rbac_and_attribution_columns`                                                      | `users` profile + manager; `project_head_user_id`; user FKs on `records` / `candidates`.                                           |
-| 7    | `_ensure_finance_ledger_cash_metrics_audit_columns`                                              | `metrics_last_updated_*` on ledger + cashflow.                                                                                     |
-| 8    | `_ensure_finance_efficiency_scorecard_columns`                                                   | `target_ppc_inr`, `metrics_updated_*` on `finance_efficiency_kpis`.                                                                |
-| 9    | `_ensure_project_enterprise_columns`                                                             | `charge_code`, `account_status`, `sub_region`, `regional_head`, `function_head` + `ix_projects_charge_code`.                       |
-| 10   | `_ensure_sla_period_start_column`                                                                | `period_start` on `sla_performances`.                                                                                              |
-| 11   | `_ensure_finance_efficiency_wl1_column`                                                          | `actual_headcount_wl1`.                                                                                                            |
-| 12   | `_ensure_finance_efficiency_taggd_joiners_column`                                                | `taggd_joiners`.                                                                                                                   |
-| 13   | (session) `dedupe_finance_tables`, `backfill_sla_period_starts`, `backfill_client_project_links` | Data repair / backfill.                                                                                                            |
-| 14   | (optional env) `backfill_candidate_masters`                                                      | When `CANDIDATE_MASTER_BACKFILL_ON_INIT` is truthy.                                                                                |
-| 15   | `_ensure_finance_unique_indexes`                                                                 | `uq_finance_ledger_proj_month_cat`, `uq_finance_cash_proj_month`.                                                                  |
-| 16   | `_ensure_revenue_tracker_indexes`                                                                | `uq_rev_fcst_week`, `uq_rev_vis_asof`.                                                                                             |
-| 17   | `_ensure_revenue_weekly_submission_schema`                                                       | Create `revenue_weekly_submission` if missing, unique + indexes, `ALTER` `weekly_submission_id` onto forecast + visibility tables. |
+| Step | Function / call                                                                                  | Purpose                                                                                                                                                                            |
+| ---- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `migrate_legacy_project_budget_forecast_tables`                                                  | If legacy `project_budgets` / `project_forecasts` exist, copy to `finance_monthly_ledger` and `DROP` legacy tables.                                                                |
+| 2    | `_ensure_clients_and_project_client_columns`                                                     | `projects.client_id`, `engagement_name` + indexes `ix_projects_client_id`, `ix_projects_engagement_name`.                                                                          |
+| 3    | `_ensure_client_lifecycle_and_project_hierarchy_columns`                                         | `clients.lifecycle_state`; `projects.parent_project_id`, `org_unit_kind`; `project_contracts.pipeline_stage` + indexes; backfill `pipeline_stage` default `discovery` where empty. |
+| 4    | `_ensure_client_project_hierarchy_tag_columns`                                                   | `hierarchy_tag_bu` / `sbu` / `sbg` / `sbe` on `clients` and `projects`.                                                                                                            |
+| 5    | `_ensure_records_rpo_columns`                                                                    | Full RPO / mandate column set on `records` when missing.                                                                                                                           |
+| 6    | `_ensure_candidates_profile_columns`                                                             | CV / experience / `created_by_user_id` on `candidates` + index.                                                                                                                    |
+| 7    | `_ensure_projects_project_head_column`                                                           | String `project_head` on `projects`.                                                                                                                                               |
+| 8    | `_ensure_user_rbac_and_attribution_columns`                                                      | `users` profile + manager; `project_head_user_id`; user FKs on `records` / `candidates`; `records.source_joiner_type`.                                                             |
+| 9    | `_ensure_finance_ledger_cash_metrics_audit_columns`                                              | `metrics_last_updated_*` on ledger + cashflow.                                                                                                                                     |
+| 10   | `_ensure_finance_efficiency_scorecard_columns`                                                   | `target_ppc_inr`, `metrics_updated_*` on `finance_efficiency_kpis`.                                                                                                                |
+| 11   | `_ensure_project_enterprise_columns`                                                             | `charge_code`, `account_status`, `sub_region`, `regional_head`, `function_head` + `ix_projects_charge_code`.                                                                       |
+| 12   | `_ensure_project_transition_resource_attachments_column`                                         | `resource_attachments_json` on `project_transitions`.                                                                                                                              |
+| 13   | `_ensure_sla_period_start_column`                                                                | `period_start` on `sla_performances`.                                                                                                                                              |
+| 14   | `_ensure_finance_efficiency_wl1_column`                                                          | `actual_headcount_wl1`.                                                                                                                                                            |
+| 15   | `_ensure_finance_efficiency_taggd_joiners_column`                                                | `taggd_joiners`.                                                                                                                                                                   |
+| 16   | (session) `dedupe_finance_tables`, `backfill_sla_period_starts`, `backfill_client_project_links` | Data repair / backfill.                                                                                                                                                            |
+| 17   | (optional env) `backfill_candidate_masters`                                                      | When `CANDIDATE_MASTER_BACKFILL_ON_INIT` is truthy.                                                                                                                                |
+| 18   | `_ensure_finance_unique_indexes`                                                                 | `uq_finance_ledger_proj_month_cat`, `uq_finance_cash_proj_month`.                                                                                                                  |
+| 19   | `_ensure_revenue_tracker_indexes`                                                                | `uq_rev_fcst_week`, `uq_rev_vis_asof`.                                                                                                                                             |
+| 20   | `_ensure_revenue_weekly_submission_schema`                                                       | Create `revenue_weekly_submission` if missing, unique + indexes, `ALTER` `weekly_submission_id` onto forecast + visibility tables.                                                 |
+| 21   | `bootstrap_default_admin` (`backend.auth.bootstrap`)                                             | Ensures default admin user exists (non-fatal on failure).                                                                                                                          |
 
 
 New tables defined **only** in SQLAlchemy `metadata` (e.g. `platform_meetings`, `finance_billing_workflow`) rely on `create_all` on a fresh DB; existing DBs need a deploy-time migration or manual DDL if those tables predate the deployment file.
@@ -184,7 +193,7 @@ New tables defined **only** in SQLAlchemy `metadata` (e.g. `platform_meetings`, 
 | `actor_email` | String(255) |                                          |
 | `kind`        | String(64)  | Not null, indexed                        |
 | `filename`    | String(512) |                                          |
-| `status`      | String(32)  |                                          |
+| `status`      | String(32)  | Not null                                 |
 | `label`       | String(255) |                                          |
 | `project_id`  | Integer     | FK → `projects.id`, nullable, `SET NULL` |
 
@@ -222,11 +231,16 @@ New tables defined **only** in SQLAlchemy `metadata` (e.g. `platform_meetings`, 
 ### `clients`
 
 
-| Column          | Type    | Notes             |
-| --------------- | ------- | ----------------- |
-| `id`            | Integer | PK                |
-| `official_name` | String  | Not null, indexed |
-| `short_code`    | String  | Nullable, indexed |
+| Column              | Type        | Notes                                                                              |
+| ------------------- | ----------- | ---------------------------------------------------------------------------------- |
+| `id`                | Integer     | PK                                                                                 |
+| `official_name`     | String      | Not null, indexed                                                                  |
+| `short_code`        | String      | Nullable, indexed                                                                  |
+| `lifecycle_state`   | String(16)  | Not null, default `active`, indexed — `prospect` vs `active` (see model docstring) |
+| `hierarchy_tag_bu`  | String(255) | Nullable — optional org-chart label (BU)                                           |
+| `hierarchy_tag_sbu` | String(255) | Nullable                                                                           |
+| `hierarchy_tag_sbg` | String(255) | Nullable                                                                           |
+| `hierarchy_tag_sbe` | String(255) | Nullable                                                                           |
 
 
 `projects` back-reference: `Client.projects`. Legacy DBs get `client_id` backfilled per project in `init_db()` when missing.
@@ -234,22 +248,25 @@ New tables defined **only** in SQLAlchemy `metadata` (e.g. `platform_meetings`, 
 ### `projects`
 
 
-| Column                                                                       | Type    | Notes                                                                            |
-| ---------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
-| `id`                                                                         | Integer | PK                                                                               |
-| `client_id`                                                                  | Integer | FK → `clients.id`, `ON DELETE RESTRICT`, nullable until backfill                 |
-| `engagement_name`                                                            | String  | SBU / engagement label; indexed (see `ix_projects_engagement_name`)              |
-| `project_head_user_id`                                                       | Integer | FK → `users.id`, `SET NULL`, indexed — platform user as accountable project head |
-| `filename`                                                                   | String  | Indexed                                                                          |
-| `tracker_sheet`, `contract_sheet`                                            | String  |                                                                                  |
-| `account_name`, `charge_code`                                                | String  | Indexed                                                                          |
-| `account_status`, `region`, `sub_region`                                     | String  |                                                                                  |
-| `practice_head`, `project_head`, `regional_head`, `function_head`, `be_spoc` | String  |                                                                                  |
-| `category`, `vertical`, `practice`                                           | String  |                                                                                  |
-| `column_mapping`                                                             | JSON    |                                                                                  |
-| `revenue_logic_code`                                                         | Text    |                                                                                  |
-| `logic_explanation`                                                          | Text    |                                                                                  |
-| `pos_id_column`                                                              | String  | Dedup key for ingest                                                             |
+| Column                                                                               | Type        | Notes                                                                              |
+| ------------------------------------------------------------------------------------ | ----------- | ---------------------------------------------------------------------------------- |
+| `id`                                                                                 | Integer     | PK                                                                                 |
+| `client_id`                                                                          | Integer     | FK → `clients.id`, `ON DELETE RESTRICT`, nullable until backfill                   |
+| `parent_project_id`                                                                  | Integer     | FK → `projects.id`, `SET NULL`, indexed — BU row has NULL; SBU points to parent BU |
+| `org_unit_kind`                                                                      | String(32)  | Nullable, indexed — `business_unit`                                                |
+| `hierarchy_tag_bu` / `hierarchy_tag_sbu` / `hierarchy_tag_sbg` / `hierarchy_tag_sbe` | String(255) | Nullable — per-project org labels (may align with client tags in UI)               |
+| `engagement_name`                                                                    | String      | SBU / engagement label; indexed (see `ix_projects_engagement_name`)                |
+| `project_head_user_id`                                                               | Integer     | FK → `users.id`, `SET NULL`, indexed — platform user as accountable project head   |
+| `filename`                                                                           | String      | Indexed                                                                            |
+| `tracker_sheet`, `contract_sheet`                                                    | String      |                                                                                    |
+| `account_name`, `charge_code`                                                        | String      | Indexed                                                                            |
+| `account_status`, `region`, `sub_region`                                             | String      |                                                                                    |
+| `practice_head`, `project_head`, `regional_head`, `function_head`, `be_spoc`         | String      |                                                                                    |
+| `category`, `vertical`, `practice`                                                   | String      |                                                                                    |
+| `column_mapping`                                                                     | JSON        |                                                                                    |
+| `revenue_logic_code`                                                                 | Text        |                                                                                    |
+| `logic_explanation`                                                                  | Text        |                                                                                    |
+| `pos_id_column`                                                                      | String      | Dedup key for ingest                                                               |
 
 
 ### `project_contracts`
@@ -257,27 +274,28 @@ New tables defined **only** in SQLAlchemy `metadata` (e.g. `platform_meetings`, 
 Commercial snapshot per project (contract workbook / platform). **Audit mixin**.
 
 
-| Column                                                                                  | Type    | Notes                                   |
-| --------------------------------------------------------------------------------------- | ------- | --------------------------------------- |
-| `id`                                                                                    | Integer | PK                                      |
-| `project_id`                                                                            | Integer | FK → `projects.id`, `CASCADE`           |
-| `client_id`                                                                             | Integer | FK → `clients.id`, nullable, `SET NULL` |
-| `customer_name`                                                                         | String  |                                         |
-| `account_type`                                                                          | String  |                                         |
-| `contract_start_date`, `contract_end_date`, `renewal_reminder_date`                     | Date    |                                         |
-| `duration_months`                                                                       | Integer |                                         |
-| `signed_acv_inr`, `agreed_rate_fee_inr`, `est_annual_value_inr`, `revenue_run_rate_inr` | Float   |                                         |
-| `contract_status`, `renewal_status`                                                     | String  | Indexed where noted in model            |
-| `signed_cm_pct`, `headcount_contracted`, `hiring_volume`, `overall_rph`                 | Float   |                                         |
-| `taggd_source_mix`, `other_source_mix`                                                  | String  |                                         |
-| `mmf_applicable`, `opening_fee_applicable`                                              | Boolean |                                         |
-| `payment_terms`, `contract_detail`, `remarks`, `reason_for_lapse`                       | Text    |                                         |
-| `pricing_model`                                                                         | String  |                                         |
-| `sow_msa_reference`                                                                     | String  |                                         |
-| `sla_terms_summary`                                                                     | Text    |                                         |
-| `positions_contracted`, `positions_filled`                                              | Integer |                                         |
-| `client_signoff_authority`, `internal_signoff`                                          | String  |                                         |
-| `practice_head_snapshot`                                                                | String  |                                         |
+| Column                                                                                  | Type       | Notes                                                                                                                                                 |
+| --------------------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                                                    | Integer    | PK                                                                                                                                                    |
+| `project_id`                                                                            | Integer    | FK → `projects.id`, `CASCADE`                                                                                                                         |
+| `client_id`                                                                             | Integer    | FK → `clients.id`, nullable, `SET NULL`                                                                                                               |
+| `customer_name`                                                                         | String     |                                                                                                                                                       |
+| `account_type`                                                                          | String     |                                                                                                                                                       |
+| `contract_start_date`, `contract_end_date`, `renewal_reminder_date`                     | Date       |                                                                                                                                                       |
+| `duration_months`                                                                       | Integer    |                                                                                                                                                       |
+| `signed_acv_inr`, `agreed_rate_fee_inr`, `est_annual_value_inr`, `revenue_run_rate_inr` | Float      |                                                                                                                                                       |
+| `contract_status`, `renewal_status`                                                     | String     | Indexed where noted in model                                                                                                                          |
+| `signed_cm_pct`, `headcount_contracted`, `hiring_volume`, `overall_rph`                 | Float      |                                                                                                                                                       |
+| `taggd_source_mix`, `other_source_mix`                                                  | String     |                                                                                                                                                       |
+| `mmf_applicable`, `opening_fee_applicable`                                              | Boolean    |                                                                                                                                                       |
+| `payment_terms`, `contract_detail`, `remarks`, `reason_for_lapse`                       | Text       |                                                                                                                                                       |
+| `pricing_model`                                                                         | String     |                                                                                                                                                       |
+| `sow_msa_reference`                                                                     | String     |                                                                                                                                                       |
+| `sla_terms_summary`                                                                     | Text       |                                                                                                                                                       |
+| `positions_contracted`, `positions_filled`                                              | Integer    |                                                                                                                                                       |
+| `client_signoff_authority`, `internal_signoff`                                          | String     |                                                                                                                                                       |
+| `practice_head_snapshot`                                                                | String     |                                                                                                                                                       |
+| `pipeline_stage`                                                                        | String(48) | Nullable, indexed — commercial closing pipeline (distinct from renewal-oriented `contract_status`); legacy rows backfilled to `discovery` where empty |
 
 
 ### `project_transitions`
@@ -285,16 +303,17 @@ Commercial snapshot per project (contract workbook / platform). **Audit mixin**.
 **Table:** `project_transitions`. One row per project (`uq_project_transitions_project_id`). **No AuditMixin** — uses `system_created_at` / `system_updated_at` inline plus optional `created_by_user_id` / `updated_by_user_id` → `users` `SET NULL`.
 
 
-| Column                       | Type                                                                                                                     | Notes                                       |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| `id`                         | Integer                                                                                                                  | PK                                          |
-| `project_id`                 | Integer                                                                                                                  | FK → `projects`, `CASCADE`, indexed         |
-| `status`                     | String(32)                                                                                                               | Nullable, indexed                           |
-| Milestones                   | `project_signed_date`, `kickoff_date`, `as_is_study_date`, `to_be_presentation_date`, `soft_launch_date`, `go_live_date` | `Date`, nullable                            |
-| `transition_done_by_user_id` | Integer                                                                                                                  | FK → `users`, `SET NULL`                    |
-| Attendees / docs             | `attendees_internal`, `attendees_external`, `external_attendees_*`, `rpo_solution_deck_url`, `transition_document_url`   | Text                                        |
-| Metrics                      | `dead_days`, `ageing_days`, `reason_for_delay`                                                                           | Integer / Text                              |
-| `linked_meeting_ids_json`    | JSON                                                                                                                     | Optional cross-links to `platform_meetings` |
+| Column                       | Type                                                                                                                     | Notes                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `id`                         | Integer                                                                                                                  | PK                                                                                                                            |
+| `project_id`                 | Integer                                                                                                                  | FK → `projects`, `CASCADE`, indexed                                                                                           |
+| `status`                     | String(32)                                                                                                               | Nullable, indexed                                                                                                             |
+| Milestones                   | `project_signed_date`, `kickoff_date`, `as_is_study_date`, `to_be_presentation_date`, `soft_launch_date`, `go_live_date` | `Date`, nullable                                                                                                              |
+| `transition_done_by_user_id` | Integer                                                                                                                  | FK → `users`, `SET NULL`                                                                                                      |
+| Attendees / docs             | `attendees_internal`, `attendees_external`, `external_attendees_*`, `rpo_solution_deck_url`, `transition_document_url`   | Text                                                                                                                          |
+| Uploads                      | `resource_attachments_json`                                                                                              | JSON — list of `{ filename, original_name, uploaded_at }` (added by `_ensure_project_transition_resource_attachments_column`) |
+| Metrics                      | `dead_days`, `ageing_days`, `reason_for_delay`                                                                           | Integer / Text                                                                                                                |
+| `linked_meeting_ids_json`    | JSON                                                                                                                     | Optional cross-links to `platform_meetings`                                                                                   |
 
 
 ### `platform_meetings` / `meeting_action_items`
@@ -325,7 +344,7 @@ Cross-cutting work queue. **No AuditMixin**; `system_created_at` / `system_updat
 
 **Core / legacy:** `project_id` → `projects`; `candidate_name`, `position_title`, `status`, `hiring_manager`, `offered_ctc`, `joining_date`, `creation_date`, `location`, `department`; `**hiring_manager_user_id`**, `**assigned_recruiter_user_id`** → `users` `SET NULL` (indexed); `additional_attributes` (JSON); `revenue_results` (JSON); `global_status`; `fingerprint`, `excel_provided_id`, `excel_row_index`.
 
-**RPO / mandate (indexed where noted):** `client_req_id`; `rpo_client_name`; `positions_open`; `rpo_priority`, `rpo_job_type`, `experience_years_required`, `ctc_budget_lpa`; sourcing funnel ints (`profiles_sourced`, `profiles_submitted`, `interviews_scheduled`, `offers_released`, `offers_accepted`); `assigned_recruiter_rpo`; `rpo_mandate_status`; org dimensions (`rpo_vertical`, `rpo_division`, `rpo_bu_sbu`, `rpo_zone`, `rpo_grade_band`, `rpo_business_hrbp`, `rpo_sourcer`, `rpo_taggd_pm`, `rpo_hiring_agency`, `rpo_ijp_referral`, `rpo_source_of_hire`, `rpo_sub_source`); milestone dates (`mandate_received_date`, `intake_date`, `first_cv_share_date`, `selection_date_req`, `loi_date_req`, `closure_date_req`); `rpo_stage`; ageing (`ageing_days`, `ageing_bracket`, `dead_days`, `tto_days`, `ttf_days`); `taggd_fees_amount`, `billing_month`, `fy_label`; `requisition_extras` (JSON).
+**RPO / mandate (indexed where noted):** `client_req_id`; `rpo_client_name`; `positions_open`; `rpo_priority`, `rpo_job_type`, `experience_years_required`, `ctc_budget_lpa`; sourcing funnel ints (`profiles_sourced`, `profiles_submitted`, `interviews_scheduled`, `offers_released`, `offers_accepted`); `assigned_recruiter_rpo`; `rpo_mandate_status`; org dimensions (`rpo_vertical`, `rpo_division`, `rpo_bu_sbu`, `rpo_zone`, `rpo_grade_band`, `rpo_business_hrbp`, `rpo_sourcer`, `rpo_taggd_pm`, `rpo_hiring_agency`, `rpo_ijp_referral`, `rpo_source_of_hire`, `rpo_sub_source`); `**source_joiner_type`** (String(64), nullable — Taggd vs non-Taggd joiner; see `RecordCreate`); milestone dates (`mandate_received_date`, `intake_date`, `first_cv_share_date`, `selection_date_req`, `loi_date_req`, `closure_date_req`); `rpo_stage`; ageing (`ageing_days`, `ageing_bracket`, `dead_days`, `tto_days`, `ttf_days`); `taggd_fees_amount`, `billing_month`, `fy_label`; `requisition_extras` (JSON).
 
 ### `candidates`
 
@@ -397,7 +416,23 @@ Optional backfill on `init_db()` when `CANDIDATE_MASTER_BACKFILL_ON_INIT` is set
 
 ### `finance_efficiency_kpis`
 
-**Audit mixin.** `reporting_month`, RPR/HC fields, `actual_headcount_wl1`, `taggd_joiners`, `target_ppc_inr`; `metrics_updated_at`, `metrics_updated_by_user_id` → `users`.
+**Audit mixin.** Monthly finance master / scorecard row per project.
+
+
+| Column                         | Type     | Notes                                                              |
+| ------------------------------ | -------- | ------------------------------------------------------------------ |
+| `id`                           | Integer  | PK                                                                 |
+| `project_id`                   | Integer  | FK → `projects`                                                    |
+| `reporting_month`              | DateTime | Month anchor                                                       |
+| `target_revenue_per_recruiter` | Float    | Default 0                                                          |
+| `approved_headcount`           | Integer  | Default 0                                                          |
+| `actual_headcount_finance`     | Integer  | Default 0 — overall HC from finance sheet                          |
+| `actual_headcount_wl1`         | Float    | Default 0 — WL1 HC (may be fractional)                             |
+| `taggd_joiners`                | Float    | Default 0 — Taggd-sourced joiner count                             |
+| `target_ppc_inr`               | Float    | Nullable — target PPC (INR per overall HC); actual PPC from ledger |
+| `metrics_updated_at`           | DateTime | Nullable                                                           |
+| `metrics_updated_by_user_id`   | Integer  | FK → `users` `SET NULL`                                            |
+
 
 ### `revenue_weekly_submission`
 
@@ -503,6 +538,7 @@ erDiagram
     users ||--o{ activity_log : actor
     projects ||--o{ activity_log : optional
     clients ||--o{ projects : owns
+    projects ||--o{ projects : parent_of
     projects ||--o{ project_contracts : has_versions
 
     users {
@@ -548,11 +584,15 @@ erDiagram
         int id PK
         string official_name
         string short_code
+        string lifecycle_state
+        string hierarchy_tag_bu
     }
 
     projects {
         int id PK
         int client_id FK
+        int parent_project_id FK
+        string org_unit_kind
         int project_head_user_id FK
         string engagement_name
         string account_name
@@ -569,6 +609,7 @@ erDiagram
         date contract_start_date
         date contract_end_date
         string contract_status
+        string pipeline_stage
         float signed_acv_inr
         string pricing_model
     }
@@ -929,7 +970,9 @@ flowchart LR
 
 **Planning tables consolidated (ledger):** `project_budgets` and `project_forecasts` were removed from the ORM; budget/forecast workbook data is stored in `finance_monthly_ledger` using additional `metric_category` values (see *Budget / forecast template*). Existing DBs still containing the old tables are migrated automatically on `init_db()`.
 
-**Since the earlier gap-analysis draft, the ORM now includes:** `**platform_meetings`** and `**meeting_action_items`** (MoM + follow-ups); `**project_transitions`** (client onboarding milestones, one row per project); `**platform_tasks**` and `**task_assignees**` (cross-project work queue); `**resume_supplier_licenses**` (org-level vendor/license costs, not per-project); `**revenue_weekly_submission**` plus `**weekly_submission_id**` on weekly forecast and visibility rows (submit/review/approve envelope); `**finance_billing_workflow**` with `**finance_billing_validation_events**`, `**finance_payment_receipts**`, and `**finance_tds_certificates**` (invoice validation, partial payments, TDS/GST fields, CFO/junior validation hooks); stub `**finance_bank_statement_lines**` for future bank reconciliation; extended `**users**` / `**projects**` / `**records**` / `**candidates**` for RBAC and user attribution; `**candidate_masters**` / `**candidate_master_links**` for optional enterprise-wide candidate identity.
+**Since the earlier gap-analysis draft, the ORM now includes:** `**platform_meetings`** and `**meeting_action_items`** (MoM + follow-ups); `**project_transitions`** (client onboarding milestones, one row per project; `**resource_attachments_json`** for uploaded transition files); `**platform_tasks`** and `**task_assignees`** (cross-project work queue); `**resume_supplier_licenses`** (org-level vendor/license costs, not per-project); `**revenue_weekly_submission**` plus `**weekly_submission_id**` on weekly forecast and visibility rows (submit/review/approve envelope); `**finance_billing_workflow**` with `**finance_billing_validation_events**`, `**finance_payment_receipts**`, and `**finance_tds_certificates**` (invoice validation, partial payments, TDS/GST fields, CFO/junior validation hooks); stub `**finance_bank_statement_lines**` for future bank reconciliation; extended `**users**` / `**projects**` / `**records**` / `**candidates**` for RBAC and user attribution; `**candidate_masters**` / `**candidate_master_links**` for optional enterprise-wide candidate identity.
+
+**Additional spine / commercial fields (current `database.py`):** `**clients.lifecycle_state`** and org-chart `**hierarchy_tag_*`** columns; `**projects.parent_project_id`**, `**org_unit_kind`**, and matching `**hierarchy_tag_***`; `**project_contracts.pipeline_stage**` for closing-pipeline tracking; `**records.source_joiner_type**` for mandate-level joiner source.
 
 **Still not modeled as first-class tables (examples):** **HubSpot (or other CRM) entity IDs**, **dedicated customer-portal identities** (beyond `users.role`), **async notification / job queue**, **per-day recruiter activity** (sourcing grain finer than mandate-level funnel counts on `records`), **full bank statement import** (only stub lines exist), **global candidate master** beyond the optional `candidate_masters` pattern, **automated SLA rule engine** (definitions exist; execution remains app-layer). Those would be **new tables or services** rather than reinterpretations of the above.
 

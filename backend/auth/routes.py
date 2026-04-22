@@ -47,6 +47,20 @@ def _clip(s: Optional[str], max_len: int) -> Optional[str]:
     return t[:max_len]
 
 
+def _me_response_for_user(u: User, db: Session) -> dict:
+    """Same payload as GET /auth/me (used by login to avoid a second round-trip)."""
+    ids = allowed_project_ids(u, db)
+    profile = resolve_user_profile(u, db)
+    return {
+        "id": u.id,
+        "email": u.email,
+        "role": u.role,
+        "project_ids": sorted(ids) if ids is not None else None,
+        **profile_to_me_dict(profile),
+        **_profile_fields(u),
+    }
+
+
 @router.post("/login")
 def login(body: LoginBody, db: Session = Depends(get_db)):
     email = body.email.strip().lower()
@@ -59,7 +73,7 @@ def login(body: LoginBody, db: Session = Depends(get_db)):
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": {"id": user.id, "email": user.email, "role": user.role},
+        **_me_response_for_user(user, db),
     }
 
 
@@ -68,16 +82,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     u = db.query(User).filter(User.id == user.id).first()
     if not u:
         raise HTTPException(status_code=401, detail="User not found")
-    ids = allowed_project_ids(u, db)
-    profile = resolve_user_profile(u, db)
-    return {
-        "id": u.id,
-        "email": u.email,
-        "role": u.role,
-        "project_ids": sorted(ids) if ids is not None else None,
-        **profile_to_me_dict(profile),
-        **_profile_fields(u),
-    }
+    return _me_response_for_user(u, db)
 
 
 @router.patch("/me/profile")

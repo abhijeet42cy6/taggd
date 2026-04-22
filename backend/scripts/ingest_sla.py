@@ -1,51 +1,74 @@
-import pandas as pd
-import sys
 import os
-import datetime
+import sys
+from collections import Counter
+from typing import Any, Optional
+
+import pandas as pd
 from sqlalchemy.orm import Session
 
 # Add project root to path so we can import from backend
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+from backend.core.sla_period import canonical_month_label, parse_sla_score_column_name
+from backend.core.sla_project_resolve import resolve_project_for_sla
 from backend.db.database import (
-    SessionLocal,
-    Project,
     MetricDefinition,
+    Project,
     SLAPerformance,
-    init_db,
+    SessionLocal,
     backfill_sla_period_starts,
     ensure_project_client,
+    init_db,
 )
-from backend.core.sla_period import canonical_month_label, parse_sla_score_column_name
 
-def ingest_sla(file_path, db=None):
+
+def _xstr(row: pd.Series, key: str) -> str:
+    v = row.get(key)
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "none", "-"):
+        return ""
+    return s
+
+
+def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[str, Any]]:
     """
-    Standalone script to ingest the "Raw Data SLA Basefile.xlsx" into the new 
-    multi-tenant metrics database structure.
+    Ingest the SLA master \"Base File\" sheet into metric_definitions + sla_performances.
+
+    Projects are resolved with case/SBU/fuzzy matching to existing rows so SLA data
+    attaches to the same projects as directory / finance (charge-code clients).
     """
     print(f"--- Starting SLA Ingestion for {os.path.basename(file_path)} ---")
-    
-    # 0. Environment Check
+
     if not os.path.exists(file_path):
         print(f"Error: File not found at {file_path}")
-        return
+        return None
 
-    # Initialize DB (creates new tables if they don't exist)
     init_db()
-    
-    # Create session if not provided
+
     external_session = db is not None
     if not external_session:
         db = SessionLocal()
-    
+
+    source_basename = os.path.basename(file_path)
+
+    result: dict[str, Any] = {
+        "ok": False,
+        "file": source_basename,
+        "rows_processed": 0,
+        "rows_skipped_header": 0,
+        "rows_skipped_empty_metric": 0,
+        "projects_created": 0,
+        "metrics_cataloged": 0,
+        "match_reasons": {},
+    }
+
     try:
-        # Align legacy rows to calendar months (period_start + YYYY-MM) before upserts
         bf = backfill_sla_period_starts(db)
         if bf:
             print(f"Aligned {bf} legacy SLA performance rows to calendar months.")
 
-        # 1. Load Data
-        # We load "Base File" sheet. Based on analysis, row 0 contains the primary headers.
         try:
             df = pd.read_excel(file_path, sheet_name="Base File", header=0)
         except ValueError as e:
@@ -55,165 +78,199 @@ def ingest_sla(file_path, db=None):
                 "Worksheet 'Base File' not found. Open the SLA master in Excel and ensure a sheet is named "
                 f"exactly 'Base File'. Sheets in this file: {sheets}"
             ) from e
-        
-        # Clean column names (strip whitespace and handle duplicates)
-        original_cols = [str(c).strip() for c in df.columns]
-        df.columns = original_cols
-        
-        # 2. Identify Performance Columns
-        # Month columns usually contain 'Score' or specific month names.
-        # Format: 'Apr24 Score', 'Apr MET/NOT_MET', etc.
-        score_cols = [c for c in df.columns if 'Score' in str(c)]
-        print(f"Identified {len(score_cols)} performance snapshots.")
 
-        # 3. Process Rows
+        df.columns = [str(c).strip() for c in df.columns]
+        score_cols = [c for c in df.columns if "Score" in str(c)]
+        print(f"Identified {len(score_cols)} performance snapshot columns.")
+
         rows_processed = 0
         projects_created = 0
         metrics_cataloged = 0
-        
-        for index, row in df.iterrows():
-            # Extract basic account metadata
-            account_name = str(row.get('Project', '')).strip()
-            perf_measure = str(row.get('Performance Measure', '')).strip()
-            
-            # Robust Sieve for header/instructional rows
-            if not account_name or account_name.lower() in ['nan', 'sr.', 'project', 'metrics', '-']:
+        skipped_header = 0
+        skipped_empty_metric = 0
+        match_reasons: Counter[str] = Counter()
+
+        for _index, row in df.iterrows():
+            account_name = _xstr(row, "Project")
+            perf_measure = _xstr(row, "Performance Measure")
+
+            if not account_name or account_name.lower() in ("sr.", "project", "metrics"):
+                skipped_header += 1
                 continue
-            if 'measure' in perf_measure.lower() or 'metric' in perf_measure.lower():
+            low = perf_measure.lower()
+            if "measure" in low or "metric" in low:
+                skipped_header += 1
                 continue
-                
-            # 3a. Sync Project (Account Level)
-            project = db.query(Project).filter(Project.account_name == account_name).first()
+
+            project, reason = resolve_project_for_sla(db, account_name)
             if not project:
                 project = Project(
-                    account_name=account_name,
-                    filename=os.path.basename(file_path),
-                    source_filename=os.path.basename(file_path)
+                    account_name=account_name.strip(),
+                    filename=source_basename,
+                    source_filename=source_basename,
                 )
                 db.add(project)
-                db.flush() # Ensure ID is available
+                db.flush()
                 ensure_project_client(db, project)
                 projects_created += 1
-            elif project.client_id is None:
-                ensure_project_client(db, project)
+                match_reasons["created_new"] += 1
+            else:
+                match_reasons[reason] += 1
+                if project.client_id is None:
+                    ensure_project_client(db, project)
 
-            project.source_filename = os.path.basename(file_path)
-            project.region = str(row.get('Region', ''))
-            project.practice_head = str(row.get('Practice Head', ''))
-            project.be_spoc = str(row.get('BE SPOC', ''))
-            project.category = str(row.get('Category', ''))
-            
-            # 3b. Sync Metric Definition (The "Zero-Loss" Catalog)
-            metric_label = str(row.get('Performance Measure', '')).strip()
-            if not metric_label or metric_label == 'nan':
+            project.source_filename = source_basename
+            # Only stamp filename when this ingest created the row (avoid hiding original upload source).
+            if (project.filename or "").strip() == "":
+                project.filename = source_basename
+
+            reg = _xstr(row, "Region")
+            if reg:
+                project.region = reg
+            ph = _xstr(row, "Practice Head")
+            if ph:
+                project.practice_head = ph
+            sp = _xstr(row, "BE SPOC")
+            if sp:
+                project.be_spoc = sp
+            cat = _xstr(row, "Category")
+            if cat:
+                project.category = cat
+
+            metric_label = perf_measure.strip()
+            if not metric_label:
+                skipped_empty_metric += 1
                 continue
-                
-            # Check for existing definition for this account
-            # (Compound key: project_id + label)
-            m_def = db.query(MetricDefinition).filter(
-                MetricDefinition.project_id == project.id,
-                MetricDefinition.metric_label == metric_label
-            ).first()
-            
+
+            m_def = (
+                db.query(MetricDefinition)
+                .filter(
+                    MetricDefinition.project_id == project.id,
+                    MetricDefinition.metric_label == metric_label,
+                )
+                .first()
+            )
+
             if not m_def:
                 m_def = MetricDefinition(
-                    project_id=project.id, 
+                    project_id=project.id,
                     metric_label=metric_label,
-                    source_filename=os.path.basename(file_path)
+                    source_filename=source_basename,
                 )
                 db.add(m_def)
                 db.flush()
                 metrics_cataloged += 1
-            
-            # Update source ref and metadata
-            m_def.source_filename = os.path.basename(file_path)
-            
-            # Extract and store extensive metadata from first 15 columns
-            m_def.metric_group = str(row.get('Metrics to be picked of BE Score (Measure Name as per standard Metrics)', ''))
-            m_def.metric_nature = str(row.get('Metric Type', ''))
-            m_def.target_threshold = str(row.get('Target', '')) # Note: some files may have multiple target cols, pandas handles as .1
-            m_def.definition = str(row.get('Metric Definition', ''))
-            m_def.calculation_method = str(row.get('Calculation Method', ''))
-            m_def.source_system = str(row.get('Measurement System', ''))
-            
-            # 3c. Sync Time-Series Performance (Periodic scores)
+
+            m_def.source_filename = source_basename
+            m_def.metric_group = str(
+                row.get("Metrics to be picked of BE Score (Measure Name as per standard Metrics)", "") or ""
+            )
+            if m_def.metric_group.lower() == "nan":
+                m_def.metric_group = ""
+            m_def.metric_nature = _xstr(row, "Metric Type")
+            m_def.target_threshold = _xstr(row, "Target")
+            m_def.definition = str(row.get("Metric Definition", "") or "")
+            if m_def.definition.lower() == "nan":
+                m_def.definition = ""
+            m_def.calculation_method = str(row.get("Calculation Method", "") or "")
+            if m_def.calculation_method.lower() == "nan":
+                m_def.calculation_method = ""
+            m_def.source_system = _xstr(row, "Measurement System")
+
             for s_col in score_cols:
-                # Find corresponding status column (usually immediately following the score)
                 s_idx = df.columns.get_loc(s_col)
                 status_col = df.columns[s_idx + 1] if s_idx + 1 < len(df.columns) else None
-                
-                # Month key from header (e.g. "Apr24 Score" -> "Apr24")
-                month_key = str(s_col).replace('Score', '').strip()
+
+                month_key = str(s_col).replace("Score", "").strip()
                 period_date = parse_sla_score_column_name(s_col)
-                
-                raw_score = str(row.get(s_col, '')).strip()
-                raw_status = str(row.get(status_col, '')).strip() if status_col else ''
-                
-                # Skip if empty
-                if (not raw_score or raw_score == 'nan') and (not raw_status or raw_status == 'nan'):
+
+                raw_score = _xstr(row, s_col)
+                raw_status = _xstr(row, status_col) if status_col else ""
+
+                if not raw_score and not raw_status:
                     continue
-                
-                # Upsert by calendar month when parsable (month-on-month analysis)
+
                 if period_date:
                     canonical = canonical_month_label(period_date)
-                    perf = db.query(SLAPerformance).filter(
-                        SLAPerformance.definition_id == m_def.id,
-                        SLAPerformance.period_start == period_date,
-                    ).first()
+                    perf = (
+                        db.query(SLAPerformance)
+                        .filter(
+                            SLAPerformance.definition_id == m_def.id,
+                            SLAPerformance.period_start == period_date,
+                        )
+                        .first()
+                    )
                     if not perf:
                         perf = SLAPerformance(
                             definition_id=m_def.id,
                             period_start=period_date,
                             reporting_month=canonical,
-                            source_filename=os.path.basename(file_path),
+                            source_filename=source_basename,
                         )
                         db.add(perf)
                     perf.period_start = period_date
                     perf.reporting_month = canonical
                 else:
-                    perf = db.query(SLAPerformance).filter(
-                        SLAPerformance.definition_id == m_def.id,
-                        SLAPerformance.period_start == None,
-                        SLAPerformance.reporting_month == month_key,
-                    ).first()
+                    perf = (
+                        db.query(SLAPerformance)
+                        .filter(
+                            SLAPerformance.definition_id == m_def.id,
+                            SLAPerformance.period_start.is_(None),
+                            SLAPerformance.reporting_month == month_key,
+                        )
+                        .first()
+                    )
                     if not perf:
                         perf = SLAPerformance(
                             definition_id=m_def.id,
                             reporting_month=month_key,
-                            source_filename=os.path.basename(file_path),
+                            source_filename=source_basename,
                         )
                         db.add(perf)
-                
-                # Update values and audit
-                perf.source_filename = os.path.basename(file_path)
+
+                perf.source_filename = source_basename
                 perf.score = raw_score
                 perf.rag_status = raw_status
 
             rows_processed += 1
-            if rows_processed % 10 == 0:
-                print(f"Processed {rows_processed} entries...")
+            if rows_processed % 50 == 0:
+                print(f"Processed {rows_processed} metric rows...")
 
-        # 4. Commit and Summarize
         db.commit()
         print("\n--- Ingestion Complete ---")
-        print(f"New Accounts (Projects) added: {projects_created}")
-        print(f"Metrics cataloged: {metrics_cataloged}")
-        print(f"Unique Metric-Snapshots saved to time-series store.")
-        
+        print(f"Metric rows processed: {rows_processed}")
+        print(f"New projects created: {projects_created}")
+        print(f"New metric definitions this run: {metrics_cataloged}")
+        print(f"Project match reasons: {dict(match_reasons)}")
+
+        result.update(
+            {
+                "ok": True,
+                "rows_processed": rows_processed,
+                "rows_skipped_header": skipped_header,
+                "rows_skipped_empty_metric": skipped_empty_metric,
+                "projects_created": projects_created,
+                "metrics_cataloged": metrics_cataloged,
+                "match_reasons": dict(match_reasons),
+            }
+        )
+        return result
+
     except Exception as e:
         db.rollback()
         print(f"FATAL ERROR during ingestion: {str(e)}")
         import traceback
+
         traceback.print_exc()
+        result["error"] = str(e)
+        return result
     finally:
         if not external_session:
             db.close()
 
+
 if __name__ == "__main__":
-    # Default file path from analysis
-    DEFAULT_PATH = "/Users/arjun/Software/tgddata/excel_files_imp/Raw Data SLA Basefile.xlsx"
-    
-    # Allow command line override
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    DEFAULT_PATH = os.path.join(_root, "excel_files_imp", "Raw Data SLA Basefile.xlsx")
     target_file = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PATH
-    
     ingest_sla(target_file)

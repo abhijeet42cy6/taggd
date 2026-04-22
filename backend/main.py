@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import tempfile
@@ -115,6 +116,7 @@ from .routers.resume_supplier_licenses import router as resume_supplier_licenses
 from .routers.tasks import router as tasks_router
 from .routers.transitions import router as transitions_router
 from .routers.finance_billing_workflow import router as finance_billing_workflow_router
+from .routers.ceo_deck_ai import router as ceo_deck_ai_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
@@ -130,6 +132,7 @@ app.include_router(resume_supplier_licenses_router)
 app.include_router(tasks_router)
 app.include_router(transitions_router)
 app.include_router(finance_billing_workflow_router)
+app.include_router(ceo_deck_ai_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (
@@ -2371,11 +2374,7 @@ def get_global_monitoring(
         elif days <= 90: ageing_buckets["61-90 days"] += 1
         else:            ageing_buckets["90+ days"] += 1
 
-    # ── 5. Revenue total — JSON column scan (minimal columns) ──────────────
-    rev_rows = _rec(db.query(Record.revenue_results)).all()
-    revenue_total = sum(float((r[0] or {}).get("revenue") or 0) for r in rev_rows)
-
-    # ── 6. Per-project stats — two GROUP BY queries ─────────────────────────
+    # ── 5–6. Per-project stats — avoid a second full scan of revenue_results ─
     # 6a. Total + per-status counts in one pass
     proj_status_rows = (
         _rec(db.query(Record.project_id, Record.global_status, func.count(Record.id)))
@@ -2390,11 +2389,12 @@ def get_global_monitoring(
         proj_status[pid][status or "UNPROCESSED"] = cnt
         proj_pos[pid] = proj_pos.get(pid, 0) + cnt
 
-    # 6b. Revenue per project
+    # 6b. Revenue per project (same pass as portfolio revenue total)
     proj_rev_rows = _rec(db.query(Record.project_id, Record.revenue_results)).all()
     proj_rev: dict = {}
     for pid, rr in proj_rev_rows:
         proj_rev[pid] = proj_rev.get(pid, 0.0) + float((rr or {}).get("revenue") or 0)
+    revenue_total = round(sum(proj_rev.values()), 2)
 
     projects = apply_project_scope(
         db.query(Project.id, Project.account_name, Project.filename),
@@ -2433,7 +2433,7 @@ def get_global_monitoring(
                 "total_open_with_date": ageing_count,
                 "buckets": ageing_buckets,
             },
-            "revenue_total": round(revenue_total, 2),
+            "revenue_total": revenue_total,
             "project_stats": project_stats,
         },
         headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
@@ -2518,42 +2518,32 @@ def get_requisition_kpis(
     )
 
 
-@app.post("/api/upload/budget-forecast")
-async def upload_budget_forecast(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Ingest Budget and Forecast templates and link them to existing projects."""
-    temp_dir = tempfile.gettempdir()
-    safe_name = os.path.basename(file.filename or "budget.xlsx") or "budget.xlsx"
-    file_path = os.path.join(temp_dir, f"bf_{int(time.time())}_{safe_name}")
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
+def _sync_upload_budget_forecast_workbook(file_path: str, safe_name: str, user_id: int) -> int:
+    """Heavy pandas + DB work; must run in a thread pool so uvicorn can still serve /auth/login."""
+    db = SessionLocal()
     try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise RuntimeError("User not found")
+
         xl = pd.ExcelFile(file_path)
         if "Budget Template" not in xl.sheet_names or "Forecast Template" not in xl.sheet_names:
-            raise HTTPException(status_code=400, detail="Excel must contain 'Budget Template' and 'Forecast Template' sheets.")
+            raise ValueError("Excel must contain 'Budget Template' and 'Forecast Template' sheets.")
 
-        # 1. Matcher Phase
         df_budget = pd.read_excel(file_path, sheet_name="Budget Template")
         excel_names = df_budget["Project"].dropna().unique().tolist()
-        
+
         all_projects = apply_project_scope(db.query(Project), user, db, Project).all()
         db_projects_list = [{"id": p.id, "filename": p.filename} for p in all_projects]
-        
+
         matcher = MatchmakerAgent()
         match_list = matcher.match_clients(excel_names, db_projects_list)
-        
-        # Create a lookup map: Excel Name -> Project ID
+
         name_to_id = {m.excel_name: m.matched_project_id for m in match_list.matches if m.matched_project_id}
         scope_ids = allowed_project_ids(user, db)
         if scope_ids is not None:
             name_to_id = {k: v for k, v in name_to_id.items() if v in scope_ids}
 
-        # Clear existing budget/forecast ONLY for the projects present in this upload
         df_forecast = pd.read_excel(file_path, sheet_name="Forecast Template")
         ingest_budget_forecast_workbook(
             db,
@@ -2571,8 +2561,33 @@ async def upload_budget_forecast(
             project_id=None,
             meta={"filename": safe_name, "matched_clients": len(name_to_id)},
         )
-        return {"status": "success", "matched_clients": len(name_to_id)}
+        db.commit()
+        return len(name_to_id)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
+
+@app.post("/api/upload/budget-forecast")
+async def upload_budget_forecast(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    """Ingest Budget and Forecast templates and link them to existing projects."""
+    temp_dir = tempfile.gettempdir()
+    safe_name = os.path.basename(file.filename or "budget.xlsx") or "budget.xlsx"
+    file_path = os.path.join(temp_dir, f"bf_{int(time.time())}_{safe_name}")
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        matched = await asyncio.to_thread(_sync_upload_budget_forecast_workbook, file_path, safe_name, user.id)
+        return {"status": "success", "matched_clients": matched}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
         print(traceback.format_exc())
@@ -3171,42 +3186,42 @@ async def get_wfm_details(
 @app.post("/wfm/upload")
 async def upload_wfm_master(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Upload and ingest the Master WFM / Headcount Projection file."""
     temp_dir = tempfile.gettempdir()
     safe_name = os.path.basename(file.filename or "wfm.xlsx") or "wfm.xlsx"
     file_path = os.path.join(temp_dir, f"wfm_master_{int(time.time())}_{safe_name}")
-    
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+
+    def _audit(status: str, label: str) -> None:
+        adb = SessionLocal()
+        try:
+            u = adb.query(User).filter(User.id == user.id).first()
+            if u:
+                log_ingestion_event(
+                    adb,
+                    user=u,
+                    kind="wfm",
+                    filename=safe_name,
+                    status=status,
+                    label=label,
+                    project_id=None,
+                )
+                adb.commit()
+        finally:
+            adb.close()
+
     try:
-        # Run the WFM ingestion pipeline
-        ingest_wfm_master(file_path)
-        log_ingestion_event(
-            db,
-            user=user,
-            kind="wfm",
-            filename=safe_name,
-            status="success",
-            label="Complete",
-            project_id=None,
-        )
+        await asyncio.to_thread(ingest_wfm_master, file_path)
+        _audit("success", "Complete")
         return {"status": "success", "message": "WFM Master file processed successfully."}
     except Exception as e:
         import traceback
         print(traceback.format_exc())
-        log_ingestion_event(
-            db,
-            user=user,
-            kind="wfm",
-            filename=safe_name,
-            status="error",
-            label="Failed",
-            project_id=None,
-        )
+        _audit("error", "Failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/finance/stats")
@@ -3529,42 +3544,42 @@ async def get_finance_data(
 @app.post("/finance/upload")
 async def upload_finance_master(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Upload and ingest the Corporate Finance Master file."""
     temp_dir = tempfile.gettempdir()
     safe_name = os.path.basename(file.filename or "finance.xlsx") or "finance.xlsx"
     file_path = os.path.join(temp_dir, f"finance_master_{int(time.time())}_{safe_name}")
-    
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+
+    def _audit(status: str, label: str) -> None:
+        adb = SessionLocal()
+        try:
+            u = adb.query(User).filter(User.id == user.id).first()
+            if u:
+                log_ingestion_event(
+                    adb,
+                    user=u,
+                    kind="finance",
+                    filename=safe_name,
+                    status=status,
+                    label=label,
+                    project_id=None,
+                )
+                adb.commit()
+        finally:
+            adb.close()
+
     try:
-        # Run the Finance ingestion pipeline
-        ingest_finance_master(file_path)
-        log_ingestion_event(
-            db,
-            user=user,
-            kind="finance",
-            filename=safe_name,
-            status="success",
-            label="Complete",
-            project_id=None,
-        )
+        await asyncio.to_thread(ingest_finance_master, file_path)
+        _audit("success", "Complete")
         return {"status": "success", "message": "Corporate Finance file processed successfully."}
     except Exception as e:
         import traceback
         print(traceback.format_exc())
-        log_ingestion_event(
-            db,
-            user=user,
-            kind="finance",
-            filename=safe_name,
-            status="error",
-            label="Failed",
-            project_id=None,
-        )
+        _audit("error", "Failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -3660,3 +3675,266 @@ def clear_agent_session(session_id: str):
     """Clear a conversation session."""
     _agent_sessions.pop(session_id, None)
     return {"status": "cleared"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Revenue Leakage analytics
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _rl_parse_date(val) -> Optional[datetime.datetime]:
+    """Parse a date value from additional_attributes (ISO string or datetime)."""
+    if val is None:
+        return None
+    if isinstance(val, (datetime.datetime, datetime.date)):
+        return val if isinstance(val, datetime.datetime) else datetime.datetime.combine(val, datetime.time())
+    try:
+        s = str(val).strip()
+        if not s or s.lower() in ("none", "nan", "null", ""):
+            return None
+        return datetime.datetime.fromisoformat(s.replace("Z", "+00:00").split("+")[0][:19])
+    except (ValueError, TypeError):
+        return None
+
+
+def _rl_working_hours(start: Optional[datetime.datetime], end: Optional[datetime.datetime]) -> float:
+    """Working hours Mon-Fri (9 h/day model). Returns inf when dates missing."""
+    if start is None or end is None:
+        return float("inf")
+    if end <= start:
+        return 0.0
+    total = 0.0
+    cur = start
+    while cur.date() <= end.date():
+        if cur.weekday() < 5:  # Mon-Fri
+            if cur.date() == start.date() == end.date():
+                total += max(0.0, (end - start).total_seconds() / 3600)
+                break
+            elif cur.date() == start.date():
+                eod = datetime.datetime.combine(cur.date(), datetime.time(18, 0))
+                total += max(0.0, (eod - start).total_seconds() / 3600)
+            elif cur.date() == end.date():
+                sod = datetime.datetime.combine(cur.date(), datetime.time(9, 0))
+                total += max(0.0, (end - sod).total_seconds() / 3600)
+            else:
+                total += 9.0
+        cur += datetime.timedelta(days=1)
+    return total
+
+
+def _rl_ageing_bucket(days: Optional[float]) -> str:
+    if days is None:
+        return "No data"
+    if days <= 2:
+        return "0-2"
+    if days <= 5:
+        return "3-5"
+    if days <= 9:
+        return "6-9"
+    return ">10"
+
+
+def _rl_soh_label(attrs: dict) -> str:
+    """Derive source-of-hire PRD category from additional_attributes.
+
+    Field mappings discovered in data:
+      'Direct/Indirect' → 'Direct' | 'Indirect'
+      'Recruiting Type'  → 'Professional' | 'Standard' | 'Senior Professional'
+      (future) source_joiner_type / rpo_source_of_hire on RPO records
+    """
+    direct_indirect = str(attrs.get("Direct/Indirect") or "").strip().lower()
+    recruiting_type = str(attrs.get("Recruiting Type") or "").strip().lower()
+
+    if direct_indirect == "direct":
+        return "Direct"
+    if direct_indirect == "indirect":
+        # Indirect sourcing = RPO-managed pipeline (Taggd RPO engagement)
+        return "RPO"
+    # fallback by recruiting type
+    if "standard" in recruiting_type:
+        return "Direct"
+    return "Unknown"
+
+
+_RL_BENEFICIAL = {"RPO"}
+
+
+@app.get("/revenue-leakage")
+def get_revenue_leakage(
+    month: str = Query(default=None, description="YYYY-MM — filter by creation_date month"),
+    project_id: int = Query(default=None),
+    source_of_hire: str = Query(default=None, description="SOH label to filter"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Revenue leakage analytics for cancelled requisitions in a given month.
+
+    Data source mapping (all from records table + additional_attributes JSON):
+      - Cancelled population : status == 'Canceled'
+      - Creation date        : records.creation_date
+      - Intake / assigned    : additional_attributes['Intake Meeting Date']
+      - Approved date        : additional_attributes['Approved Date']  (proxy for first CV / pipeline entry)
+      - Days open            : additional_attributes['Days Open']
+      - Cancellation reason  : additional_attributes['Cancellation Reason']
+      - Recruiter            : additional_attributes['Recruiter Full Name']
+      - Source of hire       : additional_attributes['Direct/Indirect']
+      - Req number           : additional_attributes['Job Requisition Number']
+    """
+    from fastapi.responses import JSONResponse
+
+    # ── base query scoped to user permissions ──────────────────────────────
+    q = db.query(Record)
+    c = scoped_clause_record(user, db)
+    if c is not None:
+        q = q.filter(c)
+    q = apply_recruiter_record_scope(q, user, db)
+
+    # ── filter: Canceled (actual value in status field) ────────────────────
+    q = q.filter(Record.status == "Canceled")
+
+    # ── filter: project ────────────────────────────────────────────────────
+    if project_id:
+        assert_project_access(user, db, project_id)
+        q = q.filter(Record.project_id == project_id)
+
+    # ── filter: month (by creation_date) ──────────────────────────────────
+    if month:
+        try:
+            y, mo = int(month[:4]), int(month[5:7])
+            month_start = datetime.datetime(y, mo, 1)
+            month_end = datetime.datetime(y + 1, 1, 1) if mo == 12 else datetime.datetime(y, mo + 1, 1)
+            q = q.filter(Record.creation_date >= month_start, Record.creation_date < month_end)
+        except (ValueError, IndexError):
+            pass
+
+    records = q.order_by(Record.id.desc()).all()
+
+    # ── per-row analytics ──────────────────────────────────────────────────
+    total = len(records)
+    ageing_values: list[float] = []
+    bucket_counts: dict[str, int] = {"0-2": 0, "3-5": 0, "6-9": 0, ">10": 0, "No data": 0}
+    sla_48h_met = 0
+    sla_48h_not_met = 0
+    sla_48h_no_data = 0
+    soh_counts: dict[str, int] = {}
+    rows = []
+
+    soh_filter_set = (
+        {s.strip() for s in source_of_hire.split(",") if s.strip()}
+        if source_of_hire else None
+    )
+
+    for r in records:
+        attrs: dict = r.additional_attributes or {}
+
+        # ── dates ──────────────────────────────────────────────────────────
+        creation = r.creation_date
+        intake = _rl_parse_date(attrs.get("Intake Meeting Date"))
+        approved = _rl_parse_date(attrs.get("Approved Date"))
+        last_update = _rl_parse_date(attrs.get("Last Update Date"))
+
+        # Revenue ageing: Approved Date − Intake Meeting Date
+        # (best proxy for "first pipeline action after assignment" − "assigned")
+        if intake and approved:
+            age_days: Optional[float] = (approved - intake).days
+        elif attrs.get("Days Open") is not None:
+            # fallback: ingested ageing
+            try:
+                age_days = float(attrs["Days Open"])
+            except (ValueError, TypeError):
+                age_days = None
+        else:
+            age_days = None
+
+        bkt = _rl_ageing_bucket(age_days)
+        bucket_counts[bkt] = bucket_counts.get(bkt, 0) + 1
+        if age_days is not None:
+            ageing_values.append(age_days)
+
+        # 48h SLA: creation_date → Approved Date (working hours)
+        if creation and approved:
+            wh = _rl_working_hours(creation, approved)
+            if wh <= 48:
+                sla_48h_met += 1
+            else:
+                sla_48h_not_met += 1
+        else:
+            sla_48h_no_data += 1
+
+        # Source of hire from additional_attributes
+        soh = _rl_soh_label(attrs)
+        soh_counts[soh] = soh_counts.get(soh, 0) + 1
+
+        if soh_filter_set and soh not in soh_filter_set:
+            continue
+
+        rows.append({
+            "id": r.id,
+            "project_id": r.project_id,
+            "req_number": str(attrs.get("Job Requisition Number") or ""),
+            "candidate_name": r.candidate_name or "",
+            "position_title": r.position_title or "",
+            "hiring_manager": r.hiring_manager or "",
+            "recruiter": str(attrs.get("Recruiter Full Name") or ""),
+            "department": r.department or "",
+            "location": str(attrs.get("City") or r.location or ""),
+            "region": str(attrs.get("Region") or ""),
+            "creation_date": creation.isoformat() if creation else None,
+            "intake_date": intake.isoformat() if intake else None,
+            "approved_date": approved.isoformat() if approved else None,
+            "last_update_date": last_update.isoformat() if last_update else None,
+            "days_open": attrs.get("Days Open"),
+            "ageing_days": age_days,
+            "ageing_bucket": bkt,
+            "cancellation_reason": str(attrs.get("Cancellation Reason") or ""),
+            "sla_48h": (
+                "Met" if (creation and approved and _rl_working_hours(creation, approved) <= 48)
+                else ("Not Met" if (creation and approved) else "No Data")
+            ),
+            "source_of_hire": soh,
+            "commercial_class": "Beneficial" if soh in _RL_BENEFICIAL else "Loss",
+            "direct_indirect": str(attrs.get("Direct/Indirect") or ""),
+            "global_status": r.global_status or "",
+            "status": r.status or "",
+        })
+
+    avg_ageing = round(sum(ageing_values) / len(ageing_values), 1) if ageing_values else None
+    sla_eligible = sla_48h_met + sla_48h_not_met
+    sla_pct = round(sla_48h_met / sla_eligible * 100, 1) if sla_eligible else None
+
+    # cancellation reasons breakdown (top reasons)
+    cancel_reason_counts: dict[str, int] = {}
+    for row in rows:
+        reason = row["cancellation_reason"] or "Not specified"
+        cancel_reason_counts[reason] = cancel_reason_counts.get(reason, 0) + 1
+    top_cancel_reasons = sorted(cancel_reason_counts.items(), key=lambda x: -x[1])[:10]
+
+    soh_breakdown = [
+        {
+            "label": k,
+            "count": v,
+            "commercial_class": "Beneficial" if k in _RL_BENEFICIAL else "Loss",
+        }
+        for k, v in sorted(soh_counts.items(), key=lambda x: -x[1])
+    ]
+
+    return JSONResponse(
+        content={
+            "summary": {
+                "total_cancelled": total,
+                "avg_ageing_days": avg_ageing,
+                "sla_48h_met": sla_48h_met,
+                "sla_48h_not_met": sla_48h_not_met,
+                "sla_48h_no_data": sla_48h_no_data,
+                "sla_48h_pct": sla_pct,
+                "month": month,
+            },
+            "ageing_buckets": [
+                {"bucket": k, "count": bucket_counts.get(k, 0)}
+                for k in ["0-2", "3-5", "6-9", ">10", "No data"]
+            ],
+            "source_of_hire": soh_breakdown,
+            "cancel_reasons": [{"reason": r, "count": c} for r, c in top_cancel_reasons],
+            "rows": rows,
+        },
+        headers={"Cache-Control": "private, max-age=30"},
+    )

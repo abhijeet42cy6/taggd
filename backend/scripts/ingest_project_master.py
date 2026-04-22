@@ -32,6 +32,39 @@ def _norm_key(s: str) -> str:
     return re.sub(r"\s+", " ", str(s).strip().lower())
 
 
+def directory_group_matches_project_account(sheet_group_name: str, project_account_name: Optional[str]) -> bool:
+    """True if DB project.account_name is the sheet Group Name or an SBU under it (e.g. Siemens / Siemens - GBS)."""
+    gn = _norm_key(sheet_group_name)
+    pn = _norm_key(project_account_name or "")
+    if not gn or not pn:
+        return False
+    if pn == gn:
+        return True
+    if pn.startswith(gn + " -") or pn.startswith(gn + " –"):
+        return True
+    if pn.startswith(gn + " ") and len(pn) > len(gn):
+        return True
+    return False
+
+
+def project_account_should_keep_instead_of_group_name(sheet_group: str, project_account: str) -> bool:
+    """If True, do not replace project.account_name with sheet Group Name (SBU / entity label)."""
+    cur = (project_account or "").strip()
+    if not cur:
+        return False
+    if " - " in cur or "–" in cur:
+        return True
+    if "(" in cur:
+        return True
+    gn = _norm_key(sheet_group)
+    pn = _norm_key(cur)
+    if not gn or pn == gn:
+        return False
+    if pn.startswith(gn + " -") or pn.startswith(gn + " –") or (pn.startswith(gn + " ") and len(pn) > len(gn)):
+        return True
+    return False
+
+
 def _build_column_map(columns: list) -> Dict[str, str]:
     """Map normalized header -> canonical field name."""
     aliases = {
@@ -94,7 +127,12 @@ def _find_project(db: Session, charge_code: Optional[str], account_name: Optiona
     name = (account_name or "").strip()
     if not name:
         return None
-    return db.query(Project).filter(func.lower(Project.account_name) == name.lower()).first()
+    key = " ".join(name.split()).lower()
+    return (
+        db.query(Project)
+        .filter(func.lower(func.trim(Project.account_name)) == key)
+        .first()
+    )
 
 
 def _find_or_create_client(db: Session, official_name: Optional[str]) -> Optional[Client]:
@@ -110,6 +148,71 @@ def _find_or_create_client(db: Session, official_name: Optional[str]) -> Optiona
     db.add(c)
     db.flush()
     return c
+
+
+def apply_directory_row_to_project(
+    db: Session,
+    proj: Project,
+    row: pd.Series,
+    col_map: Dict[str, str],
+    *,
+    source_basename: str | None = None,
+    overwrite_charge: bool = True,
+) -> None:
+    """
+    Apply one directory sheet row to an existing Project (used by ingest and reconcile).
+    When overwrite_charge is False, an existing non-empty charge_code on the project is kept.
+    """
+    charge = _cell(row, col_map, "charge_code")
+    acc = _cell(row, col_map, "account_name")
+    if charge and overwrite_charge:
+        proj.charge_code = charge
+    elif charge and not (proj.charge_code or "").strip():
+        proj.charge_code = charge
+    if acc:
+        # Group Name in directory = client label; do not replace SBU / entity account_name.
+        cur = (proj.account_name or "").strip()
+        acc_key = " ".join(acc.split()).lower()
+        cur_key = " ".join(cur.split()).lower()
+        if not cur:
+            proj.account_name = acc
+        elif cur_key == acc_key:
+            proj.account_name = acc
+        elif not project_account_should_keep_instead_of_group_name(acc, cur):
+            proj.account_name = acc
+
+    for field in (
+        "account_status",
+        "region",
+        "sub_region",
+        "function_head",
+        "regional_head",
+        "practice",
+        "practice_head",
+        "project_head",
+        "category",
+    ):
+        val = _cell(row, col_map, field)
+        if val is not None:
+            setattr(proj, field, val)
+
+    parent_client = _cell(row, col_map, "parent_client_name")
+    if parent_client:
+        cl = _find_or_create_client(db, parent_client)
+        if cl:
+            proj.client_id = cl.id
+    elif acc:
+        # Group Name is the canonical client for this row when no explicit parent column.
+        cl = _find_or_create_client(db, acc)
+        if cl:
+            proj.client_id = cl.id
+    sbu = _cell(row, col_map, "engagement_name")
+    if sbu:
+        proj.engagement_name = sbu[:500]
+    if proj.client_id is None:
+        ensure_project_client(db, proj)
+    if source_basename:
+        proj.source_filename = source_basename
 
 
 def ingest_project_master_file(file_path: str, db: Session | None = None) -> Dict[str, Any]:
@@ -144,38 +247,14 @@ def ingest_project_master_file(file_path: str, db: Session | None = None) -> Dic
                 skipped += 1
                 continue
 
-            if charge:
-                proj.charge_code = charge
-            if acc:
-                proj.account_name = acc
-
-            for field in (
-                "account_status",
-                "region",
-                "sub_region",
-                "function_head",
-                "regional_head",
-                "practice",
-                "practice_head",
-                "project_head",
-                "category",
-            ):
-                val = _cell(row, col_map, field)
-                if val is not None:
-                    setattr(proj, field, val)
-
-            parent_client = _cell(row, col_map, "parent_client_name")
-            if parent_client:
-                cl = _find_or_create_client(db, parent_client)
-                if cl:
-                    proj.client_id = cl.id
-            sbu = _cell(row, col_map, "engagement_name")
-            if sbu:
-                proj.engagement_name = sbu[:500]
-            if proj.client_id is None:
-                ensure_project_client(db, proj)
-
-            proj.source_filename = os.path.basename(file_path)
+            apply_directory_row_to_project(
+                db,
+                proj,
+                row,
+                col_map,
+                source_basename=os.path.basename(file_path),
+                overwrite_charge=True,
+            )
             updated += 1
 
         db.commit()

@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import datetime
+import os
 import re
+import shutil
+import tempfile
+import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -13,6 +17,7 @@ from sqlalchemy.orm import Session
 from backend.auth.deps import get_current_user
 from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
+from backend.core.ingestion_audit import log_ingestion_event
 from backend.core.revenue_weekly_submission_core import submission_allows_child_edit
 from backend.db.database import RevenueForecastWeekly, RevenueVisibilitySnapshot, RevenueWeeklySubmission, User, get_db
 
@@ -422,3 +427,92 @@ def delete_visibility(
         resource_id=f"{pid}:{key}",
     )
     return {"status": "ok", "id": row_id}
+
+
+@router.post("/ingest-upload")
+async def ingest_revenue_trackers_upload(
+    forecast_file: Optional[UploadFile] = File(None),
+    visibility_file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Ingest TAGGD revenue forecast and/or visibility Excel workbooks (same rules as CLI script)."""
+    if (not forecast_file or not forecast_file.filename) and (
+        not visibility_file or not visibility_file.filename
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one file: forecast_file (Revenue Forecast Data sheet) and/or "
+            "visibility_file (Revenue Tracker sheet).",
+        )
+
+    temp_paths: list[str] = []
+    forecast_path: Optional[str] = None
+    visibility_path: Optional[str] = None
+    name_parts: list[str] = []
+
+    try:
+        if forecast_file and forecast_file.filename:
+            safe = os.path.basename(forecast_file.filename) or "forecast.xlsx"
+            name_parts.append(safe)
+            forecast_path = os.path.join(
+                tempfile.gettempdir(), f"rev_forecast_{int(time.time())}_{safe}"
+            )
+            with open(forecast_path, "wb") as buf:
+                shutil.copyfileobj(forecast_file.file, buf)
+            temp_paths.append(forecast_path)
+
+        if visibility_file and visibility_file.filename:
+            safe = os.path.basename(visibility_file.filename) or "visibility.xlsx"
+            name_parts.append(safe)
+            visibility_path = os.path.join(
+                tempfile.gettempdir(), f"rev_visibility_{int(time.time())}_{safe}"
+            )
+            with open(visibility_path, "wb") as buf:
+                shutil.copyfileobj(visibility_file.file, buf)
+            temp_paths.append(visibility_path)
+
+        from backend.scripts.ingest_revenue_trackers import ingest_revenue_workbooks
+
+        out = ingest_revenue_workbooks(forecast_path, visibility_path, db=db, dry_run=False)
+        log_ingestion_event(
+            db,
+            user=user,
+            kind="revenue_trackers",
+            filename=" + ".join(name_parts) if name_parts else "revenue-templates.xlsx",
+            status="success",
+            label="Complete",
+            project_id=None,
+        )
+        return {"status": "success", **out}
+    except ValueError as e:
+        log_ingestion_event(
+            db,
+            user=user,
+            kind="revenue_trackers",
+            filename=" + ".join(name_parts) if name_parts else "revenue-templates.xlsx",
+            status="error",
+            label=str(e)[:120],
+            project_id=None,
+        )
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_ingestion_event(
+            db,
+            user=user,
+            kind="revenue_trackers",
+            filename=" + ".join(name_parts) if name_parts else "revenue-templates.xlsx",
+            status="error",
+            label="Failed",
+            project_id=None,
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        for p in temp_paths:
+            try:
+                if p and os.path.isfile(p):
+                    os.remove(p)
+            except OSError:
+                pass

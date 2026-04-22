@@ -125,5 +125,6 @@ INGESTION_RESOURCE_TYPES = frozenset(
         "ingestion_sla_upload",
         "ingestion_wfm_upload",
         "ingestion_finance_upload",
+        "ingestion_revenue_trackers_upload",
     }
 )
