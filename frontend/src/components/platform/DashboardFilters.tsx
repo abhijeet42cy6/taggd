@@ -5,6 +5,7 @@ import {
   type DashboardFilters as DF,
   FY_MONTH_ORDER,
 } from "@/lib/dashboard-aggregates";
+import "@/styles/ceo-view.css";
 
 function uniqSorted(vals: (string | undefined)[]): string[] {
   const s = new Set<string>();
@@ -15,14 +16,27 @@ function uniqSorted(vals: (string | undefined)[]): string[] {
   return Array.from(s).sort((a, b) => a.localeCompare(b));
 }
 
+function fySelectLabel(start: number): string {
+  return `FY${String(start).slice(2)}–${String(start + 1).slice(2)}`;
+}
+
 export function DashboardFilters({
   value,
   onChange,
   projects,
+  fyYears,
+  selectedFyStart,
+  onFyChange,
+  fySelectDisabled = false,
 }: {
   value: DF;
   onChange: (next: DF) => void;
   projects: Project[];
+  /** Indian FY start years present in the finance ledger (e.g. 2024 → FY24–25). */
+  fyYears: number[];
+  selectedFyStart: number;
+  onFyChange: (fyStart: number) => void;
+  fySelectDisabled?: boolean;
 }) {
   const options = useMemo(() => {
     return {
@@ -53,8 +67,35 @@ export function DashboardFilters({
     </label>
   );
 
+  const fyValue =
+    fyYears.length === 0
+      ? ""
+      : fyYears.includes(selectedFyStart)
+        ? String(selectedFyStart)
+        : String(fyYears[0]);
+
   return (
     <div className="dashboard-filter-bar">
+      <label className="dashboard-filter-field" style={{ minWidth: 120 }}>
+        <span className="ceo-fy-label">Fiscal year</span>
+        <select
+          className="ceo-fy-select"
+          aria-label="Fiscal year"
+          value={fyValue}
+          onChange={(e) => onFyChange(Number(e.target.value))}
+          disabled={fySelectDisabled || fyYears.length === 0}
+        >
+          {fyYears.length === 0 ? (
+            <option value="">No fiscal years in ledger</option>
+          ) : (
+            fyYears.map((y) => (
+              <option key={y} value={y}>
+                {fySelectLabel(y)}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
       <label className="dashboard-filter-field" style={{ minWidth: 108 }}>
         <span className="dashboard-filter-label">Period</span>
         <select

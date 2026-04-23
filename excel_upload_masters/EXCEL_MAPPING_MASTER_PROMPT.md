@@ -82,7 +82,7 @@ When a column has a **dropdown** in the template or an entry in `DROPDOWNS_BY_TA
 **Examples of canonical buckets** (not exhaustive; see the file for the full set):
 
 - **users.role** — `platform_admin`, `executive`, `operations`, `project_head`, `recruiter`, `client_user`, and legacy `admin`, `manager`.
-- **records.source_joiner_type** — `taggd_rpo`, `taggd_direct`, `nontaggd_`* variants.
+- **records.source_joiner_type** — `taggd_rpo`, `taggd_direct`, `nontaggd`_* variants.
 - **records.global_status** — e.g. `ACTIVE`, `CLOSED`, `PIPELINE`, `ON HOLD`, `UNPROCESSED`, `CANCELLED`.
 - **project_transitions.status** — `draft`, `in_progress`, `soft_launched`, `live`, `delayed`, `cancelled`.
 - **finance_monthly_ledger.metric_category** — `Revenue`, `Contribution Margin`, `Cost`, plus `Revenue_MMF`, `Revenue_JoiningFee`, etc. (see `finance_planning_categories.py`).

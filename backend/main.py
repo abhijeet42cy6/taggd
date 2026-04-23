@@ -2727,23 +2727,13 @@ async def get_sla_timeseries(
     """
     from fastapi.responses import JSONResponse
 
-    from backend.core.sla_period import canonical_month_label, sort_key_for_month_label
+    from backend.core.sla_period import bucket_sla_rag, canonical_month_label, sort_key_for_month_label
 
     # Month labels that carry no real period information — skip entirely
     _GARBAGE = {
         "YTD",
         "Metrics to be picked of BE  (Measure Name as per standard Metrics)",
     }
-
-    def _norm_rag(s: str) -> str:
-        """Bucket raw rag_status into met / not_met / not_reported."""
-        s = (s or "").strip().lower()
-        if s == "met":
-            return "met"
-        if "not met" in s or s == "not met":
-            return "not_met"
-        # Everything else: nan, NA, Not Reported, Speed, Quality, etc.
-        return "not_reported"
 
     # One row per metric snapshot — aggregate in Python so we can use period_start
     rows = (
@@ -2777,7 +2767,7 @@ async def get_sla_timeseries(
             data[account] = {}
         if month_s not in data[account]:
             data[account][month_s] = {"met": 0, "not_met": 0, "not_reported": 0}
-        data[account][month_s][_norm_rag(rag_status)] += 1
+        data[account][month_s][bucket_sla_rag(rag_status)] += 1
 
     # Build sorted output
     result = []
@@ -2837,16 +2827,32 @@ async def get_sla_stats(
     met_count = 0
     not_met_count = 0
     for rag, cnt in rag_rows:
-        if rag == "Met":
+        b = bucket_sla_rag(rag)
+        if b == "met":
             met_count += cnt
-        elif rag in ("Not Met", "NOT MET"):
+        elif b == "not_met":
             not_met_count += cnt
 
+    rag_n = func.trim(func.lower(SLAPerformance.rag_status))
     risky_metrics = (
         apply_project_scope(
             db.query(MetricDefinition.metric_label, func.count(SLAPerformance.id).label("failures"))
             .join(SLAPerformance)
-            .filter(SLAPerformance.rag_status.in_(["Not Met", "NOT MET"])),
+            .filter(
+                rag_n.in_(
+                    [
+                        "not met",
+                        "red",
+                        "amber",
+                        "yellow",
+                        "rag_r",
+                        "rag_a",
+                        "breach",
+                        "breached",
+                        "not_met",
+                    ]
+                )
+            ),
             user,
             db,
             MetricDefinition,
@@ -2956,20 +2962,12 @@ async def get_sla_account_metrics_timeseries(
     """
     from fastapi.responses import JSONResponse
 
-    from backend.core.sla_period import canonical_month_label, sort_key_for_month_label
+    from backend.core.sla_period import bucket_sla_rag, canonical_month_label, sort_key_for_month_label
 
     _GARBAGE = {
         "YTD",
         "Metrics to be picked of BE  (Measure Name as per standard Metrics)",
     }
-
-    def _norm_rag(s: str) -> str:
-        s = (s or "").strip().lower()
-        if s == "met":
-            return "met"
-        if "not met" in s or s == "not met":
-            return "not_met"
-        return "not_reported"
 
     want = (account or "").strip()
     if not want:
@@ -3015,7 +3013,7 @@ async def get_sla_account_metrics_timeseries(
             meta[def_id] = (metric_label or "", nature)
         if month_s not in data[def_id]:
             data[def_id][month_s] = {"met": 0, "not_met": 0, "not_reported": 0}
-        data[def_id][month_s][_norm_rag(rag_status)] += 1
+        data[def_id][month_s][bucket_sla_rag(rag_status)] += 1
 
     metrics_out = []
     for def_id in sorted(data.keys()):
@@ -3261,10 +3259,11 @@ async def get_finance_stats(
     ).subquery()
     total_cm_actual = db.query(func.coalesce(func.sum(cm_sub.c.ma), 0)).scalar() or 0
 
+    # Cash flows: collection / target / bad_debt are summed across months (flow-like);
+    # unbilled is a month-end balance — do not sum 12+ months of balances (double-counts AR).
     cf_sub = (
         apply_project_scope(
             db.query(
-                func.max(FinanceCashFlow.unbilled_amount).label("mu"),
                 func.max(FinanceCashFlow.actual_collected).label("mc"),
                 func.max(FinanceCashFlow.bad_debt).label("mbd"),
                 func.max(FinanceCashFlow.collection_target).label("mt"),
@@ -3275,10 +3274,24 @@ async def get_finance_stats(
         )
         .group_by(FinanceCashFlow.project_id, FinanceCashFlow.reporting_month)
     ).subquery()
-    total_unbilled = db.query(func.coalesce(func.sum(cf_sub.c.mu), 0)).scalar() or 0
     total_collected = db.query(func.coalesce(func.sum(cf_sub.c.mc), 0)).scalar() or 0
     total_bad_debt = db.query(func.coalesce(func.sum(cf_sub.c.mbd), 0)).scalar() or 0
     total_collection_target = db.query(func.coalesce(func.sum(cf_sub.c.mt), 0)).scalar() or 0
+    _cash_u: dict = {}
+    for _r in apply_project_scope(db.query(FinanceCashFlow), user, db, FinanceCashFlow).all():
+        _k = (_r.project_id, _r.reporting_month)
+        _u = float(_r.unbilled_amount or 0.0)
+        if _k not in _cash_u:
+            _cash_u[_k] = _u
+        else:
+            _cash_u[_k] = max(_cash_u[_k], _u)
+    _by_p: dict = {}
+    for (_pid, _m), _u in _cash_u.items():
+        _by_p.setdefault(_pid, []).append((_m, _u))
+    total_unbilled = 0.0
+    for _lst in _by_p.values():
+        _lst.sort(key=lambda t: t[0] or datetime.datetime.min, reverse=True)
+        total_unbilled += float(_lst[0][1])
     collection_pending = total_collection_target - total_collected
 
     return {
@@ -3321,7 +3334,8 @@ async def get_finance_data(
         .all()
     )
 
-    # Collapse legacy duplicate Revenue rows per (project, month) without mutating ORM state
+    # Collapse Revenue rows per (project, month) by summing values.
+    # For template uploads, repeated keys can represent segmented streams that must be additive.
     merged_rev: dict = {}
     for l in sorted(revenue_ledgers, key=lambda x: x.id):
         k = (l.project_id, l.reporting_month)
@@ -3337,9 +3351,9 @@ async def get_finance_data(
             }
         else:
             m = merged_rev[k]
-            m["rev_budget"] = max(m["rev_budget"], float(l.budget_value or 0))
-            m["rev_forecast"] = max(m["rev_forecast"], float(l.forecast_value or 0))
-            m["rev_actual"] = max(m["rev_actual"], float(l.actual_value or 0))
+            m["rev_budget"] += float(l.budget_value or 0)
+            m["rev_forecast"] += float(l.forecast_value or 0)
+            m["rev_actual"] += float(l.actual_value or 0)
     revenue_rows = sorted(
         merged_rev.values(),
         key=lambda r: r["reporting_month"] or datetime.datetime.min,
@@ -3349,7 +3363,7 @@ async def get_finance_data(
     _finance_project_ids = sorted({r["project_id"] for r in revenue_rows if r.get("project_id")})
     _assign_heads_map = assigned_project_heads_by_project(db, _finance_project_ids)
 
-    # CM keyed by (project_id, month); max() merges any legacy duplicate CM rows
+    # CM keyed by (project_id, month); additive merge for segmented streams.
     cm_rows = (
         apply_project_scope(
             db.query(
@@ -3367,7 +3381,7 @@ async def get_finance_data(
     for r in cm_rows:
         k = (r.project_id, r.reporting_month)
         v = float(r.actual_value or 0)
-        cm_map[k] = max(cm_map.get(k, 0.0), v)
+        cm_map[k] = cm_map.get(k, 0.0) + v
 
     kpi_objs = (
         apply_project_scope(db.query(FinanceEfficiencyKPI), user, db, FinanceEfficiencyKPI)
@@ -3389,9 +3403,9 @@ async def get_finance_data(
                 "metrics_updated_by_user_id": None,
             },
         )
-        m["wl1"] = max(m["wl1"], float(r.actual_headcount_wl1 or 0))
-        m["overall_hc"] = max(m["overall_hc"], float(r.actual_headcount_finance or 0))
-        m["taggd_joiners"] = max(m["taggd_joiners"], float(r.taggd_joiners or 0))
+        m["wl1"] += float(r.actual_headcount_wl1 or 0)
+        m["overall_hc"] += float(r.actual_headcount_finance or 0)
+        m["taggd_joiners"] += float(r.taggd_joiners or 0)
         if r.target_ppc_inr is not None:
             m["target_ppc_inr"] = float(r.target_ppc_inr)
         if r.target_revenue_per_recruiter is not None:
@@ -3419,9 +3433,9 @@ async def get_finance_data(
     for r in cost_rows:
         k = (r.project_id, r.reporting_month)
         v = float(r.actual_cost or 0)
-        cost_map[k] = max(cost_map.get(k, 0.0), v)
+        cost_map[k] = cost_map.get(k, 0.0) + v
 
-    # Merge cashflow rows on same key (legacy duplicates) — plain dicts, no ORM mutation
+    # Merge cashflow rows on same key additively; segmented streams are expected to add up.
     cash_all = apply_project_scope(db.query(FinanceCashFlow), user, db, FinanceCashFlow).all()
     cash_map: dict = {}
     for r in cash_all:
@@ -3435,10 +3449,10 @@ async def get_finance_data(
             }
             continue
         o = cash_map[k]
-        o["unbilled"] = max(o["unbilled"], float(r.unbilled_amount or 0))
-        o["collected"] = max(o["collected"], float(r.actual_collected or 0))
-        o["bad_debt"] = max(o["bad_debt"], float(r.bad_debt or 0))
-        o["collection_target"] = max(o["collection_target"], float(r.collection_target or 0))
+        o["unbilled"] += float(r.unbilled_amount or 0)
+        o["collected"] += float(r.actual_collected or 0)
+        o["bad_debt"] += float(r.bad_debt or 0)
+        o["collection_target"] += float(r.collection_target or 0)
 
     def _safe_ratio(num: float, den: float):
         if den and float(den) != 0:

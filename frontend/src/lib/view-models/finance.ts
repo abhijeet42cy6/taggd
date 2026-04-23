@@ -1,4 +1,4 @@
-import { normalizeMaybeNumeric, normalizePlainNumber } from "@/lib/finance-units";
+import { normalizePlainNumber } from "@/lib/finance-units";
 
 export type FinanceRowVm = {
   id: number;
@@ -50,17 +50,17 @@ export type FinanceRowVm = {
 
 export function financeStatsVm(raw: any) {
   if (!raw) return null;
-  const revenue_budget_inr = normalizeMaybeNumeric(raw.revenue_budget);
-  const revenue_actual_inr = normalizeMaybeNumeric(raw.revenue_actual);
-  const total_cm_inr = normalizeMaybeNumeric(raw.total_cm);
-  const total_unbilled_inr = normalizeMaybeNumeric(raw.total_unbilled);
-  const total_collected_inr = normalizeMaybeNumeric(raw.total_collected);
-  const total_bad_debt_inr = normalizeMaybeNumeric(raw.total_bad_debt);
-  const total_collection_target_inr = normalizeMaybeNumeric(raw.total_collection_target);
-  const collection_pending_inr = normalizeMaybeNumeric(raw.collection_pending);
+  const revenue_budget_inr = normalizePlainNumber(raw.revenue_budget);
+  const revenue_actual_inr = normalizePlainNumber(raw.revenue_actual);
+  const total_cm_inr = normalizePlainNumber(raw.total_cm);
+  const total_unbilled_inr = normalizePlainNumber(raw.total_unbilled);
+  const total_collected_inr = normalizePlainNumber(raw.total_collected);
+  const total_bad_debt_inr = normalizePlainNumber(raw.total_bad_debt);
+  const total_collection_target_inr = normalizePlainNumber(raw.total_collection_target);
+  const collection_pending_inr = normalizePlainNumber(raw.collection_pending);
   return {
     revenue_budget_inr,
-    revenue_forecast_inr: normalizeMaybeNumeric(raw.revenue_forecast) ?? 0,
+    revenue_forecast_inr: normalizePlainNumber(raw.revenue_forecast) ?? 0,
     revenue_actual_inr,
     total_cm_inr,
     total_unbilled_inr,
@@ -90,29 +90,29 @@ export function financeRowsVm(rows: any[]): FinanceRowVm[] {
     vertical: r.vertical,
     project_head: r.project_head ?? null,
     practice_head: r.practice_head ?? null,
-    rev_budget_inr: normalizeMaybeNumeric(r.rev_budget),
-    rev_actual_inr: normalizeMaybeNumeric(r.rev_actual),
-    rev_forecast_inr: normalizeMaybeNumeric(r.rev_forecast),
-    cm_actual_inr: normalizeMaybeNumeric(r.cm_actual),
+    rev_budget_inr: normalizePlainNumber(r.rev_budget),
+    rev_actual_inr: normalizePlainNumber(r.rev_actual),
+    rev_forecast_inr: normalizePlainNumber(r.rev_forecast),
+    cm_actual_inr: normalizePlainNumber(r.cm_actual),
     cm_pct:
       r.cm_pct != null && Number.isFinite(Number(r.cm_pct))
         ? Number(r.cm_pct)
         : (() => {
-            const cm = normalizeMaybeNumeric(r.cm_actual);
-            const rev = normalizeMaybeNumeric(r.rev_actual);
+            const cm = normalizePlainNumber(r.cm_actual);
+            const rev = normalizePlainNumber(r.rev_actual);
             if (rev > 0) return Math.round((cm / rev) * 10000) / 100;
             return null;
           })(),
-    unbilled_inr: normalizeMaybeNumeric(r.unbilled),
-    collected_inr: normalizeMaybeNumeric(r.collected),
-    bad_debt_inr: normalizeMaybeNumeric(r.bad_debt),
-    collection_target_inr: normalizeMaybeNumeric(r.collection_target),
-    collection_pending_inr: normalizeMaybeNumeric(r.collection_pending),
+    unbilled_inr: normalizePlainNumber(r.unbilled),
+    collected_inr: normalizePlainNumber(r.collected),
+    bad_debt_inr: normalizePlainNumber(r.bad_debt),
+    collection_target_inr: normalizePlainNumber(r.collection_target),
+    collection_pending_inr: normalizePlainNumber(r.collection_pending),
     attainment: r.attainment ?? 0,
     actual_headcount_wl1: normalizePlainNumber(r.actual_headcount_wl1),
     actual_headcount_overall: normalizePlainNumber(r.actual_headcount_overall),
     taggd_joiners: normalizePlainNumber(r.taggd_joiners),
-    total_cost_inr: normalizeMaybeNumeric(r.total_cost_inr),
+    total_cost_inr: normalizePlainNumber(r.total_cost_inr),
     taggd_joiner_productivity: optionalRatio(r.taggd_joiner_productivity),
     taggd_source_productivity: optionalRatio(r.taggd_source_productivity ?? r.taggd_joiner_productivity),
     ppc_inr: optionalRatio(r.ppc_inr),

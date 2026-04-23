@@ -10,11 +10,12 @@ import { isProjectHeadLike, useAuth } from "@/lib/auth";
 import { cn, formatPercent } from "@/lib/utils";
 import {
   aggregatePeriod,
-  formatPeriodColumnHeader,
-  formatPeriodLabelShort,
-  periodMonthSet,
+  formatPeriodColumnHeaderFromData,
+  formatPeriodLabelShortFromData,
+  periodMonthSetsFromData,
   type FyMode,
 } from "@/lib/sla-fy";
+import { slaRagDisplayLabel, slaRagUiBucket } from "@/lib/sla-rag";
 import { StatusTag } from "@/components/platform/PlatformBlocks";
 import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
 import {
@@ -44,28 +45,9 @@ const SERIES_COLORS = [
   "#a78bfa", "#fb923c", "#34d399", "#f472b6", "#60a5fa",
 ];
 
-// ─── Normalise raw rag_status string into a display-safe label ─────────────────
-function statusTagFromRaw(rawStatus: unknown): string {
-  const s = String(rawStatus ?? "").trim();
-  const lower = s.toLowerCase();
-  if (lower === "met") return "Met";
-  if (lower.includes("not met")) return "Breached";
-  if (
-    lower === "not reported" ||
-    lower.includes("not reported") ||
-    lower === "n/a" || lower === "na" ||
-    lower === "-" || lower === "" || lower === "nan" || lower === "none"
-  ) return "Not Reported";
-  return "Not Reported";
-}
-
-// ─── Bucket raw status into the filter keys ────────────────────────────────────
-function statusBucket(rawStatus: unknown): "met" | "breached" | "not_reported" {
-  const s = String(rawStatus ?? "").trim().toLowerCase();
-  if (s === "met") return "met";
-  if (s.includes("not met")) return "breached";
-  return "not_reported";
-}
+// rag status → display + filter buckets: `@/lib/sla-rag` (Met/Not Met + template RAG colours)
+const statusTagFromRaw = slaRagDisplayLabel;
+const statusBucket = slaRagUiBucket;
 
 /** Latest row per account for region / practice head (by reporting month / period). */
 function monthSortKey(r: any): string {
@@ -715,8 +697,14 @@ export function SLAPerformance() {
 
   const accountMetaMap = useMemo(() => accountMetaByAccount(rawRows), [rawRows]);
 
-  const p1Months = useMemo(() => periodMonthSet(fyMode, "p1"), [fyMode]);
-  const p2Months = useMemo(() => periodMonthSet(fyMode, "p2"), [fyMode]);
+  const { p1: p1Months, p2: p2Months } = useMemo(
+    () => periodMonthSetsFromData(fyMode, allMonths),
+    [fyMode, allMonths],
+  );
+  const fyLabelP1 = useMemo(() => formatPeriodLabelShortFromData(fyMode, "p1", allMonths), [fyMode, allMonths]);
+  const fyLabelP2 = useMemo(() => formatPeriodLabelShortFromData(fyMode, "p2", allMonths), [fyMode, allMonths]);
+  const fyColH1 = useMemo(() => formatPeriodColumnHeaderFromData(fyMode, "p1", allMonths), [fyMode, allMonths]);
+  const fyColH2 = useMemo(() => formatPeriodColumnHeaderFromData(fyMode, "p2", allMonths), [fyMode, allMonths]);
 
   const fyAccountsForChart = useMemo(() => {
     const list = timeseries
@@ -936,14 +924,14 @@ export function SLAPerformance() {
     const p2_pct = p2Tot > 0 ? Math.round((p2m / p2Tot) * 1000) / 10 : null;
     return {
       bar: [
-        { period: formatPeriodLabelShort(fyMode, "p1"), met: p1m, notMet: p1nm },
-        { period: formatPeriodLabelShort(fyMode, "p2"), met: p2m, notMet: p2nm },
+        { period: fyLabelP1, met: p1m, notMet: p1nm },
+        { period: fyLabelP2, met: p2m, notMet: p2nm },
       ],
       p1: { met: p1m, notMet: p1nm },
       p2: { met: p2m, notMet: p2nm },
       p2_pct,
     };
-  }, [timeseries, p1Months, p2Months, fyMode]);
+  }, [timeseries, p1Months, p2Months, fyMode, fyLabelP1, fyLabelP2]);
 
   /** Top accounts by snapshot volume — FY Met % line (HTML account trend). */
   const accountTopFyTrendData = useMemo(() => {
@@ -1549,7 +1537,7 @@ export function SLAPerformance() {
                   <div className="sla-dash-card">
                     <div className="sla-dash-card-hd">
                       <div className="sla-dash-card-title">Most improved (FY)</div>
-                      <div className="sla-dash-card-sub">{formatPeriodLabelShort(fyMode, "p2")} vs {formatPeriodLabelShort(fyMode, "p1")}.</div>
+                      <div className="sla-dash-card-sub">{fyLabelP2} vs {fyLabelP1}.</div>
                     </div>
                     <div className="sla-dash-card-bd">
                       {executiveImproved.length === 0 ? (
@@ -1586,7 +1574,7 @@ export function SLAPerformance() {
                   </div>
                   <div className="sla-dash-card">
                     <div className="sla-dash-card-hd">
-                      <div className="sla-dash-card-title">Regions — {formatPeriodLabelShort(fyMode, "p2")}</div>
+                      <div className="sla-dash-card-title">Regions — {fyLabelP2}</div>
                       <div className="sla-dash-card-sub">Met % by region (rolled up).</div>
                     </div>
                     <div className="sla-dash-card-bd">
@@ -1984,8 +1972,8 @@ export function SLAPerformance() {
         ) : (
           <SlaFyComparisonLineChart
             data={fyAccountChartData}
-            labelP1={formatPeriodLabelShort(fyMode, "p1")}
-            labelP2={formatPeriodLabelShort(fyMode, "p2")}
+            labelP1={fyLabelP1}
+            labelP2={fyLabelP2}
             height={280}
           />
         )}
@@ -2005,8 +1993,8 @@ export function SLAPerformance() {
                 <th>Account</th>
                 <th>Region</th>
                 <th>Practice Head</th>
-                <th>{formatPeriodColumnHeader(fyMode, "p1")}</th>
-                <th>{formatPeriodColumnHeader(fyMode, "p2")}</th>
+                <th>{fyColH1}</th>
+                <th>{fyColH2}</th>
                 <th>Change</th>
               </tr>
             </thead>
@@ -2050,8 +2038,8 @@ export function SLAPerformance() {
         ) : (
           <SlaFyComparisonLineChart
             data={fyRegionalChartData}
-            labelP1={formatPeriodLabelShort(fyMode, "p1")}
-            labelP2={formatPeriodLabelShort(fyMode, "p2")}
+            labelP1={fyLabelP1}
+            labelP2={fyLabelP2}
             height={280}
           />
         )}
@@ -2074,13 +2062,13 @@ export function SLAPerformance() {
             <SlaMetNotMetDonut
               met={portfolioFySnapshots.p1.met}
               notMet={portfolioFySnapshots.p1.notMet}
-              label={formatPeriodLabelShort(fyMode, "p1")}
+              label={fyLabelP1}
               height={172}
             />
             <SlaMetNotMetDonut
               met={portfolioFySnapshots.p2.met}
               notMet={portfolioFySnapshots.p2.notMet}
-              label={formatPeriodLabelShort(fyMode, "p2")}
+              label={fyLabelP2}
               height={172}
             />
           </div>
@@ -2101,8 +2089,8 @@ export function SLAPerformance() {
           ) : (
             <SlaFyComparisonLineChart
               data={accountTopFyTrendData}
-              labelP1={formatPeriodLabelShort(fyMode, "p1")}
-              labelP2={formatPeriodLabelShort(fyMode, "p2")}
+              labelP1={fyLabelP1}
+              labelP2={fyLabelP2}
               height={280}
             />
           )}
@@ -2143,15 +2131,15 @@ export function SLAPerformance() {
             ) : regionChartKind === "bar" ? (
               <SlaFyComparisonGroupedBar
                 data={fyRegionalChartData}
-                labelP1={formatPeriodLabelShort(fyMode, "p1")}
-                labelP2={formatPeriodLabelShort(fyMode, "p2")}
+                labelP1={fyLabelP1}
+                labelP2={fyLabelP2}
                 height={300}
               />
             ) : (
               <SlaFyComparisonLineChart
                 data={fyRegionalChartData}
-                labelP1={formatPeriodLabelShort(fyMode, "p1")}
-                labelP2={formatPeriodLabelShort(fyMode, "p2")}
+                labelP1={fyLabelP1}
+                labelP2={fyLabelP2}
                 height={300}
               />
             )}
@@ -2163,7 +2151,7 @@ export function SLAPerformance() {
         <div className="sla-dash-card">
           <div className="sla-dash-card-hd">
             <div className="sla-dash-card-title">Practice head analysis</div>
-            <div className="sla-dash-card-sub">Met % by practice head — FY {formatPeriodLabelShort(fyMode, "p1")} vs {formatPeriodLabelShort(fyMode, "p2")}.</div>
+            <div className="sla-dash-card-sub">Met % by practice head — FY {fyLabelP1} vs {fyLabelP2}.</div>
           </div>
           <div className="sla-dash-card-bd">
             {fyPracticeChartData.length === 0 ? (
@@ -2171,8 +2159,8 @@ export function SLAPerformance() {
             ) : (
               <SlaFyComparisonLineChart
                 data={fyPracticeChartData}
-                labelP1={formatPeriodLabelShort(fyMode, "p1")}
-                labelP2={formatPeriodLabelShort(fyMode, "p2")}
+                labelP1={fyLabelP1}
+                labelP2={fyLabelP2}
                 height={300}
               />
             )}

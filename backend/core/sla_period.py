@@ -157,3 +157,28 @@ def month_sort_key(m: str) -> float:
         return float(y) + mo / 100.0
 
     return 9999.0
+
+
+def bucket_sla_rag(rag: str | None) -> str:
+    """
+    Map rag_status to API timeline buckets: 'met' | 'not_met' | 'not_reported'.
+    Aligned with upload template enums (Green/Amber/Red/Grey, RAG_*) and Base File (Met/Not Met).
+    """
+    s = (rag or "").strip().lower()
+    if not s or s in ("nan", "none", "-", "n/a", "not reported", "no data", "grey", "gray"):
+        return "not_reported"
+    if s in ("met", "green", "rag_g"):
+        return "met"
+    if "not met" in s or s in (
+        "red",
+        "amber",
+        "yellow",
+        "rag_r",
+        "rag_a",
+        "breach",
+        "breached",
+        "not_met",
+        "not met",
+    ):
+        return "not_met"
+    return "not_reported"

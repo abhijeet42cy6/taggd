@@ -85,7 +85,7 @@ Upserts **one logical client-month** in one request:
 1. `**finance_monthly_ledger`** — `Revenue` row: budget, forecast, actual.
 2. `**finance_monthly_ledger`** — `Contribution Margin` row: `actual_value` = CM actual (budget/forecast 0).
 3. `**finance_cash_flow`** — unbilled, collection target, collected, bad debt, adjustments.
-4. `**finance_efficiency_kpis**` — always updates **WL1**; optionally updates **overall HC**, **taggd_joiners**, **target_revenue_per_recruiter**, **target_ppc_inr** if those keys are present in the JSON body (Pydantic “fields set” semantics: omitted keys leave existing values unchanged).
+4. `**finance_efficiency_kpis`** — always updates **WL1**; optionally updates **overall HC**, **taggd_joiners**, **target_revenue_per_recruiter**, **target_ppc_inr** if those keys are present in the JSON body (Pydantic “fields set” semantics: omitted keys leave existing values unchanged).
 
 **Audit stamps (manual save):**
 
@@ -122,15 +122,18 @@ All finance reads apply `**apply_project_scope`**: admins see all projects; exec
 
 ## 4. Merging rules before calculation (`GET /finance/data`)
 
-The handler loads **all** scoped rows, then **merges duplicates** in memory (legacy data may have multiple DB rows per key).
+The handler loads **all** scoped rows, then **merges duplicate ledger lines** in memory (templates and ingests can produce more than one row for the same `(project_id, reporting_month, metric_category)`).
 
-1. **Revenue** (`metric_category == "Revenue"`): for each `(project_id, reporting_month)`, keep one logical row; `**rev_budget`, `rev_forecast`, `rev_actual`** = **max** across duplicate ledger rows (ordered by `id`).
-2. **Contribution margin actual:** `cm_map[(project_id, month)]` = **max** of `actual_value` over CM rows.
-3. **Cost:** `cost_map` = **max** of `**actual_cost`** over `**metric_category == "Cost"`** rows.
+1. **Revenue** (`metric_category == "Revenue"`): for each `(project_id, reporting_month)`, keep one logical row; `**rev_budget`**, `**rev_forecast`**, `**rev_actual`** = **sum** of duplicate `budget_value` / `forecast_value` / `actual_value` (ordered by `id` only to stabilize which ORM `id` is kept on the payload — amounts are **additive**).
+2. **Contribution margin actual:** `cm_map[(project_id, month)]` = **sum** of `actual_value` over all `**Contribution Margin`** rows for that key.
+  **Why sum, not max:** a tall-ledger or filled workbook often has **several** lines in the same month (e.g. extra uploads or split lines). Taking **max** would keep only the **largest** line and under-state totals vs **summing the sheet**; **sum** matches a roll-up of `Σ CM_Actual` and `Σ Revenue` for portfolio CM% = **sum(CM) / sum(Revenue)**.
+3. **Cost:** `cost_map` = **max** of `**actual_cost`** over `**metric_category == "Cost"`** rows (unchanged — not used for the CM% headline).
 4. **Cashflow:** for each key, **max** per field across duplicate `finance_cash_flow` rows.
 5. **Efficiency KPI:** for each key, `**wl1`**, `**overall_hc`**, `**taggd_joiners**` = max across duplicate KPI rows; `**target_ppc_inr**` / `**target_revenue_per_recruiter**` taken from rows that set them (last non-null wins for targets as rows are merged); `**metrics_updated_at` / `metrics_updated_by_user_id**` = row with the **latest** `metrics_updated_at`.
 
 **Output rows:** One result per **merged revenue** key (if there is no Revenue row for a month, that month does not appear as a row in this endpoint, even if CM/cash/KPI exist).
+
+**Portfolio CM% (Executive / CEO’s View, Dashboard):** the UI computes **not** an average of row `cm_pct` values; it uses **sum of `cm_actual` ÷ sum of `rev_actual`** over filtered FY rows (`aggregateFinanceFromRows` in `frontend/src/lib/dashboard-aggregates.ts`), which is consistent with **§6** after the same merge rules in `backend/main.py`.
 
 ---
 
@@ -144,25 +147,25 @@ Let:
 - `total_cost` = merged **Cost** ledger `**actual_cost`** (INR)  
 - `wl1_hc` = merged `**actual_headcount_wl1`** (may be fractional)  
 - `overall_hc` = merged `**actual_headcount_finance`**  
-- `taggd_j` = merged `**taggd_joiners**`  
-- `tgt_ppc` = `**target_ppc_inr**` from KPI (optional)  
-- `trpr` = `**target_revenue_per_recruiter**` from KPI (optional)
+- `taggd_j` = merged `**taggd_joiners`**  
+- `tgt_ppc` = `**target_ppc_inr`** from KPI (optional)  
+- `trpr` = `**target_revenue_per_recruiter`** from KPI (optional)
 
 
 | Output field                                                                                 | Formula                                          | Notes                                                                                                                                                 |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `**attainment**`                                                                             | `(ra / rb) * 100` (1 dp)                         | If `rb <= 0`, `0`.                                                                                                                                    |
-| `**cm_pct**`                                                                                 | `(cm_val / ra) * 100` (2 dp)                     | If `ra == 0`, `null`. **CM % = actual CM ÷ actual revenue.**                                                                                          |
+| `**attainment`**                                                                             | `(ra / rb) * 100` (1 dp)                         | If `rb <= 0`, `0`.                                                                                                                                    |
+| `**cm_pct`**                                                                                 | `(cm_val / ra) * 100` (2 dp)                     | If `ra == 0`, `null`. **CM % = actual CM ÷ actual revenue.**                                                                                          |
 | `**collection_pending`**                                                                     | `collection_target - collected`                  | From merged cashflow.                                                                                                                                 |
 | `**taggd_joiner_productivity`** / `**taggd_source_productivity`**                            | `taggd_j / wl1_hc`                               | Same value twice (alias). **Taggd source productivity = Tag joiners ÷ WL1 HC.** `null` if denominator 0.                                              |
 | `**ppc_inr`**                                                                                | `total_cost / overall_hc`                        | **PPC = actual cost ÷ overall headcount (INR per HC).** Formula only; **not** from a stored “actual PPC” sheet. `null` if denominator 0.              |
 | `**revenue_productivity_inr`**                                                               | `ra / wl1_hc`                                    | **Revenue productivity = actual revenue ÷ WL1 HC.** `null` if denominator 0.                                                                          |
 | `**ppc_ach_pct`**                                                                            | `(ppc_inr / tgt_ppc) * 100` (2 dp)               | Only if `tgt_ppc > 0` and `ppc_inr` is not null. Interprets “achievement” as **actual PPC relative to target** (higher = more cost per HC vs target). |
 | `**rev_prod_ach_pct`**                                                                       | `(revenue_productivity_inr / trpr) * 100` (2 dp) | Only if `trpr > 0` and revenue productivity is not null.                                                                                              |
-| `**metrics_updated_at`** / `**metrics_updated_by_user_id`** / `**metrics_updated_by_email**` | From merged KPI audit                            | Email resolved in a second query from `users`. Ingest does not set these unless future code adds it.                                                  |
+| `**metrics_updated_at`** / `**metrics_updated_by_user_id`** / `**metrics_updated_by_email`** | From merged KPI audit                            | Email resolved in a second query from `users`. Ingest does not set these unless future code adds it.                                                  |
 
 
-`**total_cost_inr**` in the JSON is the merged `**total_cost**` used for PPC.
+`**total_cost_inr`** in the JSON is the merged `**total_cost`** used for PPC.
 
 ---
 
@@ -170,10 +173,13 @@ Let:
 
 Aggregates over **scoped** data (different shape than per-row `/finance/data`):
 
-- Sums **max-per-(project,month)** revenue actual and budget across subqueries, then `**rev_attainment`** = `total_rev_actual / total_rev_budget * 100` if budget > 0.  
-- Sums **max** CM actual per (project, month) → `**total_cm`**.  
+- For **Revenue** and **Contribution Margin**, SQL `**GROUP BY (project_id, reporting_month)`** with `****sum(actual_value)`** (and `**sum(budget_value)`** for revenue budget) for each group, then the outer total **sum**s those group values across all months. So portfolio **total revenue** and **total CM** match a tall-Excel **Σ** of `actual_value` in scope (same as `/finance/data` after merge).  
+- `**rev_attainment`** = `total_rev_actual / total_rev_budget * 100` if budget > 0.  
+- `**total_cm`** = sum of per-(project, month) **summed** CM actuals, as above.  
 - Cashflow: per (project, month) takes **max** of unbilled, collected, bad debt, collection target, then sums → `**collection_pending`** = `total_collection_target - total_collected`.  
 - `**collection_efficiency`** = `total_collected / (total_collected + total_unbilled) * 100` when denominator > 0.
+
+**Implied portfolio CM ratio** (as used in dashboards): `total_cm / total_rev_actual` when you need a single % — consistent with `Σ CM ÷ Σ Revenue` from the ledger, **not** an unweighted mean of per-month `cm_pct` values.
 
 These stats **do not** recompute PPC or productivity; those are **row-level** on `/finance/data`.
 
@@ -182,6 +188,7 @@ These stats **do not** recompute PPC or productivity; those are **row-level** on
 ## 7. Frontend mapping (high level)
 
 - `**GET /finance/data`** → `financeRowsVm()` in `frontend/src/lib/view-models/finance.ts` normalizes amounts and ratios for **Finance Command** tables.  
+- **Executive / CEO’s View** (`Dashboard`, `CeoView`): `aggregateFinanceFromRows()` in `frontend/src/lib/dashboard-aggregates.ts` builds FY totals with **sum(`cm_actual_inr`) / sum(`rev_actual_inr`)** for the headline **CM%**; inputs are the merged rows from `GET /finance/data` (see §4–§6).  
 - **Productivity averages** (dashboard / finance) average **defined** values of `taggd_joiner_productivity` / `ppc_inr` / `revenue_productivity_inr` over filtered rows.  
 - **Fiscal Performance** labels match the formulas above (e.g. PPC tooltip = cost ÷ overall HC).
 
@@ -203,14 +210,15 @@ Do not assume those equal **finance ledger** `rev_actual` without an explicit bu
 ## 9. Quick troubleshooting
 
 
-| Symptom                         | Likely cause                                                                                                      |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| PPC is blank                    | **Overall HC** is 0 or missing on `finance_efficiency_kpis`, or **no Cost** row / `actual_cost` for that month.   |
-| Revenue row missing in UI       | **No** `finance_monthly_ledger` row with `metric_category == "Revenue"` for that project-month.                   |
-| CM % missing                    | Revenue actual is 0.                                                                                              |
-| Taggd productivity blank        | WL1 HC is 0 or Tag joiners missing.                                                                               |
-| Target PPC / rev prod % missing | `target_ppc_inr` / `target_revenue_per_recruiter` not set (ingest or ledger-upsert).                              |
-| “Metrics by” empty              | No platform **ledger-upsert** yet for that month; ingest does not populate `metrics_updated_`* on KPI rows today. |
+| Symptom                                           | Likely cause                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PPC is blank                                      | **Overall HC** is 0 or missing on `finance_efficiency_kpis`, or **no Cost** row / `actual_cost` for that month.                                                                                                                                                                                                        |
+| Revenue row missing in UI                         | **No** `finance_monthly_ledger` row with `metric_category == "Revenue"` for that project-month.                                                                                                                                                                                                                        |
+| CM % missing                                      | Revenue actual is 0.                                                                                                                                                                                                                                                                                                   |
+| Portfolio **CM%** on Executive/CEO’s View ≠ Excel | Compare **sum(CM actual) / sum(Revenue actual)** in DB vs your sheet. **Scope** (FY, project, role) must match. **Empty FY slice** in `/finance/data` with a stats fallback can show **global** `**/finance/stats`**. Ensure `**project_id`** is set in the ledger so lines do not collapse into one key accidentally. |
+| Taggd productivity blank                          | WL1 HC is 0 or Tag joiners missing.                                                                                                                                                                                                                                                                                    |
+| Target PPC / rev prod % missing                   | `target_ppc_inr` / `target_revenue_per_recruiter` not set (ingest or ledger-upsert).                                                                                                                                                                                                                                   |
+| “Metrics by” empty                                | No platform **ledger-upsert** yet for that month; ingest does not populate `metrics_updated_`* on KPI rows today.                                                                                                                                                                                                      |
 
 
 ---
@@ -230,4 +238,4 @@ Do not assume those equal **finance ledger** `rev_actual` without an explicit bu
 
 ---
 
-*Generated to match repository behavior as of the date this file was added; if logic changes, update this document in the same PR.*
+*Revenue/CM duplicate merge policy was updated to **sum** (not max) so portfolio CM% matches tall-ledger / Excel **Σ** roll-ups; see §4 and §6. If logic changes again, update this document in the same PR.*

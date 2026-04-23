@@ -16,7 +16,7 @@ import { Bar } from "react-chartjs-2";
 import { Menu } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { financeStatsVm, type FinanceRowVm } from "@/lib/view-models/finance";
-import { fiscalYearStart, parseMonthSort } from "@/lib/dashboard-aggregates";
+import { fiscalYearStart, parseMonthSort, sumUnbilledLatestMonthPerProject } from "@/lib/dashboard-aggregates";
 import "@/styles/finance-exec-dashboard.css";
 
 ChartJS.register(
@@ -71,7 +71,7 @@ function aggregateStatsFromRows(rs: FinanceRowVm[]): FinanceStats {
   const revenue_forecast_inr = rs.reduce((a, r) => a + (r.rev_forecast_inr ?? 0), 0);
   const revenue_actual_inr = rs.reduce((a, r) => a + (r.rev_actual_inr ?? 0), 0);
   const total_cm_inr = rs.reduce((a, r) => a + (r.cm_actual_inr ?? 0), 0);
-  const total_unbilled_inr = rs.reduce((a, r) => a + (r.unbilled_inr ?? 0), 0);
+  const total_unbilled_inr = sumUnbilledLatestMonthPerProject(rs);
   const total_collected_inr = rs.reduce((a, r) => a + (r.collected_inr ?? 0), 0);
   const total_bad_debt_inr = rs.reduce((a, r) => a + (r.bad_debt_inr ?? 0), 0);
   const total_collection_target_inr = rs.reduce((a, r) => a + (r.collection_target_inr ?? 0), 0);

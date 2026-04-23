@@ -11,11 +11,14 @@ This note records the React SLA experience updates that align the in-app **SLA P
 ## Files touched
 
 
-| Area                                 | Path                                          |
-| ------------------------------------ | --------------------------------------------- |
-| SLA page shell & views               | `frontend/src/pages/SLAPerformance.tsx`       |
-| Shared chart primitives              | `frontend/src/components/platform/Charts.tsx` |
-| Scoped layout / tokens for SLA shell | `frontend/src/styles/sla-dash-ui.css`         |
+| Area                                 | Path                                                       |
+| ------------------------------------ | ---------------------------------------------------------- |
+| SLA page shell & views               | `frontend/src/pages/SLAPerformance.tsx`                    |
+| RAG status → met / breached / NR     | `frontend/src/lib/sla-rag.ts`                              |
+| FY P1/P2 month sets (data-driven)    | `frontend/src/lib/sla-fy.ts`                               |
+| SLA timeseries RAG + stats (API)     | `backend/core/sla_period.py`, `backend/main.py` (`/sla/*`) |
+| Shared chart primitives              | `frontend/src/components/platform/Charts.tsx`              |
+| Scoped layout / tokens for SLA shell | `frontend/src/styles/sla-dash-ui.css`                      |
 
 
 ## New chart components (`Charts.tsx`)
@@ -60,9 +63,25 @@ Existing exports such as `SlaTimeSeriesChart`, `SlaComplianceBar`, and `SlaFyCom
 
 Scoped under `**.sla-dash-scope`** so SLA-specific layout (sidebar, topbar, cards, metric grid, rank grid) does not leak globally. Theme follows platform tokens used elsewhere.
 
-## FY period logic
+## FY period logic (updated April 2026)
 
-Indian FY and calendar presets for P1/P2 remain in `frontend/src/lib/sla-fy.ts` (`periodMonthSet`, `formatPeriodLabelShort`, `aggregatePeriod`). Charts that compare two windows depend on months present in **`/sla/timeseries`** payloads.
+- **P1 / P2 month sets are data-driven** — no longer hard-coded to 2024–2026. `frontend/src/lib/sla-fy.ts` exports `periodMonthSetsFromData()` and `formatPeriodLabelShortFromData` / `formatPeriodColumnHeaderFromData()`. The UI derives **two comparison windows** from `**/sla/timeseries`**:
+  - **Indian FY:** P2 = the Indian fiscal year (Apr–Mar) that **contains the latest** `YYYY-MM` in the time-series; P1 = the **previous** Indian FY.
+  - **Calendar year:** P2 = the **calendar year** of that latest month; P1 = the **previous** year.
+- **Roll-ups** still use `aggregatePeriod(timeline, monthSet)`.
+
+## RAG status and template `08_sla` (April 2026)
+
+Upload templates (`excel_upload_masters/column_dropdowns.py`) allow `**rag_status`** values such as **Green, Amber, Red, Grey, N/A, RAG_G, RAG_A, RAG_R** — not only “Met” / “Not Met”. The legacy UI and API only treated **exact `met` (lowercase)** and strings containing **“not met”** as met/breached, so **RAG colours were all classified as “not reported”** and FY charts had **no met/not-met denominator**.
+
+**Normalisation (aligned front + back):**
+
+- `**backend/core/sla_period.py` — `bucket_sla_rag()`**  
+Maps stored `rag_status` to `**met` / `not_met` / `not_reported`** for `/sla/timeseries`, `/sla/account-metrics-timeseries`, and `/sla/stats` (including systemic-risk counts). Met-like: `met`, `green`, `rag_g`. Breach / warning: `not met` (any casing), `red`, `amber`, `yellow`, `rag_r`, `rag_a`, `breach`, `breached`, `not_met`. Unreported: empty, `n/a`, `grey`/`gray`, `nan`, etc.
+- `**frontend/src/lib/sla-rag.ts**` — `slaRagUiBucket` / `slaRagDisplayLabel`  
+Same business rules for the **SLA Performance** table, KPI cards, and filters (`SLAPerformance` imports these instead of ad-hoc string checks).
+
+After this change, **manual uploads** of `08_sla` with Green/Amber/Red should show correct **Met / Breached / Not reported** split and **FY comparison charts** for whatever years appear in the data (subject to valid `period_start` / `reporting_month` in the API).
 
 ## Benchmarking caveat
 
@@ -88,4 +107,4 @@ This branch also carries the rest of the workspace updates that were in flight a
 
 ---
 
-*Last updated: March 2026 — SLA Performance / chart parity plus related frontend, backend, and reference dashboard assets on this branch.*
+*Last updated: April 2026 — RAG bucketing (template 08 + API), data-driven FY P1/P2; earlier March 2026 note covered SLA Performance / chart parity and reference assets on this branch.*

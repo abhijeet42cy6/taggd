@@ -139,10 +139,7 @@ export const Dashboard = () => {
   const [drawerClient, setDrawerClient] = useState<string | null>(null);
   const [heatmapFullOpen, setHeatmapFullOpen] = useState(false);
   const [filters, setFilters] = useState<DF>(DEFAULT_DASHBOARD_FILTERS);
-  const [fyCompare, setFyCompare] = useState(true);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
-  /** null = auto-pick most recent FY in data that is &lt; selected primary FY */
-  const [compareFyOverride, setCompareFyOverride] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -215,35 +212,16 @@ export const Dashboard = () => {
     }
   }, [fyYears, selectedFyStart]);
 
-  useEffect(() => {
-    if (
-      compareFyOverride != null &&
-      (compareFyOverride === selectedFyStart || !fyYears.includes(compareFyOverride))
-    ) {
-      setCompareFyOverride(null);
-    }
-  }, [selectedFyStart, compareFyOverride, fyYears]);
-
   const filteredRows = useMemo(() => filterFinanceRows(financeRows, projects, filters), [financeRows, projects, filters]);
 
+  /** Prior FY for YoY (same rule as CEO's View). */
   const autoCompareFy = useMemo(() => {
     const older = fyYears.filter((y) => y < selectedFyStart).sort((a, b) => b - a);
     if (older.length) return older[0];
     return selectedFyStart - 1;
   }, [fyYears, selectedFyStart]);
 
-  const effectiveCompareFy = useMemo(() => {
-    if (
-      compareFyOverride != null &&
-      fyYears.includes(compareFyOverride) &&
-      compareFyOverride !== selectedFyStart
-    ) {
-      return compareFyOverride;
-    }
-    return autoCompareFy;
-  }, [compareFyOverride, fyYears, selectedFyStart, autoCompareFy]);
-
-  const compareFyLabel = fyShortLabel(effectiveCompareFy);
+  const compareFyLabel = fyShortLabel(autoCompareFy);
 
   const kpiRows = useMemo(() => {
     if (!fyYears.length) return filteredRows;
@@ -257,9 +235,9 @@ export const Dashboard = () => {
     if (!fyYears.length) return [] as FinanceRowVm[];
     return filteredRows.filter((r) => {
       const d = parseMonthSort(r.month_sort);
-      return d && fiscalYearStart(d) === effectiveCompareFy;
+      return d && fiscalYearStart(d) === autoCompareFy;
     });
-  }, [filteredRows, fyYears.length, effectiveCompareFy]);
+  }, [filteredRows, fyYears.length, autoCompareFy]);
 
   const priorFinance = useMemo(() => aggregateFinanceFromRows(priorKpiRows), [priorKpiRows]);
 
@@ -270,8 +248,8 @@ export const Dashboard = () => {
   }, [kpiRows, financeStatsApi]);
 
   const { revenue: yoyRev, cm: yoyCm } = useMemo(
-    () => buildYoYRevenueSeries(filteredRows, selectedFyStart, effectiveCompareFy),
-    [filteredRows, selectedFyStart, effectiveCompareFy],
+    () => buildYoYRevenueSeries(filteredRows, selectedFyStart, autoCompareFy),
+    [filteredRows, selectedFyStart, autoCompareFy],
   );
 
   const priorFYTotalCr = (priorFinance?.revenue_actual_inr ?? 0) / 1e7;
@@ -370,45 +348,8 @@ export const Dashboard = () => {
           <div className="exec-controls__meta">
             {stats?.total_projects ?? "—"} clients &nbsp;·&nbsp;{" "}
             {(reqKpis?.total_records ?? stats?.total_records ?? 0).toLocaleString()} requisitions
+            &nbsp;·&nbsp; {fyShortLabel(selectedFyStart)}
             &nbsp;·&nbsp; Finance · SLA · WFM
-          </div>
-        </div>
-        <div className="exec-controls__right">
-          <span className="exec-fy-label">Compare FY</span>
-          <button
-            type="button"
-            className={`platform-chip${fyCompare ? " active" : ""}`}
-            onClick={() => setFyCompare((v) => !v)}
-          >
-            {fyCompare ? "YoY: On" : "YoY: Off"}
-          </button>
-          <select
-            className="exec-compare-select"
-            aria-label="Comparison fiscal year"
-            value={compareFyOverride ?? ""}
-            onChange={(e) => setCompareFyOverride(e.target.value === "" ? null : Number(e.target.value))}
-            disabled={!fyCompare || fyYears.filter((y) => y !== selectedFyStart).length === 0}
-          >
-            <option value="">Auto ({fyShortLabel(autoCompareFy)})</option>
-            {fyYears
-              .filter((y) => y !== selectedFyStart)
-              .map((y) => (
-                <option key={y} value={y}>
-                  {fyShortLabel(y)}
-                </option>
-              ))}
-          </select>
-          <div style={{ display: "flex", gap: 4 }}>
-            {fyYears.map((y) => (
-              <button
-                key={y}
-                type="button"
-                className={`platform-chip${selectedFyStart === y ? " active" : ""}`}
-                onClick={() => setSelectedFyStart(y)}
-              >
-                {fyShortLabel(y)}
-              </button>
-            ))}
           </div>
         </div>
       </div>
@@ -417,7 +358,15 @@ export const Dashboard = () => {
 
       {/* ── Filters ── */}
       <div className="exec-filter-bar">
-        <DashboardFilters value={filters} onChange={setFilters} projects={projects} />
+        <DashboardFilters
+          value={filters}
+          onChange={setFilters}
+          projects={projects}
+          fyYears={fyYears}
+          selectedFyStart={selectedFyStart}
+          onFyChange={setSelectedFyStart}
+          fySelectDisabled={loadingCore}
+        />
       </div>
 
       {/* ══ SECTION: THE MONEY ══ */}
@@ -433,7 +382,7 @@ export const Dashboard = () => {
             variant="orange"
             primary={formatLargeCurrency(revA)}
             deltas={[
-              fyCompare && priorFinance && priorFinance.revenue_actual_inr > 0
+              priorFinance && priorFinance.revenue_actual_inr > 0
                 ? yoyDelta(revA, priorFinance.revenue_actual_inr)
                 : null,
             ].filter(Boolean) as { label: string; cls: string }[]}
@@ -441,7 +390,7 @@ export const Dashboard = () => {
             attainmentPct={revAtt}
             meta={[
               { label: "Full-year forecast", value: formatLargeCurrency(displayFinance?.revenue_forecast_inr ?? 0) },
-              ...(fyCompare && priorFinance
+              ...(priorFinance
                 ? [{ label: `${compareFyLabel} Actual`, value: formatLargeCurrency(priorFinance.revenue_actual_inr) }]
                 : []),
               ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
@@ -459,7 +408,7 @@ export const Dashboard = () => {
               cmPct >= 35
                 ? { label: `+${(cmPct - 35).toFixed(1)} pp vs target`, cls: "exec-delta-chip--green" }
                 : { label: `${(cmPct - 35).toFixed(1)} pp vs target`, cls: "exec-delta-chip--red" },
-              ...(fyCompare && cmPriorPct != null
+              ...(cmPriorPct != null
                 ? [
                     cmPct >= cmPriorPct
                       ? { label: `▲ ${(cmPct - cmPriorPct).toFixed(1)} pp YoY`, cls: "exec-delta-chip--green" }
@@ -471,10 +420,9 @@ export const Dashboard = () => {
             attainmentPct={(cmPct / 35) * 100}
             meta={[
               { label: "Target CM%", value: "35.0%" },
-              ...(fyCompare && cmPriorPct != null
+              ...(cmPriorPct != null
                 ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(cmPriorPct) }]
                 : []),
-              { label: "CM value", value: formatLargeCurrency(displayFinance?.total_cm_inr ?? 0) },
             ]}
           >
             <QuarterBand quarters={cmQuarters} variant="teal" />
@@ -486,7 +434,7 @@ export const Dashboard = () => {
             variant="blue"
             primary={formatLargeCurrency(coll)}
             deltas={[
-              fyCompare && priorFinance && priorFinance.total_collected_inr > 0
+              priorFinance && priorFinance.total_collected_inr > 0
                 ? yoyDelta(coll, priorFinance.total_collected_inr)
                 : null,
               collAtt >= 90
@@ -496,11 +444,6 @@ export const Dashboard = () => {
             attainmentLabel={`vs ₹ Target ${formatLargeCurrency(ct)}`}
             attainmentPct={collAtt}
             meta={[
-              {
-                label: "Pending",
-                value: formatLargeCurrency(displayFinance?.collection_pending_inr ?? Math.max(0, ct - coll)),
-                valueCls: "amber",
-              },
               {
                 label: "Unbilled",
                 value: `${formatPercent(unbPctRev)} of rev · ${formatLargeCurrency(unb)}`,
@@ -605,7 +548,7 @@ export const Dashboard = () => {
       <div className="exec-charts">
         <SectionCard
           tag="Finance"
-          title={`Monthly Revenue — Actual vs Budget vs Forecast${fyCompare ? ` vs ${compareFyLabel}` : ""}`}
+          title={`Monthly Revenue — Actual vs Budget vs Forecast vs ${compareFyLabel}`}
           noPad
         >
           <div style={{ padding: "16px 20px" }}>
@@ -613,20 +556,20 @@ export const Dashboard = () => {
               <div className="exec-empty">No finance data for current filters</div>
             ) : (
               <ExecutiveRevenueYoYChart
-                data={fyCompare ? yoyRev : yoyRev.map((p) => ({ ...p, priorActual: 0 }))}
+                data={yoyRev}
                 priorLabel={`${compareFyLabel} Actual`}
               />
             )}
           </div>
         </SectionCard>
 
-        <SectionCard tag="Margin" title={`CM% — ${fyShortLabel(selectedFyStart)}${fyCompare ? ` vs ${compareFyLabel}` : ""}`} noPad>
+        <SectionCard tag="Margin" title={`CM% — ${fyShortLabel(selectedFyStart)} vs ${compareFyLabel}`} noPad>
           <div style={{ padding: "16px 20px" }}>
             {yoyCm.length === 0 || !filteredRows.length ? (
               <div className="exec-empty">No CM data</div>
             ) : (
               <ExecutiveCmYoYChart
-                data={fyCompare ? yoyCm : yoyCm.map((p) => ({ ...p, priorActualPct: 0 }))}
+                data={yoyCm}
                 compareLabel={`CM% (${compareFyLabel})`}
               />
             )}
@@ -699,8 +642,8 @@ export const Dashboard = () => {
         <div className="exec-section-label">Portfolio monitor and pipeline</div>
         <p className="exec-monitor-section__intro">
           Client risk columns (Finance, SLA, WFM, Hiring), intervention cards, and the hiring-manager table
-          use portfolio monitor and requisition heuristics. They are not tied to the fiscal year chips,
-          compare-year selector, or finance ledger uploads above.
+          use portfolio monitor and requisition heuristics. They are not scoped to the fiscal year or account
+          filters on the finance ledger above.
         </p>
 
         <div className="exec-intel">

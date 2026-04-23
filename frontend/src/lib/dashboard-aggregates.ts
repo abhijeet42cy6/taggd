@@ -28,22 +28,39 @@ export const DEFAULT_DASHBOARD_FILTERS: DashboardFilters = {
   account: "all",
 };
 
+/**
+ * Indian FY start year from a calendar day (e.g. Apr 2025 → 2025, Mar 2025 → 2024).
+ * Uses **UTC** month/day so `month_sort` from the API (YYYY-MM-DD) does not depend on
+ * the browser’s local timezone (avoids April → March shifts in US timezones).
+ */
 export function fiscalYearStart(d: Date): number {
-  const y = d.getFullYear();
-  const m = d.getMonth();
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
   return m >= 3 ? y : y - 1;
 }
 
-/** 0 = Apr … 11 = Mar */
+/** 0 = Apr … 11 = Mar (Indian FY), UTC calendar. */
 export function monthIndexInFY(d: Date): number {
-  const m = d.getMonth();
+  const m = d.getUTCMonth();
   if (m >= 3) return m - 3;
   return m + 9;
 }
 
+const _ISO_YMD = /^(\d{4})-(\d{2})-(\d{2})/;
+
 export function parseMonthSort(iso?: string): Date | null {
   if (!iso) return null;
-  const d = new Date(iso);
+  const t = String(iso).trim();
+  const m = _ISO_YMD.exec(t);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const day = Number(m[3]);
+    if (Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(day)) {
+      return new Date(Date.UTC(y, mo - 1, day));
+    }
+  }
+  const d = new Date(t);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
@@ -317,6 +334,31 @@ export function sumPriorFYActual(yoy: YoYRevPoint[]): number {
   return yoy.reduce((s, p) => s + p.priorActual, 0);
 }
 
+/**
+ * Certain template uploads have unbilled values accidentally scaled by 1e5.
+ * If a row-level unbilled value is implausibly large (>= 1e9 INR), treat it as
+ * over-scaled and downscale by 1e5 before roll-up.
+ */
+function normalizeUnbilledInr(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  if (Math.abs(v) >= 1_000_000_000) return v / 100000;
+  return v;
+}
+
+/** Requested business rule: aggregate unbilled as sum across FY months. */
+export function sumUnbilledAllMonths(rows: FinanceRowVm[]): number {
+  let total = 0;
+  for (const r of rows) {
+    total += normalizeUnbilledInr(Number(r.unbilled_inr ?? 0) || 0);
+  }
+  return total;
+}
+
+/** Backward-compatible export used by finance components. */
+export function sumUnbilledLatestMonthPerProject(rows: FinanceRowVm[]): number {
+  return sumUnbilledAllMonths(rows);
+}
+
 /** Sum ledger rows (same units as API: INR). */
 export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
   revenue_budget_inr: number;
@@ -345,11 +387,11 @@ export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
     revF += r.rev_forecast_inr;
     revA += r.rev_actual_inr;
     cm += r.cm_actual_inr;
-    unb += r.unbilled_inr;
     bd += r.bad_debt_inr;
     coll += r.collected_inr ?? 0;
     ct += r.collection_target_inr;
   }
+  unb = sumUnbilledAllMonths(rows);
   const rev_attainment = revB > 0 ? (revA / revB) * 100 : 0;
   const collection_efficiency = coll + unb > 0 ? (coll / (coll + unb)) * 100 : 0;
   const collection_pending_inr = ct - coll;
