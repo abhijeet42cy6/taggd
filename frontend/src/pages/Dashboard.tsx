@@ -21,6 +21,8 @@ import {
   buildExecutiveSummary,
   aggregateFinanceFromRows,
   quarterlyPlanActualForFy,
+  quarterlyCollectionForFy,
+  quarterlyCmForFy,
   fiscalYearStart,
   parseMonthSort,
   type DashboardFilters as DF,
@@ -63,6 +65,44 @@ function worstDomain(p: { positions: number; closed: number; on_hold: number; re
 
 /* ── Sub-components ── */
 
+type QuarterPoint = { q: string; planInr: number; actualInr: number };
+
+/** Mini Q1–Q4 plan vs actual bars (same pattern as revenue). */
+function QuarterBand({
+  quarters,
+  variant = "orange",
+}: {
+  quarters: QuarterPoint[];
+  variant?: "orange" | "teal" | "blue";
+}) {
+  if (!quarters.some((q) => q.planInr > 0 || q.actualInr > 0)) return null;
+  const maxScale = Math.max(1, ...quarters.map((q) => Math.max(q.planInr, q.actualInr)));
+  return (
+    <div className={`exec-quarter-band exec-quarter-band--${variant}`}>
+      {quarters.map((q) => {
+        const planH = Math.max(3, (q.planInr / maxScale) * 28);
+        const actH = q.actualInr > 0 ? Math.max(0, (q.actualInr / maxScale) * 28) : 0;
+        const onTrack = q.planInr > 0 ? q.actualInr + 1 >= q.planInr : q.actualInr > 0;
+        return (
+          <div key={q.q} className="exec-quarter-col">
+            <div className="exec-quarter-col__bars">
+              <div className="exec-quarter-col__bar-plan" style={{ height: planH }} />
+              {q.actualInr > 0 && (
+                <div
+                  className={`exec-quarter-col__bar-actual exec-quarter-col__bar-actual--${onTrack ? "on" : "off"}`}
+                  style={{ height: actH }}
+                />
+              )}
+            </div>
+            <div className="exec-quarter-col__label">{q.q}</div>
+            <div className="exec-quarter-col__val">{formatLargeCurrency(q.actualInr || q.planInr)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function HeroCard({
   eyebrow,
   variant,
@@ -80,6 +120,7 @@ function HeroCard({
   attainmentLabel?: string;
   attainmentPct?: number;
   meta?: { label: string; value: React.ReactNode; valueCls?: string }[];
+  /** Placed after attainment, before meta (e.g. quarter band). */
   children?: React.ReactNode;
 }) {
   const att = attainmentPct ?? 0;
@@ -343,6 +384,11 @@ export const Dashboard = () => {
   const priorFYTotalCr = (priorFinance?.revenue_actual_inr ?? 0) / 1e7;
 
   const revQuarters = useMemo(() => quarterlyPlanActualForFy(kpiRows, selectedFyStart), [kpiRows, selectedFyStart]);
+  const collQuarters = useMemo(
+    () => quarterlyCollectionForFy(kpiRows, selectedFyStart),
+    [kpiRows, selectedFyStart],
+  );
+  const cmQuarters = useMemo(() => quarterlyCmForFy(kpiRows, selectedFyStart), [kpiRows, selectedFyStart]);
 
   const regional = useMemo(() => buildRegionalRevenue(filteredRows, projects), [filteredRows, projects]);
 
@@ -401,35 +447,6 @@ export const Dashboard = () => {
   const bdPctColl = coll > 0 ? (bd / coll) * 100 : 0;
   const collAtt = ct > 0 ? (coll / ct) * 100 : 0;
   const revAtt = displayFinance?.rev_attainment ?? 0;
-
-  /* ── Quarter chart ── */
-  const maxQPlan = Math.max(...revQuarters.map((q) => q.planInr), 1);
-
-  const quarterBandContent =
-    revQuarters.some((q) => q.planInr > 0 || q.actualInr > 0) ? (
-      <div className="exec-quarter-band">
-        {revQuarters.map((q) => {
-          const planH = Math.max(4, (q.planInr / maxQPlan) * 28);
-          const actH = Math.max(0, (q.actualInr / maxQPlan) * 28);
-          const onTrack = q.actualInr + 1 >= q.planInr;
-          return (
-            <div key={q.q} className="exec-quarter-col">
-              <div className="exec-quarter-col__bars">
-                <div className="exec-quarter-col__bar-plan" style={{ height: planH }} />
-                {q.actualInr > 0 && (
-                  <div
-                    className={`exec-quarter-col__bar-actual exec-quarter-col__bar-actual--${onTrack ? "on" : "off"}`}
-                    style={{ height: actH }}
-                  />
-                )}
-              </div>
-              <div className="exec-quarter-col__label">{q.q}</div>
-              <div className="exec-quarter-col__val">{formatLargeCurrency(q.actualInr || q.planInr)}</div>
-            </div>
-          );
-        })}
-      </div>
-    ) : null;
 
   /* ── Risk colour helpers ── */
   function riskDotCls(color: "green" | "amber" | "red"): string {
@@ -537,7 +554,7 @@ export const Dashboard = () => {
               ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
             ]}
           >
-            {quarterBandContent}
+            <QuarterBand quarters={revQuarters} variant="orange" />
           </HeroCard>
 
           {/* CM% */}
@@ -566,7 +583,9 @@ export const Dashboard = () => {
                 : []),
               { label: "CM value", value: formatLargeCurrency(displayFinance?.total_cm_inr ?? 0) },
             ]}
-          />
+          >
+            <QuarterBand quarters={cmQuarters} variant="teal" />
+          </HeroCard>
 
           {/* Collection */}
           <HeroCard
@@ -597,7 +616,9 @@ export const Dashboard = () => {
               { label: "Bad debt", value: formatLargeCurrency(bd), valueCls: bd > 0 ? "red" : undefined },
               { label: "Bad debt % coll.", value: formatPercent(bdPctColl) },
             ]}
-          />
+          >
+            <QuarterBand quarters={collQuarters} variant="blue" />
+          </HeroCard>
         </div>
       )}
 

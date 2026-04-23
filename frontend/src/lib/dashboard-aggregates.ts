@@ -393,3 +393,60 @@ export function quarterlyPlanActualForFy(
     actualInr: b.actual,
   }));
 }
+
+/** Q1–Q4 collection target vs collected for one Indian FY. */
+export function quarterlyCollectionForFy(
+  rows: FinanceRowVm[],
+  fyStart: number,
+): { q: string; planInr: number; actualInr: number }[] {
+  const buckets = [
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+  ];
+  for (const r of rows) {
+    const d = parseMonthSort(r.month_sort);
+    if (!d || fiscalYearStart(d) !== fyStart) continue;
+    const mi = monthIndexInFY(d);
+    const qi = mi <= 2 ? 0 : mi <= 5 ? 1 : mi <= 8 ? 2 : 3;
+    buckets[qi].plan += r.collection_target_inr ?? 0;
+    buckets[qi].actual += r.collected_inr ?? 0;
+  }
+  return buckets.map((b, i) => ({
+    q: `Q${i + 1}`,
+    planInr: b.plan,
+    actualInr: b.actual,
+  }));
+}
+
+const CM_TARGET_PCT = 0.35;
+
+/**
+ * Q1–Q4 contribution margin: “plan” = 35% of revenue budget in the quarter (INR);
+ * “actual” = sum of cm_actual_inr. Matches the exec CM% 35% target in rupee terms.
+ */
+export function quarterlyCmForFy(
+  rows: FinanceRowVm[],
+  fyStart: number,
+): { q: string; planInr: number; actualInr: number }[] {
+  const buckets = [
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+    { plan: 0, actual: 0 },
+  ];
+  for (const r of rows) {
+    const d = parseMonthSort(r.month_sort);
+    if (!d || fiscalYearStart(d) !== fyStart) continue;
+    const mi = monthIndexInFY(d);
+    const qi = mi <= 2 ? 0 : mi <= 5 ? 1 : mi <= 8 ? 2 : 3;
+    buckets[qi].plan += CM_TARGET_PCT * (r.rev_budget_inr ?? 0);
+    buckets[qi].actual += r.cm_actual_inr ?? 0;
+  }
+  return buckets.map((b, i) => ({
+    q: `Q${i + 1}`,
+    planInr: b.plan,
+    actualInr: b.actual,
+  }));
+}

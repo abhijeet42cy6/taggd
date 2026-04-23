@@ -20,7 +20,13 @@ sys.path.insert(0, ROOT)
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 from backend.db import database as db
+
+_EXCEL_DIR = os.path.dirname(os.path.abspath(__file__))
+if _EXCEL_DIR not in sys.path:
+    sys.path.insert(0, _EXCEL_DIR)
+from column_dropdowns import get_dropdown_options
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -148,13 +154,48 @@ SENSITIVE_COLUMNS = {
     "password_hash": "Do not store plaintext. Leave blank for invite-only, or use bcrypt hash if importing via tool.",
 }
 
+DATA_START_ROW = 3
+MAX_DATA_ROWS = 5000
+LIST_CACHE_MAX = 200  # avoid Excel / performance issues for huge inline ranges
+
+
+class _ListAllocator:
+    """Hidden `lists` sheet: one column per *unique* option list, reused when identical."""
+
+    def __init__(self, wb: Workbook) -> None:
+        self._wb = wb
+        if "lists" in wb.sheetnames:
+            self._ws = wb["lists"]
+        else:
+            self._ws = wb.create_sheet("lists")
+            self._ws.sheet_state = "hidden"
+        self._col = 0
+        self._cache: dict[tuple[str, ...], str] = {}
+
+    def ref_for(self, options: list[str]) -> str | None:
+        if not options or len(options) > LIST_CACHE_MAX:
+            return None
+        key = tuple(str(x) if x is not None else "" for x in options)
+        if key in self._cache:
+            return self._cache[key]
+        self._col += 1
+        c = self._col
+        for i, v in enumerate(options, start=1):
+            val = v if (v is not None and v != "") else None
+            self._ws.cell(row=i, column=c, value=val)
+        lo = get_column_letter(c)
+        n = len(options)
+        ref = f"lists!${lo}$1:${lo}${n}"
+        self._cache[key] = ref
+        return ref
+
 
 def _columns_for_model(model) -> list[str]:
     # Table column order matches physical / migration order in SQLite.
     return [c.key for c in model.__table__.columns]
 
 
-def _build_sheet(wb: Workbook, model, sheet_name: str) -> None:
+def _build_sheet(wb: Workbook, model, sheet_name: str, list_alloc: _ListAllocator) -> None:
     ws = wb.create_sheet(title=sheet_name[:31])  # Excel limit
     table = model.__table__
     cols = _columns_for_model(model)
@@ -166,15 +207,39 @@ def _build_sheet(wb: Workbook, model, sheet_name: str) -> None:
         note = SENSITIVE_COLUMNS.get(col, "")
         if "json" in col.lower() or col.endswith("_json"):
             note = (note + " | JSON (object/array as text). ").strip(" |")
-        col_type = str(table.c[col].type)
+        col_t = table.c[col].type
+        col_type = str(col_t)
         if col.endswith("_at") or col.endswith("_date") or "DATETIME" in col_type or "DateTime" in col_type:
             if not note:
                 note = "Date/datetime — ISO-8601 or Excel date"
         if "JSON" in col_type and "json" not in col.lower():
             note = (note + " | JSON. ").strip(" |")
+        opts = get_dropdown_options(model, col, col_t)
+        if opts:
+            note = (note + " | Pick from list (dropdown)").strip(" |")
         ws.cell(row=2, column=j, value=note)
         ws.cell(row=2, column=j).font = NOTE_FONT
-    ws.freeze_panes = "A3"
+    ws.freeze_panes = f"A{DATA_START_ROW}"
+    for j, col in enumerate(cols, start=1):
+        col_t = table.c[col].type
+        opts = get_dropdown_options(model, col, col_t)
+        if not opts:
+            continue
+        ref = list_alloc.ref_for(opts)
+        if not ref:
+            continue
+        lo = get_column_letter(j)
+        cr = f"{lo}{DATA_START_ROW}:{lo}{DATA_START_ROW + MAX_DATA_ROWS - 1}"
+        dv = DataValidation(
+            type="list",
+            formula1=f"={ref}",
+            allow_blank=True,
+            showErrorMessage=True,
+            errorTitle="Invalid value",
+            error="Choose a value from the list, or clear the cell.",
+        )
+        ws.add_data_validation(dv)
+        dv.add(cr)
     # Widen a bit
     for j in range(1, min(len(cols) + 1, 30)):
         ws.column_dimensions[get_column_letter(j)].width = 18
@@ -187,9 +252,10 @@ def main() -> None:
         # remove default sheet
         default = wb.active
         wb.remove(default)
+        list_alloc = _ListAllocator(wb)
         for sheet_label, model in sheets:
             safe_name = sheet_label[:31]
-            _build_sheet(wb, model, safe_name)
+            _build_sheet(wb, model, safe_name, list_alloc)
         if not wb.sheetnames:
             continue
         path = os.path.join(OUT_DIR, f"{stem}.xlsx")

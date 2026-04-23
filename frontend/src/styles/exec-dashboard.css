@@ -261,12 +261,26 @@
 .exec-hero-card__meta-val--red    { color: #b91c1c; }
 .exec-hero-card__meta-val--amber  { color: #92600a; }
 
-/* ── Quarter mini bars ── */
+/* ── Quarter mini bars (between attainment and meta on hero cards) ── */
+.exec-attainment + .exec-quarter-band {
+  margin-top: 4px;
+}
+.exec-quarter-band + .exec-hero-card__meta {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border2);
+}
 .exec-quarter-band {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   padding: 12px 0 4px;
+}
+.exec-hero-card--teal .exec-quarter-band--teal .exec-quarter-col__bar-actual--on {
+  background: var(--accent2) !important;
+}
+.exec-hero-card--blue .exec-quarter-band--blue .exec-quarter-col__bar-actual--on {
+  background: var(--blue) !important;
 }
 
 .exec-quarter-col {
