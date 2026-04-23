@@ -66,6 +66,31 @@ def _normalize_account_key(name: str) -> str:
     return s
 
 
+def _load_finance_sheet(xl: pd.ExcelFile, sheet: str) -> pd.DataFrame:
+    """Read sheet; if a summary row made column names wrong, retry with header=1."""
+    df = xl.parse(sheet)
+    if "Project" not in df.columns:
+        df = xl.parse(sheet, header=1)
+    return df
+
+
+def _coerce_excel_number(val) -> float | None:
+    """Return a float for numeric cells; None if the cell is a footnote / non-numeric (skip the cell)."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return 0.0
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return float(val)
+    if isinstance(val, str):
+        s = val.strip().replace(",", "")
+        if s in ("", "-", "—", "nan", "None"):
+            return 0.0
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    return None
+
+
 def get_month_date(month_str, fiscal_year_str):
     """
     Helper to convert month names and FY strings into actual datetimes.
@@ -141,8 +166,10 @@ def ingest_finance_master(file_path):
 
         # 1. Helper to find or create project (case-insensitive + whitespace — avoids TATA vs Tata duplicate rows)
         def get_project(account_name):
+            if account_name is None:
+                return None
             canon = _normalize_account_key(account_name)
-            if not canon or canon.lower() == "nan":
+            if not canon or canon.lower() in ("nan", "none"):
                 return None
 
             key = canon.lower()
@@ -188,7 +215,7 @@ def ingest_finance_master(file_path):
                 continue
             print(f"Processing ledger sheet «{sheet}» → {category} ({val_type})...")
             try:
-                df = xl.parse(sheet)
+                df = _load_finance_sheet(xl, sheet)
                 col_map = _month_column_map(df, months)
                 if not col_map:
                     print(f"  Warning: No month columns detected on «{sheet}»; skipping.")
@@ -209,7 +236,11 @@ def ingest_finance_master(file_path):
                         if not reporting_date:
                             continue
 
-                        val = float(row[excel_col]) if pd.notnull(row[excel_col]) else 0.0
+                        rawv = row[excel_col] if pd.notnull(row[excel_col]) else None
+                        cnum = _coerce_excel_number(rawv)
+                        if cnum is None:
+                            continue
+                        val = cnum
 
                         if 0 < abs(val) < 2000:
                             val *= 100000
@@ -275,7 +306,7 @@ def ingest_finance_master(file_path):
                 continue
             print(f"Processing cash flow «{sheet}» → {db_field}...")
             try:
-                df = xl.parse(sheet)
+                df = _load_finance_sheet(xl, sheet)
                 col_map = _month_column_map(df, months)
                 if not col_map:
                     print(f"  Warning: No month columns on «{sheet}»; skipping.")
@@ -295,7 +326,11 @@ def ingest_finance_master(file_path):
 
                         if not reporting_date:
                             continue
-                        val = float(row[excel_col]) if pd.notnull(row[excel_col]) else 0.0
+                        rawv = row[excel_col] if pd.notnull(row[excel_col]) else None
+                        cnum = _coerce_excel_number(rawv)
+                        if cnum is None:
+                            continue
+                        val = cnum
 
                         if 0 < abs(val) < 2000:
                             val *= 100000
@@ -367,7 +402,7 @@ def ingest_finance_master(file_path):
                 continue
             print(f"Ingesting KPI «{sheet}» → {db_field}...")
             try:
-                df = xl.parse(sheet)
+                df = _load_finance_sheet(xl, sheet)
                 col_map = _month_column_map(df, months)
                 if not col_map:
                     print(f"  Warning: No month columns on «{sheet}»; skipping.")
@@ -387,15 +422,11 @@ def ingest_finance_master(file_path):
 
                         if not reporting_date:
                             continue
-                        val = row[excel_col] if pd.notnull(row[excel_col]) else 0
-                        try:
-                            if isinstance(val, str):
-                                val = val.strip()
-                                if val == "" or val in ("-", "—"):
-                                    val = 0
-                            val = float(val)
-                        except (TypeError, ValueError):
-                            val = 0.0
+                        rawv = row[excel_col] if pd.notnull(row[excel_col]) else None
+                        cnum = _coerce_excel_number(rawv)
+                        if cnum is None:
+                            continue
+                        val = cnum
 
                         headcount_fields = (
                             "approved_headcount",

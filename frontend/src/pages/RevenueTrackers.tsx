@@ -12,6 +12,7 @@ import {
 import { canPracticeSubmitBilling, isProjectHeadLike, useAuth } from "@/lib/auth";
 import { formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { ExecutiveKpiCard } from "@/components/platform/ExecutiveKpiCard";
+import { VisibilityChartProjectPicker } from "@/components/platform/VisibilityChartProjectPicker";
 import {
   Dialog,
   DialogContent,
@@ -35,10 +36,36 @@ import {
   Legend,
   BarChart,
 } from "recharts";
-import { Calendar, ChevronLeft, ChevronRight, RefreshCw, Plus, PencilLine } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, RefreshCw, Plus, PencilLine, Trash2 } from "lucide-react";
 import { WeeklyPackNcpSheet } from "@/components/platform/WeeklyPackNcpSheet";
 
 const LAKHS = 100_000;
+
+/** Pick up to n distinct project_ids without bias (Fisher–Yates partial shuffle). */
+function pickRandomProjectIds(projectIds: number[], n: number): number[] {
+  if (n <= 0 || projectIds.length === 0) return [];
+  const copy = [...projectIds];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, Math.min(n, copy.length));
+}
+
+/** Top N projects by joiners + yet-to-join (pipeline priority) in the as-of slice. */
+function pickTopPipelineProjectIds(rows: RevenueVisibilitySnapshotRow[], n: number): number[] {
+  if (n <= 0 || rows.length === 0) return [];
+  const byId = new Map<number, { id: number; score: number }>();
+  for (const r of rows) {
+    const score = (r.joiners_as_on_date || 0) + (r.yet_to_join || 0);
+    const cur = byId.get(r.project_id);
+    if (!cur || score > cur.score) {
+      byId.set(r.project_id, { id: r.project_id, score });
+    }
+  }
+  const list = [...byId.values()].sort((a, b) => b.score - a.score || a.id - b.id);
+  return list.slice(0, Math.min(n, list.length)).map((x) => x.id);
+}
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -153,25 +180,48 @@ function forecastMonthKey(r: RevenueForecastWeeklyRow): string {
 
 function statusDisplay(status: string | null | undefined): React.ReactNode {
   const s = (status || "").trim();
-  if (!s) return "—";
+  if (!s) {
+    return <span className="platform-table__status-empty">—</span>;
+  }
   const lower = s.toLowerCase();
   if (lower.includes("risk") || lower.includes("red") || lower.includes("at risk")) {
     return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <span aria-hidden>🔴</span>
-        <span>{s}</span>
+      <span className="platform-badge red">
+        <span className="platform-badge-dot" aria-hidden />
+        {s}
       </span>
     );
   }
-  if (lower.includes("on track") || lower.includes("green") || lower.includes("good")) {
+  if (lower.includes("on track") || lower.includes("on-track") || lower.includes("green") || lower.includes("good")) {
     return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <span aria-hidden>🟢</span>
-        <span>{s}</span>
+      <span className="platform-badge green">
+        <span className="platform-badge-dot" aria-hidden />
+        {s}
       </span>
     );
   }
-  return s;
+  if (lower.includes("pend") || lower.includes("hold") || lower.includes("wait")) {
+    return (
+      <span className="platform-badge amber">
+        <span className="platform-badge-dot" aria-hidden />
+        {s}
+      </span>
+    );
+  }
+  if (lower.includes("review")) {
+    return (
+      <span className="platform-badge blue">
+        <span className="platform-badge-dot" aria-hidden />
+        {s}
+      </span>
+    );
+  }
+  return (
+    <span className="platform-badge grey">
+      <span className="platform-badge-dot" aria-hidden />
+      {s}
+    </span>
+  );
 }
 
 const CHART_TOOLTIP = {
@@ -247,6 +297,10 @@ export function RevenueTrackers() {
   const [editForecastRow, setEditForecastRow] = useState<RevenueForecastWeeklyRow | null>(null);
   const [editVisibilityRow, setEditVisibilityRow] = useState<RevenueVisibilitySnapshotRow | null>(null);
 
+  /** Subset of project_ids for the "MMF vs gap" chart (defaults to 3 random per as-of slice). */
+  const [mmfChartProjectIds, setMmfChartProjectIds] = useState<number[]>([]);
+  /** Pipeline mix chart: defaults to 5 highest (joiners + YTJ) per as-of slice. */
+  const [pipelineChartProjectIds, setPipelineChartProjectIds] = useState<number[]>([]);
   const [mainTab, setMainTab] = useState<"Revenue visibility" | "Revenue forecast" | "My weekly packs">("Revenue visibility");
   const [governanceWeek, setGovernanceWeek] = useState(() => mondayYmd());
   const [weeklyPack, setWeeklyPack] = useState<RevenueWeeklyPackResponse | null>(null);
@@ -388,6 +442,50 @@ export function RevenueTrackers() {
     return visibility.filter((r) => r.as_of_date === effectiveAsOf);
   }, [visibility, effectiveAsOf]);
 
+  /** Unique projects in the current visibility as-of slice (for MMF vs gap chart filter). */
+  const visibilityProjectOptions = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of visibilityForCut) {
+      if (!m.has(r.project_id)) {
+        m.set(
+          r.project_id,
+          (r.account_name && String(r.account_name).trim()) || `PRJ-${r.project_id}`,
+        );
+      }
+    }
+    return [...m.entries()]
+      .map(([id, name]) => ({ id, name: name.length > 40 ? `${name.slice(0, 38)}…` : name }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }, [visibilityForCut]);
+
+  useEffect(() => {
+    const inSlice = new Set(visibilityForCut.map((r) => r.project_id));
+    const all = [...inSlice];
+    if (all.length === 0) {
+      setMmfChartProjectIds([]);
+      return;
+    }
+    setMmfChartProjectIds((prev) => {
+      const fromPrev = (prev && prev.length ? prev : []).filter((id) => inSlice.has(id));
+      if (fromPrev.length > 0) return fromPrev;
+      return pickRandomProjectIds(all, Math.min(3, all.length));
+    });
+  }, [visibilityForCut]);
+
+  useEffect(() => {
+    const inSlice = new Set(visibilityForCut.map((r) => r.project_id));
+    const all = [...inSlice];
+    if (all.length === 0) {
+      setPipelineChartProjectIds([]);
+      return;
+    }
+    setPipelineChartProjectIds((prev) => {
+      const fromPrev = (prev && prev.length ? prev : []).filter((id) => inSlice.has(id));
+      if (fromPrev.length > 0) return fromPrev;
+      return pickTopPipelineProjectIds(visibilityForCut, Math.min(5, all.length));
+    });
+  }, [visibilityForCut]);
+
   /** API returned no forecast/visibility rows — almost always project scope, not missing ingest. */
   const emptyScopeData = !loading && !err && forecast.length === 0 && visibility.length === 0;
   /** Forecast rows exist but no visibility snapshots in scope (ingest visibility workbook or check assignments). */
@@ -525,15 +623,45 @@ export function RevenueTrackers() {
     };
   }, [forecast]);
 
-  const chartVisibilityMmF = useMemo(
-    () =>
-      visibilityForCut.map((r) => ({
-        name: (r.account_name || `PRJ-${r.project_id}`).slice(0, 18),
+  const chartVisibilityMmF = useMemo(() => {
+    const selected = new Set(mmfChartProjectIds);
+    return visibilityForCut
+      .filter((r) => selected.has(r.project_id))
+      .map((r) => ({
+        name: (r.account_name || `PRJ-${r.project_id}`).slice(0, 24),
         mmf: (r.mmf_inr || 0) / LAKHS,
         gap: (r.gap_to_mmf_inr || 0) / LAKHS,
-      })),
-    [visibilityForCut],
-  );
+      }));
+  }, [visibilityForCut, mmfChartProjectIds]);
+
+  const mmfChartYMax = useMemo(() => {
+    let m = 0;
+    for (const d of chartVisibilityMmF) {
+      m = Math.max(m, d.mmf, d.gap);
+    }
+    if (m <= 0) return 1;
+    return m * 1.12;
+  }, [chartVisibilityMmF]);
+
+  const chartVisibilityPipeline = useMemo(() => {
+    const selected = new Set(pipelineChartProjectIds);
+    return visibilityForCut
+      .filter((r) => selected.has(r.project_id))
+      .map((r) => ({
+        name: (r.account_name || `PRJ-${r.project_id}`).slice(0, 20),
+        joiners: r.joiners_as_on_date || 0,
+        ytj: r.yet_to_join || 0,
+      }));
+  }, [visibilityForCut, pipelineChartProjectIds]);
+
+  const pipelineChartYMax = useMemo(() => {
+    let m = 0;
+    for (const d of chartVisibilityPipeline) {
+      m = Math.max(m, d.joiners + d.ytj);
+    }
+    if (m <= 0) return 1;
+    return m * 1.12;
+  }, [chartVisibilityPipeline]);
 
   const chartForecastTrend = useMemo(
     () =>
@@ -1047,50 +1175,144 @@ export function RevenueTrackers() {
           {/* Charts */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
             <div className="platform-card" style={{ padding: 14 }}>
-              <div className="rt-section-hd" style={{ marginTop: 0 }}>
-                <div>
+              <div className="rt-section-hd" style={{ marginTop: 0, alignItems: "flex-start", gap: 10 }}>
+                <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                   <div className="rt-section-title">MMF vs gap</div>
-                  <div className="rt-section-sub">₹ Lakhs by project</div>
+                  <div className="rt-section-sub">₹ Lakhs by project — use the list to add or remove projects</div>
                 </div>
+                {visibilityProjectOptions.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4, flex: "0 1 220px" }}>
+                    <div
+                      className="rt-section-sub"
+                      style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.06em" }}
+                    >
+                      Projects in chart
+                    </div>
+                    <VisibilityChartProjectPicker
+                      options={visibilityProjectOptions}
+                      selectedIds={mmfChartProjectIds}
+                      onChange={setMmfChartProjectIds}
+                      resampleWhenEmpty={() => {
+                        const all = visibilityProjectOptions.map((o) => o.id);
+                        return pickRandomProjectIds(all, Math.min(3, all.length));
+                      }}
+                      label="MMF vs gap — projects"
+                      triggerPlaceholder="Add projects to chart"
+                      ariaLabel="Projects shown in MMF vs gap chart"
+                    />
+                  </div>
+                ) : null}
               </div>
               <div style={{ width: "100%", height: 200 }}>
                 {chartVisibilityMmF.length ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartVisibilityMmF} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                    <BarChart data={chartVisibilityMmF} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="18%">
                       <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-25} textAnchor="end" height={52} />
-                      <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={36} />
-                      <Tooltip contentStyle={CHART_TOOLTIP} formatter={(v: number | string, name: string) => [`${Number(v).toFixed(2)} L`, name === "mmf" ? "MMF" : "Gap"]} />
-                      <Bar dataKey="mmf" name="MMF" fill="color-mix(in srgb, var(--accent) 70%, transparent)" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="gap" name="Gap" fill="color-mix(in srgb, var(--amber) 55%, transparent)" radius={[3, 3, 0, 0]} />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
+                        angle={chartVisibilityMmF.length <= 5 ? 0 : -20}
+                        textAnchor={chartVisibilityMmF.length <= 5 ? "middle" : "end"}
+                        height={chartVisibilityMmF.length <= 5 ? 36 : 48}
+                        tickFormatter={(s: string) => (s.length > 16 ? `${s.slice(0, 15)}…` : s)}
+                      />
+                      <YAxis
+                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
+                        domain={[0, mmfChartYMax]}
+                        allowDecimals
+                      />
+                      <Tooltip
+                        contentStyle={CHART_TOOLTIP}
+                        formatter={(v: number | string, name: string) => [`${Number(v).toFixed(2)} L`, name === "mmf" ? "MMF" : "Gap"]}
+                      />
+                      <Bar
+                        dataKey="mmf"
+                        name="MMF"
+                        fill="color-mix(in srgb, var(--accent) 70%, transparent)"
+                        radius={[3, 3, 0, 0]}
+                        maxBarSize={56}
+                      />
+                      <Bar
+                        dataKey="gap"
+                        name="Gap"
+                        fill="color-mix(in srgb, var(--amber) 55%, transparent)"
+                        radius={[3, 3, 0, 0]}
+                        maxBarSize={56}
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11 }}>No data</div>
+                  <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11, textAlign: "center", padding: "0 8px" }}>
+                    {visibilityForCut.length ? "No projects match the current selection — pick at least one in the list above." : "No data"}
+                  </div>
                 )}
               </div>
             </div>
             <div className="platform-card" style={{ padding: 14 }}>
-              <div className="rt-section-hd" style={{ marginTop: 0 }}>
-                <div>
+              <div className="rt-section-hd" style={{ marginTop: 0, alignItems: "flex-start", gap: 10 }}>
+                <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                   <div className="rt-section-title">Pipeline mix</div>
-                  <div className="rt-section-sub">Joiners vs yet-to-join</div>
+                  <div className="rt-section-sub">Joiners vs yet-to-join — default: top 5 by joiners+YTJ</div>
                 </div>
+                {visibilityProjectOptions.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4, flex: "0 1 220px" }}>
+                    <div
+                      className="rt-section-sub"
+                      style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.06em" }}
+                    >
+                      Projects in chart
+                    </div>
+                    <VisibilityChartProjectPicker
+                      options={visibilityProjectOptions}
+                      selectedIds={pipelineChartProjectIds}
+                      onChange={setPipelineChartProjectIds}
+                      resampleWhenEmpty={() =>
+                        pickTopPipelineProjectIds(
+                          visibilityForCut,
+                          Math.min(5, new Set(visibilityForCut.map((r) => r.project_id)).size),
+                        )
+                      }
+                      label="Pipeline mix — projects"
+                      triggerPlaceholder="Add projects to chart"
+                      ariaLabel="Projects shown in pipeline mix chart"
+                    />
+                  </div>
+                ) : null}
               </div>
               <div style={{ width: "100%", height: 200 }}>
-                {visibilityForCut.length ? (
+                {chartVisibilityPipeline.length ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={visibilityForCut.map((r) => ({
-                        name: (r.account_name || `P${r.project_id}`).slice(0, 14),
-                        joiners: r.joiners_as_on_date || 0,
-                        ytj: r.yet_to_join || 0,
-                      }))}
+                      data={chartVisibilityPipeline}
                       margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+                      barCategoryGap="18%"
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-25} textAnchor="end" height={52} />
-                      <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={28} />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
+                        angle={chartVisibilityPipeline.length <= 5 ? 0 : -20}
+                        textAnchor={chartVisibilityPipeline.length <= 5 ? "middle" : "end"}
+                        height={chartVisibilityPipeline.length <= 5 ? 36 : 48}
+                        tickFormatter={(s: string) => (s.length > 16 ? `${s.slice(0, 15)}…` : s)}
+                      />
+                      <YAxis
+                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={40}
+                        domain={[0, pipelineChartYMax]}
+                        allowDecimals
+                      />
                       <Tooltip contentStyle={CHART_TOOLTIP} />
                       <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
                       <Bar dataKey="joiners" name="Joiners" stackId="a" fill="color-mix(in srgb, var(--green) 65%, transparent)" />
@@ -1098,7 +1320,19 @@ export function RevenueTrackers() {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11 }}>No data</div>
+                  <div
+                    style={{
+                      height: 200,
+                      display: "grid",
+                      placeItems: "center",
+                      color: "var(--text-subtle)",
+                      fontSize: 11,
+                      textAlign: "center",
+                      padding: "0 8px",
+                    }}
+                  >
+                    {visibilityForCut.length ? "No projects match the current selection — pick at least one above." : "No data"}
+                  </div>
                 )}
               </div>
             </div>
@@ -1121,7 +1355,7 @@ export function RevenueTrackers() {
               Add / update
             </Button>
           </div>
-          <div className="platform-table-wrap">
+          <div className="platform-table-wrap platform-table-wrap--rt-summary">
             <table className="platform-table">
               <thead>
                 <tr>
@@ -1137,7 +1371,7 @@ export function RevenueTrackers() {
                   <th>Rev %</th>
                   <th>Gap to MMF (₹)</th>
                   <th>Status</th>
-                  <th />
+                  <th aria-label="Row actions" />
                 </tr>
               </thead>
               <tbody>
@@ -1154,28 +1388,30 @@ export function RevenueTrackers() {
                     <td>{r.conversion_rate_pct != null ? formatPercent(r.conversion_rate_pct, 1) : "—"}</td>
                     <td>{r.revenue_realised_pct != null ? formatPercent(r.revenue_realised_pct, 1) : "—"}</td>
                     <td>{formatCurrency(r.gap_to_mmf_inr)}</td>
-                    <td>{statusDisplay(r.status)}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <td className="platform-table__cell--status">{statusDisplay(r.status)}</td>
+                    <td className="platform-table__cell--actions">
+                      <div className="platform-table__actions">
                         <button
                           type="button"
-                          title="Edit"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", padding: 4 }}
+                          className="platform-icon-btn platform-icon-btn--accent"
+                          title="Edit row"
+                          aria-label="Edit this visibility row"
                           onClick={() => { setEditVisibilityRow(r); setVisibilityModalOpen(true); }}
                         >
-                          <PencilLine className="h-4 w-4" />
+                          <PencilLine className="h-4 w-4" strokeWidth={1.75} />
                         </button>
                         <button
                           type="button"
-                          title="Delete"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red)", fontSize: 10, fontFamily: "var(--mono)" }}
+                          className="platform-icon-btn platform-icon-btn--danger"
+                          title="Delete row"
+                          aria-label="Delete this visibility row"
                           onClick={async () => {
                             if (!window.confirm("Delete this visibility snapshot?")) return;
                             await queries.deleteRevenueVisibility(r.id);
                             await reload();
                           }}
                         >
-                          Del
+                          <Trash2 className="h-4 w-4" strokeWidth={1.75} />
                         </button>
                       </div>
                     </td>

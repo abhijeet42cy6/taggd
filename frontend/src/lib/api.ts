@@ -419,6 +419,8 @@ export type Project = {
   /** Joined from Client.official_name in list/detail APIs */
   client_official_name?: string | null;
   account_name?: string;
+  /** From linked Client row on GET /projects; `prospect` = pre-close, exclude from revenue account list. */
+  client_lifecycle_state?: string | null;
   /** Client / charge identifier from directory (e.g. TRP0001T00NM1GIA) */
   charge_code?: string;
   account_status?: string;

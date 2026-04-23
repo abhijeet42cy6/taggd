@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { queries, type GlobalMonitor, type GlobalStats, type Project, type RequisitionKpis } from "@/lib/api";
-import { financeStatsVm, financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
+import { financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import { slaStatsVm } from "@/lib/view-models/sla";
 import {
   ExecutiveRevenueYoYChart,
@@ -20,6 +20,7 @@ import {
   buildRegionalRevenue,
   buildExecutiveSummary,
   aggregateFinanceFromRows,
+  emptyFinanceAggregate,
   quarterlyPlanActualForFy,
   quarterlyCollectionForFy,
   quarterlyCmForFy,
@@ -128,7 +129,6 @@ export const Dashboard = () => {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [monitor, setMonitor] = useState<GlobalMonitor | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [financeStatsApi, setFinanceStatsApi] = useState<ReturnType<typeof financeStatsVm> | null>(null);
   const [financeRows, setFinanceRows] = useState<FinanceRowVm[]>([]);
   const [slaStats, setSlaStats] = useState<ReturnType<typeof slaStatsVm> | null>(null);
   const [wfmStats, setWfmStats] = useState<any>(null);
@@ -156,7 +156,6 @@ export const Dashboard = () => {
           sRes,
           mRes,
           proj,
-          fStats,
           fRows,
           sStats,
           wfm,
@@ -166,7 +165,6 @@ export const Dashboard = () => {
           withTimeout(queries.globalStats(), T_STD, null),
           withTimeout(queries.globalMonitor(), T_HEAVY, null),
           withTimeout(queries.projects(), T_STD, []),
-          withTimeout(queries.financeStats(), T_STD, null),
           withTimeout(queries.financeData(), T_HEAVY, []),
           withTimeout(queries.slaStats(), T_STD, null),
           withTimeout(queries.wfmStats(), T_STD, null),
@@ -182,7 +180,6 @@ export const Dashboard = () => {
         }
 
         if (proj.status === "fulfilled") setProjects(proj.value || []);
-        if (fStats.status === "fulfilled" && fStats.value) setFinanceStatsApi(financeStatsVm(fStats.value));
         if (fRows.status === "fulfilled" && fRows.value) setFinanceRows(financeRowsVm(fRows.value as any[]));
         if (sStats.status === "fulfilled" && sStats.value) setSlaStats(slaStatsVm(sStats.value));
         if (wfm.status === "fulfilled") setWfmStats(wfm.value);
@@ -241,11 +238,14 @@ export const Dashboard = () => {
 
   const priorFinance = useMemo(() => aggregateFinanceFromRows(priorKpiRows), [priorKpiRows]);
 
+  /** Row-level /finance/data only. Never fall back to GET /finance/stats — when kpiRows is empty
+   *  (e.g. account filter, or no FY in ledger for the selected year) the old fallback showed the
+   *  same portfolio total (~₹189.96 Cr) for every account. */
   const displayFinance = useMemo(() => {
     const agg = aggregateFinanceFromRows(kpiRows);
     if (agg) return agg;
-    return financeStatsApi ? { ...financeStatsApi, collection_pending_inr: financeStatsApi.collection_pending_inr ?? 0 } : null;
-  }, [kpiRows, financeStatsApi]);
+    return emptyFinanceAggregate();
+  }, [kpiRows]);
 
   const { revenue: yoyRev, cm: yoyCm } = useMemo(
     () => buildYoYRevenueSeries(filteredRows, selectedFyStart, autoCompareFy),
@@ -362,6 +362,7 @@ export const Dashboard = () => {
           value={filters}
           onChange={setFilters}
           projects={projects}
+          financeRows={financeRows}
           fyYears={fyYears}
           selectedFyStart={selectedFyStart}
           onFyChange={setSelectedFyStart}

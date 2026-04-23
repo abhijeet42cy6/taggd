@@ -3,19 +3,27 @@
 Ingest TAGGD-style revenue Excel templates into weekly forecast + visibility tables.
 
 Files (read sheet layouts before changing column logic):
-  - excel_files_imp/Revenue_Forecast_Template_1.xlsx  → sheet \"Revenue Forecast Data\"
-  - excel_files_imp/Revenue_Visibility_Tracker.xlsx    → sheet \"Revenue Tracker\" (header row auto-detected among rows 0–4)
+  - excel_files_imp/Revenue_Forecast_Template_1.xlsx  → sheet "Revenue Forecast Data"
+  - excel_files_imp/Revenue_Visibility_Tracker.xlsx   → sheet "Revenue Tracker" (header auto-detected rows 0–4)
 
 Money columns in these templates are stored as full INR amounts (not Lakhs scalars),
 matching RevenueForecastWeekly.*_inr / RevenueVisibilitySnapshot.*_inr in the DB.
 
-Project names are resolved via backend.core.sla_project_resolve plus a small alias map
-for known template typos (e.g. combined Siemens row).
+Project names are resolved via backend.core.sla_project_resolve plus MANUAL_ACCOUNT_BY_SHEET_NORM.
+
+Optional weekly governance (revenue pack queue + both tracker tabs):
+  - --apply-governance --governance-user admin@test.local
+  - Creates/updates `revenue_weekly_submission` with status `approved` (submitted/reviewed/approved by that user)
+  - Sets `weekly_submission_id` on `revenue_forecast_weekly` and synthetic `revenue_visibility_snapshot` built from
+    the same forecast row (as-of = Update Date) when using --forecast-only. If you also pass a visibility workbook,
+    that sheet replaces/augments visibility rows instead of synthetic snapshots from forecast.
 
 Usage (repo root):
-  python3 backend/scripts/ingest_revenue_trackers.py
-  python3 backend/scripts/ingest_revenue_trackers.py --dry-run
-  python3 backend/scripts/ingest_revenue_trackers.py --forecast path.xlsx --visibility path2.xlsx
+  python3 -m backend.scripts.ingest_revenue_trackers
+  python3 -m backend.scripts.ingest_revenue_trackers --dry-run
+  python3 -m backend.scripts.ingest_revenue_trackers --forecast path.xlsx --visibility path2.xlsx
+  python3 -m backend.scripts.ingest_revenue_trackers --forecast path.xlsx --forecast-only \\
+      --apply-governance --governance-user admin@test.local
 """
 from __future__ import annotations
 
@@ -27,16 +35,20 @@ import sys
 from typing import Any, Optional
 
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+from backend.core.revenue_weekly_submission_core import ST_APPROVED
 from backend.core.sla_project_resolve import _norm_key, resolve_project_for_sla
 from backend.db.database import (
     Project,
     RevenueForecastWeekly,
     RevenueVisibilitySnapshot,
+    RevenueWeeklySubmission,
     SessionLocal,
+    User,
     init_db,
 )
 
@@ -44,6 +56,7 @@ from backend.db.database import (
 MANUAL_ACCOUNT_BY_SHEET_NORM: dict[str, str] = {
     # Template combines Advanta+GBS; DB has separate SBUs — default mapping (edit if policy changes)
     "siemens (advatnta & gbs)": "Siemens - Advanta",
+    "hyundai leadership": "Hyundai Motor Leadership",
 }
 
 
@@ -154,10 +167,111 @@ def _resolve_project(db: Session, sheet_label: str) -> tuple[Optional[Project], 
     return resolve_project_for_sla(db, sheet_label)
 
 
-def ingest_forecast_template(path: str, db: Session, *, dry_run: bool) -> dict[str, Any]:
+def _get_or_create_weekly_submission(
+    db: Session, project_id: int, week_start: dt.datetime
+) -> RevenueWeeklySubmission:
+    sub = (
+        db.query(RevenueWeeklySubmission)
+        .filter(
+            RevenueWeeklySubmission.project_id == project_id,
+            RevenueWeeklySubmission.week_start_date == week_start,
+            RevenueWeeklySubmission.period_type == "weekly",
+        )
+        .first()
+    )
+    if sub:
+        return sub
+    sub = RevenueWeeklySubmission(
+        project_id=project_id,
+        week_start_date=week_start,
+        period_type="weekly",
+        status="draft",
+    )
+    db.add(sub)
+    db.flush()
+    return sub
+
+
+def _apply_approved_governance_pack(
+    db: Session, sub: RevenueWeeklySubmission, user_id: int, when: dt.datetime
+) -> None:
+    sub.status = ST_APPROVED
+    sub.submitted_by_user_id = user_id
+    sub.submitted_at = when
+    sub.reviewed_by_user_id = user_id
+    sub.reviewed_at = when
+    sub.approved_by_user_id = user_id
+    sub.approved_at = when
+    sub.review_notes = None
+
+
+def _synthetic_status_from_forecast(row_fc: RevenueForecastWeekly) -> str:
+    ach = row_fc.achievement_pct
+    if ach is None:
+        return "—"
+    if ach >= 99.0:
+        return "On Track"
+    if ach >= 80.0:
+        return "Watch"
+    return "At Risk"
+
+
+def _upsert_synthetic_visibility_for_pack(
+    db: Session,
+    project: Project,
+    row_fc: RevenueForecastWeekly,
+    submission_id: int,
+    user_id: int,
+) -> None:
+    """Build a visibility snapshot from the weekly forecast row (same week / as-of update date)."""
+    as_of = row_fc.update_date or row_fc.week_start_date
+    vis = (
+        db.query(RevenueVisibilitySnapshot)
+        .filter(
+            RevenueVisibilitySnapshot.project_id == project.id,
+            RevenueVisibilitySnapshot.as_of_date == as_of,
+        )
+        .first()
+    )
+    if not vis:
+        vis = RevenueVisibilitySnapshot(project_id=project.id, as_of_date=as_of)
+        db.add(vis)
+    ph = (project.practice_head or project.be_spoc or "").strip() or None
+    vis.practice_head = ph
+    vis.mmf_inr = float(row_fc.mmf_inr or 0.0)
+    vis.open_req = int(row_fc.open_req or 0)
+    vis.opening_fee_inr = float(row_fc.open_fee_inr or 0.0)
+    vis.joiners_as_on_date = int(row_fc.joiner_count or 0)
+    vis.joining_fee_inr = float(row_fc.joiner_fee_inr or 0.0)
+    vis.yet_to_join = int(row_fc.to_be_offer_count or 0)
+    vis.ytj_fee_inr = float(row_fc.to_be_offer_fee_inr or 0.0)
+    vis.gap_to_mmf_inr = max(0.0, float(vis.mmf_inr) - float(vis.joining_fee_inr or 0.0))
+    ach = row_fc.achievement_pct
+    if ach is not None:
+        vis.revenue_realised_pct = float(ach)  # template % is same ballpark
+    else:
+        vis.revenue_realised_pct = None
+    vis.conversion_rate_pct = None
+    vis.status = _synthetic_status_from_forecast(row_fc)
+    vis.entered_by_user_id = user_id
+    vis.weekly_submission_id = submission_id
+    db.flush()
+
+
+def ingest_forecast_template(
+    path: str,
+    db: Session,
+    *,
+    dry_run: bool,
+    governance_user_id: Optional[int] = None,
+    synthetic_visibility: bool = True,
+) -> dict[str, Any]:
     df = pd.read_excel(path, sheet_name="Revenue Forecast Data", header=2)
     updated = 0
     skipped = 0
+    governance_linked = 0
+    synthetic_vis_n = 0
+    pack_when = dt.datetime.utcnow().replace(microsecond=0)
     unmapped: list[str] = []
     for _, row in df.iterrows():
         name = row.get("Project Name")
@@ -225,6 +339,17 @@ def ingest_forecast_template(path: str, db: Session, *, dry_run: bool) -> dict[s
         if remarks is not None and not (isinstance(remarks, float) and pd.isna(remarks)):
             s = str(remarks).strip()
             row_fc.remarks = s if s and s.lower() != "nan" else None
+        if governance_user_id is not None and not dry_run:
+            sub = _get_or_create_weekly_submission(db, project.id, week_start)
+            _apply_approved_governance_pack(db, sub, governance_user_id, pack_when)
+            row_fc.weekly_submission_id = sub.id
+            row_fc.entered_by_user_id = governance_user_id
+            if synthetic_visibility:
+                _upsert_synthetic_visibility_for_pack(
+                    db, project, row_fc, sub.id, governance_user_id
+                )
+                synthetic_vis_n += 1
+            governance_linked += 1
         db.flush()
         updated += 1
 
@@ -232,6 +357,8 @@ def ingest_forecast_template(path: str, db: Session, *, dry_run: bool) -> dict[s
         "sheet": "Revenue Forecast Data",
         "rows_upserted": updated,
         "rows_skipped": skipped,
+        "governance_approved_packs": governance_linked,
+        "synthetic_visibility_rows": synthetic_vis_n,
         "unmapped_project_names": sorted(set(unmapped)),
     }
 
@@ -342,6 +469,8 @@ def ingest_revenue_workbooks(
     db: Optional[Session] = None,
     *,
     dry_run: bool = False,
+    governance_user_id: Optional[int] = None,
+    synthetic_visibility_from_forecast: bool = True,
 ) -> dict[str, Any]:
     if not forecast_path and not visibility_path:
         raise ValueError("At least one of forecast_path or visibility_path is required")
@@ -350,9 +479,18 @@ def ingest_revenue_workbooks(
         init_db()
         db = SessionLocal()
     out: dict[str, Any] = {"ok": False, "dry_run": dry_run}
+    # When a real visibility workbook is also ingested, skip auto snapshots from forecast
+    # (avoids double-write); use forecast-only + --apply-governance for template-only data.
+    synthetic_from_fc = bool(synthetic_visibility_from_forecast and not visibility_path)
     try:
         if forecast_path:
-            out["forecast"] = ingest_forecast_template(forecast_path, db, dry_run=dry_run)
+            out["forecast"] = ingest_forecast_template(
+                forecast_path,
+                db,
+                dry_run=dry_run,
+                governance_user_id=governance_user_id,
+                synthetic_visibility=synthetic_from_fc and governance_user_id is not None,
+            )
         if visibility_path:
             out["visibility"] = ingest_visibility_tracker(visibility_path, db, dry_run=dry_run)
         if not dry_run:
@@ -371,13 +509,60 @@ def ingest_revenue_workbooks(
 def main() -> None:
     ap = argparse.ArgumentParser(description="Ingest revenue forecast + visibility Excel templates")
     ap.add_argument("--forecast", default=_repo_default_forecast(), help="Path to Revenue_Forecast_Template*.xlsx")
-    ap.add_argument("--visibility", default=_repo_default_visibility(), help="Path to Revenue_Visibility_Tracker.xlsx")
+    ap.add_argument(
+        "--visibility",
+        default=_repo_default_visibility(),
+        help="Path to Revenue_Visibility_Tracker.xlsx (not required with --forecast-only)",
+    )
+    ap.add_argument("--forecast-only", action="store_true", help="Ingest only the forecast workbook (no visibility file)")
+    ap.add_argument(
+        "--apply-governance",
+        action="store_true",
+        help="For each row: set revenue_weekly_submission to approved with --governance-user; "
+        "link forecast/visibility; build visibility from forecast (unless a visibility file is also loaded).",
+    )
+    ap.add_argument(
+        "--governance-user",
+        default="admin@test.local",
+        help="User email for submitted_by / approved_by / entered_by (requires --apply-governance)",
+    )
+    ap.add_argument(
+        "--no-synthetic-visibility",
+        action="store_true",
+        help="With --apply-governance and --forecast-only, do not build revenue_visibility_snapshot from forecast",
+    )
     ap.add_argument("--dry-run", action="store_true", help="Parse and resolve only; no DB writes")
     args = ap.parse_args()
-    for label, p in ("forecast", args.forecast), ("visibility", args.visibility):
-        if not os.path.isfile(p):
-            raise SystemExit(f"Missing {label} file: {p}")
-    r = ingest_revenue_workbooks(args.forecast, args.visibility, db=None, dry_run=args.dry_run)
+    if not os.path.isfile(args.forecast):
+        raise SystemExit(f"Missing forecast file: {args.forecast}")
+    if args.forecast_only:
+        vis: Optional[str] = None
+    else:
+        vis = args.visibility
+        if not os.path.isfile(vis or ""):
+            raise SystemExit(f"Missing visibility file: {vis}")
+    init_db()
+    dbl = SessionLocal()
+    try:
+        g_uid: Optional[int] = None
+        if args.apply_governance:
+            em = (args.governance_user or "").strip().lower()
+            u = dbl.query(User).filter(func.lower(User.email) == em).first()
+            if not u:
+                raise SystemExit(
+                    f"No user with email {args.governance_user!r}. Create the user first, then re-run."
+                )
+            g_uid = u.id
+    finally:
+        dbl.close()
+    r = ingest_revenue_workbooks(
+        args.forecast,
+        vis,
+        db=None,
+        dry_run=args.dry_run,
+        governance_user_id=g_uid,
+        synthetic_visibility_from_forecast=not args.no_synthetic_visibility,
+    )
     print(r)
 
 

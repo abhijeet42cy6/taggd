@@ -1,6 +1,12 @@
 # Data ingestion runbook
 
-This document lists **every production-style data ingestion** path in this repository: what it loads, which database tables it touches, and **exact commands** (or API routes) to run it.
+This document lists **every production-style data ingestion** path in this repository: what it loads, which database tables it touches, and **exact commands** (or API routes) to run it.  
+
+`cd /Users/arjun/Software/tgddata_C1 && python3 backend/scripts/ingest_excel_master_filled_workbooks.py --finance "excel_files_imp/Copy of 10_finance_core_filled.xlsx"`
+
+```
+Finance: {'issues': ['finance_cash_flow / finance_efficiency_kpis: each 24-row block is interpreted as two 12-row slices; slice-to-project mapping is resolved by slice fiscal year (69 FY24-25 slices + 93 FY25-26 slices).'], 'ledger_blocks': 240}
+```
 
 **Convention**
 
@@ -201,7 +207,7 @@ python3 -c "from backend.scripts.ingest_wfm import ingest_wfm_master; ingest_wfm
 
 ### `ingest_project_contracts.py`
 
-**Purpose:** Sheet **Contract Data** in **Project Signup Renewal Detail.xlsx**-style workbooks. Resolves **Customer** with **`resolve_project_for_sla`** (same as SLA: group→SBU, client singleton, fuzzy) so **Client / SBU hierarchy stays aligned** with the project directory, not a single-column exact name match. **Upserts** one contract row per project per run (update row with same `source_filename` for that `project_id`, or latest row) so re-ingests do not pile duplicate rows. Writes `excel_files_imp/contract_workbook_ingest_report.md` next to the workbook (use `--no-report` to skip).
+**Purpose:** Sheet **Contract Data** in **Project Signup Renewal Detail.xlsx**-style workbooks. Resolves **Customer** with `**resolve_project_for_sla`** (same as SLA: group→SBU, client singleton, fuzzy) so **Client / SBU hierarchy stays aligned** with the project directory, not a single-column exact name match. **Upserts** one contract row per project per run (update row with same `source_filename` for that `project_id`, or latest row) so re-ingests do not pile duplicate rows. Writes `excel_files_imp/contract_workbook_ingest_report.md` next to the workbook (use `--no-report` to skip).
 
 ```bash
 python3 backend/scripts/ingest_project_contracts.py "path/to/Project Signup Renewal Detail.xlsx"
@@ -253,18 +259,18 @@ See `backend/main.py` and the **Ingestion Center** frontend for behaviour and au
 ## 12. Quick reference table
 
 
-| What                          | Command / route                                                |
-| ----------------------------- | -------------------------------------------------------------- |
-| Directory / mapping           | `python3 backend/scripts/ingest_project_master.py "<xlsx>"`    |
-| SBU ↔ mapping reconcile       | `python3 backend/scripts/reconcile_mapping_clients.py`         |
-| Mapping sync + report         | `python3 backend/scripts/run_account_mapping_sync.py`          |
-| SLA master                    | `python3 backend/scripts/ingest_sla.py` or `POST /sla/upload`  |
+| What                          | Command / route                                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Directory / mapping           | `python3 backend/scripts/ingest_project_master.py "<xlsx>"`                                                                     |
+| SBU ↔ mapping reconcile       | `python3 backend/scripts/reconcile_mapping_clients.py`                                                                          |
+| Mapping sync + report         | `python3 backend/scripts/run_account_mapping_sync.py`                                                                           |
+| SLA master                    | `python3 backend/scripts/ingest_sla.py` or `POST /sla/upload`                                                                   |
 | Revenue forecast + visibility | `python3 backend/scripts/ingest_revenue_trackers.py` **or** `POST /revenue-trackers/ingest-upload` (Ingestion Center → Express) |
-| Finance master                | `ingest_finance_master("…")` or `POST /finance/upload`         |
-| WFM master                    | `ingest_wfm_master("…")` or `POST /wfm/upload`                 |
-| Contracts                     | `python3 backend/scripts/ingest_project_contracts.py "<xlsx>"` **or** `POST /contracts/upload` (Client contracts UI) |
-| Budget/forecast ledger        | `POST /api/upload/budget-forecast`                             |
-| Tracker uploads               | `POST /upload` (and related Pro endpoints)                     |
+| Finance master                | `ingest_finance_master("…")` or `POST /finance/upload`                                                                          |
+| WFM master                    | `ingest_wfm_master("…")` or `POST /wfm/upload`                                                                                  |
+| Contracts                     | `python3 backend/scripts/ingest_project_contracts.py "<xlsx>"` **or** `POST /contracts/upload` (Client contracts UI)            |
+| Budget/forecast ledger        | `POST /api/upload/budget-forecast`                                                                                              |
+| Tracker uploads               | `POST /upload` (and related Pro endpoints)                                                                                      |
 
 
 ---

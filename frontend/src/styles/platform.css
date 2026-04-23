@@ -639,6 +639,11 @@
   background: var(--surface-raised);
 }
 
+/* Revenue visibility summary: subtle data-table header (design system palette) */
+.platform-table-wrap--rt-summary .platform-table thead {
+  background: color-mix(in srgb, var(--blue) 5%, var(--surface-raised));
+}
+
 .platform-table {
   width: 100%;
   border-collapse: collapse;
@@ -677,6 +682,88 @@
   border-bottom: none;
 }
 
+/* Status + row actions (design_style_guide.html: badges §7, buttons §5) */
+.platform-table td.platform-table__cell--status {
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
+.platform-table th:last-child,
+.platform-table td.platform-table__cell--actions {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}
+
+.platform-table__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.platform-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--t-base),
+    border-color var(--t-base),
+    color var(--t-base),
+    box-shadow var(--t-base);
+  flex-shrink: 0;
+}
+
+.platform-icon-btn:hover {
+  background: var(--surface-muted);
+  border-color: var(--border-focus);
+  color: var(--text);
+}
+
+.platform-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.platform-icon-btn--accent {
+  color: var(--accent);
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+}
+
+.platform-icon-btn--accent:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-hover);
+  border-color: var(--accent);
+}
+
+.platform-icon-btn--danger {
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.22);
+  background: var(--red-soft);
+}
+
+.platform-icon-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.38);
+  color: var(--red);
+}
+
+.platform-table__status-empty {
+  color: var(--text-subtle);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 .platform-badge {
   display: inline-flex;
   align-items: center;
@@ -686,6 +773,7 @@
   border-radius: var(--radius-pill);
   padding: 3px 9px;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .platform-badge-dot {

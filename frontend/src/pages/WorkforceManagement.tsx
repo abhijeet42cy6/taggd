@@ -361,14 +361,18 @@ export function WorkforceManagement() {
   const fillRate = idealHc > 0 ? (actualHc / idealHc) * 100 : 0;
   const hcGap = idealHc - actualHc;
 
-  // Projected HC = actual + wl1 + wl2 + wl3 + wl4 − resignations (not tracked; just sum hires)
+  // WL1–WL4 in the ingested 09 (excel_upload_masters) template are a **band split of actual_hc_total**
+  // (sum(WL) = actual per project). They are *not* incremental pipeline on top of actual. Using
+  // actual + sum(WL) was double-counting and inflated "Projected" to ~2× actual.
   const totalWl1 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl1_hires ?? 0), 0), [rows]);
   const totalWl2 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl2_hires ?? 0), 0), [rows]);
   const totalWl3 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0), 0), [rows]);
-  const totalAdditional = totalWl1 + totalWl2 + totalWl3;
-  const projectedHc = actualHc + totalAdditional;
-  const varActual = projectedHc - actualHc;   // additional support / pipeline
+  const totalAdditional = totalWl1 + totalWl2 + totalWl3; // for WL mix; equals total actual when data is self-consistent
+  const projectedHc = actualHc; // roster strength = total actual HC (WL = mix, not added again)
+  const varActual = Math.max(0, projectedHc - actualHc); // 0 in self-consistent template; ≥0 if we ever add pipeline
   const openPositions = hcGap > 0 ? hcGap : 0;
+  /** Same as `idealHc - actualHc` (negative = over ideal / over-capacity). */
+  const netRosterGapToIdeal = idealHc - actualHc;
 
   const fillBand = idealHc > 0 ? wfmFillBand(fillRate, idealHc) : "risk";
   const fgColor = idealHc > 0 ? wfmFillColor(fillRate, idealHc) : "var(--accent)";
@@ -522,26 +526,27 @@ export function WorkforceManagement() {
       {/* ── Projected HC 3-up ── */}
       {!loading && rows.length > 0 && (
         <>
-          <div className="wfm-section-label">Projected Headcount</div>
+          <div className="wfm-section-label">Roster vs target</div>
           <div className="wfm-proj-grid">
             <div className="wfm-proj-card">
-              <div className="wfm-proj-card__label">Projected Headcount</div>
+              <div className="wfm-proj-card__label">Roster (actual HC)</div>
               <div className="wfm-proj-card__value">{formatNumber(projectedHc)}</div>
-              <div className="wfm-proj-card__sub">Actual + Additional Support</div>
+              <div className="wfm-proj-card__sub">On rolls; WL1–4 are band mix (not double-counted)</div>
             </div>
             <div className="wfm-proj-card">
-              <div className="wfm-proj-card__label">Variance vs Actual</div>
-              <div className="wfm-proj-card__value" style={{ color: varActual > 0 ? "var(--green)" : varActual < 0 ? "var(--red)" : "var(--text)" }}>
-                {varActual >= 0 ? "+" : ""}{formatNumber(varActual)}
+              <div className="wfm-proj-card__label">Net new vs Roster</div>
+              <div className="wfm-proj-card__value" style={{ color: varActual > 0 ? "var(--green)" : "var(--text-muted)" }}>
+                {varActual > 0 ? `+${formatNumber(varActual)}` : "0"}
               </div>
-              <div className="wfm-proj-card__sub">Projected − Actual</div>
+              <div className="wfm-proj-card__sub">Pipeline beyond actual (0 when WL = headcount mix)</div>
             </div>
             <div className="wfm-proj-card">
-              <div className="wfm-proj-card__label">Net Variance vs Projected</div>
-              <div className="wfm-proj-card__value" style={{ color: idealHc - projectedHc <= 0 ? "var(--green)" : "var(--amber)" }}>
-                {idealHc - projectedHc >= 0 ? "−" : "+"}{formatNumber(Math.abs(idealHc - projectedHc))}
+              <div className="wfm-proj-card__label">Gap to ideal target</div>
+              <div className="wfm-proj-card__value" style={{ color: netRosterGapToIdeal < 0 ? "var(--amber)" : netRosterGapToIdeal > 0 ? "var(--red)" : "var(--text)" }}>
+                {netRosterGapToIdeal >= 0 ? "−" : "+"}
+                {formatNumber(Math.abs(netRosterGapToIdeal))}
               </div>
-              <div className="wfm-proj-card__sub">Ideal − Projected</div>
+              <div className="wfm-proj-card__sub">Ideal − actual (same as ideal HC gap above)</div>
             </div>
           </div>
         </>
@@ -556,7 +561,7 @@ export function WorkforceManagement() {
               { label: "WL1 Hires", value: totalWl1, sub: "Entry level" },
               { label: "WL2 Hires", value: totalWl2, sub: "Mid level" },
               { label: "WL3+ Hires", value: totalWl3, sub: "Senior / leadership" },
-              { label: "Total Pipeline", value: totalAdditional, sub: "All WL tiers" },
+              { label: "WL headcount (sum)", value: totalAdditional, sub: "Equals roster when data is a band split" },
             ].map((c) => (
               <div key={c.label} className="wfm-wl-cell">
                 <div className="wfm-wl-cell__label">{c.label}</div>
@@ -602,11 +607,10 @@ export function WorkforceManagement() {
                           <th className="right">Target Productivity</th>
                           <th className="right">Ideal HC</th>
                           <th className="right">Actual HC</th>
-                          <th className="right">Variance</th>
-                          <th className="right">Additional HC</th>
+                          <th className="right">Variance (ideal−actual)</th>
+                          <th className="right">WL band sum</th>
                           <th className="right">Open Positions</th>
-                          <th className="right">Projected HC</th>
-                          <th className="right">Net Variance</th>
+                          <th className="right">Roster</th>
                           <th>Fill Rate</th>
                           <th>Status</th>
                         </tr>
@@ -616,10 +620,9 @@ export function WorkforceManagement() {
                           const idealN = Number(r.ideal_hc ?? 0);
                           const actualN = Number(r.actual_hc_total ?? 0);
                           const variance = idealN - actualN;
-                          const additional = Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0);
+                          const wlBandSum = Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0);
                           const openPos = variance > 0 ? variance : 0;
-                          const projHc = actualN + additional;
-                          const netVariance = idealN - projHc;
+                          const projHc = actualN; // WL1–4 are band mix of this roster, not add-on
                           const pct = wfmFillPct(actualN, idealN);
                           const gapColor = wfmFillColor(pct, idealN);
                           const statusLbl = wfmStatusLabel(pct, idealN);
@@ -636,14 +639,11 @@ export function WorkforceManagement() {
                               <td className="right" style={{ color: variance > 0 ? "var(--red)" : variance < 0 ? "var(--amber)" : "var(--green)", fontWeight: 600 }}>
                                 {variance > 0 ? "+" : ""}{formatNumber(variance)}
                               </td>
-                              <td className="right">{formatNumber(additional)}</td>
+                              <td className="right">{formatNumber(wlBandSum)}</td>
                               <td className="right" style={{ color: openPos > 0 ? "var(--red)" : "var(--text-muted)" }}>
                                 {formatNumber(openPos)}
                               </td>
                               <td className="right" style={{ color: "var(--blue)" }}>{formatNumber(projHc)}</td>
-                              <td className="right" style={{ color: netVariance > 0 ? "var(--amber)" : "var(--green)", fontWeight: 600 }}>
-                                {netVariance <= 0 ? "0" : formatNumber(netVariance)}
-                              </td>
                               <td style={{ minWidth: 130 }}>
                                 <div className="wfm-bar-wrap">
                                   <div className="wfm-bar-track">
@@ -667,8 +667,7 @@ export function WorkforceManagement() {
                           s + Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0), 0);
                         const totVariance = totIdeal - totActual;
                         const totOpenPos = totVariance > 0 ? totVariance : 0;
-                        const totProj = totActual + totAdditional;
-                        const totNetVar = totIdeal - totProj;
+                        const totProj = totActual;
                         const totFill = wfmFillPct(totActual, totIdeal);
                         return (
                           <tfoot>
@@ -685,9 +684,6 @@ export function WorkforceManagement() {
                                 {formatNumber(totOpenPos)}
                               </td>
                               <td className="right" style={{ color: "var(--blue)" }}>{formatNumber(totProj)}</td>
-                              <td className="right" style={{ color: totNetVar > 0 ? "var(--amber)" : "var(--green)" }}>
-                                {totNetVar <= 0 ? "0" : formatNumber(totNetVar)}
-                              </td>
                               <td>
                                 <div className="wfm-bar-wrap">
                                   <div className="wfm-bar-track">

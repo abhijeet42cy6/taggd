@@ -80,6 +80,42 @@ function matchesContains(filterVal: string, val: string | undefined): boolean {
   return v.includes(f) || f.includes(v);
 }
 
+/**
+ * Sums `rev_actual_inr` per normalized account for the given Indian FY (from `month_sort` rows).
+ * Keys are `account_name.trim().toLowerCase()`.
+ */
+export function revenueByAccountKeyInFy(
+  rows: FinanceRowVm[],
+  fyStart: number,
+): Map<string, number> {
+  const sums = new Map<string, number>();
+  for (const r of rows) {
+    const d = parseMonthSort(r.month_sort);
+    if (!d || fiscalYearStart(d) !== fyStart) continue;
+    const display = (r.account_name || "").trim();
+    if (!display) continue;
+    const key = display.toLowerCase();
+    sums.set(key, (sums.get(key) ?? 0) + (r.rev_actual_inr ?? 0));
+  }
+  return sums;
+}
+
+/** For Account filter: not linked to a prospect client, not a clearly inactive directory row. */
+export function isProjectEligibleForFinanceAccountList(p: Project): boolean {
+  if ((p.client_lifecycle_state ?? "active").toLowerCase() === "prospect") return false;
+  const st = (p.account_status ?? "").trim().toLowerCase();
+  if (!st) return true;
+  if (
+    /prospect|not\s*active|inactive|lapsed|closed|cancel|churn|lost|on\s*hold|dormant|suspended|dropped/.test(
+      st,
+    )
+  ) {
+    return false;
+  }
+  if (/pursuit|pipeline|pre[-\s]?close|pre[-\s]?sales|discovery|lead(?!er)/.test(st)) return false;
+  return true;
+}
+
 export function filterFinanceRows(
   rows: FinanceRowVm[],
   projects: Project[],
@@ -360,6 +396,35 @@ export function sumUnbilledLatestMonthPerProject(rows: FinanceRowVm[]): number {
 }
 
 /** Sum ledger rows (same units as API: INR). */
+/** Zeros for a fiscal slice with no ledger rows (never substitute portfolio-wide /finance/stats here). */
+export function emptyFinanceAggregate(): {
+  revenue_budget_inr: number;
+  revenue_forecast_inr: number;
+  revenue_actual_inr: number;
+  total_cm_inr: number;
+  total_unbilled_inr: number;
+  total_bad_debt_inr: number;
+  total_collected_inr: number;
+  total_collection_target_inr: number;
+  collection_pending_inr: number;
+  rev_attainment: number;
+  collection_efficiency: number;
+} {
+  return {
+    revenue_budget_inr: 0,
+    revenue_forecast_inr: 0,
+    revenue_actual_inr: 0,
+    total_cm_inr: 0,
+    total_unbilled_inr: 0,
+    total_bad_debt_inr: 0,
+    total_collected_inr: 0,
+    total_collection_target_inr: 0,
+    collection_pending_inr: 0,
+    rev_attainment: 0,
+    collection_efficiency: 0,
+  };
+}
+
 export function aggregateFinanceFromRows(rows: FinanceRowVm[]): {
   revenue_budget_inr: number;
   revenue_forecast_inr: number;

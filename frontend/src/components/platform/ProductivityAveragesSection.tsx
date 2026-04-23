@@ -7,10 +7,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { FinanceRowVm } from "@/lib/view-models/finance";
 
 export const PRODUCTIVITY_AVG_INFO =
-  "Arithmetic mean of Tag prod. (Taggd source productivity = joiners ÷ WL1 HC), PPC (actual cost ÷ overall HC, formula only), and Rev / WL1 (revenue actual ÷ WL1 HC). Each average uses only rows where that metric is defined; filters narrow client-month rows first.";
+  "Arithmetic mean of Tag prod. (Taggd joiners ÷ WL1 HC) and Rev / WL1 (revenue actual ÷ WL1 HC). Avg PPC is portfolio Σ(Rev − CM) ÷ Σ overall HC on filtered client-month rows (implied cost per HC), not mean of ledger-based PPC.";
 
 export const PRODUCTIVITY_AVG_INFO_DASHBOARD =
-  "Same metrics as Finance Command. Rows are those that match the dashboard filter bar (period, month, region, sub-region, account, vertical, etc.). Each average uses only rows where that metric is defined.";
+  "Same metrics as Finance Command. Dashboard filters narrow client-month rows first. Avg PPC = Σ(Rev − CM) ÷ Σ overall HC over those rows.";
 
 const selectStyle: React.CSSProperties = {
   background: "var(--surface-raised)",
@@ -46,6 +46,35 @@ function averageDefined(
   if (!vals.length) return { mean: null, count: 0 };
   const sum = vals.reduce((a, b) => a + b, 0);
   return { mean: sum / vals.length, count: vals.length };
+}
+
+/** Portfolio-style Avg PPC: Σ(Rev − CM) ÷ Σ overall HC on the same filtered rows (INR per HC). */
+export function avgPpcSigmaRevMinusCmOverSigmaHc(rows: FinanceRowVm[]): {
+  value: number | null;
+  rowCount: number;
+  sumHc: number;
+  sumImpliedCostInr: number;
+} {
+  let sumRev = 0;
+  let sumCm = 0;
+  let sumHc = 0;
+  let rowCount = 0;
+  for (const r of rows) {
+    rowCount += 1;
+    sumRev += Number(r.rev_actual_inr) || 0;
+    sumCm += Number(r.cm_actual_inr) || 0;
+    sumHc += Number(r.actual_headcount_overall) || 0;
+  }
+  const sumImpliedCostInr = sumRev - sumCm;
+  if (!rowCount || sumHc <= 0 || !Number.isFinite(sumImpliedCostInr)) {
+    return { value: null, rowCount, sumHc, sumImpliedCostInr };
+  }
+  return {
+    value: sumImpliedCostInr / sumHc,
+    rowCount,
+    sumHc,
+    sumImpliedCostInr,
+  };
 }
 
 type Props = {
@@ -95,7 +124,7 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
       rowsForProductivityAvg,
       (r) => r.taggd_joiner_productivity ?? r.taggd_source_productivity,
     );
-    const ppc = averageDefined(rowsForProductivityAvg, (r) => r.ppc_inr);
+    const ppc = avgPpcSigmaRevMinusCmOverSigmaHc(rowsForProductivityAvg);
     const rev = averageDefined(rowsForProductivityAvg, (r) => r.revenue_productivity_inr);
     return { tag, ppc, rev };
   }, [rowsForProductivityAvg]);
@@ -194,12 +223,14 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
           />
           <PlatformKpi
             label="Avg PPC"
-            value={fmtFinInrMetric(productivityAvgs.ppc.mean)}
+            value={fmtFinInrMetric(productivityAvgs.ppc.value)}
             accent="blue"
             subtext={
-              productivityAvgs.ppc.count
-                ? `Mean of ${productivityAvgs.ppc.count} values`
-                : "No PPC values in scope"
+              productivityAvgs.ppc.rowCount === 0
+                ? "No rows in scope"
+                : productivityAvgs.ppc.sumHc <= 0
+                  ? "Σ overall HC is 0 in scope"
+                  : "Σ(Rev − CM) ÷ Σ HC"
             }
           />
           <PlatformKpi

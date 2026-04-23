@@ -156,7 +156,7 @@ export function RevenueGovernance() {
   }, [searchParams]);
   const openedSubmissionRef = useRef<number | null>(null);
 
-  const [queueFilter, setQueueFilter] = useState<QueueFilter>("needs_review");
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const [rows, setRows] = useState<RevenueWeeklySubmissionDto[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -412,7 +412,15 @@ export function RevenueGovernance() {
               {!loading && rows.length === 0 && (
                 <tr>
                   <td colSpan={5} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
-                    No rows for this filter.
+                    <div>No rows for this filter.</div>
+                    {queueFilter === "needs_review" && !queueSearch.trim() ? (
+                      <p className="mt-2 max-w-md mx-auto text-[11px] text-muted-foreground leading-relaxed">
+                        Packs that are already <strong className="text-foreground/80">approved</strong> (or still{" "}
+                        <strong className="text-foreground/80">draft</strong>) do not appear under Needs review. Use{" "}
+                        <strong className="text-foreground/80">All</strong> or <strong className="text-foreground/80">Approved</strong>{" "}
+                        to see them.
+                      </p>
+                    ) : null}
                   </td>
                 </tr>
               )}

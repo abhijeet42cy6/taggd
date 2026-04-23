@@ -22,10 +22,13 @@ From the **repository root**:
 ```bash
 python3 backend/scripts/ingest_excel_master_filled_workbooks.py \
   --finance path/to/10_finance_core_filled.xlsx \
-  --sla path/to/08_sla_FILLED.xlsx
+  --sla path/to/08_sla_FILLED.xlsx \
+  --wfm path/to/09_workforce_management_filled.xlsx
 ```
 
-Omit `--finance` or `--sla` if you only need one. Set `DATABASE_URL` if not using the default SQLite file (`sqlite:///./revenue_generator.db` relative to the process working directory).
+Omit `--finance`, `--sla`, or `--wfm` if you only need a subset. Set `DATABASE_URL` if not using the default SQLite file (`sqlite:///./revenue_generator.db` relative to the process working directory).
+
+**WFM (`09` — `wfm_hr_benchmarks`, `wfm_resource_gaps`):** the `project_id` column in the sheet holds the **account name** (string), not a numeric FK. The loader resolves names with `resolve_project_for_sla` and falls back to `get_or_create_project`. Re-importing the same file **basename** replaces prior rows with that `source_filename` (idempotent). This is **not** the legacy `ingest_wfm.py` “Projected HC - FY26” positional layout.
 
 The script:
 

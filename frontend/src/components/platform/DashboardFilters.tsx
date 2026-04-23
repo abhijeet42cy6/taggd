@@ -1,7 +1,10 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import type { Project } from "@/lib/api";
+import type { FinanceRowVm } from "@/lib/view-models/finance";
 import {
   DEFAULT_DASHBOARD_FILTERS,
+  isProjectEligibleForFinanceAccountList,
+  revenueByAccountKeyInFy,
   type DashboardFilters as DF,
   FY_MONTH_ORDER,
 } from "@/lib/dashboard-aggregates";
@@ -24,6 +27,7 @@ export function DashboardFilters({
   value,
   onChange,
   projects,
+  financeRows,
   fyYears,
   selectedFyStart,
   onFyChange,
@@ -32,6 +36,8 @@ export function DashboardFilters({
   value: DF;
   onChange: (next: DF) => void;
   projects: Project[];
+  /** Used to list only accounts with actual revenue in the selected FY (excludes no-ledger / zero-revenue names). */
+  financeRows: FinanceRowVm[];
   /** Indian FY start years present in the finance ledger (e.g. 2024 → FY24–25). */
   fyYears: number[];
   selectedFyStart: number;
@@ -39,15 +45,36 @@ export function DashboardFilters({
   fySelectDisabled?: boolean;
 }) {
   const options = useMemo(() => {
+    const revenueByKey = revenueByAccountKeyInFy(financeRows, selectedFyStart);
+    const accountSeen = new Set<string>();
+    const accounts: string[] = [];
+    for (const p of projects) {
+      if (!isProjectEligibleForFinanceAccountList(p)) continue;
+      const n = (p.account_name || "").trim();
+      if (!n) continue;
+      const key = n.toLowerCase();
+      if (accountSeen.has(key)) continue;
+      if ((revenueByKey.get(key) ?? 0) <= 0) continue;
+      accountSeen.add(key);
+      accounts.push(n);
+    }
     return {
       regions: uniqSorted(projects.map((p) => p.region)),
       subRegions: uniqSorted(projects.map((p) => p.sub_region ?? p.category)),
       regionHeads: uniqSorted(projects.map((p) => p.practice_head)),
       practiceHeads: uniqSorted(projects.map((p) => p.be_spoc)),
       verticals: uniqSorted(projects.map((p) => p.vertical)),
-      accounts: uniqSorted(projects.map((p) => p.account_name)),
+      accounts: accounts.sort((a, b) => a.localeCompare(b)),
     };
-  }, [projects]);
+  }, [projects, financeRows, selectedFyStart]);
+
+  const accountList = options.accounts;
+  useEffect(() => {
+    if (value.account === "all") return;
+    if (!accountList.includes(value.account)) {
+      onChange({ ...value, account: "all" });
+    }
+  }, [accountList, value.account, value, onChange]);
 
   const sel = (key: keyof DF, v: string) => onChange({ ...value, [key]: v });
 

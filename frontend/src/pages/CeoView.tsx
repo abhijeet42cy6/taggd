@@ -17,7 +17,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { queries, type GlobalStats, type Project, type RequisitionKpis } from "@/lib/api";
-import { financeStatsVm, financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
+import { financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import { slaStatsVm } from "@/lib/view-models/sla";
 import { ExecutiveRevenueYoYChart, ExecutiveCmYoYChart, RegionalRevenueBarChart } from "@/components/platform/Charts";
 import { SkeletonKpiRow } from "@/components/platform/Skeleton";
@@ -28,6 +28,7 @@ import {
   buildRegionalRevenue,
   buildExecutiveSummary,
   aggregateFinanceFromRows,
+  emptyFinanceAggregate,
   quarterlyPlanActualForFy,
   quarterlyCollectionForFy,
   quarterlyCmForFy,
@@ -132,7 +133,6 @@ export const CeoView = () => {
   const [deckEditorOpen, setDeckEditorOpen] = useState(false);
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [financeStatsApi, setFinanceStatsApi] = useState<ReturnType<typeof financeStatsVm> | null>(null);
   const [financeRows, setFinanceRows] = useState<FinanceRowVm[]>([]);
   const [slaStats, setSlaStats] = useState<ReturnType<typeof slaStatsVm> | null>(null);
   const [wfmStats, setWfmStats] = useState<any>(null);
@@ -149,10 +149,9 @@ export const CeoView = () => {
     (async () => {
       const T_HEAVY = 90_000;
       const T_STD = 60_000;
-      const [s, proj, fStats, fRows, sStats, wfm, rk, dd] = await Promise.allSettled([
+      const [s, proj, fRows, sStats, wfm, rk, dd] = await Promise.allSettled([
         to(queries.globalStats(), T_STD, null),
         to(queries.projects(), T_STD, []),
-        to(queries.financeStats(), T_STD, null),
         to(queries.financeData(), T_HEAVY, []),
         to(queries.slaStats(), T_STD, null),
         to(queries.wfmStats(), T_STD, null),
@@ -162,7 +161,6 @@ export const CeoView = () => {
       if (!mounted) return;
       if (s.status === "fulfilled" && s.value) setStats(s.value as GlobalStats);
       if (proj.status === "fulfilled") setProjects(proj.value as Project[] || []);
-      if (fStats.status === "fulfilled" && fStats.value) setFinanceStatsApi(financeStatsVm(fStats.value));
       if (fRows.status === "fulfilled" && fRows.value) setFinanceRows(financeRowsVm(fRows.value as any[]));
       if (sStats.status === "fulfilled" && sStats.value) setSlaStats(slaStatsVm(sStats.value));
       if (wfm.status === "fulfilled") setWfmStats(wfm.value);
@@ -215,8 +213,8 @@ export const CeoView = () => {
   const fin = useMemo(() => {
     const agg = aggregateFinanceFromRows(fyRows);
     if (agg) return agg;
-    return financeStatsApi ? { ...financeStatsApi, collection_pending_inr: financeStatsApi.collection_pending_inr ?? 0 } : null;
-  }, [fyRows, financeStatsApi]);
+    return emptyFinanceAggregate();
+  }, [fyRows]);
 
   const priorFin = useMemo(() => aggregateFinanceFromRows(priorRows), [priorRows]);
   const { revenue: yoyRev, cm: yoyCm } = useMemo(

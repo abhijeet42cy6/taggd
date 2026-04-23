@@ -1226,8 +1226,10 @@ def list_projects(
         d = {c.name: clean(getattr(p, c.name)) for c in p.__table__.columns}
         if p.client_id and p.client:
             d["client_official_name"] = p.client.official_name
+            d["client_lifecycle_state"] = (p.client.lifecycle_state or "active").lower()
         else:
             d["client_official_name"] = None
+            d["client_lifecycle_state"] = "active"
         res.append(d)
 
     return JSONResponse(

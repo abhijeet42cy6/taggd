@@ -8,11 +8,14 @@ This is *not* the same layout as `ingest_finance.py` (corporate multi-sheet) or 
   plus `_FK_REFERENCE` to resolve project_id when the data rows have empty project_id.
 - `08_sla` template: `metric_definitions`, `sla_performances`, plus `_project_mapping_needed` to bind
   definitions to projects by source_project_name (or `project_id_TO_FILL` if present).
+- `09_workforce_management` template: `wfm_hr_benchmarks`, `wfm_resource_gaps` (sheet `project_id` = account
+  name string; resolved with `resolve_project_for_sla` then `get_or_create_project`).
 
 From repo root:
   python3 backend/scripts/ingest_excel_master_filled_workbooks.py \\
     --finance actual_data/10_finance_core_filled.xlsx \\
-    --sla actual_data/08_sla_FILLED.xlsx
+    --sla actual_data/08_sla_FILLED.xlsx \\
+    --wfm actual_data/09_workforce_management_filled.xlsx
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ from sqlalchemy import func
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+from backend.core.sla_project_resolve import resolve_project_for_sla  # noqa: E402
 from backend.db.database import (  # noqa: E402
     FinanceCashFlow,
     FinanceEfficiencyKPI,
@@ -35,6 +39,8 @@ from backend.db.database import (  # noqa: E402
     Project,
     SLAPerformance,
     SessionLocal,
+    WFMHRBenchmark,
+    WFMResourceGap,
     backfill_sla_period_starts,
     ensure_project_client,
     init_db,
@@ -674,13 +680,130 @@ def ingest_sla_template(path: str, db, source_fn: str) -> dict[str, Any]:
     return {"issues": issues, "metric_definitions": len(mdf)}
 
 
+def _resolve_project_for_wfm_label(
+    db, raw: Any, source_fn: str
+) -> Project:
+    """
+    `project_id` in WFM template sheets is usually an **account name** (string), not a numeric FK.
+    If it is a positive int and matches `projects.id`, that project is used.
+    """
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        raise ValueError("missing project_id")
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        if not (isinstance(raw, float) and pd.isna(raw)):
+            try:
+                pid = int(_coerce_float(raw))
+                if pid > 0:
+                    p = db.query(Project).filter(Project.id == pid).first()
+                    if p:
+                        return p
+            except (TypeError, ValueError):
+                pass
+    s = str(raw).strip()
+    if not s or s.lower() in ("nan", "none", "-", "—"):
+        raise ValueError("empty project_id")
+    p, _reason = resolve_project_for_sla(db, s)
+    if p:
+        if p.client_id is None:
+            ensure_project_client(db, p)
+        return p
+    return get_or_create_project(db, s, source_fn)
+
+
+def ingest_wfm_filled_workbook(path: str, db, source_fn: str) -> dict[str, Any]:
+    issues: list[str] = []
+    n_b = 0
+    n_g = 0
+    now = datetime.utcnow()
+    # Idempotent re-import of the same file name
+    db.query(WFMResourceGap).filter(WFMResourceGap.source_filename == source_fn).delete(
+        synchronize_session=False
+    )
+    db.query(WFMHRBenchmark).filter(WFMHRBenchmark.source_filename == source_fn).delete(
+        synchronize_session=False
+    )
+    db.flush()
+
+    dfb = _read_table_sheet(path, "wfm_hr_benchmarks", optional=True)
+    dfg = _read_table_sheet(path, "wfm_resource_gaps", optional=True)
+    if dfb is not None and not dfb.empty:
+        for _, row in dfb.iterrows():
+            try:
+                p = _resolve_project_for_wfm_label(db, row.get("project_id"), source_fn)
+                rdt = _coerce_dt(row.get("reporting_date"))
+                if not rdt:
+                    issues.append("wfm_hr_benchmarks: missing reporting_date; skipped a row.")
+                    continue
+                vals: dict[str, Any] = {
+                    "project_id": p.id,
+                    "reporting_date": rdt,
+                    "lateral_revenue_target": _coerce_float(row.get("lateral_revenue_target")),
+                    "lateral_hc_target": _coerce_float(row.get("lateral_hc_target")),
+                    "lateral_productivity_target": _coerce_float(
+                        row.get("lateral_productivity_target")
+                    ),
+                    "ideal_hc": _coerce_float(row.get("ideal_hc")),
+                    "actual_hc_total": _coerce_int(row.get("actual_hc_total")),
+                    "wl1_hires": _coerce_int(row.get("wl1_hires")),
+                    "wl2_hires": _coerce_int(row.get("wl2_hires")),
+                    "wl3_hires": _coerce_int(row.get("wl3_hires")),
+                    "wl4_hires": _coerce_int(row.get("wl4_hires")),
+                    "source_filename": source_fn,
+                    "uploaded_by": "ingest_excel_master",
+                }
+                sa = _coerce_dt(row.get("system_created_at")) or now
+                ua = _coerce_dt(row.get("system_updated_at")) or now
+                vals["system_created_at"] = sa
+                vals["system_updated_at"] = ua
+                clean = _model_kwargs(vals, WFMHRBenchmark)
+                db.add(WFMHRBenchmark(**clean))
+                n_b += 1
+            except Exception as e:  # noqa: BLE001
+                issues.append(f"wfm_hr_benchmarks: {e}")
+
+    if dfg is not None and not dfg.empty:
+        for _, row in dfg.iterrows():
+            try:
+                p = _resolve_project_for_wfm_label(db, row.get("project_id"), source_fn)
+                req_id = str(row.get("req_id") or "").strip()
+                if not req_id or req_id.lower() == "nan":
+                    issues.append("wfm_resource_gaps: missing req_id; skipped a row.")
+                    continue
+                st = str(row.get("status") or "").strip()
+                ht = str(row.get("hiring_type") or "").strip()
+                dl = str(row.get("designation_level") or "").strip()
+                tdt = _coerce_dt(row.get("target_date"))
+                vals = {
+                    "project_id": p.id,
+                    "req_id": req_id[:500],
+                    "status": (st or None) if st else None,
+                    "hiring_type": (ht or None) if ht else None,
+                    "designation_level": (dl or None) if dl else None,
+                    "target_date": tdt,
+                    "source_filename": source_fn,
+                    "uploaded_by": "ingest_excel_master",
+                }
+                vals["system_created_at"] = _coerce_dt(row.get("system_created_at")) or now
+                vals["system_updated_at"] = _coerce_dt(row.get("system_updated_at")) or now
+                clean = _model_kwargs(vals, WFMResourceGap)
+                db.add(WFMResourceGap(**clean))
+                n_g += 1
+            except Exception as e:  # noqa: BLE001
+                issues.append(f"wfm_resource_gaps: {e}")
+    if (dfb is None or dfb.empty) and (dfg is None or dfg.empty):
+        issues.append("WFM: sheets wfm_hr_benchmarks / wfm_resource_gaps missing or empty.")
+    db.flush()
+    return {"issues": issues, "wfm_hr_benchmarks": n_b, "wfm_resource_gaps": n_g}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--finance", type=str, help="Path to 10_finance_core filled .xlsx")
     ap.add_argument("--sla", type=str, help="Path to 08_sla filled .xlsx")
+    ap.add_argument("--wfm", type=str, help="Path to 09_workforce_management filled .xlsx (wfm_hr_benchmarks, wfm_resource_gaps sheets)")
     args = ap.parse_args()
-    if not args.finance and not args.sla:
-        ap.error("Provide at least one of --finance or --sla")
+    if not args.finance and not args.sla and not args.wfm:
+        ap.error("Provide at least one of --finance, --sla, or --wfm")
     init_db()
     db = SessionLocal()
     out: list[str] = []
@@ -695,6 +818,11 @@ def main() -> int:
             r2 = ingest_sla_template(args.sla, db, fn)
             db.commit()
             out.append(f"SLA: {r2}")
+        if args.wfm:
+            fn = os.path.basename(args.wfm)
+            r3 = ingest_wfm_filled_workbook(args.wfm, db, fn)
+            db.commit()
+            out.append(f"WFM: {r3}")
         for line in out:
             print(line)
     except Exception as e:
