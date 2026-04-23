@@ -4,9 +4,9 @@ Blank **.xlsx** workbooks whose **first row is the exact ORM/DB field name** for
 
 ## Dropdowns (data validation)
 
-Where the system uses **closed lists** (roles, workflow states, joiner source types, finance metric categories, task status/priority, etc.), the generator adds **Excel data validation** on data rows (rows 3–5002) pointing at a hidden **`lists`** sheet. Identical option sets are **deduplicated** to one column on `lists`.
+Where the system uses **closed lists** (roles, workflow states, joiner source types, finance metric categories, task status/priority, etc.), the generator adds **Excel data validation** on data rows (rows 3–5002) pointing at a hidden `**lists`** sheet. Identical option sets are **deduplicated** to one column on `lists`.
 
-- **Booleans** in the ORM (SQLAlchemy `Boolean`) get choices **`1` / `0`** unless a column has an explicit list in `excel_upload_masters/column_dropdowns.py` (e.g. contract flags with the same values).
+- **Booleans** in the ORM (SQLAlchemy `Boolean`) get choices `**1` / `0`** unless a column has an explicit list in `excel_upload_masters/column_dropdowns.py` (e.g. contract flags with the same values).
 - **IDs** (`project_id`, `user_id`, …) and **free-text** fields have **no** dropdown; ingesters or users fill those as usual.
 - **Sources of truth** for the lists: `column_dropdowns.py` imports or mirrors `backend` constants (`auth.profile` roles, `finance_billing_workflow_core` statuses, `revenue_weekly_submission_core`, `finance_planning_categories`, `candidate_master_mgmt` link sources, `RECORD_SOURCE_JOINER_TYPES`, and UI enums such as requisition `global_status` and transition board statuses). Extend that file when you add new enum values in code.
 

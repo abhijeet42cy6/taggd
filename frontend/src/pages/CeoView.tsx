@@ -29,10 +29,15 @@ import {
   buildExecutiveSummary,
   aggregateFinanceFromRows,
   quarterlyPlanActualForFy,
+  quarterlyCollectionForFy,
+  quarterlyCmForFy,
   fiscalYearStart,
   parseMonthSort,
   type DashboardFilters as DF,
 } from "@/lib/dashboard-aggregates";
+import { formatLargeCurrency, formatPercent } from "@/lib/utils";
+import { ExecutiveHeroCard, QuarterBand } from "@/components/platform/ExecutiveFinanceHero";
+import "@/styles/exec-dashboard.css";
 import "@/styles/ceo-view.css";
 import "@/styles/ceo-board-slides.css";
 import { CeoBoardSlides } from "@/components/ceo/CeoBoardSlides";
@@ -60,71 +65,21 @@ function fmtPct(n: number, decimals = 1): string {
   return `${n.toFixed(decimals)}%`;
 }
 
-function attCls(pct: number): "green" | "amber" | "red" {
-  return pct >= 100 ? "green" : pct >= 70 ? "amber" : "red";
-}
-
 function chipCls(val: number, goodIfPositive = true): string {
   if (Math.abs(val) < 0.01) return "ceo-chip--muted";
   const good = goodIfPositive ? val > 0 : val < 0;
   return good ? "ceo-chip--green" : "ceo-chip--red";
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function KpiCard({
-  eyebrow, variant, primary, chips, attainmentLabel, attainmentPct, meta, children,
-}: {
-  eyebrow: string;
-  variant: "orange" | "teal" | "blue" | "green" | "amber" | "red";
-  primary: React.ReactNode;
-  chips?: { label: string; cls: string }[];
-  attainmentLabel?: string;
-  attainmentPct?: number;
-  meta?: { label: string; value: React.ReactNode; cls?: string }[];
-  children?: React.ReactNode;
-}) {
-  const att = attainmentPct ?? 0;
-  const ac = attCls(att);
-  return (
-    <div className={`ceo-kpi-card ceo-kpi-card--${variant}`}>
-      <div className="ceo-kpi-card__eyebrow">{eyebrow}</div>
-      <div className="ceo-kpi-card__primary">{primary}</div>
-      {chips && chips.length > 0 && (
-        <div className="ceo-kpi-card__chips">
-          {chips.map((c, i) => <span key={i} className={`ceo-chip ${c.cls}`}>{c.label}</span>)}
-        </div>
-      )}
-      {attainmentLabel != null && (
-        <div className="ceo-attainment">
-          <div className="ceo-attainment__header">
-            <span className="ceo-attainment__label">{attainmentLabel}</span>
-            <span className={`ceo-attainment__pct ceo-attainment__pct--${ac}`}>{att.toFixed(1)}%</span>
-          </div>
-          <div className="ceo-attainment__track">
-            <div
-              className={`ceo-attainment__fill ceo-attainment__fill--${variant}`}
-              style={{ width: `${Math.min(100, att)}%` }}
-            />
-          </div>
-        </div>
-      )}
-      {children}
-      {meta && meta.length > 0 && (
-        <div className="ceo-kpi-card__meta">
-          {meta.map((m, i) => (
-            <div key={i} className="ceo-kpi-card__meta-row">
-              <span className="ceo-kpi-card__meta-label">{m.label}</span>
-              <span className={`ceo-kpi-card__meta-val${m.cls ? ` ceo-kpi-card__meta-val--${m.cls}` : ""}`}>
-                {m.value}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+/** Aligns with Executive Overview (`Dashboard`) YoY chip styling. */
+function yoyDeltaChip(curr: number, prev: number): { label: string; cls: string } {
+  if (prev <= 0 || curr <= 0) return { label: "—", cls: "exec-delta-chip--muted" };
+  const p = ((curr - prev) / prev) * 100;
+  const cls = p > 0.5 ? "exec-delta-chip--green" : p < -0.5 ? "exec-delta-chip--red" : "exec-delta-chip--amber";
+  return { label: `${p >= 0 ? "▲" : "▼"} ${Math.abs(p).toFixed(1)}% YoY`, cls };
 }
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
 
 function PulseCard({
   icon, iconVariant, label, primary, sub, chip,
@@ -182,6 +137,7 @@ export const CeoView = () => {
   const [slaStats, setSlaStats] = useState<ReturnType<typeof slaStatsVm> | null>(null);
   const [wfmStats, setWfmStats] = useState<any>(null);
   const [reqKpis, setReqKpis] = useState<RequisitionKpis | null>(null);
+  const [drilldown, setDrilldown] = useState<Array<{ name: string; revenue: number; count: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
 
@@ -193,7 +149,7 @@ export const CeoView = () => {
     (async () => {
       const T_HEAVY = 90_000;
       const T_STD = 60_000;
-      const [s, proj, fStats, fRows, sStats, wfm, rk] = await Promise.allSettled([
+      const [s, proj, fStats, fRows, sStats, wfm, rk, dd] = await Promise.allSettled([
         to(queries.globalStats(), T_STD, null),
         to(queries.projects(), T_STD, []),
         to(queries.financeStats(), T_STD, null),
@@ -201,6 +157,7 @@ export const CeoView = () => {
         to(queries.slaStats(), T_STD, null),
         to(queries.wfmStats(), T_STD, null),
         to(queries.requisitionKpis(), T_STD, null),
+        to(queries.globalDrilldown("hiring_manager"), T_STD, []),
       ]);
       if (!mounted) return;
       if (s.status === "fulfilled" && s.value) setStats(s.value as GlobalStats);
@@ -210,6 +167,7 @@ export const CeoView = () => {
       if (sStats.status === "fulfilled" && sStats.value) setSlaStats(slaStatsVm(sStats.value));
       if (wfm.status === "fulfilled") setWfmStats(wfm.value);
       if (rk.status === "fulfilled") setReqKpis(rk.value as RequisitionKpis);
+      if (dd.status === "fulfilled") setDrilldown((dd.value as any) || []);
       setLoading(false);
     })();
     return () => { mounted = false; };
@@ -265,7 +223,9 @@ export const CeoView = () => {
     () => buildYoYRevenueSeries(allRows, selectedFyStart, autoCompareFy),
     [allRows, selectedFyStart, autoCompareFy],
   );
-  const quarters = useMemo(() => quarterlyPlanActualForFy(fyRows, selectedFyStart), [fyRows, selectedFyStart]);
+  const revQuarters = useMemo(() => quarterlyPlanActualForFy(fyRows, selectedFyStart), [fyRows, selectedFyStart]);
+  const collQuarters = useMemo(() => quarterlyCollectionForFy(fyRows, selectedFyStart), [fyRows, selectedFyStart]);
+  const cmQuarters = useMemo(() => quarterlyCmForFy(fyRows, selectedFyStart), [fyRows, selectedFyStart]);
   const regional = useMemo(() => buildRegionalRevenue(allRows, projects), [allRows, projects]);
   const execRows = useMemo(() => {
     if (!fin) return [];
@@ -289,7 +249,6 @@ export const CeoView = () => {
   // ── Core KPI derivations ─────────────────────────────────────────────────
   const revA   = fin?.revenue_actual_inr ?? 0;
   const revBud = fin?.revenue_budget_inr ?? 0;
-  const revFor = fin?.revenue_forecast_inr ?? 0;
   const cmA    = fin?.total_cm_inr ?? 0;
   const cmPct  = revA > 0 ? (cmA / revA) * 100 : 0;
   const coll   = fin?.total_collected_inr ?? 0;
@@ -298,13 +257,12 @@ export const CeoView = () => {
   const bd     = fin?.total_bad_debt_inr ?? 0;
   const revAtt = fin?.rev_attainment ?? 0;
   const collAtt = collT > 0 ? (coll / collT) * 100 : 0;
-  const collEff = fin?.collection_efficiency ?? 0;
+  const unbPctRev = revA > 0 ? (unb / revA) * 100 : 0;
+  const bdPctColl = coll > 0 ? (bd / coll) * 100 : 0;
 
   const priorRevA  = priorFin?.revenue_actual_inr ?? 0;
   const priorCmPct = priorFin && priorFin.revenue_actual_inr > 0 ? (priorFin.total_cm_inr / priorFin.revenue_actual_inr) * 100 : null;
   const priorColl  = priorFin?.total_collected_inr ?? 0;
-  const yoyRevPct  = priorRevA > 0 ? ((revA - priorRevA) / priorRevA) * 100 : 0;
-  const yoyCollPct = priorColl > 0 ? ((coll - priorColl) / priorColl) * 100 : 0;
   const cmDeltaPp  = priorCmPct != null ? cmPct - priorCmPct : null;
 
   // Productivity: sum from fyRows
@@ -353,35 +311,6 @@ export const CeoView = () => {
   const closedReqs  = Number(reqKpis?.joiners ?? 0);   // joiners = filled/closed mandates
   const activeReqs  = Number(reqKpis?.open_req ?? 0);  // open = active pipeline
   const closureRate = totalReqs > 0 ? (closedReqs / totalReqs) * 100 : 0;
-
-  // Quarter chart
-  const maxQPlan = Math.max(...quarters.map((q) => q.planInr), 1);
-  const quarterBand = quarters.some((q) => q.planInr > 0 || q.actualInr > 0) ? (
-    <div className="ceo-quarter-band">
-      {quarters.map((q) => {
-        const planH = Math.max(4, (q.planInr / maxQPlan) * 24);
-        const actH  = Math.max(0, (q.actualInr / maxQPlan) * 24);
-        const onTrack = q.actualInr + 1 >= q.planInr;
-        return (
-          <div key={q.q} className="ceo-quarter-col">
-            <div className="ceo-quarter-col__bars">
-              <div className="ceo-quarter-col__bar-plan" style={{ height: planH }} />
-              {q.actualInr > 0 && (
-                <div
-                  className={`ceo-quarter-col__bar-actual ceo-quarter-col__bar-actual--${onTrack ? "on" : "off"}`}
-                  style={{ height: actH }}
-                />
-              )}
-            </div>
-            <div className="ceo-quarter-col__label">{q.q}</div>
-            <div className="ceo-quarter-col__val">
-              {((q.actualInr || q.planInr) / 1e7).toFixed(1)} Cr
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  ) : null;
 
   // Vertical revenue mix
   const verticalMix = useMemo(() => {
@@ -474,76 +403,87 @@ export const CeoView = () => {
       {loading ? (
         <SkeletonKpiRow count={3} />
       ) : (
-        <div className="ceo-hero">
-
-          {/* Revenue */}
-          <KpiCard
+        <div className="exec-hero">
+          <ExecutiveHeroCard
             eyebrow="Revenue — Actual"
             variant="orange"
-            primary={fmtCr(revA)}
-            chips={[
-              yoyRevPct !== 0
-                ? { label: `${yoyRevPct >= 0 ? "▲" : "▼"} ${Math.abs(yoyRevPct).toFixed(1)}% YoY`, cls: chipCls(yoyRevPct) }
-                : { label: "No prior FY", cls: "ceo-chip--muted" },
-              revAtt >= 100
-                ? { label: "On target", cls: "ceo-chip--green" }
-                : { label: `${revAtt.toFixed(1)}% attained`, cls: revAtt >= 70 ? "ceo-chip--amber" : "ceo-chip--red" },
-            ]}
-            attainmentLabel={`vs ₹ Budget ${fmtCr(revBud)}`}
+            primary={formatLargeCurrency(revA)}
+            deltas={
+              [priorRevA > 0 ? yoyDeltaChip(revA, priorRevA) : null].filter(Boolean) as { label: string; cls: string }[]
+            }
+            attainmentLabel={`vs ₹ Budget ${formatLargeCurrency(revBud)}`}
             attainmentPct={revAtt}
             meta={[
-              { label: "Full-year forecast", value: fmtCr(revFor > 0 ? revFor : revBud) },
-              { label: "Budget", value: fmtCr(revBud) },
-              ...(priorRevA > 0 ? [{ label: `${compareFyLabel} actual`, value: fmtCr(priorRevA) }] : []),
+              { label: "Full-year forecast", value: formatLargeCurrency(fin?.revenue_forecast_inr ?? 0) },
+              ...(priorFin && priorRevA > 0
+                ? [{ label: `${compareFyLabel} Actual`, value: formatLargeCurrency(priorFin.revenue_actual_inr) }]
+                : []),
+              ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
             ]}
           >
-            {quarterBand}
-          </KpiCard>
+            <QuarterBand quarters={revQuarters} variant="orange" />
+          </ExecutiveHeroCard>
 
-          {/* CM% */}
-          <KpiCard
+          <ExecutiveHeroCard
             eyebrow="Contribution Margin"
             variant="teal"
-            primary={fmtPct(cmPct)}
-            chips={[
+            primary={formatPercent(cmPct)}
+            deltas={[
               cmPct >= 35
-                ? { label: `+${(cmPct - 35).toFixed(1)} pp vs 35% target`, cls: "ceo-chip--green" }
-                : { label: `${(cmPct - 35).toFixed(1)} pp vs target`, cls: "ceo-chip--red" },
+                ? { label: `+${(cmPct - 35).toFixed(1)} pp vs target`, cls: "exec-delta-chip--green" }
+                : { label: `${(cmPct - 35).toFixed(1)} pp vs target`, cls: "exec-delta-chip--red" },
               ...(cmDeltaPp != null
-                ? [{ label: `${cmDeltaPp >= 0 ? "▲" : "▼"} ${Math.abs(cmDeltaPp).toFixed(1)} pp YoY`, cls: chipCls(cmDeltaPp) }]
+                ? [
+                    cmDeltaPp >= 0
+                      ? { label: `▲ ${Math.abs(cmDeltaPp).toFixed(1)} pp YoY`, cls: "exec-delta-chip--green" }
+                      : { label: `▼ ${Math.abs(cmDeltaPp).toFixed(1)} pp YoY`, cls: "exec-delta-chip--red" },
+                  ]
                 : []),
             ]}
             attainmentLabel="vs 35% target"
             attainmentPct={(cmPct / 35) * 100}
             meta={[
-              { label: "CM value", value: fmtCr(cmA) },
               { label: "Target CM%", value: "35.0%" },
-              ...(priorCmPct != null ? [{ label: `${compareFyLabel} CM%`, value: fmtPct(priorCmPct) }] : []),
+              ...(priorCmPct != null
+                ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(priorCmPct) }]
+                : []),
+              { label: "CM value", value: formatLargeCurrency(fin?.total_cm_inr ?? 0) },
             ]}
-          />
+          >
+            <QuarterBand quarters={cmQuarters} variant="teal" />
+          </ExecutiveHeroCard>
 
-          {/* Collection */}
-          <KpiCard
+          <ExecutiveHeroCard
             eyebrow="Collection"
             variant="blue"
-            primary={fmtCr(coll)}
-            chips={[
-              collAtt >= 100
-                ? { label: "Above target", cls: "ceo-chip--green" }
-                : { label: "Below target", cls: "ceo-chip--amber" },
-              yoyCollPct !== 0
-                ? { label: `${yoyCollPct >= 0 ? "▲" : "▼"} ${Math.abs(yoyCollPct).toFixed(1)}% YoY`, cls: chipCls(yoyCollPct) }
-                : { label: "No prior FY", cls: "ceo-chip--muted" },
-            ]}
-            attainmentLabel={`vs ₹ Target ${fmtCr(collT)}`}
+            primary={formatLargeCurrency(coll)}
+            deltas={
+              [
+                priorColl > 0 ? yoyDeltaChip(coll, priorColl) : null,
+                collAtt >= 90
+                  ? { label: "On track", cls: "exec-delta-chip--green" }
+                  : { label: "Below target", cls: "exec-delta-chip--amber" },
+              ].filter(Boolean) as { label: string; cls: string }[]
+            }
+            attainmentLabel={`vs ₹ Target ${formatLargeCurrency(collT)}`}
             attainmentPct={collAtt}
             meta={[
-              { label: "Pending", value: fmtCr(Math.max(0, collT - coll)), cls: collT - coll > 0 ? "amber" : "green" },
-              { label: "Collection efficiency", value: fmtPct(collEff), cls: collEff >= 80 ? "green" : collEff >= 60 ? "amber" : "red" },
-              { label: "Unbilled exposure", value: fmtCr(unb), cls: unb / Math.max(revA, 1) > 0.3 ? "red" : "amber" },
-              { label: "Bad debt", value: fmtCr(bd), cls: bd > 0 ? "red" : "green" },
+              {
+                label: "Pending",
+                value: formatLargeCurrency(fin?.collection_pending_inr ?? Math.max(0, collT - coll)),
+                valueCls: "amber",
+              },
+              {
+                label: "Unbilled",
+                value: `${formatPercent(unbPctRev)} of rev · ${formatLargeCurrency(unb)}`,
+                valueCls: unbPctRev > 10 ? "red" : undefined,
+              },
+              { label: "Bad debt", value: formatLargeCurrency(bd), valueCls: bd > 0 ? "red" : undefined },
+              { label: "Bad debt % coll.", value: formatPercent(bdPctColl) },
             ]}
-          />
+          >
+            <QuarterBand quarters={collQuarters} variant="blue" />
+          </ExecutiveHeroCard>
         </div>
       )}
 
