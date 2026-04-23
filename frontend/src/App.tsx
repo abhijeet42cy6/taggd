@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserRouter as Router,
   NavLink,
@@ -102,6 +102,13 @@ function ClientPortalNoAccess() {
 
 type NavItem = { label: string; path: string };
 type NavGroup = { title: string; items: NavItem[] };
+/** Staff Control Centre: collapsible parent + child links. */
+type MainNavAccordion = { id: string; title: string; items: NavItem[] };
+
+function isNavItemActive(pathname: string, itemPath: string) {
+  if (itemPath === "/") return pathname === "/";
+  return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+}
 
 const SIDEBAR_COLLAPSED_KEY = "platform_sidebar_collapsed";
 
@@ -173,9 +180,10 @@ const RECRUITER_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-const ALL_NAV_GROUPS: NavGroup[] = [
+const STAFF_MAIN_NAV_ACCORDIONS: MainNavAccordion[] = [
   {
-    title: "Overview",
+    id: "leadership",
+    title: "Leadership",
     items: [
       { label: "Executive Overview", path: "/" },
       { label: "CEO's View", path: "/ceo-view" },
@@ -183,32 +191,57 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Operations",
+    id: "business-financials",
+    title: "Business financials",
     items: [
-      { label: "Clients", path: "/clients" },
-      { label: "Contracts", path: "/client-contracts" },
-      { label: "Meetings", path: "/meetings" },
-      { label: "Client onboarding", path: "/transitions" },
-      { label: "Requisitions", path: "/requisitions" },
-      { label: "Candidates", path: "/candidates" },
-      { label: "Candidate store", path: "/candidate-store" },
-    ],
-  },
-  {
-    title: "Analytics",
-    items: [
-      { label: "Finance Command", path: "/finance" },
-      { label: "Revenue trackers", path: "/revenue-trackers" },
       { label: "Billing", path: "/billing" },
       { label: "Finance validation", path: "/finance-validation" },
       { label: "Revenue packs", path: "/revenue-governance" },
-      { label: "Vendor licenses", path: "/vendor-licenses" },
-      { label: "SLA Performance", path: "/sla-performance" },
-      { label: "Revenue Leakage", path: "/revenue-leakage" },
-      { label: "Workforce Mgmt", path: "/wfm" },
+      { label: "Finance Command", path: "/finance" },
+      { label: "Revenue trackers", path: "/revenue-trackers" },
     ],
   },
   {
+    id: "vendor",
+    title: "Vendor Management",
+    items: [{ label: "Vendor Management", path: "/vendor-licenses" }],
+  },
+  {
+    id: "operations",
+    title: "Operations",
+    items: [
+      { label: "Requisitions", path: "/requisitions" },
+      { label: "Candidates", path: "/candidates" },
+      { label: "Candidate store", path: "/candidate-store" },
+      { label: "Meetings", path: "/meetings" },
+      { label: "Clients", path: "/clients" },
+    ],
+  },
+  {
+    id: "commercial",
+    title: "Commercial",
+    items: [
+      { label: "Client onboarding", path: "/transitions" },
+      { label: "Contracts", path: "/client-contracts" },
+    ],
+  },
+  {
+    id: "business-excellence",
+    title: "Business Excellence",
+    items: [{ label: "SLA KPI", path: "/sla-performance" }],
+  },
+  {
+    id: "revenue-leakage",
+    title: "Revenue Leakage",
+    items: [{ label: "Revenue Leakage", path: "/revenue-leakage" }],
+  },
+  {
+    id: "workforce",
+    title: "Workforce Management",
+    items: [{ label: "Workforce Mgmt", path: "/wfm" }],
+  },
+  {
+    id: "platform",
     title: "Platform",
     items: [
       { label: "My profile", path: "/profile" },
@@ -340,14 +373,47 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
     );
   }
 
-  const filteredGroups: NavGroup[] = (isRecruiter ? RECRUITER_NAV_GROUPS : ALL_NAV_GROUPS)
-    .map((g) => ({
+  const filteredRecruiterGroups: NavGroup[] = useMemo(() => {
+    if (!isRecruiter) return [];
+    return RECRUITER_NAV_GROUPS.map((g) => ({
       ...g,
       items: g.items.filter((item) =>
         role ? navAllowedForRole(item.path, role, { effectiveRole, verticalAccess }) : false,
       ),
-    }))
-    .filter((g) => g.items.length > 0);
+    })).filter((g) => g.items.length > 0);
+  }, [isRecruiter, role, effectiveRole, verticalAccess]);
+
+  const [mainNavExpanded, setMainNavExpanded] = useState<Record<string, boolean>>({});
+  const staffNavPathRef = useRef<string | null>(null);
+
+  const filteredStaffAccordions = useMemo(() => {
+    if (isRecruiter) return [] as MainNavAccordion[];
+    const allow = (item: NavItem) =>
+      role ? navAllowedForRole(item.path, role, { effectiveRole, verticalAccess }) : false;
+    return STAFF_MAIN_NAV_ACCORDIONS.map((g) => ({
+      ...g,
+      items: g.items.filter(allow),
+    })).filter((g) => g.items.length > 0);
+  }, [isRecruiter, role, effectiveRole, verticalAccess]);
+
+  const staffFlatForCollapsed = useMemo(
+    () => filteredStaffAccordions.flatMap((g) => g.items),
+    [filteredStaffAccordions],
+  );
+
+  useLayoutEffect(() => {
+    if (isRecruiter) return;
+    const p = location.pathname;
+    if (staffNavPathRef.current === null || staffNavPathRef.current !== p) {
+      staffNavPathRef.current = p;
+      const match = filteredStaffAccordions.find((g) =>
+        g.items.some((item) => isNavItemActive(p, item.path)),
+      );
+      if (match) {
+        setMainNavExpanded((prev) => ({ ...prev, [match.id]: true }));
+      }
+    }
+  }, [isRecruiter, location.pathname, filteredStaffAccordions]);
 
   const email = user?.email ?? "";
   const displayName = user ? displayNameFromUser(user) : "";
@@ -382,23 +448,90 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
           </div>
 
           <div className="no-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
-            {filteredGroups.map((g) => (
-              <div key={g.title} className="nav-section">
-                <div className="platform-nav-group-title">{g.title}</div>
-                {g.items.map((item) => (
-                  <NavLink
-                    key={item.path}
-                    to={item.path}
-                    end={item.path === "/"}
-                    title={item.label}
-                    className={({ isActive }) => `platform-nav-item${isActive ? " active" : ""}`}
-                  >
-                    <NavPathIcon path={item.path} />
-                    <span className="platform-nav-label">{item.label}</span>
-                  </NavLink>
-                ))}
-              </div>
-            ))}
+            {isRecruiter
+              ? filteredRecruiterGroups.map((g) => (
+                  <div key={g.title} className="nav-section">
+                    <div className="platform-nav-group-title">{g.title}</div>
+                    {g.items.map((item) => (
+                      <NavLink
+                        key={item.path}
+                        to={item.path}
+                        end={item.path === "/"}
+                        title={item.label}
+                        className={({ isActive }) => `platform-nav-item${isActive ? " active" : ""}`}
+                      >
+                        <NavPathIcon path={item.path} />
+                        <span className="platform-nav-label">{item.label}</span>
+                      </NavLink>
+                    ))}
+                  </div>
+                ))
+              : sidebarCollapsed
+                ? (
+                    <div className="nav-section">
+                      {staffFlatForCollapsed.map((item) => {
+                        const p = location.pathname;
+                        const active = isNavItemActive(p, item.path);
+                        return (
+                          <NavLink
+                            key={item.path + item.label}
+                            to={item.path}
+                            end={item.path === "/"}
+                            title={item.label}
+                            className={`platform-nav-item${active ? " active" : ""}`}
+                          >
+                            <NavPathIcon path={item.path} />
+                            <span className="platform-nav-label">{item.label}</span>
+                          </NavLink>
+                        );
+                      })}
+                    </div>
+                  )
+                : (
+                    <>
+                      {filteredStaffAccordions.map((g) => {
+                        const hasChildActive = g.items.some((item) => isNavItemActive(location.pathname, item.path));
+                        const isOpen = mainNavExpanded[g.id] ?? hasChildActive;
+                        return (
+                          <div
+                            key={g.id}
+                            className={cn("nav-section platform-nav-accordion", isOpen && "platform-nav-accordion--open", hasChildActive && "platform-nav-accordion--child-active")}
+                          >
+                            <button
+                              type="button"
+                              className="platform-nav-accordion__trigger"
+                              aria-expanded={isOpen}
+                              onClick={() => {
+                                setMainNavExpanded((prev) => {
+                                  const wasOpen = prev[g.id] ?? g.items.some((it) => isNavItemActive(location.pathname, it.path));
+                                  return { ...prev, [g.id]: !wasOpen };
+                                });
+                              }}
+                            >
+                              <span className="platform-nav-accordion__title-text">{g.title}</span>
+                              <ChevronRight className="platform-nav-accordion__chevron" size={14} strokeWidth={2} aria-hidden />
+                            </button>
+                            {isOpen && (
+                              <div className="platform-nav-accordion__panel" role="region" aria-label={g.title}>
+                                {g.items.map((item) => (
+                                  <NavLink
+                                    key={item.path + item.label}
+                                    to={item.path}
+                                    end={item.path === "/"}
+                                    title={item.label}
+                                    className={({ isActive }) => `platform-nav-item${isActive ? " active" : ""}`}
+                                  >
+                                    <NavPathIcon path={item.path} />
+                                    <span className="platform-nav-label">{item.label}</span>
+                                  </NavLink>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
           </div>
 
           <div className={cn("platform-sidebar-footer", sidebarCollapsed && "is-collapsed")}>

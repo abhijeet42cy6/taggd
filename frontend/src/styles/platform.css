@@ -382,6 +382,79 @@
   display: block;
 }
 
+/* Collapsible main nav (AppShell) */
+.platform-nav-accordion {
+  border-radius: var(--radius-base);
+  margin-bottom: 2px;
+}
+
+.platform-nav-accordion--open .platform-nav-accordion__chevron {
+  transform: rotate(90deg);
+}
+
+.platform-nav-accordion--child-active .platform-nav-accordion__trigger {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+/* Match .platform-nav-item + .platform-nav-label (sentence case, body font) */
+.platform-nav-accordion__trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-family: var(--font);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-base);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.platform-nav-accordion__trigger:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.platform-nav-accordion__title-text {
+  font: inherit;
+  color: inherit;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.platform-nav-accordion__chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transform: rotate(0deg);
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.platform-nav-accordion__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 6px 0;
+  margin-left: 2px;
+  border-left: 1px solid var(--border);
+  padding-left: 7px;
+}
+
+.platform-nav-accordion__panel .platform-nav-item {
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
 .platform-nav-item {
   display: flex;
   align-items: center;
