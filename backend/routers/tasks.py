@@ -92,7 +92,22 @@ def _task_to_dict(db: Session, task: Task) -> dict[str, Any]:
     return out
 
 
-def _validate_manager_assignees(db: Session, user: User, assignee_ids: List[int]) -> None:
+def _validate_manager_assignees(
+    db: Session,
+    user: User,
+    assignee_ids: List[int],
+    *,
+    task_project_id: Optional[int] = None,
+) -> None:
+    """
+    Project heads may only assign people who share their project scope, except:
+    - themselves (self-assign) is always allowed
+    - platform_admin / executive assignees (e.g. task created by org admin) are allowed without a UPA row
+
+    When the task is linked to a project, require a UserProjectAssignment on *that* project for
+    other assignees (stricter, matches "work on this client project" semantics). When the task
+    has no project, any overlap with the manager's project_ids is enough (legacy behaviour).
+    """
     if effective_role(user) != ROLE_PROJECT_HEAD:
         return
     pids = allowed_project_ids(user, db)
@@ -101,14 +116,28 @@ def _validate_manager_assignees(db: Session, user: User, assignee_ids: List[int]
     for uid in assignee_ids:
         if uid == user.id:
             continue
-        ok = (
-            db.query(UserProjectAssignment)
-            .filter(
-                UserProjectAssignment.user_id == uid,
-                UserProjectAssignment.project_id.in_(pids),
+        subj = db.query(User).filter(User.id == uid, User.is_active.is_(True)).first()
+        if subj and (is_platform_admin(subj) or effective_role(subj) == ROLE_EXECUTIVE):
+            continue
+        if task_project_id is not None:
+            # Task scoped: assignee must have a row on that project (unless admin/exec, above)
+            ok = (
+                db.query(UserProjectAssignment)
+                .filter(
+                    UserProjectAssignment.user_id == uid,
+                    UserProjectAssignment.project_id == task_project_id,
+                )
+                .first()
             )
-            .first()
-        )
+        else:
+            ok = (
+                db.query(UserProjectAssignment)
+                .filter(
+                    UserProjectAssignment.user_id == uid,
+                    UserProjectAssignment.project_id.in_(pids),
+                )
+                .first()
+            )
         if not ok:
             raise HTTPException(
                 status_code=400,
@@ -299,10 +328,11 @@ def create_task(
         task.completed_by_user_id = user.id
     db.add(task)
     db.flush()
-    _validate_manager_assignees(db, user, body.assignee_user_ids)
+    _validate_manager_assignees(db, user, body.assignee_user_ids, task_project_id=body.project_id)
     _replace_assignees(db, task, body.assignee_user_ids)
     db.commit()
     db.refresh(task)
+    # Log in a follow-up commit so a failing insert cannot poison the main session (see log_activity + commit=False).
     log_activity(
         db,
         user=user,
@@ -359,7 +389,7 @@ def patch_task(
     task.updated_by_user_id = user.id
 
     if assignee_ids is not None:
-        _validate_manager_assignees(db, user, assignee_ids)
+        _validate_manager_assignees(db, user, assignee_ids, task_project_id=task.project_id)
         _replace_assignees(db, task, assignee_ids)
 
     db.commit()

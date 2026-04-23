@@ -272,7 +272,12 @@ export function NewContractSheet({
   );
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      // Body-portaled NCP pickers are outside Dialog content; they are inert if modal.
+      modal={false}
+    >
       <SheetContent
         side="right"
         showCloseButton={false}

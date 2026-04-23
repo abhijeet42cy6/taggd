@@ -589,7 +589,11 @@ export const Dashboard = () => {
                 value: formatLargeCurrency(displayFinance?.collection_pending_inr ?? Math.max(0, ct - coll)),
                 valueCls: "amber",
               },
-              { label: "Unbilled", value: `${formatPercent(unbPctRev)} of rev`, valueCls: unbPctRev > 10 ? "red" : undefined },
+              {
+                label: "Unbilled",
+                value: `${formatPercent(unbPctRev)} of rev · ${formatLargeCurrency(unb)}`,
+                valueCls: unbPctRev > 10 ? "red" : undefined,
+              },
               { label: "Bad debt", value: formatLargeCurrency(bd), valueCls: bd > 0 ? "red" : undefined },
               { label: "Bad debt % coll.", value: formatPercent(bdPctColl) },
             ]}

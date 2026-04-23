@@ -924,8 +924,7 @@ export function Tasks() {
       setMoveDialogOpen(false);
       setPendingMove(null);
     } catch (err: unknown) {
-      const msg = err && typeof err === "object" && "message" in err ? String((err as Error).message) : "Update failed";
-      alert(msg);
+      alert(getApiErrorMessage(err));
     } finally {
       setMoveSaving(false);
     }

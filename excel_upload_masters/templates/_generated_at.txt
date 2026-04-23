@@ -1,0 +1,2 @@
+Generated: 2026-04-23T08:31:44.266553Z
+Source: SQLAlchemy models in backend/db/database.py

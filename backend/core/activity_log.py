@@ -22,7 +22,11 @@ def log_activity(
     project_id: Optional[int] = None,
     resource_id: Optional[str] = None,
     meta: Optional[dict[str, Any]] = None,
+    commit: bool = True,
 ) -> None:
+    """
+    If commit=False, only add+flush; caller must commit the same session (e.g. task + log in one transaction).
+    """
     try:
         row = ActivityLog(
             user_id=user.id,
@@ -35,10 +39,17 @@ def log_activity(
             meta_json=meta if meta else None,
         )
         db.add(row)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     except Exception:
-        db.rollback()
+        if commit:
+            db.rollback()
         logging.exception("activity_log insert failed")
+        if not commit:
+            # Caller owns the outer transaction; re-raise so it can rollback and return 5xx accurately.
+            raise
 
 
 def _scoped_activity_query(db: Session, user: User):

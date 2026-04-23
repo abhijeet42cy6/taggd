@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  api,
   queries,
   adminApi,
   CONTRACT_PIPELINE_STAGES,
@@ -351,6 +352,8 @@ type ContractDetailSheetProps = {
   onRealise: () => void | Promise<void>;
   onDelete: () => void | Promise<void>;
   onSave: (form: Record<string, string>) => void | Promise<void>;
+  /** After MSA/contract file upload, parent refreshes `contracts` / `row`. */
+  onMsaUploadComplete: (row: ProjectContractRow) => void;
   goClient: (clientId: number | null) => void;
 };
 
@@ -542,12 +545,16 @@ function ContractDetailSheet({
   onRealise,
   onDelete,
   onSave,
+  onMsaUploadComplete,
   goClient,
 }: ContractDetailSheetProps) {
   const [editMode, setEditMode] = useState(false);
   const [tab, setTab] = useState(0);
   const [form, setForm] = useState<Record<string, string>>({});
   const [platformUsers, setPlatformUsers] = useState<PlatformUserLite[]>([]);
+  const [msaUploading, setMsaUploading] = useState(false);
+  const [msaErr, setMsaErr] = useState<string | null>(null);
+  const msaFileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (open && row) {
@@ -555,7 +562,7 @@ function ContractDetailSheet({
       setEditMode(false);
       setTab(0);
     }
-  }, [open, row]);
+  }, [open, row?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -681,6 +688,49 @@ function ContractDetailSheet({
       </select>
     </div>
   );
+
+  const hasMsaFile = (row.sow_msa_reference || "").trim().toLowerCase().startsWith("msa:");
+
+  async function onMsaUpload(file: File | null) {
+    if (!file || !row) return;
+    const cid = row.id;
+    setMsaErr(null);
+    setMsaUploading(true);
+    try {
+      await queries.uploadContractMSA(cid, file);
+      const updated = await queries.contract(cid);
+      onMsaUploadComplete(updated);
+      onField("sow_msa_reference", updated.sow_msa_reference ?? "");
+    } catch (e: unknown) {
+      const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Upload failed";
+      setMsaErr(msg);
+    } finally {
+      setMsaUploading(false);
+      if (msaFileRef.current) msaFileRef.current.value = "";
+    }
+  }
+
+  async function onDownloadMsa() {
+    if (!hasMsaFile || !row) return;
+    const cid = row.id;
+    setMsaErr(null);
+    try {
+      const res = await api.get(`contracts/${cid}/msa-document`, { responseType: "blob" });
+      const dispo = res.headers["content-disposition"] as string | undefined;
+      let name = "contract-document";
+      const m = dispo && /filename\*?=(?:UTF-8''|")?([^";\n]+)/i.exec(dispo);
+      if (m?.[1]) name = decodeURIComponent(m[1].replace(/"/g, "").trim());
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Download failed";
+      setMsaErr(msg);
+    }
+  }
 
   async function handleSave() {
     await onSave(form);
@@ -984,21 +1034,77 @@ function ContractDetailSheet({
           )}
         </div>
       </div>
-      {(row.source_filename || row.uploaded_by) && (
-        <div className="ncp-section">
-          <div className="ncp-section-header" style={{ cursor: "default" }}>
-            <div className="ncp-section-icon" style={{ background: "var(--ncp-surface-hover)" }}>📁</div>
-            <div>
-              <div className="ncp-section-label">Provenance</div>
-              <div className="ncp-section-desc">Import source</div>
-            </div>
-          </div>
-          <div className="ncp-section-body" style={{ maxHeight: 120 }}>
-            {propRow("Source file", row.source_filename, true)}
-            {propRow("Uploaded by", row.uploaded_by)}
+      <div className="ncp-section">
+        <div className="ncp-section-header" style={{ cursor: "default" }}>
+          <div className="ncp-section-icon" style={{ background: "var(--ncp-surface-hover)" }}>📁</div>
+          <div>
+            <div className="ncp-section-label">Provenance</div>
+            <div className="ncp-section-desc">Import source and contract documents</div>
           </div>
         </div>
-      )}
+        <div className="ncp-section-body" style={{ maxHeight: 400 }}>
+          {(row.source_filename || row.uploaded_by) && (
+            <>
+              {propRow("Source file", row.source_filename, true)}
+              {propRow("Uploaded by", row.uploaded_by)}
+            </>
+          )}
+          {!row.source_filename && !row.uploaded_by && (
+            <p className="ncp-hint" style={{ margin: "0 0 10px" }}>
+              No import workbook is linked to this row. Bulk import still runs from the <strong>Import workbook</strong> tab.
+            </p>
+          )}
+          <div
+            style={{
+              borderTop: "1px solid var(--ncp-border)",
+              marginTop: row.source_filename || row.uploaded_by ? 4 : 0,
+              paddingTop: 10,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ncp-text-secondary)", marginBottom: 8 }}>
+              Contract sheet / MSA
+            </div>
+            <p className="ncp-hint" style={{ margin: "0 0 8px" }}>
+              PDF, Word, Excel, or an image. Stored on the server; “SOW / MSA reference” is updated to point at the file.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+              <input
+                ref={msaFileRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.xlsx,.xls,.png,.jpg,.jpeg"
+                className="sr-only"
+                disabled={msaUploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  void onMsaUpload(f);
+                }}
+              />
+              <button
+                type="button"
+                className="ncp-btn ncp-btn-secondary"
+                disabled={msaUploading}
+                onClick={() => msaFileRef.current?.click()}
+              >
+                {msaUploading ? "Uploading…" : "Upload file…"}
+              </button>
+              {hasMsaFile && (
+                <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => void onDownloadMsa()}>
+                  Download current
+                </button>
+              )}
+            </div>
+            {msaErr && (
+              <div
+                className="ncp-hint"
+                style={{ marginTop: 8, color: "var(--ncp-amber, #b45309)", fontSize: 12 }}
+                role="alert"
+              >
+                {msaErr}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 
@@ -1903,6 +2009,19 @@ export function ClientContracts() {
         onDelete={() => void removeContract()}
         onSave={async (f) => {
           await savePatch(f);
+        }}
+        onMsaUploadComplete={(u) => {
+          setContracts((prev) => prev.map((c) => (c.id === u.id ? u : c)));
+          setActiveRow((ar) => {
+            if (!ar || ar.id !== u.id) return ar;
+            const pr = projectById.get(u.project_id);
+            const sbu =
+              (pr?.engagement_name && String(pr.engagement_name).trim()) ||
+              (pr?.account_name && String(pr.account_name).trim()) ||
+              `PRJ-${u.project_id}`;
+            const cl = u.client_id != null ? clientNameById.get(u.client_id) ?? null : null;
+            return { ...u, sbuLabel: sbu, clientLabel: cl };
+          });
         }}
         goClient={goClient}
       />

@@ -1367,7 +1367,13 @@ function TransitionSheet({
   const selectedProject = allProjects.find((p) => String(p.id) === form.project_id) ?? null;
 
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Sheet
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+      modal={false} /* body-portaled dropdowns; non-modal so they are not inert */
+    >
       <SheetContent
         side="right"
         showCloseButton={false}

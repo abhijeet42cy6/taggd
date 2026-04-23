@@ -642,13 +642,6 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
 
         <main className="platform-main">
           <header className="platform-topbar">
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "var(--mono)", fontSize: 13, letterSpacing: "0.02em", color: "var(--text-subtle)" }}>
-              <span style={{ color: "var(--text)", fontWeight: 500 }}>
-                {isRecruiter ? "Recruiting" : "Control Centre"}
-              </span>
-              <span style={{ opacity: 0.4 }}>›</span>
-              <span>{isRecruiter ? "Work queue" : "FY 2024-25"}</span>
-            </div>
             <div style={{ flex: 1 }} />
             <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--surface-page)", border: "1px solid var(--border)", borderRadius: "var(--radius-base)", padding: "7px 12px", width: 220, transition: "border-color var(--t-base), box-shadow var(--t-base)" }}>
               <span style={{ color: "var(--text-subtle)", fontSize: 13 }}>⌕</span>
