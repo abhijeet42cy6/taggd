@@ -37,7 +37,7 @@ def _iso(dt: Any) -> Optional[str]:
 def _user_label(u: Optional[User]) -> Optional[dict[str, Any]]:
     if not u:
         return None
-    return {"id": u.id, "email": u.email}
+    return {"id": u.id, "email": u.email, "role": u.role}
 
 
 def _serialize_submission(s: RevenueWeeklySubmission, db: Session) -> dict[str, Any]:

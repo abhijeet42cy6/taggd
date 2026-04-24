@@ -3638,7 +3638,7 @@ def agent_chat(
     _user: User = Depends(get_current_user),
 ):
     """
-    Multi-turn chat with the Nexus Analysis Agent.
+    Multi-turn chat with Taggy (Taggd intelligence, powered by Aparatus).
     Supply session_id to continue a conversation; omit for a new session.
     """
     try:

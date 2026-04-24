@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 import datetime
+import os
+import tempfile
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.auth.deps import get_current_user
 from backend.core.activity_log import log_activity
+from backend.core.ingestion_audit import log_ingestion_event
+from backend.core.resume_supply_chain_tracker_xlsx import ingest_workbook
 from backend.db.database import ResumeSupplierLicense, User, get_db
 
 router = APIRouter(
@@ -114,6 +118,64 @@ def list_vendor_licenses(
         .all()
     )
     return [_row_to_dict(r) for r in rows]
+
+
+@router.post("/ingest-upload")
+async def ingest_vendor_licenses_workbook(
+    file: UploadFile = File(...),
+    replace_fy: bool = Query(False, description="Delete all DB rows for the workbook FY, then load."),
+    dry_run: bool = Query(False, description="Parse and validate only; do not commit."),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Upload *Resume Supply Chain Partner* / *Job Board Tracker* .xlsx;
+    same mapping as `backend/scripts/ingest_resume_supply_chain_partner_tracker.py`.
+    """
+    safe = os.path.basename(file.filename or "tracker.xlsx") or "tracker.xlsx"
+    suffix = os.path.splitext(safe)[1] or ".xlsx"
+    path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            path = tmp.name
+            content = await file.read()
+            tmp.write(content)
+        out = ingest_workbook(
+            path,
+            db,
+            user_id=user.id,
+            dry_run=dry_run,
+            replace_fy=replace_fy,
+        )
+        if dry_run:
+            log_ingestion_event(
+                db,
+                user=user,
+                kind="vendor_licenses",
+                filename=safe,
+                status="dry_run",
+                label=f"would_upsert={out.get('would_upsert', 0)} fy={out.get('fiscal_year_label')}",
+            )
+        else:
+            log_ingestion_event(
+                db,
+                user=user,
+                kind="vendor_licenses",
+                filename=safe,
+                status="ok",
+                label=f"inserted={out.get('inserted', 0)} updated={out.get('updated', 0)} deleted={out.get('deleted_prior', 0)} fy={out.get('fiscal_year_label')}",
+            )
+        return out
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ingest failed: {e!s}") from e
+    finally:
+        if path and os.path.isfile(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 @router.get("/{license_id}")

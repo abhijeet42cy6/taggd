@@ -203,11 +203,14 @@ export function UserPickerDropdown({
   onChange,
   users,
   placeholder = "— Optional —",
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   users: PlatformUserLite[];
   placeholder?: string;
+  /** When true, shows the current selection without opening a dropdown. */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -245,6 +248,10 @@ export function UserPickerDropdown({
       window.removeEventListener("scroll", measure, true);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -330,6 +337,31 @@ export function UserPickerDropdown({
       </div>
     </div>
   );
+
+  if (disabled) {
+    return (
+      <div className="ncp-user-wrap">
+        <button type="button" className={cn("ncp-user-btn", selected && "ncp-selected")} disabled style={{ cursor: "default", opacity: 1 }}>
+          {selected ? (
+            <>
+              <span className="ncp-user-ico" style={{ background: userColor(selected.email) }}>
+                {userInitials(selected.email)}
+              </span>
+              <div className="ncp-user-meta">
+                <strong>{selected.email}</strong>
+                <span>{selected.role}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 16, opacity: 0.4 }}>👤</span>
+              <span>{placeholder}</span>
+            </>
+          )}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="ncp-user-wrap" ref={wrapRef}>

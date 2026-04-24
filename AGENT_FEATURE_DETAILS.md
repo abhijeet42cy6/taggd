@@ -1,4 +1,4 @@
-# Analysis Agent (Nexus Intelligence)
+# Analysis Agent (Taggy)
 
 This document describes the **interactive chat agent** in this codebase (distinct from the **ingestion** sheet-mapping agents used during Excel upload). It covers **who can open it**, **how data access is enforced**, and where the code lives.
 
@@ -6,7 +6,7 @@ This document describes the **interactive chat agent** in this codebase (distinc
 
 ## What it is
 
-- **Product name in UI:** “Taggd Intelligence Agent” / Nexus-style analyst (see `backend/agents/analysis_agent.py` system prompt).
+- **Persona in UI / system prompt:** **Taggy** — personal Taggd intelligence, **powered by Aparatus** (see `backend/agents/analysis_agent.py`).
 - **Purpose:** Multi-turn **read-only** Q&A over the live database: clients/projects, requisitions, SLA, WFM, finance, portfolio KPIs.
 - **Model:** Google **Gemini** (`models/gemini-flash-latest`) with **function calling** (tools), not the Instructor-based pipeline used elsewhere.
 - **Tools:** Implemented in `backend/agent_tools/tools.py` and invoked via `**execute_tool(name, args, db, user)`**. Each tool receives the authenticated `**User**` so queries respect admin-assigned **projects** and **vertical modules** (and recruiter requisition scoping where applicable).

@@ -23,8 +23,11 @@ from sqlalchemy.orm import Session
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+from sqlalchemy import func  # noqa: E402
+
 from backend.core.sla_project_resolve import resolve_project_for_sla  # noqa: E402
 from backend.db.database import (  # noqa: E402
+    Project,
     ProjectContract,
     SessionLocal,
     ensure_project_client,
@@ -34,6 +37,36 @@ from backend.db.database import (  # noqa: E402
 
 def _norm(s: str) -> str:
     return " ".join(str(s).strip().split())
+
+
+def get_or_create_project_by_name(
+    db: Session, account_name: str, source_basename: str
+) -> Project:
+    """
+    When `resolve_project_for_sla` returns None, optionally create a `projects` row
+    so the contract row can still load (e.g. new account not yet in spine / directory).
+    """
+    key = " ".join(str(account_name).strip().split()).lower()
+    if not key or key == "nan":
+        raise ValueError("empty account name")
+    p = (
+        db.query(Project)
+        .filter(func.lower(func.trim(Project.account_name)) == key)
+        .first()
+    )
+    if not p:
+        p = Project(
+            account_name=" ".join(str(account_name).strip().split()),
+            filename=source_basename,
+            source_filename=source_basename,
+        )
+        db.add(p)
+        db.flush()
+        ensure_project_client(db, p)
+    else:
+        if p.client_id is None:
+            ensure_project_client(db, p)
+    return p
 
 
 def _parse_excel_date(val: Any) -> Optional[date]:
@@ -138,6 +171,12 @@ def _apply_row_to_contract(
     c.overall_rph = _float(cell(ri, "Overall RPH")) or _float(cell(ri, "Overall RPH  Number"))
     c.mmf_applicable = _yes_no(cell(ri, "MMF"))
     c.opening_fee_applicable = _yes_no(cell(ri, "Opening Fee"))
+    ph_raw = cell(ri, "Practice Head")
+    c.practice_head_snapshot = (
+        _norm(str(ph_raw))
+        if ph_raw is not None and not pd.isna(ph_raw) and str(ph_raw).strip() not in ("", "nan")
+        else None
+    )
     c.payment_terms = None if pd.isna(cell(ri, "Payment Terms")) else str(cell(ri, "Payment Terms")).strip() or None
     c.pricing_model = None if pd.isna(cell(ri, "Pricing Model")) else str(cell(ri, "Pricing Model")).strip() or None
     c.contract_detail = None if pd.isna(cell(ri, "Detail")) else str(cell(ri, "Detail")).strip() or None
@@ -151,6 +190,7 @@ def ingest_contract_workbook_file(
     db: Session | None = None,
     *,
     user: Any | None = None,
+    create_missing_projects: bool = False,
 ) -> Dict[str, Any]:
     own = db is None
     if own:
@@ -162,6 +202,7 @@ def ingest_contract_workbook_file(
     errors: list[str] = []
     reason_counts: Counter = Counter()
     resolution_log: List[str] = []
+    created_projects: list[str] = []
 
     try:
         raw = pd.read_excel(file_path, sheet_name="Contract Data", header=None)
@@ -209,9 +250,19 @@ def ingest_contract_workbook_file(
             customer_s = _norm(str(customer))
             proj, rreason = resolve_project_for_sla(db, customer_s)
             if not proj:
-                missing_projects.append(customer_s)
-                skipped += 1
-                continue
+                if create_missing_projects:
+                    try:
+                        proj = get_or_create_project_by_name(db, customer_s, base_name)
+                        rreason = "created_for_contract_ingest"
+                        created_projects.append(customer_s)
+                    except ValueError as e:
+                        errors.append(f"row {ri}: {e!s}")
+                        skipped += 1
+                        continue
+                else:
+                    missing_projects.append(customer_s)
+                    skipped += 1
+                    continue
 
             reason_counts[rreason] += 1
             if proj.client_id is None:
@@ -262,6 +313,8 @@ def ingest_contract_workbook_file(
             "skipped": skipped,
             "missing_customer_no_project": missing_projects,
             "match_reason_counts": dict(reason_counts),
+            "projects_created_for_unmatched": created_projects,
+            "create_missing_projects": create_missing_projects,
             "file": base_name,
             "resolution_log": resolution_log,
         }
@@ -331,9 +384,14 @@ def main():
     init_db()
     ap = argparse.ArgumentParser(description="Ingest contract workbook Contract Data sheet")
     ap.add_argument("file", help="Path to .xlsx")
+    ap.add_argument(
+        "--create-missing",
+        action="store_true",
+        help="Create a Project (+ Client via ensure_project_client) when Customer does not resolve; use for new accounts not in spine yet.",
+    )
     ap.add_argument("--no-report", action="store_true", help="Do not write contract_workbook_ingest_report.md")
     args = ap.parse_args()
-    r = ingest_contract_workbook_file(args.file)
+    r = ingest_contract_workbook_file(args.file, create_missing_projects=args.create_missing)
     print(r)
     if not r.get("error") and not args.no_report:
         rp = _write_ingest_report(args.file, r)

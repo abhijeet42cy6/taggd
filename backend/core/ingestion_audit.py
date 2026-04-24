@@ -21,6 +21,7 @@ _KIND_TO_RESOURCE = {
     "wfm": "ingestion_wfm_upload",
     "finance": "ingestion_finance_upload",
     "revenue_trackers": "ingestion_revenue_trackers_upload",
+    "vendor_licenses": "ingestion_vendor_licenses_upload",
 }
 
 

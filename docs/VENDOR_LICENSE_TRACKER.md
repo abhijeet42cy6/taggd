@@ -66,6 +66,7 @@ The script is **idempotent** for this set: it deletes existing rows with `fiscal
 | `GET` | `/vendor-licenses` | List all rows (ordered by `sort_order`, `id`). |
 | `GET` | `/vendor-licenses/{id}` | Single row. |
 | `POST` | `/vendor-licenses` | Create (`vendor_name` required). |
+| `POST` | `/vendor-licenses/ingest-upload` | Multipart: job board / resume supply chain tracker .xlsx (see §5.1). |
 | `PATCH` | `/vendor-licenses/{id}` | Partial update; nullable fields can be cleared with `null`. |
 | `DELETE` | `/vendor-licenses/{id}` | Remove row. |
 
@@ -110,6 +111,19 @@ The script is **idempotent** for this set: it deletes existing rows with `fiscal
 | FY header (e.g. FY 2025-26) | `fiscal_year_label` on each row |
 | TOTAL / SUMMARY row | **Omit** — use UI total or `SUM(cost_inr)` |
 
+### 5.1 Bulk ingest (*Resume Supply Chain Partner* / *Job Board Tracker*)
+
+Workbooks like **`excel_files_imp/Resume Supply Chain Partner_Tracker.xlsx`** (sheet **Job Board Tracker**, header row with **#** + **Job Board / Vendor** + **Cost**) are parsed by:
+
+| Mechanism | Command / path |
+| --------- | -------------- |
+| **CLI** | `python3 backend/scripts/ingest_resume_supply_chain_partner_tracker.py "excel_files_imp/Resume Supply Chain Partner_Tracker.xlsx"` |
+| **CLI — full replace for FY** | Add `--replace-fy` to delete all `resume_supplier_licenses` rows whose `fiscal_year_label` matches the sheet (e.g. **FY 2025-26**), then insert. |
+| **CLI — dry run** | `--dry-run` |
+| **API** | `POST /vendor-licenses/ingest-upload?replace_fy=false&dry_run=false` (multipart file field `file`) — same core logic as the CLI. |
+
+**Behaviour:** data rows are those with a **numeric** `#` (sequence 1…*n*); **TOTAL / GRAND** and **legend** rows are skipped. Ingest is **upsert** by default (`fiscal_year_label` + `vendor_name`); use **`--replace-fy`** for a one-to-one mirror of the tracker for that FY. Core parser/loader: `backend/core/resume_supply_chain_tracker_xlsx.py`.
+
 ---
 
 ## 6. Related files
@@ -117,6 +131,7 @@ The script is **idempotent** for this set: it deletes existing rows with `fiscal
 | Area | Path |
 | ---- | ---- |
 | Model | `backend/db/database.py` — `ResumeSupplierLicense` |
+| Ingest (xlsx) | `backend/core/resume_supply_chain_tracker_xlsx.py`, `backend/scripts/ingest_resume_supply_chain_partner_tracker.py` |
 | API | `backend/routers/resume_supplier_licenses.py` |
 | App registration | `backend/main.py` — `resume_supplier_licenses_router` |
 | UI | `frontend/src/pages/VendorLicenses.tsx` |

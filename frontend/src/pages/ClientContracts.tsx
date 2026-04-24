@@ -1295,6 +1295,7 @@ function ReadonlyContractDetails({ row }: { row: EnrichedContract }) {
 
 export function ClientContracts() {
   const navigate = useNavigate();
+  const contractWorkbookImportId = React.useId();
   const [tab, setTab] = useState("Portfolio");
   const [contracts, setContracts] = useState<ProjectContractRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1965,26 +1966,28 @@ export function ClientContracts() {
 
       {tab === "Import workbook" && (
         <PlatformSection title="Import Contract Data sheet">
-          <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 12, maxWidth: 800 }}>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 16px", maxWidth: 800, lineHeight: 1.55 }}>
             Upload <strong>Project Signup Renewal Detail.xlsx</strong> (or the same layout). Rows match{" "}
             <strong>Customer</strong> to <strong>project account name</strong>. Signed ACV in ₹L is converted to INR.
             Unmatched names are returned in the response — create or rename projects first if needed.
           </p>
+          <input
+            id={contractWorkbookImportId}
+            type="file"
+            accept=".xlsx,.xlsm"
+            className="sr-only"
+            disabled={uploading}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              void onUpload(f ?? null);
+            }}
+          />
           <label
+            htmlFor={contractWorkbookImportId}
             className={cn("platform-dialog__dropzone", uploading && "opacity-70")}
-            style={{ maxWidth: 480, cursor: uploading ? "wait" : "pointer" }}
+            style={{ cursor: uploading ? "wait" : "pointer" }}
           >
-            <input
-              type="file"
-              accept=".xlsx,.xlsm"
-              className="sr-only"
-              disabled={uploading}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                void onUpload(f ?? null);
-              }}
-            />
             <div className="platform-dialog__dropzone-hint">
               {uploading ? "Uploading…" : "Drop .xlsx here or click to browse"}
             </div>

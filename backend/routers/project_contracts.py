@@ -6,7 +6,7 @@ import mimetypes
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
@@ -189,6 +189,10 @@ def list_all_contracts_scoped(
 @router.post("/upload")
 async def upload_contract_workbook(
     file: UploadFile = File(...),
+    create_missing_projects: bool = Query(
+        False,
+        description="If true, create Project rows for Customer names with no directory match (then link contract).",
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -203,7 +207,9 @@ async def upload_contract_workbook(
         shutil.copyfileobj(file.file, tmp)
         path = tmp.name
     try:
-        result = ingest_contract_workbook_file(path, db, user=user)
+        result = ingest_contract_workbook_file(
+            path, db, user=user, create_missing_projects=create_missing_projects
+        )
         if result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
         return result

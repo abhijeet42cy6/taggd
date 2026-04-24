@@ -173,7 +173,7 @@ export type RevenueVisibilityUpsert = {
   status?: string | null;
 };
 
-export type RevenueWeeklySubmissionActor = { id: number; email: string } | null;
+export type RevenueWeeklySubmissionActor = { id: number; email: string; role?: string | null } | null;
 
 export type RevenueWeeklySubmissionDto = {
   id: number;

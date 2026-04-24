@@ -1,7 +1,6 @@
-import axios from "axios";
+import { api } from "./api";
 
-// Use the same proxy base as the rest of the app ("/api" proxied to FastAPI)
-const http = axios.create({ baseURL: "/api", timeout: 60_000 }); // 60s for LLM
+/** Use shared client so `Authorization: Bearer` matches the rest of the app (see `api` interceptors). */
 
 export interface AgentMessage {
   role: "user" | "assistant";
@@ -24,13 +23,14 @@ export async function sendAgentMessage(
   message: string,
   sessionId: string | null
 ): Promise<AgentChatResponse> {
-  const { data } = await http.post<AgentChatResponse>("/agent/chat", {
-    message,
-    session_id: sessionId ?? undefined,
-  });
+  const { data } = await api.post<AgentChatResponse>(
+    "/agent/chat",
+    { message, session_id: sessionId ?? undefined },
+    { timeout: 90_000 }
+  );
   return data;
 }
 
 export async function clearAgentSession(sessionId: string): Promise<void> {
-  await http.delete(`/agent/session/${sessionId}`);
+  await api.delete(`/agent/session/${sessionId}`);
 }

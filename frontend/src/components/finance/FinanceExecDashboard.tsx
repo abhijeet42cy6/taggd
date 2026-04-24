@@ -181,8 +181,6 @@ export function FinanceExecDashboard({
 }: FinanceExecDashboardProps) {
   const [page, setPage] = useState<FinPage>("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  /** UI toggle reserved for future YoY overlays; charts do not read this yet. */
-  const [compareOn, setCompareOn] = useState(true);
   const [quarter, setQuarter] = useState<"ALL" | "Q1" | "Q2" | "Q3" | "Q4">("ALL");
   /** "all" = every FY in ledger; otherwise Apr–Mar FY start year (calendar year of April). */
   const [fyFilter, setFyFilter] = useState<number | "all">("all");
@@ -859,26 +857,7 @@ export function FinanceExecDashboard({
               <Menu className="fin-dash-tb-toggle-icon" strokeWidth={2} aria-hidden />
             </button>
             <div className="tb-title platform-page-title" id="page-title">
-              Finance <span>Command</span>
-            </div>
-            <div className="tb-fy" title="Matches Fiscal year filter below (Indian FY Apr–Mar)">
-              <span className="tb-fy-btn active">
-                {fyFilter === "all" ? "All FYs" : fyShortLabel(fyFilter)}
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`btn btn-outline ${compareOn ? "active" : ""}`}
-              onClick={() => setCompareOn((v) => !v)}
-              title="Placeholder for future year-over-year chart overlays"
-            >
-              <i className="fas fa-code-branch" aria-hidden />
-              <span>{compareOn ? "FY Compare: ON" : "FY Compare: OFF"}</span>
-            </button>
-            <div className="tb-actions">
-              <button type="button" className="btn btn-primary" onClick={() => window.print()}>
-                <i className="fas fa-download" aria-hidden /> Export
-              </button>
+              Finance Command
             </div>
           </header>
 

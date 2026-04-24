@@ -13,7 +13,8 @@ import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlock
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { UserPickerDropdown, type PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
+import "@/styles/new-contract-panel.css";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,47 +50,139 @@ function packStatusBadgeClass(status: string): string {
   return "bg-muted/80 text-foreground border-border";
 }
 
-function PackMetric({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+/** NCP sheet status pill class (scoped under `.new-contract-sheet`). */
+function packStatusNcpClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "approved") return "ncp-st-active";
+  if (s === "submitted" || s === "under_review" || s === "changes_requested") return "ncp-st-pending";
+  if (s === "rejected") return "ncp-st-inactive";
+  if (s === "draft") return "ncp-st-inactive";
+  return "ncp-st-inactive";
+}
+
+function NcpReadonlyRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex flex-col gap-0.5 min-w-0">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={cn("text-sm font-semibold text-foreground truncate", mono && "font-mono text-[13px]")}>{value}</div>
+    <div className="ncp-prop-row">
+      <span className="ncp-prop-label">{label}</span>
+      <span
+        className={cn("text-[13px] font-semibold", mono && "font-mono")}
+        style={{ color: "var(--ncp-text-primary)", alignSelf: "center" }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-function SectionShell({
+function actorToPickerUsers(actor: RevenueWeeklySubmissionDto["submitted_by"], fallbackRole: string): PlatformUserLite[] {
+  if (!actor?.id || !actor.email?.trim()) return [];
+  const role = (actor.role && String(actor.role).trim()) || fallbackRole;
+  return [{ id: actor.id, email: actor.email.trim(), role }];
+}
+
+/** Read-only row styled like `UserPickerDropdown`’s selected `ncp-user-btn`. */
+function NcpReadonlyUserRow({
+  label,
+  actor,
+  fallbackRole,
+}: {
+  label: string;
+  actor: RevenueWeeklySubmissionDto["submitted_by"];
+  fallbackRole: string;
+}) {
+  const users = actorToPickerUsers(actor, fallbackRole);
+  const value = actor?.id != null ? String(actor.id) : "";
+  return (
+    <div className="ncp-prop-row ncp-prop-row--tall-value">
+      <span className="ncp-prop-label">{label}</span>
+      <div className="ncp-user-wrap">
+        <UserPickerDropdown value={value} onChange={() => {}} users={users} disabled placeholder="—" />
+      </div>
+    </div>
+  );
+}
+
+/** Date / timestamp row using the same card shell as `ncp-user-btn`. */
+function NcpReadonlyDateRow({
+  label,
+  iso,
+  detail = "Governance log",
+}: {
+  label: string;
+  iso: string | null | undefined;
+  /** Shown under the date, like role under email in the user picker. */
+  detail?: string;
+}) {
+  const has = Boolean(iso);
+  const primary = has ? formatDate(iso!) : "—";
+  return (
+    <div className="ncp-prop-row ncp-prop-row--tall-value">
+      <span className="ncp-prop-label">{label}</span>
+      <div className="ncp-user-wrap">
+        <button
+          type="button"
+          className={cn("ncp-user-btn", has && "ncp-selected")}
+          disabled
+          style={{ cursor: "default", opacity: 1 }}
+        >
+          <span
+            className="ncp-user-ico"
+            style={{
+              background: has ? "var(--ncp-blue-soft)" : "var(--ncp-border)",
+              color: has ? "var(--ncp-blue)" : "var(--ncp-text-muted)",
+              fontSize: 12,
+            }}
+            aria-hidden
+          >
+            {has ? "📅" : "—"}
+          </span>
+          <div className="ncp-user-meta">
+            <strong>{primary}</strong>
+            {detail ? <span>{has ? detail : "Not recorded"}</span> : null}
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NcpSectionCard({
+  icon,
+  iconTone,
   title,
   description,
   children,
-  className,
 }: {
+  icon: React.ReactNode;
+  iconTone?: "orange" | "blue" | "green" | "amber" | "accent";
   title: string;
   description?: string;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
-    <section
-      className={cn(
-        "flex flex-col rounded-xl border border-border/80 bg-card/80 shadow-sm overflow-hidden min-h-[188px]",
-        className,
-      )}
-    >
-      <div className="border-b border-border/60 bg-muted/25 px-4 py-2.5">
-        <h4 className="text-sm font-semibold tracking-tight text-foreground">{title}</h4>
-        {description ? <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">{description}</p> : null}
+    <div className="ncp-section">
+      <div className="ncp-section-header">
+        <span className={cn("ncp-section-icon", iconTone && `ncp-${iconTone}`)}>{icon}</span>
+        <div>
+          <div className="ncp-section-label">{title}</div>
+          {description ? <div className="ncp-section-desc">{description}</div> : null}
+        </div>
       </div>
-      <div className="flex-1 p-4 flex flex-col">{children}</div>
-    </section>
+      <div className="ncp-section-body">{children}</div>
+    </div>
   );
 }
 
 function EmptyPackBlock({ title, body }: { title: string; body: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center text-center rounded-lg border border-dashed border-border/80 bg-muted/10 px-4 py-8 min-h-[120px]">
-      <p className="text-xs font-medium text-foreground">{title}</p>
-      <p className="text-[11px] text-muted-foreground mt-1 max-w-[280px] leading-relaxed">{body}</p>
+    <div
+      className="flex flex-col items-center justify-center text-center rounded-[var(--ncp-radius-lg)] border border-dashed px-4 py-8 min-h-[120px]"
+      style={{ borderColor: "var(--ncp-border)", background: "var(--ncp-surface-hover)" }}
+    >
+      <p className="text-xs font-medium" style={{ color: "var(--ncp-text-primary)" }}>
+        {title}
+      </p>
+      <p className="ncp-hint mt-1 max-w-[280px]">{body}</p>
     </div>
   );
 }
@@ -106,14 +199,11 @@ function ForecastBody({ row }: { row: RevenueForecastWeeklyRow }) {
     { label: "Week label", value: row.week_label || "—" },
   ];
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+    <div className="flex flex-col gap-0">
       {cells.map((c) => (
-        <div key={c.label} className="min-w-0">
-          <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{c.label}</dt>
-          <dd className="text-[13px] font-semibold font-mono text-foreground mt-0.5 break-words">{c.value}</dd>
-        </div>
+        <NcpReadonlyRow key={c.label} label={c.label} value={c.value} mono />
       ))}
-    </dl>
+    </div>
   );
 }
 
@@ -133,16 +223,19 @@ function VisibilityBody({ row }: { row: RevenueVisibilitySnapshotRow }) {
     { label: "Status", value: row.status || "—" },
   ];
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+    <div className="flex flex-col gap-0">
       {cells.map((c) => (
-        <div key={c.label} className="min-w-0">
-          <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{c.label}</dt>
-          <dd className="text-[13px] font-semibold font-mono text-foreground mt-0.5 break-words">{c.value}</dd>
-        </div>
+        <NcpReadonlyRow key={c.label} label={c.label} value={c.value} mono />
       ))}
-    </dl>
+    </div>
   );
 }
+
+const GOVERNANCE_DRAWER_TABS: { icon: string; label: string }[] = [
+  { icon: "◇", label: "Overview" },
+  { icon: "✓", label: "Workflow" },
+  { icon: "📊", label: "Forecast & pipeline" },
+];
 
 export function RevenueGovernance() {
   const { user } = useAuth();
@@ -168,6 +261,7 @@ export function RevenueGovernance() {
   const [saving, setSaving] = useState(false);
   const [notes, setNotes] = useState("");
   const [queueSearch, setQueueSearch] = useState("");
+  const [governanceDrawerTab, setGovernanceDrawerTab] = useState(0);
 
   const filteredQueueRows = useMemo(() => {
     const q = queueSearch.trim().toLowerCase();
@@ -207,6 +301,10 @@ export function RevenueGovernance() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (sel?.id != null) setGovernanceDrawerTab(0);
+  }, [sel?.id]);
 
   useEffect(() => {
     if (submissionFromUrl != null) {
@@ -302,13 +400,6 @@ export function RevenueGovernance() {
     if (st === "changes_requested") return "Waiting on the project team to address your feedback.";
     return "";
   }, [sel, st]);
-
-  const drawerTitle = sel ? (sel.account_name?.trim() || `Project ${sel.project_id}`) : "Pack";
-  const drawerSubtitle = sel?.week_start_date
-    ? `Pack #${sel.id} · PRJ-${sel.project_id} · Week of ${formatDate(sel.week_start_date)}`
-    : sel
-      ? `Pack #${sel.id} · PRJ-${sel.project_id}`
-      : undefined;
 
   return (
     <div className="space-y-6 pb-16">
@@ -495,191 +586,338 @@ export function RevenueGovernance() {
           setSel(null);
           setPack(null);
         }}
-        title={drawerTitle}
-        subtitle={drawerSubtitle}
-        className="platform-drawer--wide"
-        headerActions={
-          sel ? (
-            <Badge variant="outline" className={cn("shrink-0 border font-mono text-[10px] capitalize", packStatusBadgeClass(st))}>
-              {sel.status.replace(/_/g, " ")}
-            </Badge>
-          ) : null
-        }
-        footer={
-          sel ? (
-            <div className="flex w-full flex-col gap-3">
-              {footerHint ? (
-                <p className="text-[11px] leading-snug text-muted-foreground">{footerHint}</p>
+        title=" "
+        embeddedChrome
+      >
+        <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+          <div className="ncp-scroll min-h-0 flex-1">
+            <div className="ncp-page">
+              {err && drawer ? (
+                <div
+                  className="mb-4 rounded-[var(--ncp-radius)] border px-3 py-2 text-xs"
+                  style={{
+                    borderColor: "rgba(239, 68, 68, 0.35)",
+                    background: "rgba(239, 68, 68, 0.06)",
+                    color: "#b91c1c",
+                  }}
+                  role="alert"
+                >
+                  {err}
+                </div>
               ) : null}
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" className="text-xs" disabled={saving} onClick={() => setDrawer(false)}>
+
+              {!sel ? (
+                <p className="ncp-hint" style={{ padding: "24px 0", textAlign: "center" }}>
+                  Open a pack from the queue.
+                </p>
+              ) : (
+                <>
+                  <div className="ncp-header">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="ncp-breadcrumb">
+                        <span>Governance</span>
+                        <span className="ncp-breadcrumb-sep">›</span>
+                        <span>Revenue packs</span>
+                        <span className="ncp-breadcrumb-sep">›</span>
+                        <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 10 }}>#{sel.id}</span>
+                      </div>
+                      <h1 className="ncp-h1">{sel.account_name?.trim() || `Project ${sel.project_id}`}</h1>
+                      <div className="ncp-subtitle">
+                        <span style={{ fontFamily: "var(--ncp-mono)", color: "var(--ncp-text-muted)" }}>{`PRJ-${sel.project_id}`}</span>
+                        {sel.week_start_date ? (
+                          <>
+                            <span style={{ color: "var(--ncp-text-muted)", margin: "0 6px" }}>·</span>
+                            <span>Week of {formatDate(sel.week_start_date)}</span>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    <button type="button" className="ncp-close-btn" aria-label="Close" onClick={() => {
+                      setDrawer(false);
+                      setSel(null);
+                      setPack(null);
+                    }}>
+                      ✕
+                    </button>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "10px 14px",
+                      background: "var(--ncp-surface)",
+                      border: "1px solid var(--ncp-border)",
+                      borderRadius: "var(--ncp-radius-lg)",
+                      marginBottom: 14,
+                    }}
+                  >
+                    <span className={cn("ncp-status-pill", packStatusNcpClass(st))}>{sel.status.replace(/_/g, " ")}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--ncp-mono)",
+                        background: "var(--ncp-accent-soft)",
+                        color: "var(--ncp-accent)",
+                        border: "1px solid var(--ncp-accent-mid)",
+                        borderRadius: 999,
+                        padding: "3px 10px",
+                      }}
+                    >
+                      {`Pack #${sel.id}`}
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    {packLoading ? (
+                      <span style={{ fontSize: 12, color: "var(--ncp-text-muted)" }}>Loading metrics…</span>
+                    ) : pack?.forecast ? (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontFamily: "var(--ncp-font)",
+                          fontWeight: 600,
+                          fontVariantNumeric: "tabular-nums",
+                          color: "var(--ncp-text-primary)",
+                        }}
+                      >
+                        Net revenue {formatLargeCurrency(pack.forecast.net_revenue_inr)}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 12, color: "var(--ncp-text-muted)" }}>No forecast row</span>
+                    )}
+                  </div>
+
+                  <div className="ncp-steps" role="tablist" style={{ marginBottom: 18 }}>
+                    {GOVERNANCE_DRAWER_TABS.map(({ icon, label }, i) => (
+                      <button
+                        key={label}
+                        type="button"
+                        role="tab"
+                        aria-selected={governanceDrawerTab === i}
+                        className={cn("ncp-step", governanceDrawerTab === i && "ncp-active")}
+                        onClick={() => setGovernanceDrawerTab(i)}
+                      >
+                        <span
+                          className="ncp-step-num"
+                          style={{
+                            fontSize: 14,
+                            background: governanceDrawerTab === i ? "rgba(255,255,255,0.22)" : "var(--ncp-border)",
+                          }}
+                        >
+                          {icon}
+                        </span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {packLoading ? (
+                    <div className="flex min-h-[200px] items-center justify-center text-sm" style={{ color: "var(--ncp-text-muted)" }}>
+                      Loading pack details…
+                    </div>
+                  ) : (
+                    <>
+                      {governanceDrawerTab === 0 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                          <NcpSectionCard
+                            icon="🗓"
+                            iconTone="orange"
+                            title="Weekly revenue pack review"
+                            description="Compare forecast (expected fees and revenue) with visibility (pipeline and realisation), then use the footer actions when you are ready to move this pack forward."
+                          >
+                            <p className="ncp-hint" style={{ marginBottom: 14 }}>
+                              Governance compares what the practice <strong>expects</strong> this week with pipeline{" "}
+                              <strong>visibility</strong> so you can approve or send targeted feedback.
+                            </p>
+                            <NcpReadonlyRow label="Account" value={sel.account_name?.trim() || "—"} />
+                            <NcpReadonlyRow
+                              label="Week start"
+                              value={sel.week_start_date ? formatDate(sel.week_start_date) : "—"}
+                              mono
+                            />
+                            <NcpReadonlyRow label="Pack / project" value={`#${sel.id} · PRJ-${sel.project_id}`} mono />
+                          </NcpSectionCard>
+                        </div>
+                      ) : null}
+
+                      {governanceDrawerTab === 1 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                          <NcpSectionCard
+                            icon="✓"
+                            iconTone="green"
+                            title="Workflow & ownership"
+                            description="Who touched this pack and when."
+                          >
+                            {displaySubmission ? (
+                              <>
+                                <NcpReadonlyUserRow
+                                  label="Submitted by"
+                                  actor={displaySubmission.submitted_by}
+                                  fallbackRole="Submitter"
+                                />
+                                <NcpReadonlyDateRow
+                                  label="Submitted at"
+                                  iso={displaySubmission.submitted_at}
+                                  detail="Practice submission"
+                                />
+                                <NcpReadonlyUserRow
+                                  label="Reviewed by"
+                                  actor={displaySubmission.reviewed_by}
+                                  fallbackRole="Reviewer"
+                                />
+                                <NcpReadonlyDateRow
+                                  label="Reviewed at"
+                                  iso={displaySubmission.reviewed_at}
+                                  detail="Governance review"
+                                />
+                                <NcpReadonlyUserRow
+                                  label="Approved by"
+                                  actor={displaySubmission.approved_by}
+                                  fallbackRole="Approver"
+                                />
+                                <NcpReadonlyDateRow
+                                  label="Approved at"
+                                  iso={displaySubmission.approved_at}
+                                  detail="Final approval"
+                                />
+                                <NcpReadonlyRow label="Prior review notes" value={displaySubmission.review_notes?.trim() || "—"} />
+                              </>
+                            ) : (
+                              <EmptyPackBlock title="No submission payload" body="Try closing and reopening this pack." />
+                            )}
+                          </NcpSectionCard>
+
+                          <NcpSectionCard
+                            icon="💬"
+                            iconTone="blue"
+                            title="Feedback to project team"
+                            description="Optional for approval. Required detail helps when you request changes or reject."
+                          >
+                            <textarea
+                              id="rg-pack-notes"
+                              className="ncp-prop-input"
+                              style={{ width: "100%", minHeight: 88, maxHeight: 160, resize: "vertical" }}
+                              value={notes}
+                              onChange={(e) => setNotes(e.target.value)}
+                              placeholder="e.g. Please reconcile MMF with visibility joiners for week of Apr 13…"
+                            />
+                          </NcpSectionCard>
+                        </div>
+                      ) : null}
+
+                      {governanceDrawerTab === 2 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                          <NcpSectionCard
+                            icon="📈"
+                            iconTone="accent"
+                            title="Weekly forecast"
+                            description="Fee and revenue line items the practice expects for this week."
+                          >
+                            {pack?.forecast ? (
+                              <ForecastBody row={pack.forecast} />
+                            ) : (
+                              <EmptyPackBlock
+                                title="No forecast row"
+                                body="The project team has not saved a weekly forecast for this week in Revenue trackers yet."
+                              />
+                            )}
+                          </NcpSectionCard>
+
+                          <NcpSectionCard
+                            icon="👁"
+                            iconTone="amber"
+                            title="Visibility snapshot"
+                            description="Pipeline, fees, and conversion signals as of the snapshot date."
+                          >
+                            {pack?.visibility ? (
+                              <VisibilityBody row={pack.visibility} />
+                            ) : (
+                              <EmptyPackBlock
+                                title="No visibility snapshot"
+                                body="The project team has not saved a visibility snapshot for this pack in Revenue trackers yet."
+                              />
+                            )}
+                          </NcpSectionCard>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {sel ? (
+            <div className="ncp-footer">
+              <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                {footerHint ? <p className="ncp-hint" style={{ margin: 0 }}>{footerHint}</p> : <span />}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="ncp-btn ncp-btn-ghost"
+                  style={{ fontSize: 13, padding: "8px 14px" }}
+                  disabled={saving}
+                  onClick={() => {
+                    setDrawer(false);
+                    setSel(null);
+                    setPack(null);
+                  }}
+                >
                   Close
-                </Button>
+                </button>
                 {st === "submitted" ? (
-                  <Button
+                  <button
                     type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="text-xs font-medium"
+                    className="ncp-btn ncp-btn-secondary"
+                    style={{ fontSize: 13, padding: "8px 14px" }}
                     disabled={saving}
                     onClick={() => void run(() => queries.revenueWeeklySubmissionStartReview(sel.id))}
                   >
                     Start review
-                  </Button>
+                  </button>
                 ) : null}
                 {st === "submitted" || st === "under_review" ? (
                   <>
-                    <Button
+                    <button
                       type="button"
-                      size="sm"
-                      className="text-xs font-semibold shadow-sm"
+                      className="ncp-btn ncp-btn-primary"
+                      style={{ fontSize: 13, padding: "8px 14px" }}
                       disabled={saving}
                       onClick={() => void run(() => queries.revenueWeeklySubmissionApprove(sel.id))}
                     >
                       Approve pack
-                    </Button>
-                    <Button
+                    </button>
+                    <button
                       type="button"
-                      size="sm"
-                      variant="outline"
-                      className="text-xs font-medium"
+                      className="ncp-btn ncp-btn-secondary"
+                      style={{ fontSize: 13, padding: "8px 14px" }}
                       disabled={saving}
                       onClick={() => void run(() => queries.revenueWeeklySubmissionRequestChanges(sel.id, notes || undefined))}
                     >
                       Request changes
-                    </Button>
-                    <Button
+                    </button>
+                    <button
                       type="button"
-                      size="sm"
-                      variant="destructive"
-                      className="text-xs font-medium"
+                      className="ncp-btn ncp-btn-ghost"
+                      style={{
+                        fontSize: 13,
+                        padding: "8px 14px",
+                        color: "rgba(185, 28, 28, 0.95)",
+                        borderColor: "rgba(239, 68, 68, 0.35)",
+                      }}
                       disabled={saving}
                       onClick={() => void run(() => queries.revenueWeeklySubmissionReject(sel.id, notes || undefined))}
                     >
                       Reject pack
-                    </Button>
+                    </button>
                   </>
                 ) : null}
               </div>
             </div>
-          ) : null
-        }
-      >
-        {err && drawer ? (
-          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{err}</div>
-        ) : null}
-
-        <div className="rounded-lg border border-primary/15 bg-primary/5 px-3 py-2.5 mb-4">
-          <p className="text-xs font-medium text-foreground">Weekly revenue pack review</p>
-          <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-            Compare <span className="font-medium text-foreground">forecast</span> (expected fees and revenue) with{" "}
-            <span className="font-medium text-foreground">visibility</span> (pipeline and realisation). Use the actions
-            below when you are ready to move this pack forward.
-          </p>
+          ) : null}
         </div>
-
-        {packLoading ? (
-          <div className="flex min-h-[200px] items-center justify-center text-sm text-muted-foreground">Loading pack details…</div>
-        ) : sel ? (
-          <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-3 min-h-[88px] flex flex-col justify-center">
-                <PackMetric label="Account" value={sel.account_name?.trim() || "—"} />
-              </div>
-              <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-3 min-h-[88px] flex flex-col justify-center">
-                <PackMetric label="Week start" value={sel.week_start_date ? formatDate(sel.week_start_date) : "—"} mono />
-              </div>
-              <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-3 min-h-[88px] flex flex-col justify-center">
-                <PackMetric label="Pack / project" value={`#${sel.id} · PRJ-${sel.project_id}`} mono />
-              </div>
-            </div>
-
-            <Separator />
-
-            <SectionShell
-              title="Workflow & ownership"
-              description="Who touched this pack and when — same data as before, formatted for scanning."
-            >
-              {displaySubmission ? (
-                <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <PackMetric label="Submitted by" value={displaySubmission.submitted_by?.email ?? "—"} mono />
-                  <PackMetric
-                    label="Submitted at"
-                    value={displaySubmission.submitted_at ? formatDate(displaySubmission.submitted_at) : "—"}
-                    mono
-                  />
-                  <PackMetric label="Reviewed by" value={displaySubmission.reviewed_by?.email ?? "—"} mono />
-                  <PackMetric
-                    label="Reviewed at"
-                    value={displaySubmission.reviewed_at ? formatDate(displaySubmission.reviewed_at) : "—"}
-                    mono
-                  />
-                  <PackMetric label="Approved by" value={displaySubmission.approved_by?.email ?? "—"} mono />
-                  <PackMetric
-                    label="Approved at"
-                    value={displaySubmission.approved_at ? formatDate(displaySubmission.approved_at) : "—"}
-                    mono
-                  />
-                  <div className="sm:col-span-2">
-                    <PackMetric label="Prior review notes" value={displaySubmission.review_notes?.trim() || "—"} />
-                  </div>
-                </dl>
-              ) : (
-                <EmptyPackBlock title="No submission payload" body="Try refreshing the drawer." />
-              )}
-            </SectionShell>
-
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <SectionShell
-                title="Weekly forecast"
-                description="Fee and revenue line items the practice expects for this week."
-                className="min-h-[220px]"
-              >
-                {pack?.forecast ? (
-                  <ForecastBody row={pack.forecast} />
-                ) : (
-                  <EmptyPackBlock
-                    title="No forecast row"
-                    body="The project team has not saved a weekly forecast for this week in Revenue trackers yet."
-                  />
-                )}
-              </SectionShell>
-
-              <SectionShell
-                title="Visibility snapshot"
-                description="Pipeline, fees, and conversion signals as of the snapshot date."
-                className="min-h-[220px]"
-              >
-                {pack?.visibility ? (
-                  <VisibilityBody row={pack.visibility} />
-                ) : (
-                  <EmptyPackBlock
-                    title="No visibility snapshot"
-                    body="The project team has not saved a visibility snapshot for this pack in Revenue trackers yet."
-                  />
-                )}
-              </SectionShell>
-            </div>
-
-            <div className="rounded-xl border border-border/80 bg-card px-4 py-3">
-              <label className="text-sm font-semibold text-foreground" htmlFor="rg-pack-notes">
-                Feedback to project team
-              </label>
-              <p id="rg-pack-notes-hint" className="text-[11px] text-muted-foreground mt-1 mb-2 leading-relaxed">
-                Optional for approval. Include specifics when you <strong>request changes</strong> or <strong>reject</strong> so
-                the practice can fix the pack quickly.
-              </p>
-              <textarea
-                id="rg-pack-notes"
-                aria-describedby="rg-pack-notes-hint"
-                className="w-full min-h-[88px] max-h-[140px] resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. Please reconcile MMF with visibility joiners for week of Apr 13…"
-              />
-            </div>
-          </div>
-        ) : null}
       </PlatformDrawer>
     </div>
   );

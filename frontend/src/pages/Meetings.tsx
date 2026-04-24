@@ -76,10 +76,12 @@ function MultiUserPicker({
   selectedIds,
   onChange,
   users,
+  disabled = false,
 }: {
   selectedIds: string[];
   onChange: (ids: string[]) => void;
   users: PlatformUserLite[];
+  disabled?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -87,6 +89,10 @@ function MultiUserPicker({
   const wrapRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLDivElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useLayoutEffect(() => {
     if (!open) { setDdRect(null); return; }
@@ -192,7 +198,10 @@ function MultiUserPicker({
       <div
         ref={btnRef}
         className="ncp-multi-user-btn"
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!disabled) setOpen((o) => !o);
+        }}
         style={{
           display: "flex",
           flexWrap: "wrap",
@@ -201,7 +210,7 @@ function MultiUserPicker({
           border: "1px solid var(--ncp-border)",
           borderRadius: "var(--ncp-radius-lg)",
           background: "var(--ncp-surface-hover)",
-          cursor: "pointer",
+          cursor: disabled ? "default" : "pointer",
           minHeight: 40,
           alignItems: "center",
         }}
@@ -236,17 +245,19 @@ function MultiUserPicker({
               {initials(u.email)}
             </span>
             {u.email.split("@")[0]}
-            <span
-              style={{ cursor: "pointer", opacity: 0.5, fontSize: 14, lineHeight: 1 }}
-              onClick={(e) => { e.stopPropagation(); toggle(String(u.id)); }}
-            >
-              ×
-            </span>
+            {!disabled ? (
+              <span
+                style={{ cursor: "pointer", opacity: 0.5, fontSize: 14, lineHeight: 1 }}
+                onClick={(e) => { e.stopPropagation(); toggle(String(u.id)); }}
+              >
+                ×
+              </span>
+            ) : null}
           </span>
         ))}
-        <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)", fontSize: 12 }}>▾</span>
+        {!disabled ? <span style={{ marginLeft: "auto", color: "var(--ncp-text-muted)", fontSize: 12 }}>▾</span> : null}
       </div>
-      {open && ddRect && createPortal(
+      {!disabled && open && ddRect && createPortal(
         <div
           ref={portalRef}
           className="new-contract-sheet"
@@ -357,9 +368,11 @@ function serializeAgenda(selected: string[], custom: string): string {
 function AgendaTagPicker({
   value,
   onChange,
+  readOnly = false,
 }: {
   value: string;
   onChange: (v: string) => void;
+  readOnly?: boolean;
 }) {
   const { selected: initSel, custom: initCustom } = useMemo(() => parseAgenda(value), []);
 
@@ -368,9 +381,30 @@ function AgendaTagPicker({
   const [activeCategory, setActiveCategory] = useState<string>(Object.keys(AGENDA_TAXONOMY)[0]);
 
   useEffect(() => {
+    if (readOnly) return;
     onChange(serializeAgenda(selected, custom));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, custom]);
+  }, [readOnly, selected, custom]);
+
+  if (readOnly) {
+    return (
+      <div
+        className="ncp-prop-input"
+        style={{
+          minHeight: 72,
+          padding: "10px 12px",
+          fontSize: 12,
+          lineHeight: 1.5,
+          color: "var(--ncp-text-primary)",
+          whiteSpace: "pre-wrap",
+          background: "var(--ncp-surface)",
+          borderRadius: "var(--ncp-radius)",
+        }}
+      >
+        {value.trim() ? value : "—"}
+      </div>
+    );
+  }
 
   function toggle(tag: string) {
     setSelected((prev) =>
@@ -501,6 +535,7 @@ function MeetingFormNCP({
   // meta
   platformUsers,
   tab, setTab,
+  readOnly = false,
 }: {
   meetingTitle: string; setMeetingTitle: (v: string) => void;
   meetingType: string; setMeetingType: (v: string) => void;
@@ -530,6 +565,7 @@ function MeetingFormNCP({
   setActions: React.Dispatch<React.SetStateAction<Omit<MeetingActionItemRow, "id">[]>>;
   platformUsers: PlatformUserLite[];
   tab: number; setTab: (n: number) => void;
+  readOnly?: boolean;
 }) {
   // Project picker portal
   const [projDdOpen, setProjDdOpen] = useState(false);
@@ -565,6 +601,10 @@ function MeetingFormNCP({
     return () => document.removeEventListener("click", onDoc);
   }, []);
 
+  useEffect(() => {
+    if (readOnly) setProjDdOpen(false);
+  }, [readOnly]);
+
   const filteredProjects = useMemo(() => {
     const q = projSearch.trim().toLowerCase();
     if (!q) return projects;
@@ -583,14 +623,20 @@ function MeetingFormNCP({
   const pr = (label: string, value: string, onChange: (v: string) => void, extra?: React.InputHTMLAttributes<HTMLInputElement>) => (
     <div className="ncp-prop-row">
       <div className="ncp-prop-label">{label}</div>
-      <input className="ncp-prop-input" value={value} onChange={(e) => onChange(e.target.value)} {...extra} />
+      <input
+        className="ncp-prop-input"
+        value={value}
+        readOnly={readOnly}
+        onChange={(e) => onChange(e.target.value)}
+        {...extra}
+      />
     </div>
   );
 
   const dd = (label: string, value: string, onChange: (v: string) => void, opts: string[], allowEmpty = true) => (
     <div className="ncp-prop-row">
       <div className="ncp-prop-label">{label}</div>
-      <select className="ncp-prop-input" value={value} onChange={(e) => onChange(e.target.value)}>
+      <select className="ncp-prop-input" value={value} disabled={readOnly} onChange={(e) => onChange(e.target.value)}>
         {allowEmpty && <option value="">— Choose —</option>}
         {opts.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -605,8 +651,9 @@ function MeetingFormNCP({
         rows={rows}
         placeholder={placeholder}
         value={value}
+        readOnly={readOnly}
         onChange={(e) => onChange(e.target.value)}
-        style={{ resize: "vertical" }}
+        style={{ resize: readOnly ? "none" : "vertical" }}
       />
     </div>
   );
@@ -660,7 +707,11 @@ function MeetingFormNCP({
                   type="button"
                   className={cn("ncp-project-btn", selectedProject && "ncp-selected")}
                   style={{ padding: "8px 12px", height: 36 }}
-                  onClick={(e) => { e.stopPropagation(); setProjDdOpen((o) => !o); }}
+                  disabled={readOnly}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!readOnly) setProjDdOpen((o) => !o);
+                  }}
                 >
                   {selectedProject ? (
                     <>
@@ -714,27 +765,27 @@ function MeetingFormNCP({
             <div className="ncp-date-grid" style={{ borderTop: "none" }}>
               <div className="ncp-date-cell">
                 <label>Meeting date</label>
-                <input type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} />
+                <input type="date" value={meetingDate} readOnly={readOnly} onChange={(e) => setMeetingDate(e.target.value)} />
               </div>
               <div className="ncp-date-cell">
                 <label>Follow-up date</label>
-                <input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} />
+                <input type="date" value={followUpDate} readOnly={readOnly} onChange={(e) => setFollowUpDate(e.target.value)} />
               </div>
             </div>
             <div className="ncp-date-grid">
               <div className="ncp-date-cell">
                 <label>Start time</label>
-                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                <input type="time" value={startTime} readOnly={readOnly} onChange={(e) => setStartTime(e.target.value)} />
               </div>
               <div className="ncp-date-cell">
                 <label>End time</label>
-                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                <input type="time" value={endTime} readOnly={readOnly} onChange={(e) => setEndTime(e.target.value)} />
               </div>
             </div>
             <div className="ncp-date-grid">
               <div className="ncp-date-cell" style={{ gridColumn: "1 / -1" }}>
                 <label>Next meeting date</label>
-                <input type="date" value={nextMeetingDate} onChange={(e) => setNextMeetingDate(e.target.value)} />
+                <input type="date" value={nextMeetingDate} readOnly={readOnly} onChange={(e) => setNextMeetingDate(e.target.value)} />
               </div>
             </div>
             {dd("Mode", meetingMode, setMeetingMode, MEETING_MODES)}
@@ -758,6 +809,7 @@ function MeetingFormNCP({
                 }}
                 users={platformUsers}
                 placeholder="— Select organizer —"
+                disabled={readOnly}
               />
             </div>
           </div>
@@ -769,6 +821,7 @@ function MeetingFormNCP({
               selectedIds={internalIds}
               onChange={setInternalIds}
               users={platformUsers}
+              disabled={readOnly}
             />
           </div>
         )}
@@ -783,13 +836,15 @@ function MeetingFormNCP({
                   <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ncp-text-secondary)", flex: 1 }}>
                     {c.name || c.email || "Contact"}
                   </span>
-                  <button
-                    type="button"
-                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "var(--ncp-text-muted)", padding: "0 4px" }}
-                    onClick={() => setExtContacts((prev) => prev.length === 1 ? [emptyContact()] : prev.filter((_, j) => j !== i))}
-                  >
-                    ×
-                  </button>
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "var(--ncp-text-muted)", padding: "0 4px" }}
+                      onClick={() => setExtContacts((prev) => prev.length === 1 ? [emptyContact()] : prev.filter((_, j) => j !== i))}
+                    >
+                      ×
+                    </button>
+                  ) : null}
                 </div>
                 {[
                   { label: "Name", key: "name" as const, placeholder: "Full name" },
@@ -803,20 +858,23 @@ function MeetingFormNCP({
                       className="ncp-prop-input"
                       placeholder={placeholder}
                       value={c[key]}
+                      readOnly={readOnly}
                       onChange={(e) => setExtContacts((prev) => prev.map((x, j) => j === i ? { ...x, [key]: e.target.value } : x))}
                     />
                   </div>
                 ))}
               </div>
             ))}
-            <button
-              type="button"
-              className="ncp-btn ncp-btn-ghost"
-              style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
-              onClick={() => setExtContacts((p) => [...p, emptyContact()])}
-            >
-              + Add external contact
-            </button>
+            {!readOnly ? (
+              <button
+                type="button"
+                className="ncp-btn ncp-btn-ghost"
+                style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
+                onClick={() => setExtContacts((p) => [...p, emptyContact()])}
+              >
+                + Add external contact
+              </button>
+            ) : null}
           </>
         )}
       </div>
@@ -826,7 +884,7 @@ function MeetingFormNCP({
         {section("📋", "ncp-blue", "Content", "Agenda, discussion and decisions",
           <>
             <div className="ncp-section-body" style={{ borderTop: "none", padding: "12px 14px" }}>
-              <AgendaTagPicker value={agendaItems} onChange={setAgendaItems} />
+              <AgendaTagPicker value={agendaItems} onChange={setAgendaItems} readOnly={readOnly} />
             </div>
             {ta("Key points", keyDiscussionPoints, setKeyDiscussionPoints, 3, "Bullet points from the conversation…")}
             {ta("Summary", discussionSummary, setDiscussionSummary, 3, "Overall narrative summary…")}
@@ -854,13 +912,15 @@ function MeetingFormNCP({
                   <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ncp-text-secondary)", flex: 1 }}>
                     {a.description || "Action item"}
                   </span>
-                  <button
-                    type="button"
-                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "var(--ncp-text-muted)", padding: "0 4px" }}
-                    onClick={() => setActions((prev) => prev.length === 1 ? [emptyAction()] : prev.filter((_, j) => j !== i))}
-                  >
-                    ×
-                  </button>
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "var(--ncp-text-muted)", padding: "0 4px" }}
+                      onClick={() => setActions((prev) => prev.length === 1 ? [emptyAction()] : prev.filter((_, j) => j !== i))}
+                    >
+                      ×
+                    </button>
+                  ) : null}
                 </div>
                 <div className="ncp-prop-row">
                   <div className="ncp-prop-label" style={{ paddingLeft: 28 }}>Description</div>
@@ -868,6 +928,7 @@ function MeetingFormNCP({
                     className="ncp-prop-input"
                     placeholder="What needs to be done…"
                     value={a.description ?? ""}
+                    readOnly={readOnly}
                     onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
                   />
                 </div>
@@ -877,6 +938,7 @@ function MeetingFormNCP({
                     className="ncp-prop-input"
                     placeholder="Name or email…"
                     value={a.owner ?? ""}
+                    readOnly={readOnly}
                     onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, owner: e.target.value } : x))}
                   />
                 </div>
@@ -886,6 +948,7 @@ function MeetingFormNCP({
                     type="date"
                     className="ncp-prop-input"
                     value={a.due_date ?? ""}
+                    readOnly={readOnly}
                     onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, due_date: e.target.value } : x))}
                   />
                 </div>
@@ -894,6 +957,7 @@ function MeetingFormNCP({
                   <select
                     className="ncp-prop-input"
                     value={a.status ?? ""}
+                    disabled={readOnly}
                     onChange={(e) => setActions((prev) => prev.map((x, j) => j === i ? { ...x, status: e.target.value } : x))}
                   >
                     <option value="">— Choose —</option>
@@ -902,14 +966,16 @@ function MeetingFormNCP({
                 </div>
               </div>
             ))}
-            <button
-              type="button"
-              className="ncp-btn ncp-btn-ghost"
-              style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
-              onClick={() => setActions((p) => [...p, emptyAction()])}
-            >
-              + Add action item
-            </button>
+            {!readOnly ? (
+              <button
+                type="button"
+                className="ncp-btn ncp-btn-ghost"
+                style={{ marginTop: 10, width: "100%", justifyContent: "center" }}
+                onClick={() => setActions((p) => [...p, emptyAction()])}
+              >
+                + Add action item
+              </button>
+            ) : null}
           </>
         )}
       </div>
@@ -930,6 +996,7 @@ export function Meetings() {
   const [search, setSearch] = useState("");
 
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetReadOnly, setSheetReadOnly] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [meetingTab, setMeetingTab] = useState(0);
@@ -1008,6 +1075,7 @@ export function Meetings() {
     setFollowUpDate(""); setNextMeetingDate(""); setMeetingMode("");
     setMeetingStatus("Scheduled"); setMomStatus(""); setMomLinkRemarks("");
     setActions([emptyAction()]); setMeetingTab(0); setSaveErr(null);
+    setSheetReadOnly(false);
   }
 
   function openCreate() {
@@ -1015,7 +1083,7 @@ export function Meetings() {
     setSheetOpen(true);
   }
 
-  const openEdit = useCallback((m: MeetingRow) => {
+  const openMeetingSheet = useCallback((m: MeetingRow, viewOnly: boolean) => {
     setEditingId(m.id);
     setMeetingTitle(m.meeting_title ?? ""); setMeetingType(m.meeting_type ?? "");
     setMeetingDate(m.meeting_date?.slice(0, 10) ?? "");
@@ -1049,8 +1117,17 @@ export function Meetings() {
       ? m.action_items.map((a) => ({ description: a.description ?? "", owner: a.owner ?? "", due_date: a.due_date?.slice(0,10) ?? "", status: a.status ?? "", sort_order: a.sort_order ?? 0 }))
       : [emptyAction()]);
     setMeetingTab(0); setSaveErr(null);
+    setSheetReadOnly(viewOnly);
     setSheetOpen(true);
   }, []);
+
+  const openEdit = useCallback((m: MeetingRow) => {
+    openMeetingSheet(m, false);
+  }, [openMeetingSheet]);
+
+  const openView = useCallback((m: MeetingRow) => {
+    openMeetingSheet(m, true);
+  }, [openMeetingSheet]);
 
   // Sync organizer + internal after users load
   useEffect(() => {
@@ -1202,7 +1279,19 @@ export function Meetings() {
                   const pr = m.project_id != null ? projectById.get(m.project_id) : undefined;
                   const prLabel = m.account_name_snapshot || (pr && (pr.engagement_name || pr.account_name)) || (m.project_id != null ? `PRJ-${m.project_id}` : "—");
                   return (
-                    <tr key={m.id}>
+                    <tr
+                      key={m.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openView(m)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openView(m);
+                        }
+                      }}
+                      style={{ cursor: "pointer" }}
+                    >
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>{m.id}</td>
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{m.meeting_date?.slice(0, 10) ?? "—"}</td>
                       <td style={{ fontWeight: 600, maxWidth: 200 }}>{m.meeting_title ?? "—"}</td>
@@ -1216,9 +1305,29 @@ export function Meetings() {
                         {m.created_by_email ?? "—"}
                         <div style={{ fontSize: 9, opacity: 0.8 }}>{m.system_created_at?.slice(0, 16) ?? ""}</div>
                       </td>
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <button type="button" className="platform-dialog__btn" style={{ fontSize: 10, padding: "4px 8px" }} onClick={() => openEdit(m)}>Edit</button>
-                        <button type="button" className="platform-dialog__btn" style={{ fontSize: 10, padding: "4px 8px", marginLeft: 6, color: "var(--red)", borderColor: "rgba(255,79,107,0.35)" }} onClick={() => void removeMeeting(m.id)}>Delete</button>
+                      <td style={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="platform-dialog__btn"
+                          style={{ fontSize: 10, padding: "4px 8px" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(m);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="platform-dialog__btn"
+                          style={{ fontSize: 10, padding: "4px 8px", marginLeft: 6, color: "var(--red)", borderColor: "rgba(255,79,107,0.35)" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void removeMeeting(m.id);
+                          }}
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
                   );
@@ -1256,10 +1365,16 @@ export function Meetings() {
                         : <span>New</span>}
                     </div>
                     <h1 className="ncp-h1">
-                      {editingId == null ? "Log a meeting" : `Edit meeting #${editingId}`}
+                      {editingId == null
+                        ? "Log a meeting"
+                        : sheetReadOnly
+                          ? `View meeting #${editingId}`
+                          : `Edit meeting #${editingId}`}
                     </h1>
                     <p className="ncp-subtitle" style={{ marginTop: 4 }}>
-                      Record a governance call, QBR, or MoM. Link an optional project for scoping.
+                      {sheetReadOnly && editingId != null
+                        ? "Read-only summary — use Edit below to change fields, or browse tabs to see all sections."
+                        : "Record a governance call, QBR, or MoM. Link an optional project for scoping."}
                     </p>
                   </div>
                   <button type="button" className="ncp-close-btn" aria-label="Close" onClick={() => setSheetOpen(false)}>✕</button>
@@ -1292,6 +1407,7 @@ export function Meetings() {
                   actions={actions} setActions={setActions}
                   platformUsers={platformUsers}
                   tab={meetingTab} setTab={setMeetingTab}
+                  readOnly={sheetReadOnly}
                 />
 
                 {saveErr && (
@@ -1304,18 +1420,37 @@ export function Meetings() {
 
             {/* Footer */}
             <div className="ncp-footer">
-              <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</button>
-              <div style={{ display: "flex", gap: 8 }}>
-                {meetingTab > 0 && (
-                  <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setMeetingTab((t) => t - 1)}>← Back</button>
-                )}
-                {meetingTab < MTG_TABS.length - 1 && (
-                  <button type="button" className="ncp-btn ncp-btn-secondary" onClick={() => setMeetingTab((t) => t + 1)}>Next →</button>
-                )}
-                <button type="button" className="ncp-btn ncp-btn-primary" disabled={saving} onClick={() => void save()}>
-                  {saving ? "Saving…" : editingId == null ? "Create ✓" : "Save changes ✓"}
-                </button>
-              </div>
+              {sheetReadOnly && editingId != null ? (
+                <>
+                  <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setSheetOpen(false)}>
+                    Close
+                  </button>
+                  <button type="button" className="ncp-btn ncp-btn-primary" onClick={() => setSheetReadOnly(false)}>
+                    Edit
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setSheetOpen(false)} disabled={saving}>
+                    Cancel
+                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {meetingTab > 0 && (
+                      <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => setMeetingTab((t) => t - 1)}>
+                        ← Back
+                      </button>
+                    )}
+                    {meetingTab < MTG_TABS.length - 1 && (
+                      <button type="button" className="ncp-btn ncp-btn-secondary" onClick={() => setMeetingTab((t) => t + 1)}>
+                        Next →
+                      </button>
+                    )}
+                    <button type="button" className="ncp-btn ncp-btn-primary" disabled={saving} onClick={() => void save()}>
+                      {saving ? "Saving…" : editingId == null ? "Create ✓" : "Save changes ✓"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </SheetContent>

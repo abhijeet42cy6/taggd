@@ -25,11 +25,11 @@ import {
   Landmark,
   LayoutDashboard,
   LineChart,
-  LogOut,
   Package,
   PieChart,
   Receipt,
   ScrollText,
+  Settings,
   ShieldCheck,
   TrendingDown,
   TrendingUp,
@@ -55,6 +55,13 @@ import {
   useAuth,
 } from "@/lib/auth";
 import { UserAvatarImg } from "@/components/UserAvatarImg";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ClientsHub } from "./pages/ClientsHub";
 import { ClientDetail } from "./pages/ClientDetail";
 import { ClientContracts } from "./pages/ClientContracts";
@@ -561,81 +568,66 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
             />
             {!sidebarCollapsed ? (
               <>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 500,
-                      color: "var(--text)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {displayName || email || "—"}
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--accent)", fontFamily: "var(--mono)" }}>
-                    {effectiveRole || user?.role || ""}
-                  </div>
+                <div className="platform-sidebar-footer__meta">
+                  <div className="platform-sidebar-footer__name">{displayName || email || "—"}</div>
+                  <div className="platform-sidebar-footer__role">{effectiveRole || user?.role || ""}</div>
                 </div>
-                <div style={{ display: "flex", gap: 4 }}>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      title="Account"
+                      aria-label="Open account menu"
+                    >
+                      <Settings className="size-4" strokeWidth={2} aria-hidden />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" side="top" sideOffset={8} className="min-w-[10rem]">
+                    <DropdownMenuItem className="text-xs font-medium" onSelect={() => navigate("/profile")}>
+                      Profile
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-xs font-medium text-destructive focus:text-destructive"
+                      onSelect={() => {
+                        logout();
+                        navigate("/login", { replace: true });
+                      }}
+                    >
+                      Log out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    title="My profile"
-                    onClick={() => navigate("/profile")}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--text-subtle)",
-                      fontSize: 11,
-                      cursor: "pointer",
-                      padding: "2px 4px",
-                      borderRadius: "var(--radius-sm)",
-                      fontFamily: "var(--font)",
-                      transition: "color var(--t-fast), background var(--t-fast)",
-                    }}
+                    className="platform-sidebar-footer-collapsed-menu-trigger"
+                    title="Account"
+                    aria-label="Open account menu"
                   >
-                    Profile
+                    <Settings size={18} strokeWidth={2} aria-hidden />
                   </button>
-                  <button
-                    type="button"
-                    title="Log out"
-                    onClick={() => {
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="right" sideOffset={8} className="min-w-[10rem]">
+                  <DropdownMenuItem className="text-xs font-medium" onSelect={() => navigate("/profile")}>
+                    Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-xs font-medium text-destructive focus:text-destructive"
+                    onSelect={() => {
                       logout();
                       navigate("/login", { replace: true });
                     }}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--text-subtle)",
-                      fontSize: 11,
-                      cursor: "pointer",
-                      padding: "2px 4px",
-                      borderRadius: "var(--radius-sm)",
-                      fontFamily: "var(--font)",
-                      transition: "color var(--t-fast), background var(--t-fast)",
-                    }}
                   >
                     Log out
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="platform-sidebar-footer-collapsed-btns">
-                <button type="button" title="My profile" onClick={() => navigate("/profile")}>
-                  <User size={16} strokeWidth={2} />
-                </button>
-                <button
-                  type="button"
-                  title="Log out"
-                  onClick={() => {
-                    logout();
-                    navigate("/login", { replace: true });
-                  }}
-                >
-                  <LogOut size={16} strokeWidth={2} />
-                </button>
-              </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </aside>

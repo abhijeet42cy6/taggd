@@ -260,7 +260,7 @@ export function AgentChat() {
       {/* ── FLOATING BUTTON ───────────────────────────────────────────── */}
       <button
         onClick={() => setOpen(v => !v)}
-        title="Taggd Intelligence Agent"
+        title="Taggy — Taggd intelligence (Aparatus)"
         style={{
           position: "fixed",
           bottom: 24,
@@ -347,10 +347,10 @@ export function AgentChat() {
             }}>◈</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "'Syne',sans-serif" }}>
-                Taggd Intelligence
+                Taggy
               </div>
               <div style={{ fontSize: 9.5, color: "var(--green)", fontFamily: "'DM Mono',monospace" }}>
-                ● Analysis Agent — Live DB
+                ● Taggd intelligence — powered by Aparatus · Live DB
               </div>
             </div>
             {messages.length > 0 && (

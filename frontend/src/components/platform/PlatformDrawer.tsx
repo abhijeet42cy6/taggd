@@ -15,6 +15,11 @@ type PlatformDrawerProps = {
   headerActions?: React.ReactNode;
   /** Sticky bottom bar (e.g. Save) — body scrolls independently */
   footer?: React.ReactNode;
+  /**
+   * When true, hides the default drawer chrome (title row + text Close).
+   * Children should render a full `new-contract-sheet` layout (breadcrumb, ✕, footer inside sheet if needed).
+   */
+  embeddedChrome?: boolean;
 };
 
 export function PlatformDrawer({
@@ -27,6 +32,7 @@ export function PlatformDrawer({
   className,
   headerActions,
   footer,
+  embeddedChrome = false,
 }: PlatformDrawerProps) {
   useEffect(() => {
     if (!open) return;
@@ -47,7 +53,7 @@ export function PlatformDrawer({
         aria-hidden
       />
       <aside
-        className={`platform-drawer${footer ? " platform-drawer--footer" : ""}${className ? ` ${className}` : ""}`}
+        className={`platform-drawer${footer ? " platform-drawer--footer" : ""}${embeddedChrome ? " platform-drawer--ncp-embed" : ""}${className ? ` ${className}` : ""}`}
         style={{
           ...(width ? { width } : {}),
           minWidth: 0,
@@ -57,21 +63,23 @@ export function PlatformDrawer({
         role="dialog"
         aria-modal="true"
       >
-        <div className="platform-drawer-head">
-          <div className="platform-drawer-head-row">
-            <div className="platform-drawer-head-text">
-              <h3 className="platform-drawer-title">{title}</h3>
-              {subtitle ? <div className="platform-drawer-subtitle">{subtitle}</div> : null}
-            </div>
-            <div className="platform-drawer-head-actions">
-              {headerActions}
-              <button type="button" className="platform-drawer-close" onClick={onClose}>
-                Close
-              </button>
+        {!embeddedChrome ? (
+          <div className="platform-drawer-head">
+            <div className="platform-drawer-head-row">
+              <div className="platform-drawer-head-text">
+                <h3 className="platform-drawer-title">{title}</h3>
+                {subtitle ? <div className="platform-drawer-subtitle">{subtitle}</div> : null}
+              </div>
+              <div className="platform-drawer-head-actions">
+                {headerActions}
+                <button type="button" className="platform-drawer-close" onClick={onClose}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="platform-drawer-body">{children}</div>
+        ) : null}
+        <div className={`platform-drawer-body${embeddedChrome ? " platform-drawer-body--ncp-embed" : ""}`}>{children}</div>
         {footer ? <div className="platform-drawer-footer">{footer}</div> : null}
       </aside>
     </>

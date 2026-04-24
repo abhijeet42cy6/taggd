@@ -512,6 +512,8 @@ def ingest_sla_template(path: str, db, source_fn: str) -> dict[str, Any]:
                 if not pr:
                     issues.append(f"definition {did}: project_id_TO_FILL {pid} not in DB; using name")
                     pid = None
+                elif pr.client_id is None:
+                    ensure_project_client(db, pr)
             except (TypeError, ValueError):
                 pid = None
         else:
@@ -521,8 +523,14 @@ def ingest_sla_template(path: str, db, source_fn: str) -> dict[str, Any]:
             if not pname:
                 issues.append(f"definition {did}: no source_project_name / project_id_TO_FILL; skipped.")
                 continue
-            p = get_or_create_project(db, pname, source_fn)
-            pid = p.id
+            p_match, _reason = resolve_project_for_sla(db, pname)
+            if p_match is not None:
+                if p_match.client_id is None:
+                    ensure_project_client(db, p_match)
+                pid = p_match.id
+            else:
+                p = get_or_create_project(db, pname, source_fn)
+                pid = p.id
         def_to_pid[did] = pid
     db.flush()
 

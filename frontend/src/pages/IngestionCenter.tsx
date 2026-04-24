@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, invalidateCache, queries, columnMappingEntryCount, type IngestionEventRow } from "@/lib/api";
 import { isPlatformAdminRole, isRecruiterUser, useAuth } from "@/lib/auth";
-import { PlatformSection, PageHeader, Tabs } from "@/components/platform/PlatformBlocks";
+import { PlatformSection, Tabs } from "@/components/platform/PlatformBlocks";
 import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
+import "@/styles/ingestion-center.css";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -412,27 +413,38 @@ function DropZone({
         onChange={(e) => { const f = e.target.files?.[0]; if (f) { onFile(f); e.target.value = ""; } }}
         disabled={disabled} />
       <div
+        className="ingestion-center__drop"
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         style={{
           border: `1.5px dashed ${dragOver ? accent : `${accent}60`}`,
-          borderRadius: 10, padding: "24px 16px", display: "flex", flexDirection: "column",
+          padding: "24px 16px", display: "flex", flexDirection: "column",
           alignItems: "center", justifyContent: "center", gap: 8,
           background: dragOver
-            ? `color-mix(in srgb, ${accent} 14%, var(--surface-raised, #fff))`
-            : "color-mix(in srgb, var(--accent) 5%, var(--surface-muted, #f4f4f5))",
-          transition: "all .15s", opacity: disabled ? 0.5 : 1,
-          minHeight: 130, textAlign: "center",
-        }}>
+            ? `color-mix(in srgb, ${accent} 14%, var(--surface-raised))`
+            : "color-mix(in srgb, var(--accent) 6%, var(--surface-muted))",
+          transition: "all var(--t-fast)", opacity: disabled ? 0.5 : 1,
+          minHeight: 140, textAlign: "center",
+        }}
+      >
         <div style={{ fontSize: 30, color: accent }}>{icon}</div>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 13 }}>{title}</div>
-        <div style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>{subtitle}</div>
-        <div style={{ fontSize: 9.5, color: accent, fontFamily: "'DM Mono',monospace", marginTop: 2 }}>
+        <div className="ingestion-center__drop-title">{title}</div>
+        <div style={{ fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.55 }}>{subtitle}</div>
+        <div style={{ fontSize: "10px", color: accent, fontFamily: "var(--mono)", marginTop: 4, fontWeight: 500 }}>
           Click or drag & drop
         </div>
       </div>
     </label>
+  );
+}
+
+function InfoCallout({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <aside className="ingestion-center__callout" aria-label={title}>
+      <h3 className="ingestion-center__callout-title">{title}</h3>
+      <div className="ingestion-center__callout-body">{children}</div>
+    </aside>
   );
 }
 
@@ -472,8 +484,9 @@ function IngestionActivitySection({
       ? "Portfolio-wide: all users’ uploads and ingest runs."
       : "Your runs and teammates’ activity on projects you share (project-scoped).";
   return (
+    <div className="ingestion-center__activity">
     <PlatformSection title="Recent ingestion activity">
-      <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 14px", lineHeight: 1.45, maxWidth: 640 }}>
+      <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "0 0 16px", lineHeight: 1.55, maxWidth: "40rem" }}>
         {scopeHint}
       </p>
       {loading ? (
@@ -542,6 +555,7 @@ function IngestionActivitySection({
         </div>
       )}
     </PlatformSection>
+    </div>
   );
 }
 
@@ -796,35 +810,32 @@ export function IngestionCenter() {
 
   // ── RENDER ────────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader
-        title="Ingestion Center"
-        subtitle={
-          recruiterView
+    <div className="ingestion-center">
+      <header className="ingestion-center__hero">
+        <p className="ingestion-center__eyebrow">Data operations</p>
+        <h1 className="ingestion-center__title">Ingestion Center</h1>
+        <p className="ingestion-center__lede">
+          {recruiterView
             ? "Run uploads for your assigned projects. The activity feed shows ingestion you triggered; project scope still applies to matching and commits."
-            : "Data onboarding · AI-assisted schema mapping · Validation gates · Multi-path ingestion"
-        }
-      />
+            : "Bring workbooks into the live database — AI-assisted column mapping, validation gates, and clear paths for trackers, revenue templates, SLA, WFM, and finance."}
+        </p>
+      </header>
 
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 6,
-          margin: "0 -4px",
-          padding: "8px 10px 10px",
-          background: "linear-gradient(180deg, var(--surface-page, #fafafa) 70%, transparent)",
-          borderBottom: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-        }}
-      >
-        <Tabs tabs={[...INGESTION_TABS]} active={tab} onChange={(t) => setTab(t as IngestionTab)} />
+      <div className="ingestion-center__tabs">
+        <div className="ingestion-center__tabRail">
+          <Tabs tabs={[...INGESTION_TABS]} active={tab} onChange={(t) => setTab(t as IngestionTab)} />
+        </div>
       </div>
 
       {/* ── EXPRESS TAB ──────────────────────────────────────────────────────── */}
       {tab === "Express" && (
-        <PlatformSection title="Express Path — AI Ingestion Pipeline">
+        <PlatformSection title="Express">
+          <p className="ingestion-center__tabIntro">
+            Upload requisition or placement trackers. AI identifies sheets, maps columns, and prepares revenue logic before you
+            commit.
+          </p>
           {express.job === "idle" && (
-            <div className="platform-grid-2" style={{ gap: 16, alignItems: "stretch" }}>
+            <div className="ingestion-center__grid2">
               <DropZone
                 title="Express upload"
                 subtitle={"Tracking sheet (Req / Placement)\nAI auto-maps columns & synthesizes revenue logic"}
@@ -833,26 +844,17 @@ export function IngestionCenter() {
                 onFile={handleExpress}
                 disabled={false}
               />
-              <div
-                style={{
-                  padding: "18px 16px",
-                  borderRadius: 12,
-                  border: "1px solid var(--border)",
-                  background: "var(--surface-raised, #fff)",
-                  boxShadow: "0 2px 12px rgba(15, 23, 42, 0.06)",
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>How it works</div>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: "var(--text-subtle)", lineHeight: 1.65 }}>
-                  <li>Supports Requisitions, Placement, and Offer trackers (top drop zone).</li>
+              <InfoCallout title="How express works">
+                <ul>
+                  <li>Supports Requisitions, Placement, and Offer trackers (this drop zone).</li>
                   <li>
-                    <strong>Revenue weekly templates</strong> (below): forecast + visibility workbooks → same ingest as the
-                    CLI script.
+                    <strong>Revenue weekly templates</strong> (below): forecast + visibility workbooks use the same ingest as
+                    the CLI script.
                   </li>
                   <li>AI identifies sheets, maps columns, and synthesizes revenue logic for tracker uploads.</li>
                   <li>Progress and logs appear below after you upload.</li>
                 </ul>
-              </div>
+              </InfoCallout>
             </div>
           )}
           {express.job !== "idle" && (
@@ -876,26 +878,10 @@ export function IngestionCenter() {
             </div>
           )}
 
-          <div
-            style={{
-              marginTop: 22,
-              paddingTop: 20,
-              borderTop: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                marginBottom: 12,
-                fontFamily: "'Syne',sans-serif",
-                color: "var(--text)",
-              }}
-            >
-              Revenue weekly templates (forecast and visibility)
-            </div>
+          <div className="ingestion-center__subsection">
+            <h2 className="ingestion-center__subsection-title">Revenue weekly templates</h2>
             {revenueTrackers.job === "idle" && (
-              <div className="platform-grid-2" style={{ gap: 16, alignItems: "stretch" }}>
+              <div className="ingestion-center__grid2">
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <DropZone
                     title="Weekly forecast workbook"
@@ -947,14 +933,14 @@ export function IngestionCenter() {
                         disabled={!revForecastFile && !revVisibilityFile}
                         style={{
                           padding: "10px 16px",
-                          borderRadius: 8,
+                          borderRadius: "var(--radius-base)",
                           border: "none",
                           cursor: revForecastFile || revVisibilityFile ? "pointer" : "not-allowed",
                           background: revForecastFile || revVisibilityFile ? "var(--accent)" : "var(--surface-muted)",
                           color: revForecastFile || revVisibilityFile ? "var(--text-on-accent)" : "var(--text-muted)",
                           fontSize: 12,
                           fontWeight: 600,
-                          fontFamily: "'Syne',sans-serif",
+                          fontFamily: "var(--font)",
                         }}
                       >
                         Run revenue ingest
@@ -962,25 +948,23 @@ export function IngestionCenter() {
                     </div>
                   )}
                 </div>
-                <div
-                  style={{
-                    padding: "18px 16px",
-                    borderRadius: 12,
-                    border: "1px solid var(--border)",
-                    background: "var(--surface-raised, #fff)",
-                    boxShadow: "0 2px 12px rgba(15, 23, 42, 0.06)",
-                  }}
-                >
-                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>How it works</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: "var(--text-subtle)", lineHeight: 1.65 }}>
-                    <li>Requires the <strong>revenue_forecast</strong> module on your account (same as Revenue trackers).</li>
-                    <li>Upload <strong>one or both</strong> workbooks; the server uses the same parser as{" "}
-                      <code style={{ fontSize: 10 }}>backend/scripts/ingest_revenue_trackers.py</code>.</li>
-                    <li>Data lands in <code style={{ fontSize: 10 }}>revenue_forecast_weekly</code> and{" "}
-                      <code style={{ fontSize: 10 }}>revenue_visibility_snapshot</code>.</li>
-                    <li>Runs appear in <strong>Recent ingestion activity</strong> below as Revenue trackers.</li>
+                <InfoCallout title="Revenue templates">
+                  <ul>
+                    <li>
+                      Requires the <strong>revenue_forecast</strong> module on your account (same as Revenue trackers).
+                    </li>
+                    <li>
+                      Upload <strong>one or both</strong> workbooks; the server uses the same parser as{" "}
+                      <code>backend/scripts/ingest_revenue_trackers.py</code>.
+                    </li>
+                    <li>
+                      Data lands in <code>revenue_forecast_weekly</code> and <code>revenue_visibility_snapshot</code>.
+                    </li>
+                    <li>
+                      Runs appear in <strong>Recent ingestion activity</strong> below as Revenue trackers.
+                    </li>
                   </ul>
-                </div>
+                </InfoCallout>
               </div>
             )}
             {revenueTrackers.job !== "idle" && (
@@ -1056,9 +1040,12 @@ export function IngestionCenter() {
 
       {/* ── PRO PATH TAB ──────────────────────────────────────────────────────── */}
       {tab === "Pro Path" && (
-        <PlatformSection title="Pro Path — Review & Confirm">
+        <PlatformSection title="Pro path">
+          <p className="ingestion-center__tabIntro">
+            For complex workbooks: inspect AI sheet picks, then run the full pipeline with explicit confirmation.
+          </p>
           {proInspect.job === "idle" && proRun.job === "idle" && (
-            <div className="platform-grid-2" style={{ gap: 16, alignItems: "stretch" }}>
+            <div className="ingestion-center__grid2">
               <DropZone
                 title="Pro upload"
                 subtitle={"Multi-sheet Excel\nReview AI sheet suggestions before committing"}
@@ -1067,22 +1054,13 @@ export function IngestionCenter() {
                 onFile={handleProInspect}
                 disabled={false}
               />
-              <div
-                style={{
-                  padding: "18px 16px",
-                  borderRadius: 12,
-                  border: "1px solid var(--border)",
-                  background: "var(--surface-raised, #fff)",
-                  boxShadow: "0 2px 12px rgba(15, 23, 42, 0.06)",
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>Pro path</div>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: "var(--text-subtle)", lineHeight: 1.65 }}>
+              <InfoCallout title="Two-step flow">
+                <ul>
                   <li>Best for complex multi-sheet workbooks.</li>
                   <li>Step 1: AI classifies sheets — you review selections.</li>
                   <li>Step 2: Confirm contract + data sheets, then the full pipeline runs.</li>
                 </ul>
-              </div>
+              </InfoCallout>
             </div>
           )}
 
@@ -1148,7 +1126,7 @@ export function IngestionCenter() {
       {/* ── SLA TAB ──────────────────────────────────────────────────────────── */}
       {tab === "SLA" && (
         <SpecializedIngestTab
-          title="SLA Performance Ingestion"
+          title="SLA basefile"
           subtitle="Upload the Raw SLA Basefile (Master SLA Performance sheet). Validates metric definitions, month labels, and client linkage."
           icon="📊"
           accent="var(--accent2)"
@@ -1166,7 +1144,7 @@ export function IngestionCenter() {
       {/* ── WFM TAB ──────────────────────────────────────────────────────────── */}
       {tab === "WFM" && (
         <SpecializedIngestTab
-          title="Workforce Management Ingestion"
+          title="WFM headcount"
           subtitle="Upload the WFM Projected Headcount & Revenue file. Maps HC benchmarks, resource gaps, WL distribution, and productivity targets."
           icon="👥"
           accent="var(--green)"
@@ -1184,7 +1162,7 @@ export function IngestionCenter() {
       {/* ── FINANCE TAB ──────────────────────────────────────────────────────── */}
       {tab === "Finance" && (
         <SpecializedIngestTab
-          title="Finance Ledger Ingestion"
+          title="Finance ledger"
           subtitle="Upload the Corporate Finance Data master file. All monetary values are expected in Lacs (₹ × 100,000) — normalized automatically."
           icon="₹"
           accent="var(--amber)"
@@ -1201,7 +1179,10 @@ export function IngestionCenter() {
 
       {/* ── RUN LOG TAB ──────────────────────────────────────────────────────── */}
       {tab === "Run Log" && (
-        <PlatformSection title="All Run Logs">
+        <PlatformSection title="Run log">
+          <p className="ingestion-center__tabIntro">
+            In-browser step logs from your current session. Switch tabs and run uploads to populate each block.
+          </p>
           {[
             { label: "Express", log: express.log },
             { label: "Revenue trackers", log: revenueTrackers.log },
@@ -1252,16 +1233,27 @@ function SpecializedIngestTab({
 }) {
   return (
     <PlatformSection title={title}>
-      {/* HINT */}
-      <div style={{ padding: "7px 12px", background: `${accent}0d`, border: `1px solid ${accent}30`, borderRadius: 7, fontSize: 10.5, color: accent, fontFamily: "'DM Mono',monospace", marginBottom: 14 }}>
+      <p className="ingestion-center__tabIntro">{subtitle}</p>
+      <div
+        style={{
+          padding: "8px 14px",
+          background: `color-mix(in srgb, ${accent} 10%, var(--surface-muted))`,
+          border: `1px solid color-mix(in srgb, ${accent} 28%, var(--border))`,
+          borderRadius: "var(--radius-base)",
+          fontSize: "11px",
+          color: accent,
+          fontFamily: "var(--mono)",
+          marginBottom: 16,
+        }}
+      >
         {hint}
       </div>
 
-      <div className="platform-grid-2" style={{ gap: 14 }}>
+      <div className="ingestion-center__grid2" style={{ gap: 14 }}>
         {/* LEFT — drop zone */}
         <DropZone
           title={title.split("Ingestion")[0].trim()}
-          subtitle={subtitle}
+          subtitle={hint}
           icon={icon}
           accent={accent}
           onFile={onFile}

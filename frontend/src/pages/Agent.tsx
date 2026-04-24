@@ -1,8 +1,9 @@
-import React, { useRef, useState } from "react";
-import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
+import React, { useEffect, useRef, useState } from "react";
+import { ArrowUp } from "lucide-react";
 import { clearAgentSession, sendAgentMessage, type ToolCall } from "@/lib/agent-api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import "@/styles/agent-page.css";
 
 type UiMessage = {
   role: "user" | "assistant";
@@ -13,7 +14,7 @@ type UiMessage = {
 
 function MarkdownMessage({ text }: { text: string }) {
   return (
-    <div className="agent-markdown" style={{ lineHeight: 1.4 }}>
+    <div className="agent-markdown" style={{ lineHeight: 1.45 }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -33,30 +34,24 @@ function MarkdownMessage({ text }: { text: string }) {
                   border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
                   borderRadius: 5,
                   padding: "1px 5px",
-                  fontFamily: "'DM Mono', monospace",
+                  fontFamily: "var(--mono)",
                   fontSize: 11.5,
                 }}
               >
                 {children}
               </code>
             ) : (
-              <code
-                style={{
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: 11.5,
-                }}
-              >
-                {children}
-              </code>
+              <code style={{ fontFamily: "var(--mono)", fontSize: 11.5 }}>{children}</code>
             ),
           pre: ({ children }) => (
             <pre
               style={{
-                margin: "5px 0",
+                margin: "8px 0",
                 padding: "10px 12px",
-                background: "rgba(8,12,18,0.65)",
+                background: "rgba(25, 24, 23, 0.85)",
+                color: "#f0ede8",
                 border: "1px solid var(--border2)",
-                borderRadius: 10,
+                borderRadius: "var(--radius-base)",
                 overflowX: "auto",
               }}
             >
@@ -64,12 +59,12 @@ function MarkdownMessage({ text }: { text: string }) {
             </pre>
           ),
           table: ({ children }) => (
-            <div style={{ overflowX: "auto", margin: "5px 0" }}>
+            <div style={{ overflowX: "auto", margin: "6px 0" }}>
               <table
                 style={{
                   borderCollapse: "collapse",
                   width: "100%",
-                  minWidth: 420,
+                  minWidth: 360,
                   fontSize: 12,
                 }}
               >
@@ -81,7 +76,7 @@ function MarkdownMessage({ text }: { text: string }) {
             <th
               style={{
                 border: "1px solid var(--border2)",
-                background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+                background: "var(--accent-soft)",
                 padding: "6px 8px",
                 textAlign: "left",
                 color: "var(--text)",
@@ -95,7 +90,7 @@ function MarkdownMessage({ text }: { text: string }) {
               style={{
                 border: "1px solid var(--border)",
                 padding: "6px 8px",
-                color: "var(--text2)",
+                color: "var(--text-muted)",
                 verticalAlign: "top",
               }}
             >
@@ -105,11 +100,11 @@ function MarkdownMessage({ text }: { text: string }) {
           blockquote: ({ children }) => (
             <blockquote
               style={{
-                margin: "4px 0",
-                padding: "5px 8px",
-                borderLeft: "3px solid rgba(79,143,255,0.5)",
-                background: "color-mix(in srgb, var(--accent) 8%, transparent)",
-                color: "var(--text2)",
+                margin: "6px 0",
+                padding: "6px 10px",
+                borderLeft: "3px solid var(--accent-mid)",
+                background: "var(--accent-soft)",
+                color: "var(--text-muted)",
               }}
             >
               {children}
@@ -133,7 +128,25 @@ export function Agent() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [threadAnim, setThreadAnim] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const chatMode = messages.length > 0;
+
+  useEffect(() => {
+    if (!chatMode) {
+      setThreadAnim(false);
+      return;
+    }
+    setThreadAnim(true);
+    const id = window.setTimeout(() => setThreadAnim(false), 420);
+    return () => window.clearTimeout(id);
+  }, [chatMode]);
+
+  useEffect(() => {
+    if (!chatMode) return;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading, chatMode]);
 
   const send = async (text: string) => {
     const payload = text.trim();
@@ -148,159 +161,110 @@ export function Agent() {
         ...prev,
         { role: "assistant", text: res.response, toolCalls: res.tool_calls },
       ]);
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 30);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string };
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: `Request failed: ${e?.response?.data?.detail || e?.message || "Unknown error"}`, error: true },
+        {
+          role: "assistant",
+          text: `Request failed: ${err?.response?.data?.detail || err?.message || "Unknown error"}`,
+          error: true,
+        },
       ]);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <PageHeader
-        title="Agent"
-        subtitle="Ask natural-language questions across clients, requisitions, SLA, WFM and finance"
-      />
+  const clear = async () => {
+    if (sessionId) await clearAgentSession(sessionId);
+    setSessionId(null);
+    setMessages([]);
+    setInput("");
+  };
 
-      <PlatformSection>
-        <div
-            style={{
-              height: "calc(100vh - 260px)",
-              minHeight: 520,
-              maxHeight: 760,
-              border: "1px solid var(--border)",
-              borderRadius: 12,
-              background: "linear-gradient(180deg, rgba(79,143,255,0.04), rgba(0,0,0,0.1))",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
+  const composer = (variant: "hero" | "dock") => (
+    <footer className={`agent-page__composer agent-page__composer--${variant}`}>
+      <div className="agent-page__composer-inner">
+        <div className="agent-page__composer-field">
+          <textarea
+            className="agent-page__textarea"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send(input);
+              }
             }}
+            placeholder="Ask about a client, metric, requisition, or org overview…"
+            rows={2}
+            aria-label="Message"
+          />
+          <button
+            type="button"
+            className="agent-page__send"
+            disabled={loading}
+            aria-label="Send message"
+            onClick={() => void send(input)}
           >
-            <div
-              style={{
-                padding: "10px 12px",
-                borderBottom: "1px solid var(--border)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div style={{ fontSize: 12, color: "var(--text2)" }}>
-                <span style={{ color: "var(--green)" }}>●</span> Live DB grounded responses
-              </div>
-              <button
-                className="platform-chip"
-                onClick={async () => {
-                  if (sessionId) await clearAgentSession(sessionId);
-                  setSessionId(null);
-                  setMessages([]);
-                }}
-                style={{ cursor: "pointer" }}
-              >
-                Clear chat
-              </button>
-            </div>
-
-            <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "grid", gap: 10 }}>
-              {messages.length === 0 ? (
-                <div style={{ color: "var(--text2)", fontSize: 13 }}>
-                  Start by asking a portfolio or client-specific question.
-                </div>
-              ) : null}
-
-              {messages.map((m, i) => (
-                <div
-                  key={`${m.role}-${i}`}
-                  style={{
-                    justifySelf: m.role === "user" ? "end" : "start",
-                    maxWidth: "86%",
-                    background:
-                      m.role === "user"
-                        ? "rgba(79,143,255,0.16)"
-                        : m.error
-                          ? "rgba(255,79,107,0.16)"
-                          : "rgba(255,255,255,0.03)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    padding: "10px 12px",
-                    whiteSpace: "pre-wrap",
-                    fontSize: 12.5,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {m.toolCalls?.length ? (
-                    <div style={{ marginBottom: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {m.toolCalls.map((t, idx) => (
-                        <span
-                          key={`${t.tool}-${idx}`}
-                          style={{
-                            border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
-                            background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-                            borderRadius: 20,
-                            padding: "2px 8px",
-                            fontFamily: "'DM Mono', monospace",
-                            fontSize: 10,
-                            color: "var(--accent)",
-                          }}
-                        >
-                          {t.tool}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {m.role === "assistant" ? <MarkdownMessage text={m.text} /> : m.text}
-                </div>
-              ))}
-              {loading ? (
-                <div style={{ color: "var(--text2)", fontSize: 12, fontFamily: "'DM Mono', monospace" }}>
-                  thinking...
-                </div>
-              ) : null}
-              <div ref={bottomRef} />
-            </div>
-
-            <div style={{ borderTop: "1px solid var(--border)", padding: 10 }}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void send(input);
-                    }
-                  }}
-                  placeholder="Ask about a client, metric, requisition, or org overview..."
-                  style={{
-                    width: "100%",
-                    minHeight: 48,
-                    maxHeight: 120,
-                    resize: "vertical",
-                    borderRadius: 10,
-                    border: "1px solid var(--border2)",
-                    background: "var(--bg2)",
-                    color: "var(--text)",
-                    padding: "10px 12px",
-                    fontSize: 13,
-                  }}
-                />
-                <button
-                  className="platform-chip active"
-                  onClick={() => void send(input)}
-                  style={{ cursor: "pointer", alignSelf: "end", height: 36 }}
-                  disabled={loading}
-                >
-                  Send
-                </button>
-              </div>
-            </div>
+            <ArrowUp strokeWidth={2.25} size={18} aria-hidden />
+          </button>
         </div>
-      </PlatformSection>
+      </div>
+    </footer>
+  );
+
+  return (
+    <div className="agent-page">
+      <button type="button" className="agent-page__clear" onClick={() => void clear()}>
+        Clear chat
+      </button>
+
+      {!chatMode ? (
+        <div className="agent-page__stage agent-page__stage--empty">
+          <div className="agent-page__emptyShell">
+            <div className="agent-page__hero">
+              <p className="agent-page__tagline">Let&apos;s go! Tagger!</p>
+              <p className="agent-page__hint">
+                Ask me anything across clients, requisitions, SLA, WFM and finance — I&apos;m grounded on your live data.
+              </p>
+            </div>
+            {composer("hero")}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="agent-page__stage agent-page__stage--chat">
+            <div className={`agent-page__thread${threadAnim ? " agent-page__thread--animate" : ""}`}>
+              <div className="agent-page__thread-inner">
+                {messages.map((m, i) => (
+                  <div
+                    key={`${m.role}-${i}`}
+                    className={`agent-page__bubble agent-page__bubble--${
+                      m.role === "user" ? "user" : m.error ? "error" : "assistant"
+                    }`}
+                  >
+                    {m.toolCalls?.length ? (
+                      <div className="agent-page__tools">
+                        {m.toolCalls.map((t, idx) => (
+                          <span key={`${t.tool}-${idx}`} className="agent-page__tool-chip">
+                            {t.tool}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {m.role === "assistant" ? <MarkdownMessage text={m.text} /> : m.text}
+                  </div>
+                ))}
+                {loading ? <div className="agent-page__thinking">Thinking…</div> : null}
+                <div ref={bottomRef} />
+              </div>
+            </div>
+          </div>
+          {composer("dock")}
+        </>
+      )}
     </div>
   );
 }
-
