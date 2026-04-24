@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { queries, type GlobalMonitor, type GlobalStats, type Project, type RequisitionKpis } from "@/lib/api";
+import { buildClientRiskRadarRows, worstDomainName, type ClientRiskRadarRow } from "@/lib/executive-risk-radar";
 import { financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import { slaStatsVm } from "@/lib/view-models/sla";
 import {
@@ -21,6 +22,8 @@ import {
   buildExecutiveSummary,
   aggregateFinanceFromRows,
   emptyFinanceAggregate,
+  isProjectEligibleForFinanceAccountList,
+  projectMatchesExecFilters,
   quarterlyPlanActualForFy,
   quarterlyCollectionForFy,
   quarterlyCmForFy,
@@ -40,25 +43,6 @@ function yoyDelta(curr: number, prev: number): { label: string; cls: string } {
   const p = ((curr - prev) / prev) * 100;
   const cls = p > 0.5 ? "exec-delta-chip--green" : p < -0.5 ? "exec-delta-chip--red" : "exec-delta-chip--amber";
   return { label: `${p >= 0 ? "▲" : "▼"} ${Math.abs(p).toFixed(1)}% YoY`, cls };
-}
-
-function realComposite(p: {
-  positions: number; closed: number; active: number; on_hold: number; revenue: number;
-}): number {
-  const total = Math.max(p.positions, 1);
-  const fill = (p.closed / total) * 100;
-  const activity = ((p.closed + p.active) / total) * 100;
-  const holdFree = Math.max(0, 100 - (p.on_hold / total) * 100);
-  const revScore = Math.min(100, ((p.revenue / total) / 200_000) * 100);
-  return Math.round(fill * 0.4 + activity * 0.3 + holdFree * 0.2 + revScore * 0.1);
-}
-
-function worstDomain(p: { positions: number; closed: number; on_hold: number; revenue: number }): string {
-  const total = Math.max(p.positions, 1);
-  if ((p.closed / total) * 100 < 40) return "Hiring";
-  if ((p.on_hold / total) * 100 > 25) return "SLA";
-  if (p.revenue / total < 80_000) return "Finance";
-  return "WFM";
 }
 
 /* ── Sub-components ── */
@@ -134,6 +118,11 @@ export const Dashboard = () => {
   const [wfmStats, setWfmStats] = useState<any>(null);
   const [reqKpis, setReqKpis] = useState<RequisitionKpis | null>(null);
   const [drilldown, setDrilldown] = useState<Array<{ name: string; revenue: number; count: number }>>([]);
+  /** Per-project rows for Risk Radar (SLA / WFM detail — not portfolio-wide stats). */
+  const [slaDataRows, setSlaDataRows] = useState<{ project_id: number; status: string }[]>([]);
+  const [wfmDataRows, setWfmDataRows] = useState<
+    { project_id: number; ideal_hc: number | null; actual_hc_total: number | null; reporting_date: string | null }[]
+  >([]);
   const [loadingCore, setLoadingCore] = useState(true);
   const [coreError, setCoreError] = useState<string | null>(null);
   const [drawerClient, setDrawerClient] = useState<string | null>(null);
@@ -161,6 +150,8 @@ export const Dashboard = () => {
           wfm,
           rk,
           dd,
+          slaD,
+          wfmD,
         ] = await Promise.allSettled([
           withTimeout(queries.globalStats(), T_STD, null),
           withTimeout(queries.globalMonitor(), T_HEAVY, null),
@@ -170,6 +161,8 @@ export const Dashboard = () => {
           withTimeout(queries.wfmStats(), T_STD, null),
           withTimeout(queries.requisitionKpis(), T_STD, null),
           withTimeout(queries.globalDrilldown("hiring_manager"), T_STD, []),
+          withTimeout(queries.slaData(), T_STD, []),
+          withTimeout(queries.wfmData(), T_STD, []),
         ]);
         if (!mounted) return;
 
@@ -185,6 +178,24 @@ export const Dashboard = () => {
         if (wfm.status === "fulfilled") setWfmStats(wfm.value);
         if (rk.status === "fulfilled") setReqKpis(rk.value as RequisitionKpis);
         if (dd.status === "fulfilled") setDrilldown((dd.value as any) || []);
+        if (slaD.status === "fulfilled" && Array.isArray(slaD.value)) {
+          setSlaDataRows(
+            (slaD.value as { project_id: number; status: string }[]).map((r) => ({
+              project_id: r.project_id,
+              status: String(r.status ?? ""),
+            })),
+          );
+        }
+        if (wfmD.status === "fulfilled" && Array.isArray(wfmD.value)) {
+          setWfmDataRows(
+            wfmD.value as {
+              project_id: number;
+              ideal_hc: number | null;
+              actual_hc_total: number | null;
+              reporting_date: string | null;
+            }[],
+          );
+        }
       } catch {
         if (mounted) setCoreError("Unable to load KPIs — check backend connectivity.");
       } finally {
@@ -283,19 +294,46 @@ export const Dashboard = () => {
   }, [displayFinance, priorFYTotalCr, priorFinance]);
 
   const projectStats = monitor?.project_stats || [];
+  const pipelineByProjectId = useMemo(() => {
+    const m = new Map<
+      number,
+      { positions: number; closed: number; active: number; on_hold: number; pipeline: number; revenue: number }
+    >();
+    for (const s of projectStats) {
+      m.set(s.id, {
+        positions: s.positions,
+        closed: s.closed,
+        active: s.active,
+        on_hold: s.on_hold,
+        pipeline: s.pipeline,
+        revenue: s.revenue,
+      });
+    }
+    return m;
+  }, [projectStats]);
+
+  const riskClients = useMemo(() => {
+    return projects
+      .filter(isProjectEligibleForFinanceAccountList)
+      .filter((p) => projectMatchesExecFilters(p, filters))
+      .map((p) => ({
+        id: p.id,
+        name: (p.engagement_name || p.account_name || p.filename || `Project ${p.id}`).trim() || `Project ${p.id}`,
+      }));
+  }, [projects, filters]);
+
   const riskRows = useMemo(
     () =>
-      projectStats
-        .map((p) => {
-          const score = realComposite(p);
-          const risk = score < 50 ? "HIGH" : score < 70 ? "MED" : "OK";
-          return { ...p, risk, score };
-        })
-        .sort((a, b) => a.score - b.score),
-    [projectStats],
+      buildClientRiskRadarRows(
+        riskClients,
+        kpiRows,
+        slaDataRows,
+        wfmDataRows,
+        pipelineByProjectId,
+      ),
+    [riskClients, kpiRows, slaDataRows, wfmDataRows, pipelineByProjectId],
   );
 
-  const interventions = useMemo(() => riskRows.filter((r) => r.risk !== "OK").slice(0, 5), [riskRows]);
   const selectedClient = riskRows.find((r) => r.name === drawerClient);
 
   /* ── Derived numbers ── */
@@ -319,22 +357,21 @@ export const Dashboard = () => {
   const collAtt = ct > 0 ? (coll / ct) * 100 : 0;
   const revAtt = displayFinance?.rev_attainment ?? 0;
 
-  /* ── Risk colour helpers ── */
+  /* ── Risk radar: domain level → pill (revenue+finance+fcst+SLA+WFM; reweighted on available data only) ── */
   function riskDotCls(color: "green" | "amber" | "red"): string {
     return `exec-risk-dot exec-risk-dot--${color}`;
   }
 
-  function clientRiskColors(p: { positions: number; closed: number; active: number; on_hold: number; revenue: number }) {
-    const total = Math.max(p.positions, 1);
-    const revPerReq = p.revenue / total;
-    const holdPct = (p.on_hold / total) * 100;
-    const actPct = ((p.closed + p.active) / total) * 100;
-    const fillPct = (p.closed / total) * 100;
-    const fin = revPerReq > 200_000 ? "green" : revPerReq > 80_000 ? "amber" : "red";
-    const sla = holdPct < 15 ? "green" : holdPct < 30 ? "amber" : "red";
-    const wfm = actPct >= 80 ? "green" : actPct >= 60 ? "amber" : "red";
-    const hiring = fillPct >= 70 ? "green" : fillPct >= 45 ? "amber" : "red";
-    return { fin, sla, wfm, hiring } as const;
+  function riskDotForLevel(level: "OK" | "MED" | "HIGH") {
+    const c = level === "OK" ? "green" : level === "MED" ? "amber" : "red";
+    return riskDotCls(c);
+  }
+
+  function riskRadarCell(level: "OK" | "MED" | "HIGH" | null) {
+    if (level == null) {
+      return <span style={{ color: "var(--text-subtle)", fontSize: 11, fontFamily: "var(--mono)" }}>—</span>;
+    }
+    return <span className={riskDotForLevel(level)}>{level}</span>;
   }
 
   const riskLabel = { green: "OK", amber: "MED", red: "HIGH" } as const;
@@ -642,9 +679,11 @@ export const Dashboard = () => {
       <div className="exec-monitor-section">
         <div className="exec-section-label">Portfolio monitor and pipeline</div>
         <p className="exec-monitor-section__intro">
-          Client risk columns (Finance, SLA, WFM, Hiring), intervention cards, and the hiring-manager table
-          use portfolio monitor and requisition heuristics. They are not scoped to the fiscal year or account
-          filters on the finance ledger above.
+          <strong>Risk radar</strong> uses only <strong>ledger + SLA + WFM</strong> (selected FY, same account filters
+          as the finance table). Domains: <strong>Revenue</strong> (budget vs actual), <strong>Finance</strong> (CM,
+          collections, unbilled/bad debt), <strong>Forecast</strong> (actual vs forecast, when forecast exists),{" "}
+          <strong>SLA</strong>, <strong>WFM</strong>. Missing data in a column does not drag the score; composite
+          reweights over available domains. Requisition rows are shown in the drawer only, not in the score.
         </p>
 
         <div className="exec-intel">
@@ -659,96 +698,59 @@ export const Dashboard = () => {
               <table className="exec-risk-table">
                 <thead>
                   <tr>
-                    <th style={{ width: "30%" }}>Client</th>
+                    <th style={{ width: "20%" }}>Client</th>
+                    <th>Revenue</th>
                     <th>Finance</th>
+                    <th>Fcst</th>
                     <th>SLA</th>
                     <th>WFM</th>
-                    <th>Hiring</th>
                     <th style={{ textAlign: "right" }}>Score</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {riskRows.slice(0, 8).map((p) => {
-                    const c = clientRiskColors(p);
-                    return (
-                      <tr key={p.id} onClick={() => setDrawerClient(p.name)}>
-                        <td>
-                          <div className="exec-risk-table__name" title={p.name}>{p.name}</div>
-                        </td>
-                        <td><span className={riskDotCls(c.fin)}>{riskLabel[c.fin]}</span></td>
-                        <td><span className={riskDotCls(c.sla)}>{riskLabel[c.sla]}</span></td>
-                        <td><span className={riskDotCls(c.wfm)}>{riskLabel[c.wfm]}</span></td>
-                        <td><span className={riskDotCls(c.hiring)}>{riskLabel[c.hiring]}</span></td>
-                        <td style={{ textAlign: "right" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
-                            <div style={{
-                              width: 48, height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden",
-                            }}>
+                  {riskRows.slice(0, 8).map((p) => (
+                    <tr key={p.id} onClick={() => setDrawerClient(p.name)}>
+                      <td>
+                        <div className="exec-risk-table__name" title={p.name}>{p.name}</div>
+                      </td>
+                      <td>{riskRadarCell(p.levels.revenue)}</td>
+                      <td>{riskRadarCell(p.levels.finance)}</td>
+                      <td>{riskRadarCell(p.levels.forecast)}</td>
+                      <td>{riskRadarCell(p.levels.sla)}</td>
+                      <td>{riskRadarCell(p.levels.wfm)}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                          {p.composite == null ? (
+                            <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-subtle)" }}>—</span>
+                          ) : (
+                            <>
                               <div style={{
-                                width: `${Math.min(100, p.score)}%`,
-                                height: "100%",
-                                background: p.score >= 70 ? "var(--green)" : p.score >= 50 ? "var(--amber)" : "var(--red)",
-                                borderRadius: 100,
-                              }} />
-                            </div>
-                            <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-muted)", minWidth: 24 }}>
-                              {p.score}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                                width: 48, height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden",
+                              }}>
+                                <div style={{
+                                  width: `${Math.min(100, p.composite)}%`,
+                                  height: "100%",
+                                  background: p.composite >= 70 ? "var(--green)" : p.composite >= 50 ? "var(--amber)" : "var(--red)",
+                                  borderRadius: 100,
+                                }} />
+                              </div>
+                              <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-muted)", minWidth: 24 }}>
+                                {p.composite}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {riskRows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="exec-empty">No client data yet</td>
+                      <td colSpan={7} className="exec-empty">No client data yet</td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
-          </SectionCard>
-
-          <SectionCard tag="Action needed" title="Accounts requiring attention">
-            {interventions.length === 0 ? (
-              <div className="exec-empty" style={{ padding: 24 }}>
-                ✓ All accounts within normal thresholds
-              </div>
-            ) : (
-              <div className="exec-interventions">
-                {interventions.map((p) => {
-                  const domain = worstDomain(p);
-                  return (
-                    <div
-                      key={p.id}
-                      className="exec-intervention-card"
-                      onClick={() => setDrawerClient(p.name)}
-                    >
-                      <div className="exec-intervention-card__top">
-                        <div className="exec-intervention-card__name">{p.name}</div>
-                        <span className={`exec-intervention-card__domain exec-intervention-card__domain--${domain}`}>
-                          {domain}
-                        </span>
-                      </div>
-                      <div className="exec-intervention-card__score-row">
-                        <span className="exec-intervention-card__score-label">
-                          {p.risk === "HIGH" ? "High risk" : "Moderate"}
-                        </span>
-                        <div className="exec-intervention-card__score-track">
-                          <div
-                            className={`exec-intervention-card__score-fill exec-intervention-card__score-fill--${p.risk === "HIGH" ? "high" : "med"}`}
-                            style={{ width: `${Math.min(100, p.score)}%` }}
-                          />
-                        </div>
-                        <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--text-subtle)", minWidth: 24 }}>
-                          {p.score}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </SectionCard>
         </div>
 
@@ -784,13 +786,20 @@ export const Dashboard = () => {
               <div className="kv-row"><span className="kv-key">Client</span><span className="kv-val">{selectedClient.name}</span></div>
               <div className="kv-row"><span className="kv-key">Positions</span><span className="kv-val">{selectedClient.positions}</span></div>
               <div className="kv-row"><span className="kv-key">Revenue</span><span className="kv-val">{formatCurrency(selectedClient.revenue)}</span></div>
-              <div className="kv-row"><span className="kv-key">Composite score</span><span className="kv-val">{selectedClient.score} / 100</span></div>
+              <div className="kv-row"><span className="kv-key">Composite score</span><span className="kv-val">{selectedClient.composite == null ? "—" : `${selectedClient.composite} / 100`}</span></div>
               <div className="kv-row"><span className="kv-key">Risk level</span><span className="kv-val">
+                {selectedClient.risk == null ? "—" : (
                 <span className={`exec-risk-dot exec-risk-dot--${selectedClient.risk === "OK" ? "green" : selectedClient.risk === "MED" ? "amber" : "red"}`}>
                   {selectedClient.risk}
                 </span>
+                )}
               </span></div>
-              <div className="kv-row"><span className="kv-key">Weakest domain</span><span className="kv-val">{worstDomain(selectedClient)}</span></div>
+              <div className="kv-row"><span className="kv-key">Weakest domain</span><span className="kv-val">{worstDomainName(selectedClient)}</span></div>
+              <div className="kv-row"><span className="kv-key">Domain scores (0–100)</span><span className="kv-val" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                Rev {selectedClient.scores.revenue ?? "—"} · Fin {selectedClient.scores.finance ?? "—"} · Fcst {selectedClient.scores.forecast ?? "—"}
+                <br />
+                SLA {selectedClient.scores.sla ?? "—"} · WFM {selectedClient.scores.wfm ?? "—"}
+              </span></div>
             </div>
             <div className="drawer-section">
               <div className="drawer-section-title">Hiring pipeline</div>
@@ -809,37 +818,37 @@ export const Dashboard = () => {
             <thead>
               <tr>
                 <th>Client</th>
+                <th>Revenue</th>
                 <th>Finance</th>
+                <th>Fcst</th>
                 <th>SLA</th>
                 <th>WFM</th>
-                <th>Hiring</th>
                 <th style={{ textAlign: "right" }}>Score</th>
               </tr>
             </thead>
             <tbody>
-              {riskRows.map((p) => {
-                const c = clientRiskColors(p);
-                return (
-                  <tr
-                    key={p.id}
-                    onClick={() => { setHeatmapFullOpen(false); setDrawerClient(p.name); }}
-                  >
-                    <td><div className="exec-risk-table__name" title={p.name}>{p.name}</div></td>
-                    <td><span className={riskDotCls(c.fin)}>{riskLabel[c.fin]}</span></td>
-                    <td><span className={riskDotCls(c.sla)}>{riskLabel[c.sla]}</span></td>
-                    <td><span className={riskDotCls(c.wfm)}>{riskLabel[c.wfm]}</span></td>
-                    <td><span className={riskDotCls(c.hiring)}>{riskLabel[c.hiring]}</span></td>
-                    <td style={{ textAlign: "right" }}>
-                      <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{p.score}</span>
-                    </td>
-                  </tr>
-                );
-              })}
+              {riskRows.map((p) => (
+                <tr
+                  key={p.id}
+                  onClick={() => { setHeatmapFullOpen(false); setDrawerClient(p.name); }}
+                >
+                  <td><div className="exec-risk-table__name" title={p.name}>{p.name}</div></td>
+                  <td>{riskRadarCell(p.levels.revenue)}</td>
+                  <td>{riskRadarCell(p.levels.finance)}</td>
+                  <td>{riskRadarCell(p.levels.forecast)}</td>
+                  <td>{riskRadarCell(p.levels.sla)}</td>
+                  <td>{riskRadarCell(p.levels.wfm)}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{p.composite ?? "—"}</span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
         <p className="exec-heatmap-footnote">
-          Same scope as the Portfolio monitor and pipeline section at the bottom of this page.
+          Only ledger (FY + filters), forecast column, revenue vs budget, SLA, and WFM. Missing data is excluded from
+          the composite, not treated as a failing score.
         </p>
       </PlatformDrawer>
     </div>

@@ -34,7 +34,7 @@ const ALL_VERTICAL_KEYS = VERTICAL_MODULES.map((m) => m.key);
 
 const VERTICAL_MODULES_CLIENT_CREATE = VERTICAL_MODULES.filter((m) => m.key !== "admin_users");
 
-const USER_CREATE_TABS = ["Credentials", "Role & reporting", "Module access", "Review"] as const;
+const USER_CREATE_TABS = ["Credentials", "Role & reporting", "Module access", "Projects"] as const;
 type CreateTabIdx = 0 | 1 | 2 | 3;
 
 const EDIT_ACCESS_TABS = ["Credentials", "Role & reporting", "Module access", "Projects"] as const;
@@ -105,13 +105,6 @@ function roleSelectOptions(currentStoredRole: string): { value: string; label: s
     }
   }
   return out;
-}
-
-function verticalSummary(access: string[] | null | undefined): string {
-  if (access == null) return "— (default: all)";
-  if (access.length === 0) return "— (none)";
-  if (access.length >= ALL_VERTICAL_KEYS.length) return "All modules";
-  return access.slice(0, 4).join(", ") + (access.length > 4 ? ` +${access.length - 4}` : "");
 }
 
 function projInitials(name: string): string {
@@ -397,6 +390,8 @@ export function AdminUsers() {
   const [cManagerUserId, setCManagerUserId] = useState("");
   const [cVerticals, setCVerticals] = useState<Set<string>>(() => new Set(ALL_VERTICAL_KEYS));
   const [cClientModules, setCClientModules] = useState<string[]>(["portfolio", "sla"]);
+  /** New-user wizard only (edit access uses `selectedProjects`). */
+  const [cProjectIds, setCProjectIds] = useState<number[]>([]);
 
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
 
@@ -460,6 +455,7 @@ export function AdminUsers() {
     setCManagerUserId("");
     setCVerticals(new Set(ALL_VERTICAL_KEYS));
     setCClientModules(["portfolio", "sla"]);
+    setCProjectIds([]);
     setLoadError(null);
   }
 
@@ -474,6 +470,11 @@ export function AdminUsers() {
     try {
       if (cRole === "client_user" && cClientModules.length === 0) {
         setLoadError("Client portal users need at least one dashboard module.");
+        setBusy(false);
+        return;
+      }
+      if (cRole === "client_user" && cProjectIds.length === 0) {
+        setLoadError("Client portal users need at least one project — use the Projects step.");
         setBusy(false);
         return;
       }
@@ -501,7 +502,10 @@ export function AdminUsers() {
           body.vertical_access = [...cVerticals].sort();
         }
       }
-      await adminApi.createUser(body);
+      const created = (await adminApi.createUser(body)) as { id: number };
+      if (cProjectIds.length > 0) {
+        await adminApi.setUserProjects(created.id, cProjectIds);
+      }
       setCreateSheetOpen(false);
       resetCreateSheet();
       await refresh();
@@ -909,7 +913,7 @@ export function AdminUsers() {
               {/* Tab 2 — Module access */}
               <div className={cn("ncp-panel", createTab === 2 && "ncp-panel-active")}>
                 {cRole === "client_user" ? (
-                  ncpSection("📊", "ncp-blue", "Client dashboards", "Read-only sections this portal login may open (assign projects after save)",
+                  ncpSection("📊", "ncp-blue", "Client dashboards", "Read-only sections this portal login may open (assign projects in the Projects step).",
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "4px 0" }}>
                       {VERTICAL_MODULES_CLIENT_CREATE.map((m) => (
                         <label
@@ -990,29 +994,14 @@ export function AdminUsers() {
                 )}
               </div>
 
-              {/* Tab 3 — Review */}
+              {/* Tab 3 — Project assignments (same as Edit access) */}
               <div className={cn("ncp-panel", createTab === 3 && "ncp-panel-active")}>
-                {ncpSection("✓", "ncp-accent", "Review", "Confirm before creating the account",
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "var(--ncp-text-secondary)", padding: "4px 0" }}>
-                    <div><strong style={{ color: "var(--ncp-text-primary)" }}>Email:</strong> {cEmail.trim() || "—"}</div>
-                    <div><strong style={{ color: "var(--ncp-text-primary)" }}>Role:</strong> {ROLE_OPTIONS_CREATE.find((r) => r.value === cRole)?.label ?? cRole}</div>
-                    <div>
-                      <strong style={{ color: "var(--ncp-text-primary)" }}>Reports to:</strong>{" "}
-                      {cManagerUserId
-                        ? (platformUsers.find((u) => String(u.id) === cManagerUserId)?.email ?? `#${cManagerUserId}`)
-                        : "— None —"}
-                    </div>
-                    <div>
-                      <strong style={{ color: "var(--ncp-text-primary)" }}>Modules:</strong>{" "}
-                      {cRole === "client_user"
-                        ? verticalSummary(cClientModules)
-                        : cVerticals.size >= ALL_VERTICAL_KEYS.length
-                          ? "All modules (default)"
-                          : cVerticals.size === 0
-                            ? "— (none — may block gated routes)"
-                            : verticalSummary([...cVerticals])}
-                    </div>
-                  </div>,
+                {ncpSection("📁", "ncp-green", "Project assignments", "Scoped roles (operations, project head, recruiter) only see data for checked projects. Executive with no assignments is org-wide; with assignments, scope matches the list.",
+                  <MultiProjectPicker
+                    value={cProjectIds}
+                    onChange={setCProjectIds}
+                    projects={projects}
+                  />,
                 )}
               </div>
 

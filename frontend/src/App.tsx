@@ -29,7 +29,7 @@ import {
   PieChart,
   Receipt,
   ScrollText,
-  Settings,
+  LogOut,
   ShieldCheck,
   TrendingDown,
   TrendingUp,
@@ -57,11 +57,15 @@ import {
 import { UserAvatarImg } from "@/components/UserAvatarImg";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ClientsHub } from "./pages/ClientsHub";
 import { ClientDetail } from "./pages/ClientDetail";
 import { ClientContracts } from "./pages/ClientContracts";
@@ -336,6 +340,7 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
       return false;
     }
   });
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -426,7 +431,14 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
   const displayName = user ? displayNameFromUser(user) : "";
   const initials = user ? initialsFromUser(user) : "?";
 
+  const confirmLogout = () => {
+    logout();
+    setLogoutConfirmOpen(false);
+    navigate("/login", { replace: true });
+  };
+
   return (
+    <>
     <div className="platform-app">
       <div className="platform-layout">
         <aside className={cn("platform-sidebar", sidebarCollapsed && "platform-sidebar--collapsed")}>
@@ -434,13 +446,6 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
             <div className="platform-sidebar-head-row">
               <div className="platform-logo-inner">
                 <img src={taggdLogo} alt="Taggd" className="platform-logo-img" />
-                <button
-                  type="button"
-                  className="platform-logo-tagline platform-logo-tagline--action"
-                  onClick={onOpenMissionVision}
-                >
-                  Mission &amp; Vision
-                </button>
               </div>
               <button
                 type="button"
@@ -572,62 +577,28 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
                   <div className="platform-sidebar-footer__name">{displayName || email || "—"}</div>
                   <div className="platform-sidebar-footer__role">{effectiveRole || user?.role || ""}</div>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
-                      title="Account"
-                      aria-label="Open account menu"
-                    >
-                      <Settings className="size-4" strokeWidth={2} aria-hidden />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" side="top" sideOffset={8} className="min-w-[10rem]">
-                    <DropdownMenuItem className="text-xs font-medium" onSelect={() => navigate("/profile")}>
-                      Profile
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="text-xs font-medium text-destructive focus:text-destructive"
-                      onSelect={() => {
-                        logout();
-                        navigate("/login", { replace: true });
-                      }}
-                    >
-                      Log out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  title="Log out"
+                  aria-label="Log out"
+                  onClick={() => setLogoutConfirmOpen(true)}
+                >
+                  <LogOut className="size-4" strokeWidth={2} aria-hidden />
+                </Button>
               </>
             ) : (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="platform-sidebar-footer-collapsed-menu-trigger"
-                    title="Account"
-                    aria-label="Open account menu"
-                  >
-                    <Settings size={18} strokeWidth={2} aria-hidden />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" side="right" sideOffset={8} className="min-w-[10rem]">
-                  <DropdownMenuItem className="text-xs font-medium" onSelect={() => navigate("/profile")}>
-                    Profile
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-xs font-medium text-destructive focus:text-destructive"
-                    onSelect={() => {
-                      logout();
-                      navigate("/login", { replace: true });
-                    }}
-                  >
-                    Log out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <button
+                type="button"
+                className="platform-sidebar-footer-collapsed-menu-trigger"
+                title="Log out"
+                aria-label="Log out"
+                onClick={() => setLogoutConfirmOpen(true)}
+              >
+                <LogOut size={18} strokeWidth={2} aria-hidden />
+              </button>
             )}
           </div>
         </aside>
@@ -635,13 +606,20 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
         <main className="platform-main">
           <header className="platform-topbar">
             <div style={{ flex: 1 }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--surface-page)", border: "1px solid var(--border)", borderRadius: "var(--radius-base)", padding: "7px 12px", width: 220, transition: "border-color var(--t-base), box-shadow var(--t-base)" }}>
-              <span style={{ color: "var(--text-subtle)", fontSize: 13 }}>⌕</span>
-              <input
-                className="platform-search"
-                placeholder="Search…"
-                style={{ border: "none", background: "transparent", padding: 0, fontSize: 13, flex: 1, minWidth: 0 }}
-              />
+            <div className="platform-topbar-end">
+              <div className="platform-topbar-search-wrap">
+                <span style={{ color: "var(--text-subtle)", fontSize: 13 }} aria-hidden>
+                  ⌕
+                </span>
+                <input
+                  className="platform-search"
+                  placeholder="Search…"
+                  style={{ border: "none", background: "transparent", padding: 0, fontSize: 13, flex: 1, minWidth: 0 }}
+                />
+              </div>
+              <button type="button" className="platform-topbar-mission-btn" onClick={onOpenMissionVision}>
+                Mission &amp; Vision
+              </button>
             </div>
           </header>
 
@@ -680,6 +658,27 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
         </main>
       </div>
     </div>
+
+    <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+      <AlertDialogContent size="default" className="border-border sm:max-w-md">
+        <AlertDialogHeader className="text-left sm:text-left">
+          <AlertDialogTitle>Log out?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to log out? You will need to sign in again to access the platform.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="border-border">
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-[var(--accent)] text-white hover:opacity-90"
+            onClick={confirmLogout}
+          >
+            Log out
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 

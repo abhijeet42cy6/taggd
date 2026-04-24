@@ -550,6 +550,16 @@ export function isPlatformAdminRole(role: string | undefined): boolean {
   return r === "admin" || r === "platform_admin";
 }
 
+/**
+ * Code of Work — "By the Numbers" (revenue / headcount-style targets).
+ * Visible only when acting as Admin or Executive (CEO); hidden for project, recruiter, client, operations, etc.
+ */
+export function canSeeCodeOfWorkByTheNumbers(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  const er = (user.effectiveRole ?? user.role ?? "").trim().toLowerCase();
+  return er === "executive" || isPlatformAdminRole(er);
+}
+
 export function isReadOnlyClient(user: AuthUser | null | undefined): boolean {
   if (!user) return false;
   const er = (user.effectiveRole ?? user.role).toLowerCase();

@@ -150,6 +150,19 @@ export function filterFinanceRows(
   });
 }
 
+/** Static project / account filters (region, vertical, account search, …) for exec views — no month row logic. */
+export function projectMatchesExecFilters(p: Project, f: DashboardFilters): boolean {
+  const vertical = p.vertical;
+  const account = (p.engagement_name || p.account_name || "").trim();
+  if (!matches(f.region, p.region)) return false;
+  if (!matchesContains(f.subRegion, p.sub_region ?? p.category)) return false;
+  if (!matches(f.regionHead, p.practice_head)) return false;
+  if (!matches(f.practiceHead, p.be_spoc)) return false;
+  if (!matches(f.vertical, vertical)) return false;
+  if (!matchesContains(f.account, account)) return false;
+  return true;
+}
+
 export type YoYRevPoint = {
   month: string;
   budget: number;

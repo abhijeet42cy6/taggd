@@ -564,9 +564,13 @@
   flex-shrink: 0;
 }
 .exec-intervention-card__domain--Hiring  { background: var(--accent-soft);  color: var(--accent); }
+.exec-intervention-card__domain--Revenue  { background: rgba(16, 185, 129, 0.12); color: #047857; }
 .exec-intervention-card__domain--SLA     { background: var(--blue-soft);    color: var(--blue); }
 .exec-intervention-card__domain--Finance { background: var(--amber-soft);   color: #92600a; }
+.exec-intervention-card__domain--Forecast { background: var(--violet-soft, rgba(139, 92, 246, 0.12)); color: #5b21b6; }
+.exec-intervention-card__domain--Contract { background: rgba(59, 130, 246, 0.1); color: #1d4ed8; }
 .exec-intervention-card__domain--WFM     { background: rgba(20,184,166,.1); color: #0d7a6d; }
+.exec-intervention-card__domain--generic { background: var(--surface-2);   color: var(--text-subtle); }
 
 .exec-intervention-card__score-row {
   display: flex;
