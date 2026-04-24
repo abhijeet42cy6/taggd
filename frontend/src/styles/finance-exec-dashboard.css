@@ -195,18 +195,10 @@
   width: 18px;
   height: 18px;
 }
-.finance-exec-scope .fin-dash-topbar .tb-title {
+/* Title uses global .platform-page-title (same as PageHeader / Revenue governance) */
+.finance-exec-scope .fin-dash-topbar .tb-title.platform-page-title {
   flex: 1;
   min-width: 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text, var(--fin-text));
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-.finance-exec-scope .fin-dash-topbar .tb-title span {
-  color: var(--accent, var(--fin-accent));
-  font-weight: 700;
 }
 
 /* FY toggle — pill switcher */

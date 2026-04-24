@@ -557,31 +557,20 @@ export function SLAPerformance() {
   const slaGfMonthOpts = useMemo(() => [...allMonths], [allMonths]);
 
   // ─── Derived: KPI numbers (from filtered metric rows) ────────────────────────
-  const metPct = useMemo(() => {
+  /** Met % and Not met % use denominator (met + not met) only — Not reported rows excluded. */
+  const slaKpiMetNotMet = useMemo(() => {
     let met = 0;
-    let br = 0;
+    let breached = 0;
     for (const r of rows) {
       const b = statusBucket(r.status);
       if (b === "met") met++;
-      else if (b === "breached") br++;
+      else if (b === "breached") breached++;
     }
-    return met + br > 0 ? Math.round((met / (met + br)) * 1000) / 10 : 0;
+    const withOutcome = met + breached;
+    const metPct = withOutcome > 0 ? Math.round((met / withOutcome) * 1000) / 10 : 0;
+    const notMetPct = withOutcome > 0 ? Math.round((breached / withOutcome) * 1000) / 10 : 0;
+    return { met, breached, withOutcome, metPct, notMetPct };
   }, [rows]);
-  const notMetPct = useMemo(() => {
-    let met = 0;
-    let br = 0;
-    for (const r of rows) {
-      const b = statusBucket(r.status);
-      if (b === "met") met++;
-      else if (b === "breached") br++;
-    }
-    return met + br > 0 ? Math.round((br / (met + br)) * 1000) / 10 : 0;
-  }, [rows]);
-  const metRowCount = useMemo(() => rows.filter((r: any) => statusBucket(r.status) === "met").length, [rows]);
-  const breachedRowCount = useMemo(
-    () => rows.filter((r: any) => statusBucket(r.status) === "breached").length,
-    [rows],
-  );
   const notReportedCount = useMemo(
     () => rows.filter((r: any) => statusBucket(r.status) === "not_reported").length,
     [rows],
@@ -1460,17 +1449,31 @@ export function SLAPerformance() {
                       <div className="sla-metric-card">
                         <div className="sla-metric-card-hd">Metrics met</div>
                         <div className="sla-metric-card-body">
-                          <div className="sla-metric-val">{rows.length > 0 ? formatPercent(metPct) : "—"}</div>
+                          <div className="sla-metric-val">
+                            {rows.length > 0 ? formatPercent(slaKpiMetNotMet.metPct) : "—"}
+                          </div>
                           <div className="sla-metric-sub">
-                            {rows.length > 0 ? `${metRowCount} of ${rows.length} metrics` : "Upload SLA data"}
+                            {rows.length > 0
+                              ? slaKpiMetNotMet.withOutcome > 0
+                                ? `${slaKpiMetNotMet.met} of ${slaKpiMetNotMet.withOutcome} with outcome (excl. not reported)`
+                                : "No Met / Not met data"
+                              : "Upload SLA data"}
                           </div>
                         </div>
                       </div>
                       <div className="sla-metric-card">
                         <div className="sla-metric-card-hd">Not met</div>
                         <div className="sla-metric-card-body">
-                          <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notMetPct) : "—"}</div>
-                          <div className="sla-metric-sub">{rows.length > 0 ? `${breachedRowCount} metrics` : "—"}</div>
+                          <div className="sla-metric-val">
+                            {rows.length > 0 ? formatPercent(slaKpiMetNotMet.notMetPct) : "—"}
+                          </div>
+                          <div className="sla-metric-sub">
+                            {rows.length > 0
+                              ? slaKpiMetNotMet.withOutcome > 0
+                                ? `${slaKpiMetNotMet.breached} of ${slaKpiMetNotMet.withOutcome} with outcome (excl. not reported)`
+                                : "—"
+                              : "—"}
+                          </div>
                         </div>
                       </div>
                       <div className="sla-metric-card">

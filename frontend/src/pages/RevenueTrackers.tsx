@@ -41,15 +41,21 @@ import { WeeklyPackNcpSheet } from "@/components/platform/WeeklyPackNcpSheet";
 
 const LAKHS = 100_000;
 
-/** Pick up to n distinct project_ids without bias (Fisher–Yates partial shuffle). */
-function pickRandomProjectIds(projectIds: number[], n: number): number[] {
-  if (n <= 0 || projectIds.length === 0) return [];
-  const copy = [...projectIds];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+/** Top N projects by chart scale: max(|MMF|, |gap to MMF|) per project in the as-of slice. */
+function pickTopMmfProjectIds(rows: RevenueVisibilitySnapshotRow[], n: number): number[] {
+  if (n <= 0 || rows.length === 0) return [];
+  const byId = new Map<number, { id: number; score: number }>();
+  for (const r of rows) {
+    const mmf = Math.abs(r.mmf_inr || 0);
+    const gap = Math.abs(r.gap_to_mmf_inr || 0);
+    const score = Math.max(mmf, gap);
+    const cur = byId.get(r.project_id);
+    if (!cur || score > cur.score) {
+      byId.set(r.project_id, { id: r.project_id, score });
+    }
   }
-  return copy.slice(0, Math.min(n, copy.length));
+  const list = [...byId.values()].sort((a, b) => b.score - a.score || a.id - b.id);
+  return list.slice(0, Math.min(n, list.length)).map((x) => x.id);
 }
 
 /** Top N projects by joiners + yet-to-join (pipeline priority) in the as-of slice. */
@@ -297,7 +303,7 @@ export function RevenueTrackers() {
   const [editForecastRow, setEditForecastRow] = useState<RevenueForecastWeeklyRow | null>(null);
   const [editVisibilityRow, setEditVisibilityRow] = useState<RevenueVisibilitySnapshotRow | null>(null);
 
-  /** Subset of project_ids for the "MMF vs gap" chart (defaults to 3 random per as-of slice). */
+  /** Subset of project_ids for the "MMF vs gap" chart (defaults to top 5 by MMF/gap scale per as-of slice). */
   const [mmfChartProjectIds, setMmfChartProjectIds] = useState<number[]>([]);
   /** Pipeline mix chart: defaults to 5 highest (joiners + YTJ) per as-of slice. */
   const [pipelineChartProjectIds, setPipelineChartProjectIds] = useState<number[]>([]);
@@ -468,7 +474,7 @@ export function RevenueTrackers() {
     setMmfChartProjectIds((prev) => {
       const fromPrev = (prev && prev.length ? prev : []).filter((id) => inSlice.has(id));
       if (fromPrev.length > 0) return fromPrev;
-      return pickRandomProjectIds(all, Math.min(3, all.length));
+      return pickTopMmfProjectIds(visibilityForCut, Math.min(5, all.length));
     });
   }, [visibilityForCut]);
 
@@ -1178,7 +1184,9 @@ export function RevenueTrackers() {
               <div className="rt-section-hd" style={{ marginTop: 0, alignItems: "flex-start", gap: 10 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                   <div className="rt-section-title">MMF vs gap</div>
-                  <div className="rt-section-sub">₹ Lakhs by project — use the list to add or remove projects</div>
+                  <div className="rt-section-sub">
+                    ₹ Lakhs by project — default: top 5 by MMF vs gap scale; use the picker to change
+                  </div>
                 </div>
                 {visibilityProjectOptions.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4, flex: "0 1 220px" }}>
@@ -1192,10 +1200,12 @@ export function RevenueTrackers() {
                       options={visibilityProjectOptions}
                       selectedIds={mmfChartProjectIds}
                       onChange={setMmfChartProjectIds}
-                      resampleWhenEmpty={() => {
-                        const all = visibilityProjectOptions.map((o) => o.id);
-                        return pickRandomProjectIds(all, Math.min(3, all.length));
-                      }}
+                      resampleWhenEmpty={() =>
+                        pickTopMmfProjectIds(
+                          visibilityForCut,
+                          Math.min(5, new Set(visibilityForCut.map((r) => r.project_id)).size),
+                        )
+                      }
                       label="MMF vs gap — projects"
                       triggerPlaceholder="Add projects to chart"
                       ariaLabel="Projects shown in MMF vs gap chart"
@@ -1355,7 +1365,7 @@ export function RevenueTrackers() {
               Add / update
             </Button>
           </div>
-          <div className="platform-table-wrap platform-table-wrap--rt-summary">
+          <div className="platform-table-wrap">
             <table className="platform-table">
               <thead>
                 <tr>

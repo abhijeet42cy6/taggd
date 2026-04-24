@@ -68,12 +68,12 @@ mkdir -p ~/${REMOTE_DIR}
 tar -xzf ~/deploy.tar.gz -C ~/${REMOTE_DIR}
 if [ -f ~/tgddata.env ]; then mv -f ~/tgddata.env ~/${REMOTE_DIR}/.env; fi
 cd ~/${REMOTE_DIR}
-if command -v docker-compose >/dev/null 2>&1; then
-  docker-compose up -d --build
-elif docker compose version >/dev/null 2>&1; then
+if docker compose version >/dev/null 2>&1; then
   docker compose up -d --build
+elif command -v docker-compose >/dev/null 2>&1; then
+  docker-compose up -d --build
 else
-  echo 'ERROR: Neither docker-compose nor docker compose found on VM.' >&2
+  echo 'ERROR: Install Docker on the VM first: GCP_INSTANCE=... ./scripts/bootstrap-gcp-docker.sh then re-login (or reboot).' >&2
   exit 1
 fi
 echo 'Done.'

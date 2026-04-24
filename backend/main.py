@@ -3785,7 +3785,7 @@ def get_revenue_leakage(
     """Revenue leakage analytics for cancelled requisitions in a given month.
 
     Data source mapping (all from records table + additional_attributes JSON):
-      - Cancelled population : status == 'Canceled'
+      - Cancelled population : status in ('Canceled', 'Cancelled') — both spellings (ingest / LLM often use 'Cancelled')
       - Creation date        : records.creation_date
       - Intake / assigned    : additional_attributes['Intake Meeting Date']
       - Approved date        : additional_attributes['Approved Date']  (proxy for first CV / pipeline entry)
@@ -3804,8 +3804,8 @@ def get_revenue_leakage(
         q = q.filter(c)
     q = apply_recruiter_record_scope(q, user, db)
 
-    # ── filter: Canceled (actual value in status field) ────────────────────
-    q = q.filter(Record.status == "Canceled")
+    # ── filter: cancelled requisitions (status spellings vary by sheet / logic generator) ──
+    q = q.filter(or_(Record.status == "Canceled", Record.status == "Cancelled"))
 
     # ── filter: project ────────────────────────────────────────────────────
     if project_id:

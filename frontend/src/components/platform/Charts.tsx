@@ -1097,3 +1097,113 @@ export function RegionalRevenueBarChart({ data }: { data: RegionBarDatum[] }) {
     </ResponsiveContainer>
   );
 }
+
+/** Labels above grouped governance bars (dark ink on light fills). */
+const GOV_GROUPED_LABEL_STYLE: React.CSSProperties = {
+  fill: "#1e293b",
+  fontSize: 8,
+  fontWeight: 600,
+  fontFamily: "'DM Mono', monospace",
+};
+
+function formatGovGroupedCrLabel(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n >= 10 ? `${n.toFixed(0)}` : n >= 1 ? `${n.toFixed(1)}` : `${n.toFixed(2)}`;
+}
+
+export type GovernanceGroupedBarSeries = { dataKey: string; name: string; fill: string };
+
+/** Grouped bars: one X category per row (`name`), multiple `<Bar />` series (e.g. weeks). Values are ₹ Cr. */
+export function GovernanceForecastGroupedBarChart({
+  data,
+  series,
+  height = 320,
+}: {
+  data: Array<Record<string, string | number | undefined>>;
+  series: GovernanceGroupedBarSeries[];
+  height?: number;
+}) {
+  if (!data.length || !series.length) {
+    return (
+      <div
+        style={{
+          height,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: COLORS.text3,
+          fontSize: 11,
+          textAlign: "center",
+          padding: "0 16px",
+        }}
+      >
+        Select at least one project and week with tracker forecast data.
+      </div>
+    );
+  }
+
+  let yMax = 0.0001;
+  for (const row of data) {
+    for (const s of series) {
+      const v = row[s.dataKey];
+      if (typeof v === "number" && Number.isFinite(v)) yMax = Math.max(yMax, v);
+    }
+  }
+  yMax *= 1.12;
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart
+        data={data}
+        style={CHART_STYLE}
+        margin={{ top: 18, right: 10, left: 4, bottom: series.length > 4 ? 56 : 44 }}
+        barCategoryGap="18%"
+        barGap={2}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+        <XAxis
+          dataKey="name"
+          tick={{ fill: COLORS.text3, fontSize: 9 }}
+          axisLine={false}
+          tickLine={false}
+          interval={0}
+          angle={data.length > 4 ? -16 : 0}
+          textAnchor={data.length > 4 ? "end" : "middle"}
+          height={data.length > 4 ? 52 : 28}
+        />
+        <YAxis
+          domain={[0, yMax]}
+          tick={{ fill: COLORS.text3, fontSize: 9 }}
+          axisLine={false}
+          tickLine={false}
+          tickFormatter={(v) => `₹${v}`}
+          width={44}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          formatter={(v: number, name: string) => [`₹${Number(v).toFixed(2)} Cr`, name]}
+          labelStyle={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}
+        />
+        <Legend
+          verticalAlign="bottom"
+          height={36}
+          iconType="square"
+          iconSize={9}
+          wrapperStyle={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: "var(--text)",
+            fontFamily: "'DM Mono', monospace",
+            paddingTop: 4,
+          }}
+        />
+        {series.map((s) => (
+          <Bar key={s.dataKey} dataKey={s.dataKey} name={s.name} fill={s.fill} radius={[2, 2, 0, 0]} maxBarSize={48}>
+            <LabelList dataKey={s.dataKey} position="top" formatter={formatGovGroupedCrLabel} style={GOV_GROUPED_LABEL_STYLE} />
+          </Bar>
+        ))}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}

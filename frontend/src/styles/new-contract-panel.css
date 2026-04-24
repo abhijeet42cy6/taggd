@@ -299,6 +299,13 @@
 .new-contract-sheet .ncp-prop-row + .ncp-prop-row {
   border-top: 1px solid var(--ncp-border);
 }
+/* Taller value cells (e.g. read-only user / date chips) — keep label aligned to first line of the control. */
+.new-contract-sheet .ncp-prop-row.ncp-prop-row--tall-value {
+  align-items: flex-start;
+}
+.new-contract-sheet .ncp-prop-row.ncp-prop-row--tall-value .ncp-prop-label {
+  margin-top: 14px;
+}
 .new-contract-sheet .ncp-prop-label {
   display: flex;
   align-items: center;

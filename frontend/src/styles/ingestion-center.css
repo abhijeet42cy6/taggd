@@ -1,0 +1,203 @@
+/* Ingestion Center — layout & hierarchy aligned with design_style_guide.html / platform tokens */
+
+.ingestion-center {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 0 0 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  font-family: var(--font);
+}
+
+.ingestion-center__hero {
+  padding-top: 4px;
+}
+
+.ingestion-center__eyebrow {
+  font-size: 10px;
+  font-family: var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.ingestion-center__title {
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.ingestion-center__lede {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-muted);
+  max-width: 40rem;
+  margin: 0;
+}
+
+.ingestion-center__tabs {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  margin: 0 -4px;
+  padding: 8px 0 16px;
+  background: linear-gradient(180deg, var(--surface-page) 82%, transparent);
+}
+
+/* Segmented pill rail — chips sit on one muted panel (reference UI) */
+.ingestion-center__tabRail {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.ingestion-center .platform-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ingestion-center .platform-tab {
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  box-shadow: 0 1px 0 rgba(25, 24, 23, 0.04);
+  border-bottom: none;
+  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
+}
+
+.ingestion-center .platform-tab:hover {
+  color: var(--text);
+  background: var(--surface-page);
+  box-shadow: 0 1px 2px rgba(25, 24, 23, 0.06);
+}
+
+.ingestion-center .platform-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--accent-mid), 0 1px 3px rgba(225, 111, 61, 0.12);
+}
+
+.ingestion-center__tabIntro {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 0 0 18px;
+  max-width: 42rem;
+}
+
+.ingestion-center__callout {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.ingestion-center__callout-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ingestion-center__callout-body {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.ingestion-center__callout-body ul {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.ingestion-center__callout-body li {
+  margin-bottom: 6px;
+}
+
+.ingestion-center__callout-body li:last-child {
+  margin-bottom: 0;
+}
+
+.ingestion-center__callout-body strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ingestion-center__callout-body code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  color: var(--accent);
+}
+
+.ingestion-center__subsection {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.ingestion-center__subsection-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin: 0 0 14px;
+}
+
+.ingestion-center__grid2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  align-items: stretch;
+}
+
+@media (min-width: 840px) {
+  .ingestion-center__grid2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.ingestion-center__drop {
+  border-radius: var(--radius-lg);
+}
+
+.ingestion-center__drop-title {
+  font-family: var(--font);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.ingestion-center__activity {
+  margin-top: 8px;
+}

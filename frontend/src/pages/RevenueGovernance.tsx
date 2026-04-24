@@ -14,7 +14,9 @@ import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { UserPickerDropdown, type PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
+import { RevenueGovernanceForecastAnalytics } from "@/components/platform/GovernanceForecastCharts";
 import "@/styles/new-contract-panel.css";
+import "@/styles/exec-dashboard.css";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -407,6 +409,14 @@ export function RevenueGovernance() {
         title="Revenue pack governance"
         subtitle="Queue of weekly forecast + visibility submissions — start review, approve, request changes, or reject."
       />
+
+      <PlatformSection title="Forecast analytics">
+        <p className="text-xs text-muted-foreground leading-relaxed mb-4 max-w-3xl">
+          Tracker weekly rows: pick multiple projects (X-axis) and ISO week starts (grouped bars). The same week keeps the
+          same color on every project. Values are ₹ Cr (INR ÷ 1e7).
+        </p>
+        <RevenueGovernanceForecastAnalytics />
+      </PlatformSection>
 
       <PlatformSection title="Filters">
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">

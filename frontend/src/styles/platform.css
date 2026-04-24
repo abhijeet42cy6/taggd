@@ -217,6 +217,26 @@
   color: var(--text);
 }
 
+.platform-sidebar-footer-collapsed-menu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+
+.platform-sidebar-footer-collapsed-menu-trigger:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border2);
+}
+
 .platform-sidebar-footer.is-collapsed {
   flex-direction: column;
   align-items: center;
@@ -286,6 +306,33 @@
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.platform-sidebar-footer__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.platform-sidebar-footer__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-sidebar-footer__role {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .platform-nav-icon {
@@ -569,6 +616,16 @@
   min-height: 0;
 }
 
+/* Agent: full-height chat shell (no nested section card) */
+.platform-content:has(.agent-page) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
 .platform-page-title {
   font-size: 26px;
   font-weight: 500;
@@ -639,27 +696,28 @@
   background: var(--surface-raised);
 }
 
-/* Revenue visibility summary: subtle data-table header (design system palette) */
-.platform-table-wrap--rt-summary .platform-table thead {
-  background: color-mix(in srgb, var(--blue) 5%, var(--surface-raised));
-}
-
 .platform-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
 
+/* Match Transitions tracker header row (accent 8% wash + bold labels) */
+.platform-table thead tr {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
 .platform-table th {
-  color: var(--text-subtle);
+  background: transparent;
+  color: var(--text);
   text-transform: uppercase;
   font-size: 10.5px;
   font-family: var(--mono);
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: .06em;
   text-align: left;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border2);
   white-space: nowrap;
 }
 
@@ -888,6 +946,29 @@
     width: 100%;
     max-width: 100vw;
   }
+}
+
+/* Embedded new-contract-sheet chrome (breadcrumb + ✕ in content; no default drawer head). */
+.platform-drawer.platform-drawer--ncp-embed {
+  width: min(720px, 100vw);
+  max-width: min(720px, 100vw);
+  background: #f7f6f3;
+}
+
+@media (max-width: 760px) {
+  .platform-drawer.platform-drawer--ncp-embed {
+    width: 100%;
+    max-width: 100vw;
+  }
+}
+
+.platform-drawer-body--ncp-embed {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .platform-drawer-head {
@@ -1443,6 +1524,11 @@ body [data-slot="dialog-content"].platform-dialog [data-slot="dialog-footer"] {
 }
 
 .platform-dialog__dropzone {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  box-sizing: border-box;
+  position: relative;
   border: 2px dashed rgba(234, 88, 12, 0.35);
   border-radius: var(--radius);
   padding: 26px 18px;
@@ -1464,13 +1550,15 @@ body [data-slot="dialog-content"].platform-dialog [data-slot="dialog-footer"] {
 }
 
 .platform-dialog__dropzone-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: #52525b;
-  margin-bottom: 10px;
-  line-height: 1.45;
+  margin: 0;
+  line-height: 1.5;
+  pointer-events: none;
 }
 
 .platform-dialog__dropzone-file {
+  margin-top: 10px;
   font-family: "DM Mono", ui-monospace, monospace;
   font-size: 11px;
   color: #ea580c;
