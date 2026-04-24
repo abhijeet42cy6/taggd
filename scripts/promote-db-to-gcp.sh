@@ -27,7 +27,8 @@ GCP_PROJECT="${GCP_PROJECT:-taggd-491107}"
 GCP_ZONE="${GCP_ZONE:-asia-south1-a}"
 GCP_INSTANCE="${GCP_INSTANCE:-revenue-gen-prod}"
 REMOTE_USER="${REMOTE_USER:-arjun}"
-CONTAINER="${CONTAINER:-tgddata_c1_backend_1}"
+# Compose v2 names services with hyphens, e.g. tgddata_c1-backend-1; older was tgddata_c1_backend_1
+CONTAINER="${CONTAINER:-tgddata_c1-backend-1}"
 
 LOCAL_DB="${1:-${LOCAL_DB:-${REPO_ROOT}/revenue_generator.db}}"
 

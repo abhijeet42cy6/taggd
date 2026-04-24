@@ -25,8 +25,7 @@ export function CompanyValuesModal({ open, onOpenChange }: Props) {
       <DialogContent
         showCloseButton
         className={cn(
-          "platform-dialog grid max-h-[min(92vh,940px)] max-w-[min(98vw,1360px)] w-[min(98vw,1360px)] gap-0 overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] p-0 shadow-[var(--shadow-lg)]",
-          "sm:max-w-[min(98vw,1360px)]",
+          "platform-dialog platform-dialog--xl grid max-h-[min(92vh,940px)] gap-0 overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] p-0 shadow-[var(--shadow-lg)]",
         )}
       >
         <div className="flex shrink-0 items-center border-b border-[var(--border)] bg-[var(--surface-muted)] px-5 py-3.5 pr-14">

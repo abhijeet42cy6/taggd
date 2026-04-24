@@ -2,7 +2,7 @@
 # Full CLI ingestion on the GCP VM (or anywhere Docker Compose runs tgddata_C1).
 #
 # Prerequisites:
-#   - Backend container up: tgddata_c1_backend_1
+#   - Backend container up: tgddata_c1-backend-1 (Compose v2) or tgddata_c1_backend_1 (older)
 #   - Repo layout at ~/tgddata_C1 with excel_files_imp/ populated (bundled with deploy since deploy includes that folder)
 #   - Matches docs/DATA_INGESTION_RUNBOOK.md ordering for directory → SLA → revenue → finance → WFM → contracts.
 #
@@ -13,7 +13,7 @@
 #
 set -euo pipefail
 
-CONTAINER="${CONTAINER:-tgddata_c1_backend_1}"
+CONTAINER="${CONTAINER:-tgddata_c1-backend-1}"
 ROOT="/app"
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
