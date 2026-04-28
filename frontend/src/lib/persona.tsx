@@ -22,7 +22,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--accent)",
     landingPath: "/",
     avatarInitials: "AR",
-    scopedNav: ["/", "/portfolio", "/clients", "/client-contracts", "/meetings", "/requisitions", "/finance", "/vendor-licenses", "/sla-performance", "/wfm", "/data-operations", "/ingestion", "/tasks"],
+    scopedNav: ["/", "/portfolio", "/clients", "/client-contracts", "/meetings", "/requisitions", "/finance", "/projections", "/vendor-licenses", "/sla-performance", "/wfm", "/data-operations", "/ingestion", "/tasks"],
   },
   {
     id: "finance",
@@ -32,7 +32,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--amber)",
     landingPath: "/finance",
     avatarInitials: "FH",
-    scopedNav: ["/finance", "/portfolio", "/clients", "/client-contracts", "/meetings", "/vendor-licenses", "/data-operations", "/ingestion", "/tasks"],
+    scopedNav: ["/finance", "/projections", "/portfolio", "/clients", "/client-contracts", "/meetings", "/vendor-licenses", "/data-operations", "/ingestion", "/tasks"],
   },
   {
     id: "wfm",
@@ -52,7 +52,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--green)",
     landingPath: "/clients",
     avatarInitials: "CM",
-    scopedNav: ["/clients", "/client-contracts", "/meetings", "/requisitions", "/finance", "/vendor-licenses", "/sla-performance", "/ingestion", "/tasks"],
+    scopedNav: ["/clients", "/client-contracts", "/meetings", "/requisitions", "/finance", "/projections", "/vendor-licenses", "/sla-performance", "/ingestion", "/tasks"],
   },
   {
     id: "ops",
@@ -62,7 +62,7 @@ export const PERSONAS: PersonaDef[] = [
     accentColor: "var(--text-subtle)",
     landingPath: "/ingestion",
     avatarInitials: "PO",
-    scopedNav: ["/data-operations", "/ingestion", "/", "/portfolio", "/clients", "/client-contracts", "/meetings", "/requisitions", "/finance", "/vendor-licenses", "/sla-performance", "/wfm", "/tasks"],
+    scopedNav: ["/data-operations", "/ingestion", "/", "/portfolio", "/clients", "/client-contracts", "/meetings", "/requisitions", "/finance", "/projections", "/vendor-licenses", "/sla-performance", "/wfm", "/tasks"],
   },
 ];
 

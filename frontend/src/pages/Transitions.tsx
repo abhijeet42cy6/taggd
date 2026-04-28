@@ -1283,7 +1283,7 @@ function TransitionSheet({
       if (isCreate) {
         try {
           await queries.createTransition(pid);
-        } catch (e: unknown) {
+    } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);
           if (!msg.toLowerCase().includes("already exists")) throw e;
         }
@@ -1939,14 +1939,14 @@ export function Transitions() {
         {/* Create button */}
         {!readOnly && (
           <div style={{ marginBottom: 14 }}>
-            <button
-              type="button"
-              className="platform-dialog__btn platform-dialog__btn--primary"
+          <button
+            type="button"
+            className="platform-dialog__btn platform-dialog__btn--primary"
               onClick={openCreate}
-            >
+          >
               + Create tracker
-            </button>
-          </div>
+          </button>
+        </div>
         )}
 
         {/* Table */}

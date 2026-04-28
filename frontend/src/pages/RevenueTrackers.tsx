@@ -707,24 +707,24 @@ export function RevenueTrackers() {
             Revenue trackers
           </div>
           <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
-            {lastRefresh ? (
+          {lastRefresh ? (
               <span style={{ fontSize: 11, color: "var(--text-subtle)", fontFamily: "var(--mono)" }}>
-                Last refresh {lastRefresh.toLocaleTimeString()}
-              </span>
-            ) : null}
+              Last refresh {lastRefresh.toLocaleTimeString()}
+            </span>
+          ) : null}
           </div>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="font-mono text-[11px]"
-          onClick={() => void reload()}
-          disabled={loading}
-        >
-          <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
-          Refresh
-        </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="font-mono text-[11px]"
+            onClick={() => void reload()}
+            disabled={loading}
+          >
+            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
+            Refresh
+          </Button>
       </div>
 
       {/* ── Filter bar: scope (week + project) + PH pack rail + as-of ── */}
@@ -764,7 +764,7 @@ export function RevenueTrackers() {
                       onChange={(e) => setGovernanceWeek(mondayOfYmd(e.target.value || governanceWeekMon))}
                     />
                     <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                  </div>
+        </div>
                   <span className="text-xs font-semibold text-foreground">{formatWeekRangeLabel(governanceWeekMon)}</span>
                 </div>
                 <Button
@@ -802,15 +802,15 @@ export function RevenueTrackers() {
                       </div>
                       <span style={{ color: "var(--ncp-accent)" }}>▾</span>
                     </>
-                  ) : (
-                    <>
+      ) : (
+        <>
                       <span className="ncp-project-icon" style={{ fontSize: 11, fontWeight: 700 }}>
                         ∑
                       </span>
                       <div className="ncp-project-meta">
                         <strong>All assigned projects</strong>
                         <span>Aggregate scope</span>
-                      </div>
+      </div>
                       <span style={{ color: "var(--ncp-accent)" }}>▾</span>
                     </>
                   )}
@@ -836,14 +836,14 @@ export function RevenueTrackers() {
                         <div className="ncp-project-dd ncp-open ncp-project-dd--portal" onClick={(e) => e.stopPropagation()}>
                           <div className="ncp-project-search">
                             <span style={{ opacity: 0.5 }}>🔍</span>
-                            <input
+                  <input
                               type="search"
                               placeholder="Search projects…"
                               value={scopeProjSearch}
                               onChange={(e) => setScopeProjSearch(e.target.value)}
                               autoFocus
                             />
-                          </div>
+                  </div>
                           <div
                             className="ncp-dd-scroll"
                             style={{ maxHeight: 280 }}
@@ -851,9 +851,9 @@ export function RevenueTrackers() {
                             onTouchMove={(e) => e.stopPropagation()}
                           >
                             <button
-                              type="button"
+                  type="button"
                               className="ncp-project-opt"
-                              onClick={() => {
+                  onClick={() => {
                                 setProjectFilter("");
                                 setScopeProjDdOpen(false);
                                 setScopeProjSearch("");
@@ -872,9 +872,9 @@ export function RevenueTrackers() {
                             {scopeFilteredProjects.map((p) => (
                               <button
                                 key={p.id}
-                                type="button"
+                  type="button"
                                 className="ncp-project-opt"
-                                onClick={() => {
+                  onClick={() => {
                                   setProjectFilter(String(p.id));
                                   setScopeProjDdOpen(false);
                                   setScopeProjSearch("");
@@ -887,8 +887,8 @@ export function RevenueTrackers() {
                                     style={{ fontSize: 11, color: "var(--ncp-text-muted)", fontFamily: "var(--ncp-mono)" }}
                                   >
                                     PRJ-{p.id}
-                                  </div>
-                                </div>
+              </div>
+            </div>
                               </button>
                             ))}
                           </div>
@@ -942,7 +942,7 @@ export function RevenueTrackers() {
               <div className={cn("rt-pack-completeness__row", weeklyPack?.forecast && "rt-pack-completeness__row--done")}>
                 <span>{weeklyPack?.forecast ? "✓" : "○"}</span>
                 <span>Forecast</span>
-              </div>
+            </div>
               <div className={cn("rt-pack-completeness__row", weeklyPack?.visibility && "rt-pack-completeness__row--done")}>
                 <span>{weeklyPack?.visibility ? "✓" : "○"}</span>
                 <span>Visibility</span>
@@ -950,27 +950,27 @@ export function RevenueTrackers() {
             </div>
 
             <div className="rt-cta-area">
-              {weeklyPack?.submission &&
-              ["draft", "changes_requested", "rejected"].includes(String(weeklyPack.submission.status)) &&
-              canPracticeSubmitBilling(user) ? (
-                <Button
-                  type="button"
-                  size="sm"
+            {weeklyPack?.submission &&
+            ["draft", "changes_requested", "rejected"].includes(String(weeklyPack.submission.status)) &&
+            canPracticeSubmitBilling(user) ? (
+              <Button
+                type="button"
+                size="sm"
                   variant="outline"
                   className="font-mono text-[11px]"
-                  onClick={async () => {
-                    try {
-                      await queries.revenueWeeklySubmissionSubmit(weeklyPack.submission!.id);
-                      await reload();
+                onClick={async () => {
+                  try {
+                    await queries.revenueWeeklySubmissionSubmit(weeklyPack.submission!.id);
+                    await reload();
                       void loadMinePacks();
-                    } catch (e: unknown) {
-                      window.alert(e instanceof Error ? e.message : String(e));
-                    }
-                  }}
-                >
+                  } catch (e: unknown) {
+                    window.alert(e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              >
                   Submit to finance
-                </Button>
-              ) : null}
+              </Button>
+            ) : null}
               <button
                 type="button"
                 className="rt-cta-primary"
@@ -982,13 +982,13 @@ export function RevenueTrackers() {
                 </span>
                 Open weekly pack
               </button>
-            </div>
           </div>
-        ) : null}
+          </div>
+      ) : null}
         </div>
 
         <div className="rt-filter-bar__bottom">
-          {mainTab === "Revenue visibility" ? (
+        {mainTab === "Revenue visibility" ? (
             <div className="rt-filter-group rt-filter-group--asof">
               <span className="rt-filter-label">Visibility as-of</span>
               <select
@@ -997,14 +997,14 @@ export function RevenueTrackers() {
                 onChange={(e) => setAsOfFilter(e.target.value)}
               >
                 {asOfDates.length === 0 ? <option value="">No snapshots yet</option> : null}
-                {asOfDates.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
+              {asOfDates.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
             </div>
-          ) : null}
+        ) : null}
 
           {err ? <span style={{ fontSize: 11, color: "var(--red)", fontFamily: "var(--mono)" }}>{err}</span> : null}
         </div>
@@ -1027,7 +1027,7 @@ export function RevenueTrackers() {
             {t}
           </button>
         ))}
-      </div>
+          </div>
 
       {emptyScopeData ? (
         <div
@@ -1057,7 +1057,7 @@ export function RevenueTrackers() {
             </code>{" "}
             (defaults include <code className="font-mono text-[11px]">excel_files_imp/Revenue_Visibility_Tracker.xlsx</code>).
           </span>
-        </div>
+          </div>
       ) : null}
 
       {!emptyScopeData && emptyScopeVisibilityOnly && mainTab === "Revenue visibility" ? (
@@ -1143,7 +1143,7 @@ export function RevenueTrackers() {
             />
             <ExecutiveKpiCard
               title="Opening fee"
-              accent="teal"
+            accent="teal"
               primary={formatLargeCurrency(visibilityTotals.openFee)}
               sublines={[{ label: "Open reqs", value: String(visibilityTotals.openReq) }]}
             />
@@ -1176,17 +1176,17 @@ export function RevenueTrackers() {
               primary={formatLargeCurrency(visibilityTotals.gap)}
               sublines={[{ label: "vs MMF target", value: "↑ fill gap" }]}
             />
-          </div>
+        </div>
 
           {/* Charts */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
-            <div className="platform-card" style={{ padding: 14 }}>
+          <div className="platform-card" style={{ padding: 14 }}>
               <div className="rt-section-hd" style={{ marginTop: 0, alignItems: "flex-start", gap: 10 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                   <div className="rt-section-title">MMF vs gap</div>
                   <div className="rt-section-sub">
                     ₹ Lakhs by project — default: top 5 by MMF vs gap scale; use the picker to change
-                  </div>
+            </div>
                 </div>
                 {visibilityProjectOptions.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4, flex: "0 1 220px" }}>
@@ -1214,10 +1214,10 @@ export function RevenueTrackers() {
                 ) : null}
               </div>
               <div style={{ width: "100%", height: 200 }}>
-                {chartVisibilityMmF.length ? (
-                  <ResponsiveContainer width="100%" height="100%">
+              {chartVisibilityMmF.length ? (
+                <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartVisibilityMmF} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="18%">
-                      <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
                       <XAxis
                         dataKey="name"
                         tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
@@ -1237,10 +1237,10 @@ export function RevenueTrackers() {
                         domain={[0, mmfChartYMax]}
                         allowDecimals
                       />
-                      <Tooltip
-                        contentStyle={CHART_TOOLTIP}
-                        formatter={(v: number | string, name: string) => [`${Number(v).toFixed(2)} L`, name === "mmf" ? "MMF" : "Gap"]}
-                      />
+                    <Tooltip
+                      contentStyle={CHART_TOOLTIP}
+                      formatter={(v: number | string, name: string) => [`${Number(v).toFixed(2)} L`, name === "mmf" ? "MMF" : "Gap"]}
+                    />
                       <Bar
                         dataKey="mmf"
                         name="MMF"
@@ -1255,21 +1255,21 @@ export function RevenueTrackers() {
                         radius={[3, 3, 0, 0]}
                         maxBarSize={56}
                       />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
                   <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11, textAlign: "center", padding: "0 8px" }}>
                     {visibilityForCut.length ? "No projects match the current selection — pick at least one in the list above." : "No data"}
                   </div>
-                )}
-              </div>
+              )}
             </div>
-            <div className="platform-card" style={{ padding: 14 }}>
+          </div>
+          <div className="platform-card" style={{ padding: 14 }}>
               <div className="rt-section-hd" style={{ marginTop: 0, alignItems: "flex-start", gap: 10 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                   <div className="rt-section-title">Pipeline mix</div>
                   <div className="rt-section-sub">Joiners vs yet-to-join — default: top 5 by joiners+YTJ</div>
-                </div>
+            </div>
                 {visibilityProjectOptions.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4, flex: "0 1 220px" }}>
                     <div
@@ -1297,13 +1297,13 @@ export function RevenueTrackers() {
               </div>
               <div style={{ width: "100%", height: 200 }}>
                 {chartVisibilityPipeline.length ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
                       data={chartVisibilityPipeline}
                       margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
                       barCategoryGap="18%"
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
                       <XAxis
                         dataKey="name"
                         tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
@@ -1323,13 +1323,13 @@ export function RevenueTrackers() {
                         domain={[0, pipelineChartYMax]}
                         allowDecimals
                       />
-                      <Tooltip contentStyle={CHART_TOOLTIP} />
+                    <Tooltip contentStyle={CHART_TOOLTIP} />
                       <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
-                      <Bar dataKey="joiners" name="Joiners" stackId="a" fill="color-mix(in srgb, var(--green) 65%, transparent)" />
-                      <Bar dataKey="ytj" name="YTJ" stackId="a" fill="color-mix(in srgb, var(--accent2) 55%, transparent)" radius={[3, 3, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
+                    <Bar dataKey="joiners" name="Joiners" stackId="a" fill="color-mix(in srgb, var(--green) 65%, transparent)" />
+                    <Bar dataKey="ytj" name="YTJ" stackId="a" fill="color-mix(in srgb, var(--accent2) 55%, transparent)" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
                   <div
                     style={{
                       height: 200,
@@ -1343,10 +1343,10 @@ export function RevenueTrackers() {
                   >
                     {visibilityForCut.length ? "No projects match the current selection — pick at least one above." : "No data"}
                   </div>
-                )}
-              </div>
+              )}
             </div>
           </div>
+        </div>
 
           {/* Table */}
           <div className="rt-section-hd">
@@ -1452,12 +1452,12 @@ export function RevenueTrackers() {
               </div>
             ) : null}
           </div>
-        </section>
+      </section>
       ) : null}
 
       {/* ─────────── Revenue forecast ─────────── */}
       {mainTab === "Revenue forecast" ? (
-        <section>
+      <section>
           {/* KPIs */}
           <div className="rt-kpi-grid">
             <ExecutiveKpiCard
@@ -1489,8 +1489,8 @@ export function RevenueTrackers() {
               accent="amber"
               primary={forecastTotals.achPct != null ? formatPercent(forecastTotals.achPct, 1) : "—"}
               sublines={[{ label: "vs MMF", value: "weekly avg" }]}
-            />
-          </div>
+          />
+        </div>
 
           {/* Chart */}
           <div className="platform-card" style={{ padding: 14, marginBottom: 24 }}>
@@ -1498,26 +1498,26 @@ export function RevenueTrackers() {
               <div>
                 <div className="rt-section-title">Revenue forecast vs MMF</div>
                 <div className="rt-section-sub">₹ Lakhs · monthly roll-up from weekly entries</div>
-              </div>
+          </div>
             </div>
             <div style={{ width: "100%", height: 240 }}>
-              {chartForecastTrend.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartForecastTrend} margin={{ top: 12, right: 12, left: 4, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" />
+            {chartForecastTrend.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartForecastTrend} margin={{ top: 12, right: 12, left: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" />
                     <XAxis dataKey="month" tick={{ fill: "var(--text-subtle)", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={40} />
-                    <Tooltip contentStyle={CHART_TOOLTIP} />
+                  <Tooltip contentStyle={CHART_TOOLTIP} />
                     <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
-                    <Bar dataKey="forecast" name="Revenue forecast" fill="color-mix(in srgb, var(--accent) 45%, transparent)" radius={[4, 4, 0, 0]} />
-                    <Line type="monotone" dataKey="mmf" name="MMF" stroke="var(--accent2)" strokeWidth={2} dot={{ r: 3 }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              ) : (
+                  <Bar dataKey="forecast" name="Revenue forecast" fill="color-mix(in srgb, var(--accent) 45%, transparent)" radius={[4, 4, 0, 0]} />
+                  <Line type="monotone" dataKey="mmf" name="MMF" stroke="var(--accent2)" strokeWidth={2} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
                 <div style={{ height: 240, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11, fontFamily: "var(--mono)" }}>No monthly roll-up yet</div>
-              )}
-            </div>
+            )}
           </div>
+        </div>
 
           {/* Monthly roll-up table */}
           <div className="rt-section-hd">
@@ -1641,7 +1641,7 @@ export function RevenueTrackers() {
               <div style={{ padding: 16, color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>No weekly rows.</div>
             ) : null}
           </div>
-        </section>
+      </section>
       ) : null}
 
       {mainTab === "My weekly packs" && ph ? (
@@ -2222,9 +2222,9 @@ function ForecastFormDialog({
                                   {monthOptions.map((m) => (
                                     <option key={m} value={m}>
                                       {monthAnchorLabel(m)}
-                                    </option>
-                                  ))}
-                                </select>
+                  </option>
+                ))}
+              </select>
                               </div>
                               <div className="ncp-date-cell">
                                 <label>Update date</label>
@@ -2250,42 +2250,42 @@ function ForecastFormDialog({
                             </div>
                             <div className="ncp-prop-row" style={{ borderTop: "none" }}>
                               <div className="ncp-prop-label">Week label</div>
-                              <input
+              <input
                                 className="ncp-prop-input"
                                 value={weekLabel}
                                 onChange={(e) => setWeekLabel(e.target.value)}
                                 placeholder="Optional"
                               />
-                            </div>
+          </div>
                           </div>
                         </div>
                         <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-3 mt-2">
-                          {(
-                            [
-                              ["Revenue forecast (L)", revenueForecastLakhs, setRevenueForecastLakhs],
-                              ["Adjustment (L)", adjustmentLakhs, setAdjustmentLakhs],
-                              ["Penalty (L)", penaltyLakhs, setPenaltyLakhs],
-                              ["Bad debts (L)", badDebtsLakhs, setBadDebtsLakhs],
-                              ["MMF (L)", mmfLakhs, setMmfLakhs],
-                              ["Open fee (L)", openFeeLakhs, setOpenFeeLakhs],
-                              ["Joiner fee (L)", joinerFeeLakhs, setJoinerFeeLakhs],
-                              ["TBO fee (L)", tboFeeLakhs, setTboFeeLakhs],
-                              ["Net revenue (L)", netRevLakhs, setNetRevLakhs],
+            {(
+              [
+                ["Revenue forecast (L)", revenueForecastLakhs, setRevenueForecastLakhs],
+                ["Adjustment (L)", adjustmentLakhs, setAdjustmentLakhs],
+                ["Penalty (L)", penaltyLakhs, setPenaltyLakhs],
+                ["Bad debts (L)", badDebtsLakhs, setBadDebtsLakhs],
+                ["MMF (L)", mmfLakhs, setMmfLakhs],
+                ["Open fee (L)", openFeeLakhs, setOpenFeeLakhs],
+                ["Joiner fee (L)", joinerFeeLakhs, setJoinerFeeLakhs],
+                ["TBO fee (L)", tboFeeLakhs, setTboFeeLakhs],
+                ["Net revenue (L)", netRevLakhs, setNetRevLakhs],
                               ["Open req", openReq, setOpenReq],
                               ["Joiners", joinerCount, setJoinerCount],
                               ["TBO count", tboCount, setTboCount],
                               ["Achievement %", achPct, setAchPct],
-                            ] as const
-                          ).map(([label, val, set]) => (
+              ] as const
+            ).map(([label, val, set]) => (
                             <div key={label} className="ncp-prop-row">
                               <div className="ncp-prop-label">{label}</div>
                               <input className="ncp-prop-input" value={val} onChange={(e) => set(e.target.value)} inputMode="decimal" />
                             </div>
                           ))}
-                        </div>
+          </div>
                         <div className="ncp-prop-row mt-2" style={{ alignItems: "flex-start" }}>
                           <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
-                            Remarks
+            Remarks
                           </div>
                           <textarea
                             className="ncp-prop-input"
@@ -2298,8 +2298,8 @@ function ForecastFormDialog({
                       </div>
                     </div>
                   </div>
-                </div>
-              </form>
+          </div>
+        </form>
             </div>
           </div>
 

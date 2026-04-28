@@ -27,6 +27,7 @@ import {
   LineChart,
   Package,
   PieChart,
+  Telescope,
   Receipt,
   ScrollText,
   LogOut,
@@ -75,6 +76,7 @@ import { Tasks } from "./pages/Tasks";
 import { Agent } from "./pages/Agent";
 import { Dashboard } from "./pages/Dashboard";
 import { CeoView } from "./pages/CeoView";
+import { Projections } from "./pages/Projections";
 import { DataOperations } from "./pages/DataOperations";
 import { FiscalPerformance } from "./pages/FiscalPerformance";
 import { RevenueTrackers } from "./pages/RevenueTrackers";
@@ -135,6 +137,7 @@ const NAV_PATH_ICONS: Record<string, LucideIcon> = {
   "/candidates": UserCircle,
   "/candidate-store": Archive,
   "/finance": Landmark,
+  "/projections": Telescope,
   "/revenue-trackers": LineChart,
   "/billing": Receipt,
   "/finance-validation": ShieldCheck,
@@ -209,6 +212,7 @@ const STAFF_MAIN_NAV_ACCORDIONS: MainNavAccordion[] = [
       { label: "Finance validation", path: "/finance-validation" },
       { label: "Revenue packs", path: "/revenue-governance" },
       { label: "Finance Command", path: "/finance" },
+      { label: "Projections", path: "/projections" },
       { label: "Revenue trackers", path: "/revenue-trackers" },
     ],
   },
@@ -639,6 +643,7 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
               <Route path="/candidates" element={<Candidates />} />
               <Route path="/candidate-store" element={<CandidateStore />} />
               <Route path="/finance" element={<FiscalPerformance />} />
+              <Route path="/projections" element={<Projections />} />
               <Route path="/revenue-trackers" element={<RevenueTrackers />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/finance-validation" element={<FinanceValidation />} />

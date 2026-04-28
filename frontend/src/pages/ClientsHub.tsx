@@ -59,6 +59,8 @@ export function ClientsHub() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("Overview");
   const [search, setSearch] = useState("");
+  /** Default: active only (excludes prospect legal clients from GET /clients). */
+  const [lifecycleFilter, setLifecycleFilter] = useState<"active" | "all">("active");
   const { persona, scopedClients } = usePersona();
   const navigate = useNavigate();
 
@@ -136,10 +138,15 @@ export function ClientsHub() {
     return all;
   }, [clientsList, persona, scopedClients]);
 
+  const clientsLifecycle = useMemo(() => {
+    if (lifecycleFilter === "all") return clients;
+    return clients.filter((c) => c.lifecycleState !== "prospect");
+  }, [clients, lifecycleFilter]);
+
   const filteredClients = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return clients;
-    return clients.filter((c) => {
+    if (!q) return clientsLifecycle;
+    return clientsLifecycle.filter((c) => {
       if (c.officialName.toLowerCase().includes(q) || c.client.toLowerCase().includes(q)) return true;
       for (const p of c.projects) {
         const sbu = (p.engagement_name || p.account_name || "").toLowerCase();
@@ -151,7 +158,7 @@ export function ClientsHub() {
       }
       return false;
     });
-  }, [clients, search]);
+  }, [clientsLifecycle, search]);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -191,11 +198,29 @@ export function ClientsHub() {
           aria-label="Filter clients"
           style={{ flex: "1 1 240px", maxWidth: 420, minWidth: 180 }}
         />
+        <label className="sr-only" htmlFor="clients-lifecycle-filter">
+          Show clients
+        </label>
+        <select
+          id="clients-lifecycle-filter"
+          className="platform-search"
+          value={lifecycleFilter}
+          onChange={(e) => setLifecycleFilter(e.target.value as "active" | "all")}
+          aria-label="Show active clients or all clients"
+          style={{ flex: "0 0 auto", maxWidth: 200, minWidth: 150, cursor: "pointer" }}
+        >
+          <option value="active">Active only</option>
+          <option value="all">All clients</option>
+        </select>
         {!loading && clients.length > 0 && (
           <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-            {filteredClients.length === clients.length
-              ? `${clients.length} client${clients.length !== 1 ? "s" : ""}`
-              : `Showing ${filteredClients.length} of ${clients.length}`}
+            {filteredClients.length === clientsLifecycle.length
+              ? `${clientsLifecycle.length} client${clientsLifecycle.length !== 1 ? "s" : ""}${
+                  lifecycleFilter === "active" && clients.length > clientsLifecycle.length
+                    ? ` (active; ${clients.length} incl. prospects)`
+                    : ""
+                }`
+              : `Showing ${filteredClients.length} of ${clientsLifecycle.length}`}
           </span>
         )}
       </div>
@@ -221,7 +246,11 @@ export function ClientsHub() {
           )}
           {!loading && clients.length > 0 && filteredClients.length === 0 && (
             <div className="platform-card" style={{ gridColumn: "1/-1", textAlign: "center", color: "var(--text-muted)", padding: 32 }}>
-              No clients match &quot;{search.trim()}&quot;. Try another name or project ID.
+              {search.trim()
+                ? <>No clients match &quot;{search.trim()}&quot;. Try another name or project ID.</>
+                : lifecycleFilter === "active"
+                  ? <>No active clients — use the filter above to show <strong>All clients</strong> (includes prospects).</>
+                  : <>No clients to show.</>}
             </div>
           )}
           {filteredClients.map((c) => {
@@ -312,8 +341,14 @@ export function ClientsHub() {
             <strong>Account Info</strong> tab in client detail. Click a row to open the client cockpit.
           </p>
           {loading && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Loading…</div>}
-          {!loading && filteredClients.length === 0 && (
-            <div style={{ color: "var(--text-muted)", fontSize: 12 }}>No clients to show.</div>
+          {!loading && clients.length > 0 && filteredClients.length === 0 && (
+            <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+              {search.trim()
+                ? <>No clients match your search.</>
+                : lifecycleFilter === "active"
+                  ? <>No active clients — switch the filter to <strong>All clients</strong> to include prospects.</>
+                  : <>No clients to show.</>}
+            </div>
           )}
           {!loading &&
             filteredClients.map((c) => (
@@ -355,7 +390,15 @@ export function ClientsHub() {
               <thead><tr><th>Client</th><th>Project IDs</th><th>Composite</th><th>Status</th><th>Split</th></tr></thead>
               <tbody>
                 {filteredClients.length === 0 && clients.length > 0 && (
-                  <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: 24 }}>No clients match your search.</td></tr>
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: 24 }}>
+                      {search.trim()
+                        ? "No clients match your search."
+                        : lifecycleFilter === "active"
+                          ? 'No active clients — choose "All clients" in the filter above to include prospects.'
+                          : "No clients to show."}
+                    </td>
+                  </tr>
                 )}
                 {filteredClients.map((c) => {
                   const score = compositeScore(c.projectIds, projectStats);
