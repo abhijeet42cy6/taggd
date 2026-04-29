@@ -14,7 +14,10 @@ import {
   type MeetingRow,
   type Project,
   type MeetingActionItemRow,
+  type ComposioStatusResponse,
+  type ComposioOutlookSyncResponse,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { PageHeader, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -68,6 +71,22 @@ function sortMeetings(rows: MeetingRow[]): MeetingRow[] {
     if (da !== db) return db.localeCompare(da);
     return (b.id || 0) - (a.id || 0);
   });
+}
+
+function isPastMeeting(row: MeetingRow): boolean {
+  const d = row.meeting_date?.slice(0, 10) ?? "";
+  if (!d) return false;
+  const t = (row.end_time || row.start_time || "23:59").slice(0, 5);
+  const dt = new Date(`${d}T${t}:00`);
+  if (Number.isNaN(dt.getTime())) return false;
+  return dt.getTime() < Date.now();
+}
+
+function meetingTimeLabel(row: MeetingRow): string {
+  const s = (row.start_time || "").slice(0, 5);
+  const e = (row.end_time || "").slice(0, 5);
+  if (s && e) return `${s} - ${e}`;
+  return s || e || "—";
 }
 
 // ─── MultiUserPicker ──────────────────────────────────────────────────────────
@@ -986,8 +1005,10 @@ function MeetingFormNCP({
 // ─── Meetings (main page) ─────────────────────────────────────────────────────
 
 export function Meetings() {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const openedFromUrlRef = useRef<number | null>(null);
+  const teamsIntegrationEnabled = import.meta.env.VITE_TEAMS_CALENDAR_ENABLED !== "false";
 
   const [rows, setRows] = useState<MeetingRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1001,6 +1022,9 @@ export function Meetings() {
   const [saving, setSaving] = useState(false);
   const [meetingTab, setMeetingTab] = useState(0);
   const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [teamsStatus, setTeamsStatus] = useState<ComposioStatusResponse | null>(null);
+  const [teamsBusy, setTeamsBusy] = useState(false);
+  const [showPastMeetings, setShowPastMeetings] = useState(true);
 
   // Form state
   const [meetingTitle, setMeetingTitle] = useState("");
@@ -1037,6 +1061,20 @@ export function Meetings() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  const refreshTeamsStatus = useCallback(async () => {
+    if (!teamsIntegrationEnabled) return;
+    try {
+      const s = await queries.composioStatus();
+      setTeamsStatus(s);
+    } catch {
+      setTeamsStatus(null);
+    }
+  }, [teamsIntegrationEnabled]);
+
+  useEffect(() => {
+    void refreshTeamsStatus();
+  }, [refreshTeamsStatus]);
+
   // Load platform users once
   useEffect(() => {
     Promise.all([queries.taskAssignableUsers().catch(() => []), adminApi.listUsers().catch(() => [])])
@@ -1057,13 +1095,14 @@ export function Meetings() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const sorted = sortMeetings(rows);
-    if (!q) return sorted;
-    return sorted.filter((r) => {
+    const scoped = showPastMeetings ? sorted : sorted.filter((r) => !isPastMeeting(r));
+    if (!q) return scoped;
+    return scoped.filter((r) => {
       const blob = [r.meeting_title, r.meeting_type, r.account_name_snapshot, r.organizer_name, r.meeting_status, r.mom_status, String(r.id)]
         .filter(Boolean).join(" ").toLowerCase();
       return blob.includes(q);
     });
-  }, [rows, search]);
+  }, [rows, search, showPastMeetings]);
 
   function resetForm() {
     setEditingId(null);
@@ -1089,11 +1128,18 @@ export function Meetings() {
     setMeetingDate(m.meeting_date?.slice(0, 10) ?? "");
     setStartTime(m.start_time ?? ""); setEndTime(m.end_time ?? "");
     setOrganizerName(m.organizer_name ?? "");
-    // Sync organizer user id
-    setOrganizerUserId("");
-    setInternalIds([]);
-    if (m.attendees_internal) {
-      // no-op: we'll try to match after platformUsers load
+    setOrganizerUserId(m.organizer_user_id != null ? String(m.organizer_user_id) : "");
+    const internalEmails = (m.attendees_internal ?? "")
+      .split(/[,;\n]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (internalEmails.length && platformUsers.length) {
+      const matched = platformUsers
+        .filter((u) => internalEmails.includes(u.email.toLowerCase()))
+        .map((u) => String(u.id));
+      setInternalIds(matched);
+    } else {
+      setInternalIds([]);
     }
     setAttendeesExternal(m.attendees_external ?? "");
     const ej = m.external_attendees_json;
@@ -1129,14 +1175,29 @@ export function Meetings() {
     openMeetingSheet(m, true);
   }, [openMeetingSheet]);
 
-  // Sync organizer + internal after users load
   useEffect(() => {
     if (!platformUsers.length) return;
     if (organizerName && !organizerUserId) {
       const u = platformUsers.find((x) => x.email.toLowerCase() === organizerName.toLowerCase());
       if (u) setOrganizerUserId(String(u.id));
     }
-  }, [platformUsers, organizerName, organizerUserId]);
+    if (editingId != null && internalIds.length === 0) {
+      const m = rows.find((r) => r.id === editingId);
+      const csv = m?.attendees_internal ?? "";
+      if (csv) {
+        const emails = csv
+          .split(/[,;\n]/)
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean);
+        if (emails.length) {
+          const matched = platformUsers
+            .filter((u) => emails.includes(u.email.toLowerCase()))
+            .map((u) => String(u.id));
+          if (matched.length) setInternalIds(matched);
+        }
+      }
+    }
+  }, [platformUsers, organizerName, organizerUserId, editingId, internalIds.length, rows]);
 
   function onProjectChange(pid: string) {
     setProjectId(pid);
@@ -1217,6 +1278,105 @@ export function Meetings() {
     }
   }
 
+  async function connectMicrosoftCalendar() {
+    setTeamsBusy(true);
+    try {
+      const link = await queries.composioConnectLink();
+      const popup = window.open(
+        link.redirect_url,
+        "composio_connect_popup",
+        "popup=yes,width=560,height=760,menubar=no,toolbar=no,location=yes,status=no,resizable=yes,scrollbars=yes",
+      );
+      if (!popup) {
+        throw new Error("Popup blocked by browser. Please allow popups and try again.");
+      }
+      const startedAt = Date.now();
+      const timer = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(timer);
+          setTeamsBusy(false);
+          void refreshTeamsStatus();
+          return;
+        }
+        if (Date.now() - startedAt > 3 * 60_000) {
+          window.clearInterval(timer);
+          try { popup.close(); } catch { /* noop */ }
+          setTeamsBusy(false);
+          alert("Composio connect timed out. Please try again.");
+        }
+      }, 1500);
+    } catch (e: unknown) {
+      alert(e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Connect failed");
+      setTeamsBusy(false);
+    }
+  }
+
+  async function disconnectMicrosoftCalendar() {
+    if (!window.confirm("Disconnect Microsoft calendar for your user?")) return;
+    setTeamsBusy(true);
+    try {
+      const next = await queries.composioDisconnect();
+      setTeamsStatus(next);
+    } catch (e: unknown) {
+      alert(e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Disconnect failed");
+    } finally {
+      setTeamsBusy(false);
+    }
+  }
+
+  const syncOutlookMeetings = useCallback(
+    async (options?: { silent?: boolean; bypassConnectedCheck?: boolean }) => {
+      if (!options?.bypassConnectedCheck && !teamsStatus?.connected) {
+        alert("Connect Microsoft first.");
+        return;
+      }
+      setTeamsBusy(true);
+      try {
+        const res: ComposioOutlookSyncResponse = await queries.composioSyncOutlookMeetings(100);
+        const latest = await queries.meetingsList();
+        setRows(latest);
+        if (!options?.silent) {
+          alert(
+            `Outlook sync complete.\nImported: ${res.imported}\nUpdated: ${res.updated}\nRemote events seen: ${res.remote_count}`,
+          );
+        }
+      } catch (e: unknown) {
+        if (!options?.silent) {
+          alert(e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Outlook sync failed");
+        }
+      } finally {
+        setTeamsBusy(false);
+      }
+    },
+    [teamsStatus?.connected],
+  );
+
+  async function linkMeetingToTeams(meeting: MeetingRow) {
+    if (!teamsStatus?.connected) {
+      alert("Connect Microsoft first.");
+      return;
+    }
+    try {
+      const updated = await queries.linkMeetingCalendar(meeting.id, {
+        teams_calendar_id: meeting.teams_calendar_id || "primary",
+        teams_sync_status: "linked",
+      });
+      setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    } catch (e: unknown) {
+      alert(e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Link failed");
+    }
+  }
+
+  async function unlinkMeetingFromTeams(meeting: MeetingRow) {
+    if (!window.confirm(`Unlink MTG-${meeting.id} from Teams calendar?`)) return;
+    try {
+      const updated = await queries.unlinkMeetingCalendar(meeting.id);
+      setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    } catch (e: unknown) {
+      alert(e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Unlink failed");
+    }
+  }
+
   useEffect(() => {
     if (loading) return;
     const raw = searchParams.get("meeting");
@@ -1228,6 +1388,20 @@ export function Meetings() {
     if (m) { openedFromUrlRef.current = id; openEdit(m); }
   }, [loading, rows, searchParams, openEdit]);
 
+  useEffect(() => {
+    const onMessage = (ev: MessageEvent) => {
+      const data = ev.data as { type?: string; status?: string } | null;
+      if (!data || data.type !== "composio-connect-result") return;
+      setTeamsBusy(false);
+      void refreshTeamsStatus();
+      if (data.status === "connected") {
+        void syncOutlookMeetings({ silent: true, bypassConnectedCheck: true });
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [refreshTeamsStatus, syncOutlookMeetings]);
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
@@ -1235,21 +1409,91 @@ export function Meetings() {
           title="Meeting tracker"
           subtitle="Log governance calls, QBRs, and MoMs — scoped to your projects. Action items are stored per meeting."
         />
-        <button
-          type="button"
-          className="platform-dialog__btn platform-dialog__btn--primary"
-          style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
-          onClick={openCreate}
-        >
-          + Log meeting
-        </button>
+        <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+          {teamsIntegrationEnabled && (
+            <div
+              style={{
+                border: "1px solid var(--border-color, #d7dce3)",
+                borderRadius: 10,
+                padding: "8px 10px",
+                fontSize: 11,
+                minWidth: 300,
+                background: "var(--surface, #fff)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                <strong>Microsoft Calendar</strong>
+                <span style={{ color: teamsStatus?.connected ? "#15803d" : "#92400e" }}>
+                  {teamsStatus?.connected ? "Connected" : "Not connected"}
+                </span>
+              </div>
+              <div style={{ marginTop: 6, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="platform-dialog__btn"
+                  style={{ fontSize: 10, padding: "4px 8px" }}
+                  disabled={teamsBusy || !teamsStatus?.configured || !!teamsStatus?.connected}
+                  onClick={() => void connectMicrosoftCalendar()}
+                >
+                  {teamsStatus?.connected ? "Connected" : "Connect"}
+                </button>
+                <button
+                  type="button"
+                  className="platform-dialog__btn"
+                  style={{ fontSize: 10, padding: "4px 8px" }}
+                  disabled={teamsBusy || !teamsStatus?.connected}
+                  onClick={() => void syncOutlookMeetings()}
+                >
+                  Sync Outlook
+                </button>
+                <button
+                  type="button"
+                  className="platform-dialog__btn"
+                  style={{ fontSize: 10, padding: "4px 8px" }}
+                  disabled={teamsBusy || !teamsStatus?.connected}
+                  onClick={() => void disconnectMicrosoftCalendar()}
+                >
+                  Disconnect
+                </button>
+              </div>
+              {teamsStatus?.auth_config_id && (
+                <div style={{ marginTop: 6, fontSize: 10, color: "var(--text-muted)" }}>
+                  auth config: {teamsStatus.auth_config_id}
+                </div>
+              )}
+              {teamsStatus?.connection?.external_user_id && (
+                <div style={{ marginTop: 2, fontSize: 10, color: "var(--text-muted)" }}>
+                  composio user: {teamsStatus.connection.external_user_id}
+                </div>
+              )}
+              {teamsStatus?.connection?.connection_id && (
+                <div style={{ marginTop: 2, fontSize: 10, color: "var(--text-muted)" }}>
+                  connected account: {teamsStatus.connection.connection_id}
+                </div>
+              )}
+              {!teamsStatus?.configured && (
+                <div style={{ marginTop: 6, color: "#b91c1c" }}>
+                  COMPOSIO_API_KEY or COMPOSIO_OUTLOOK_AUTH_CONFIG_ID missing on server.
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            type="button"
+            className="platform-dialog__btn platform-dialog__btn--primary"
+            style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
+            onClick={openCreate}
+          >
+            + Log meeting
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <Skeleton height={200} />
       ) : (
         <PlatformSection title="Meetings" action="Refresh" onAction={refresh}>
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <input
               className="platform-search"
               placeholder="Search title, type, account, organizer, status, ID…"
@@ -1257,20 +1501,28 @@ export function Meetings() {
               onChange={(e) => setSearch(e.target.value)}
               style={{ maxWidth: 400, width: "100%" }}
             />
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)" }}>
+              <input
+                type="checkbox"
+                checked={showPastMeetings}
+                onChange={(e) => setShowPastMeetings(e.target.checked)}
+              />
+              Show past meetings
+            </label>
           </div>
           <div className="platform-table-wrap" style={{ overflowX: "auto" }}>
             <table className="platform-table" style={{ minWidth: 1100 }}>
               <thead>
                 <tr>
-                  <th>ID</th><th>Date</th><th>Title</th><th>Type</th>
+                  <th>ID</th><th>Date / time</th><th>Title</th><th>Type</th>
                   <th>Account / project</th><th>Mode</th><th>Status</th>
-                  <th>Organizer</th><th>MoM</th><th>Created</th><th />
+                  <th>Organizer</th><th>MoM</th><th>Teams</th><th>Created</th><th />
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={11} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
+                    <td colSpan={12} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
                       No meetings yet. Use "Log meeting".
                     </td>
                   </tr>
@@ -1278,6 +1530,10 @@ export function Meetings() {
                 {filtered.map((m) => {
                   const pr = m.project_id != null ? projectById.get(m.project_id) : undefined;
                   const prLabel = m.account_name_snapshot || (pr && (pr.engagement_name || pr.account_name)) || (m.project_id != null ? `PRJ-${m.project_id}` : "—");
+                  const linked = Boolean(m.teams_event_id);
+                  const ownerId = m.teams_owner_user_id ?? null;
+                  const canManageLink = ownerId == null || ownerId === user?.id;
+                  const canEditMeeting = !linked || canManageLink;
                   return (
                     <tr
                       key={m.id}
@@ -1293,7 +1549,10 @@ export function Meetings() {
                       style={{ cursor: "pointer" }}
                     >
                       <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>{m.id}</td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{m.meeting_date?.slice(0, 10) ?? "—"}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>
+                        <div>{m.meeting_date?.slice(0, 10) ?? "—"}</div>
+                        <div style={{ fontSize: 9, opacity: 0.8 }}>{meetingTimeLabel(m)}</div>
+                      </td>
                       <td style={{ fontWeight: 600, maxWidth: 200 }}>{m.meeting_title ?? "—"}</td>
                       <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{m.meeting_type ?? "—"}</td>
                       <td style={{ fontSize: 11 }}>{prLabel}</td>
@@ -1301,6 +1560,20 @@ export function Meetings() {
                       <td><StatusTag status={m.meeting_status || "—"} /></td>
                       <td style={{ fontSize: 11 }}>{m.organizer_name ?? "—"}</td>
                       <td style={{ fontSize: 10, color: "var(--text-muted)" }}>{m.mom_status ?? "—"}</td>
+                      <td style={{ fontSize: 10 }}>
+                        {linked ? (
+                          <span style={{ color: "#15803d", fontWeight: 600 }}>
+                            Linked
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)" }}>—</span>
+                        )}
+                        {ownerId != null && (
+                          <div style={{ fontSize: 9, opacity: 0.8 }}>
+                            owner: U{ownerId}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ fontSize: 10, color: "var(--text-muted)" }}>
                         {m.created_by_email ?? "—"}
                         <div style={{ fontSize: 9, opacity: 0.8 }}>{m.system_created_at?.slice(0, 16) ?? ""}</div>
@@ -1310,12 +1583,31 @@ export function Meetings() {
                           type="button"
                           className="platform-dialog__btn"
                           style={{ fontSize: 10, padding: "4px 8px" }}
+                          disabled={!canEditMeeting}
+                          title={canEditMeeting ? "" : "Only link owner can edit linked meeting"}
                           onClick={(e) => {
                             e.stopPropagation();
                             openEdit(m);
                           }}
                         >
                           Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="platform-dialog__btn"
+                          style={{ fontSize: 10, padding: "4px 8px", marginLeft: 6 }}
+                          disabled={!canManageLink}
+                          title={canManageLink ? "" : "Only link owner can edit Teams link"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (linked) {
+                              void unlinkMeetingFromTeams(m);
+                            } else {
+                              void linkMeetingToTeams(m);
+                            }
+                          }}
+                        >
+                          {linked ? "Unlink" : "Link"}
                         </button>
                         <button
                           type="button"

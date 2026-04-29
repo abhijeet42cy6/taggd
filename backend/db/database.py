@@ -54,6 +54,27 @@ class UserProjectAssignment(Base):
     project = relationship("Project", backref="user_assignments")
 
 
+class UserComposioConnection(Base):
+    """Per-user Composio account linkage metadata (token storage handled out-of-band)."""
+
+    __tablename__ = "user_composio_connections"
+    __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_user_composio_provider"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(64), nullable=False, default="microsoft")
+    connection_id = Column(String(255), nullable=True, index=True)
+    external_user_id = Column(String(255), nullable=True)
+    status = Column(String(32), nullable=False, default="connected", index=True)
+    connection_meta_json = Column(JSON, nullable=True)
+    connected_at = Column(DateTime, default=datetime.datetime.utcnow)
+    disconnected_at = Column(DateTime, nullable=True)
+    system_created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    system_updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    user = relationship("User", backref="composio_connections")
+
+
 class IngestionEvent(Base):
     """Audit trail for uploads / ingest runs (used by Ingestion Center activity feed)."""
 
@@ -343,6 +364,16 @@ class Meeting(Base):
     mom_status = Column(String(64), nullable=True, index=True)
     mom_link_remarks = Column(Text, nullable=True)
 
+    # Teams / Outlook calendar sync metadata (via Composio).
+    teams_event_id = Column(String(255), nullable=True, index=True)
+    teams_calendar_id = Column(String(255), nullable=True)
+    teams_owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    teams_sync_status = Column(String(64), nullable=True, index=True, default="not_linked")
+    teams_etag = Column(String(255), nullable=True)
+    teams_last_synced_at = Column(DateTime, nullable=True)
+    teams_last_remote_updated_at = Column(DateTime, nullable=True)
+    teams_last_local_updated_at = Column(DateTime, nullable=True)
+
     created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by_email = Column(String(255), nullable=True)
     system_created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -350,6 +381,7 @@ class Meeting(Base):
 
     organizer_user = relationship("User", foreign_keys=[organizer_user_id])
     creator = relationship("User", foreign_keys=[created_by_user_id])
+    teams_owner_user = relationship("User", foreign_keys=[teams_owner_user_id])
     project = relationship("Project", back_populates="meetings")
     action_items = relationship(
         "MeetingActionItem",
@@ -1650,6 +1682,55 @@ def backfill_sla_period_starts(db: Session):
     return updated
 
 
+def _ensure_meeting_calendar_integration_columns():
+    """SQLite: add Teams/Composio metadata columns on platform_meetings if missing."""
+    from sqlalchemy import text
+
+    alters: list[tuple[str, str]] = [
+        ("teams_event_id", "VARCHAR(255)"),
+        ("teams_calendar_id", "VARCHAR(255)"),
+        ("teams_owner_user_id", "INTEGER"),
+        ("teams_sync_status", "VARCHAR(64)"),
+        ("teams_etag", "VARCHAR(255)"),
+        ("teams_last_synced_at", "DATETIME"),
+        ("teams_last_remote_updated_at", "DATETIME"),
+        ("teams_last_local_updated_at", "DATETIME"),
+    ]
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(platform_meetings)")).fetchall()
+            cols = {r[1] for r in rows}
+            if not cols:
+                return
+            for col, ddl in alters:
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE platform_meetings ADD COLUMN {col} {ddl}"))
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_platform_meetings_teams_event_id ON platform_meetings (teams_event_id)")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_platform_meetings_teams_owner_user_id ON platform_meetings (teams_owner_user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_platform_meetings_teams_sync_status ON platform_meetings (teams_sync_status)"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE platform_meetings SET teams_sync_status = 'not_linked' "
+                    "WHERE teams_sync_status IS NULL OR TRIM(COALESCE(teams_sync_status, '')) = ''"
+                )
+            )
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("meeting calendar integration columns migration: %s", e)
+
+
 def get_db():
     """FastAPI dependency: one session per request."""
     db = SessionLocal()
@@ -1680,6 +1761,7 @@ def init_db():
     _ensure_finance_efficiency_scorecard_columns()
     _ensure_project_enterprise_columns()
     _ensure_project_transition_resource_attachments_column()
+    _ensure_meeting_calendar_integration_columns()
     _ensure_sla_period_start_column()
     _ensure_finance_efficiency_wl1_column()
     _ensure_finance_efficiency_taggd_joiners_column()

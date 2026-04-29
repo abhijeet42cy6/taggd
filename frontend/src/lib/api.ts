@@ -590,11 +590,56 @@ export type MeetingRow = {
   attachments_json: unknown[] | null;
   mom_status: string | null;
   mom_link_remarks: string | null;
+  teams_event_id?: string | null;
+  teams_calendar_id?: string | null;
+  teams_owner_user_id?: number | null;
+  teams_sync_status?: string | null;
+  teams_etag?: string | null;
+  teams_last_synced_at?: string | null;
+  teams_last_remote_updated_at?: string | null;
+  teams_last_local_updated_at?: string | null;
   created_by_user_id: number | null;
   created_by_email: string | null;
   system_created_at: string | null;
   system_updated_at: string | null;
   action_items: MeetingActionItemRow[];
+};
+
+export type ComposioConnectionRow = {
+  id: number;
+  provider: string;
+  status: string;
+  connection_id: string | null;
+  external_user_id: string | null;
+  connection_meta_json: Record<string, unknown> | null;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  system_updated_at: string | null;
+};
+
+export type ComposioStatusResponse = {
+  enabled: boolean;
+  configured: boolean;
+  env: string;
+  base_url: string;
+  auth_config_id?: string | null;
+  connected: boolean;
+  user_id: number;
+  connection: ComposioConnectionRow | null;
+};
+
+export type ComposioConnectLinkResponse = {
+  redirect_url: string;
+  connection_id: string | null;
+  connection_user_id: string;
+  auth_config_id: string;
+};
+
+export type ComposioOutlookSyncResponse = {
+  imported: number;
+  updated: number;
+  remote_count: number;
+  meetings: MeetingRow[];
 };
 
 /** Org-level job board / resume supplier license costs (`resume_supplier_licenses`). */
@@ -1265,6 +1310,27 @@ export const queries = {
       return r.data;
     }),
 
+  composioStatus: () =>
+    api.get<ComposioStatusResponse>(`/integrations/composio/status`).then((r) => r.data),
+
+  composioConnectLink: () =>
+    api.post<ComposioConnectLinkResponse>(`/integrations/composio/connect-link`, {}).then((r) => r.data),
+
+  composioConnect: (body: {
+    connection_id?: string | null;
+    external_user_id?: string | null;
+    connection_meta_json?: Record<string, unknown> | null;
+  } = {}) =>
+    api.post<ComposioStatusResponse>(`/integrations/composio/connect`, body).then((r) => r.data),
+
+  composioDisconnect: () =>
+    api.post<ComposioStatusResponse>(`/integrations/composio/disconnect`, {}).then((r) => r.data),
+
+  composioSyncOutlookMeetings: (limit = 25) =>
+    api
+      .post<ComposioOutlookSyncResponse>(`/integrations/composio/outlook/sync`, { limit })
+      .then((r) => r.data),
+
   meetingsList: () => api.get<MeetingRow[]>(`/meetings`).then((r) => r.data),
 
   meeting: (id: number) => api.get<MeetingRow>(`/meetings/${id}`).then((r) => r.data),
@@ -1274,6 +1340,33 @@ export const queries = {
 
   patchMeeting: (id: number, body: Record<string, unknown>) =>
     api.patch<MeetingRow>(`/meetings/${id}`, body).then((r) => r.data),
+
+  linkMeetingCalendar: (
+    id: number,
+    body: {
+      teams_event_id?: string | null;
+      teams_calendar_id?: string | null;
+      teams_sync_status?: string | null;
+      teams_etag?: string | null;
+      teams_last_remote_updated_at?: string | null;
+      teams_last_local_updated_at?: string | null;
+    } = {},
+  ) => api.post<MeetingRow>(`/meetings/${id}/calendar-link`, body).then((r) => r.data),
+
+  patchMeetingCalendarLink: (
+    id: number,
+    body: {
+      teams_event_id?: string | null;
+      teams_calendar_id?: string | null;
+      teams_sync_status?: string | null;
+      teams_etag?: string | null;
+      teams_last_remote_updated_at?: string | null;
+      teams_last_local_updated_at?: string | null;
+    },
+  ) => api.patch<MeetingRow>(`/meetings/${id}/calendar-link`, body).then((r) => r.data),
+
+  unlinkMeetingCalendar: (id: number) =>
+    api.delete<MeetingRow>(`/meetings/${id}/calendar-link`).then((r) => r.data),
 
   deleteMeeting: (id: number) =>
     api.delete<{ status: string; id: number }>(`/meetings/${id}`).then((r) => r.data),
