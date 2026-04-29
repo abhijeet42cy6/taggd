@@ -1,21 +1,44 @@
+/**
+ * Presentation-only conversational shell (Tagger-style).
+ * Wired by parent — e.g. deck studio calls Gemini `/ceo-deck/ai-edit` per turn.
+ */
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowUp } from "lucide-react";
-import { clearAgentSession, sendAgentMessage, type ToolCall } from "@/lib/agent-api";
-import "@/styles/agent-page.css";
+import type { ToolCall } from "@/lib/agent-api";
 import { AgentMarkdownMessage } from "@/components/AgentMarkdownMessage";
+import "@/styles/agent-page.css";
 
-type UiMessage = {
+export type SlideShowAgentMessage = {
   role: "user" | "assistant";
   text: string;
   toolCalls?: ToolCall[];
   error?: boolean;
 };
 
-export function Agent() {
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+export type SlideShowAgentProps = {
+  welcomeTitle: string;
+  welcomeHint: string;
+  composerPlaceholder?: string;
+  messages: SlideShowAgentMessage[];
+  loading: boolean;
+  onSend: (text: string) => void | Promise<void>;
+  onClear: () => void;
+  composerDisabled?: boolean;
+  disabled?: boolean;
+};
+
+export function SlideShowAgent({
+  welcomeTitle,
+  welcomeHint,
+  composerPlaceholder = "Describe how to tune the slides…",
+  messages,
+  loading,
+  onSend,
+  onClear,
+  composerDisabled = false,
+  disabled = false,
+}: SlideShowAgentProps) {
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
   const [threadAnim, setThreadAnim] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -36,38 +59,10 @@ export function Agent() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, chatMode]);
 
-  const send = async (text: string) => {
-    const payload = text.trim();
-    if (!payload || loading) return;
-    setMessages((prev) => [...prev, { role: "user", text: payload }]);
-    setInput("");
-    setLoading(true);
-    try {
-      const res = await sendAgentMessage(payload, sessionId);
-      setSessionId(res.session_id);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: res.response, toolCalls: res.tool_calls },
-      ]);
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string };
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: `Request failed: ${err?.response?.data?.detail || err?.message || "Unknown error"}`,
-          error: true,
-        },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const clear = async () => {
-    if (sessionId) await clearAgentSession(sessionId);
-    setSessionId(null);
-    setMessages([]);
+  const send = () => {
+    const payload = input.trim();
+    if (!payload || loading || disabled) return;
+    void onSend(payload);
     setInput("");
   };
 
@@ -82,19 +77,20 @@ export function Agent() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                void send(input);
+                send();
               }
             }}
-            placeholder="Ask about a client, metric, requisition, or org overview…"
+            placeholder={composerPlaceholder}
             rows={2}
-            aria-label="Message"
+            aria-label="Deck assistant message"
+            disabled={composerDisabled || disabled || loading}
           />
           <button
             type="button"
             className="agent-page__send"
-            disabled={loading}
-            aria-label="Send message"
-            onClick={() => void send(input)}
+            disabled={loading || disabled || composerDisabled || !input.trim()}
+            aria-label="Send"
+            onClick={() => send()}
           >
             <ArrowUp strokeWidth={2.25} size={18} aria-hidden />
           </button>
@@ -104,8 +100,13 @@ export function Agent() {
   );
 
   return (
-    <div className="agent-page">
-      <button type="button" className="agent-page__clear" onClick={() => void clear()}>
+    <div className="agent-page slide-show-agent slide-show-agent--embedded" style={{ height: "100%" }}>
+      <button
+        type="button"
+        className="agent-page__clear"
+        onClick={onClear}
+        disabled={disabled || (!messages.length && !input.trim())}
+      >
         Clear chat
       </button>
 
@@ -113,10 +114,8 @@ export function Agent() {
         <div className="agent-page__stage agent-page__stage--empty">
           <div className="agent-page__emptyShell">
             <div className="agent-page__hero">
-              <p className="agent-page__tagline">Let&apos;s go! Tagger!</p>
-              <p className="agent-page__hint">
-                Ask me anything across clients, requisitions, SLA, WFM and finance — I&apos;m grounded on your live data.
-              </p>
+              <p className="agent-page__tagline">{welcomeTitle}</p>
+              <p className="agent-page__hint">{welcomeHint}</p>
             </div>
             {composer("hero")}
           </div>
@@ -145,7 +144,7 @@ export function Agent() {
                     {m.role === "assistant" ? <AgentMarkdownMessage text={m.text} /> : m.text}
                   </div>
                 ))}
-                {loading ? <div className="agent-page__thinking">Thinking…</div> : null}
+                {loading ? <div className="agent-page__thinking">Updating deck…</div> : null}
                 <div ref={bottomRef} />
               </div>
             </div>

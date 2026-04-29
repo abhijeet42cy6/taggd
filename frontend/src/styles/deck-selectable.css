@@ -1,0 +1,22 @@
+.deck-region {
+  position: relative;
+  border-radius: var(--radius-base);
+  transition:
+    outline 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.12s ease;
+  outline: 2px solid transparent;
+  cursor: var(--deck-region-cursor, crosshair);
+}
+
+.deck-region--hover {
+  outline-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-soft) 35%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.deck-region--picked {
+  outline-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}

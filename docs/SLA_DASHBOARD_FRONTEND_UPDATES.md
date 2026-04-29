@@ -14,6 +14,7 @@ This note records the React SLA experience updates that align the in-app **SLA P
 | Area                                 | Path                                                       |
 | ------------------------------------ | ---------------------------------------------------------- |
 | SLA page shell & views               | `frontend/src/pages/SLAPerformance.tsx`                    |
+| SLA Dash–style KPI blocks & drawers  | `frontend/src/components/platform/SlaDashInspired.tsx`     |
 | RAG status → met / breached / NR     | `frontend/src/lib/sla-rag.ts`                              |
 | FY P1/P2 month sets (data-driven)    | `frontend/src/lib/sla-fy.ts`                               |
 | SLA timeseries RAG + stats (API)     | `backend/core/sla_period.py`, `backend/main.py` (`/sla/*`) |
@@ -37,9 +38,28 @@ This note records the React SLA experience updates that align the in-app **SLA P
 
 Existing exports such as `SlaTimeSeriesChart`, `SlaComplianceBar`, and `SlaFyComparisonLineChart` remain the primary building blocks; the new components extend them for parity with the HTML dash.
 
+`Charts.tsx` still exports **`SlaBenchmarkGroupedBar`** for reuse anywhere a **client Met % vs portfolio Met %** bar comparison is needed; the SLA sidebar **Benchmarking** view currently uses the lighter **`SlaBenchmarkForecastCards`** scaffold (see below) until a dedicated API or sheet feed is wired.
+
+## SLA Dash–inspired KPI strip (`SlaDashInspired.tsx` + overview)
+
+The **Overview** main column (`fin-dash-content`) adds UX and representations inspired by the reference **SLA Dash** HTML (`dashboard_exp/SLA Dash/…`), without new backend endpoints: rollups and filters run on the same **`/sla/data`** row set and related memos as the rest of the page.
+
+| Block | Behaviour | Notes |
+| ----- | --------- | ----- |
+| **`SlaExportInlineBar`** | **Export CSV** of the **current filtered** metric rows (client-side). | Column set derived from row keys; empty when there are no rows. |
+| **`SlaInsightsStrip`** | Short **insight cards** (FY snapshot mix, FY trajectory vs P1, latest decisive-row posture, reporting gaps). | Driven by `portfolioFySnapshots`, `slaKpiMetNotMet`, `notReportedCount`, FY labels. |
+| **`SlaBifurcationTiles`** | Four tiles: **contractual**, **internal**, **penalty**, **non-penalty** (met / not-met counts and met % within each slice). | **Double-click** a tile opens a **drawer** listing metrics in that slice (`metric_nature` / penalty heuristics). |
+| **`SlaAccountHealthRail`** | **Red / Amber / Green** buckets by **account** (latest-row met % thresholds: &lt; 50%, 50–74%, ≥ 75%). | **Click** a tier filters the **main table** to accounts in that tier; clear via chip in overview. |
+| **`SlaRegionZonesMap`** | Schematic **N / S / E / W / Central** grid; met % per zone from free-text **`region`** via `regionToZoneFromLabel`. | **Click** toggles **zone filter** on the table (not a geographic map). |
+| **KPI cards** (Met / Not met / Not reported / Total) | **`role="button"`** with keyboard support. | **Click** opens a **drawer** with up to **200** rows for that KPI bucket (`met` / `breached` / `not_reported` / `all`). |
+| **`SlaBenchmarkForecastCards`** | Placeholder **cards** for copy and layout. | Used from sidebar views **Benchmarking** and **Forecasting** (`variant`: `bench` / `forecast`). |
+
+**Explicit non-goals (vs full SLA Dash):** voice / audio / guided tours; PDF or Word export; real **India** geo map (only zone grid); **industry-type** lens (no industry field on these rows); live forecasting or external benchmark series (scaffold only).
+
 ## `SLAPerformance.tsx` — view-level behaviour
 
 - **Overview**  
+  - KPI **cards** (with drill drawers), **export**, **insights**, **bifurcation**, **account health** + **zone map**, then existing **FY portfolio Met vs Not met** chart and compliance content (filters apply consistently where wired).  
   - Portfolio **Met % by month** (unchanged conceptually).  
   - **FY Met vs Not met counts** with **Indian FY / Calendar** toggle (shared `fyMode` with Year-over-Year).
 - **Executive**  
@@ -53,15 +73,14 @@ Existing exports such as `SlaTimeSeriesChart`, `SlaComplianceBar`, and `SlaFyCom
   - **Toggle**: grouped **bars** vs **line** for the same `fyRegionalChartData`.
 - **Practice head**  
   - Still driven by FY roll-ups; uses existing FY comparison line chart.
-- **Industry benchmarking**  
-  - Replaces placeholder copy with `**SlaBenchmarkGroupedBar`**: top clients by **P2 Met %** vs **portfolio P2 Met %**.  
-  - Short disclaimer: replace with real industry benchmarks when API or sheets are available.
+- **Benchmarking** / **Forecasting** (sidebar)  
+  - Dedicated nav entries render **`SlaBenchmarkForecastCards`** with workspace copy; **no live models** yet — replace with API-backed charts when benchmark and forecast feeds exist. For bar-style **client vs portfolio** comparisons, **`SlaBenchmarkGroupedBar`** in `Charts.tsx` remains available to wire in.
 - **Not reported**  
   - Dedicated **summary** plus four charts sourced from **time-series `not_reported`** (and copy referencing **table** not-reported row counts): by **account**, **region**, **practice head**, and **monthly trend**.
 
 ## Styling (`sla-dash-ui.css`)
 
-Scoped under `**.sla-dash-scope`** so SLA-specific layout (sidebar, topbar, cards, metric grid, rank grid) does not leak globally. Theme follows platform tokens used elsewhere.
+Scoped under `**.sla-dash-scope`** so SLA-specific layout (sidebar, topbar, cards, metric grid, rank grid) does not leak globally. Theme follows platform tokens used elsewhere. Additional rules cover the **export bar**, **insights strip**, **bifurcation tiles**, **health rail**, **zone map**, and **clickable KPI** treatment (`sla-metric-card--drill`).
 
 ## FY period logic (updated April 2026)
 
@@ -85,15 +104,17 @@ After this change, **manual uploads** of `08_sla` with Green/Amber/Red should sh
 
 ## Benchmarking caveat
 
-The “benchmark” series is **portfolio Met % in period 2**, not an external industry index. When benchmark data is ingested, prefer extending the API and passing a distinct series into `SlaBenchmarkGroupedBar` (or a successor component).
+When **`SlaBenchmarkGroupedBar`** is used, the “benchmark” series is **portfolio Met % in period 2**, not an external industry index. When benchmark data is ingested, prefer extending the API and passing a distinct series into `SlaBenchmarkGroupedBar` (or a successor component). The **sidebar Benchmarking** view currently shows **`SlaBenchmarkForecastCards`** placeholder copy only until feeds or charts are wired.
 
 ## Verification
 
 From `frontend/`:
 
 ```bash
-npx tsc --noEmit
+npm run build
 ```
+
+(`tsc` runs as part of the Vite production build.)
 
 ## Branch scope (bundled commits on `feature/sla-dashboard-docs-and-charts`)
 
@@ -107,4 +128,4 @@ This branch also carries the rest of the workspace updates that were in flight a
 
 ---
 
-*Last updated: April 2026 — RAG bucketing (template 08 + API), data-driven FY P1/P2; earlier March 2026 note covered SLA Performance / chart parity and reference assets on this branch.*
+*Last updated: April 2026 — SLA Dash–inspired overview (export, insights, bifurcation, health rail, zone map, KPI/bifurcation drawers; Benchmarking / Forecasting sidebar scaffolds); RAG bucketing (template 08 + API); data-driven FY P1/P2; chart parity vs reference HTML.*

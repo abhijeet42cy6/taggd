@@ -42,7 +42,7 @@ import "@/styles/exec-dashboard.css";
 import "@/styles/ceo-view.css";
 import "@/styles/ceo-board-slides.css";
 import { CeoBoardSlides } from "@/components/ceo/CeoBoardSlides";
-import { CeoSlideDeckEditor } from "@/components/ceo/CeoSlideDeckEditor";
+import { CeoSlideDeckStudio } from "@/components/ceo/CeoSlideDeckStudio";
 import { loadCeoSlideDeck, saveCeoSlideDeck, type CeoSlideDeckConfig } from "@/lib/ceo-slide-deck";
 import { Pencil } from "lucide-react";
 
@@ -445,7 +445,6 @@ export const CeoView = () => {
               ...(priorCmPct != null
                 ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(priorCmPct) }]
                 : []),
-              { label: "CM value", value: formatLargeCurrency(fin?.total_cm_inr ?? 0) },
             ]}
           >
             <QuarterBand quarters={cmQuarters} variant="teal" />
@@ -466,11 +465,6 @@ export const CeoView = () => {
             attainmentLabel={`vs ₹ Target ${formatLargeCurrency(collT)}`}
             attainmentPct={collAtt}
             meta={[
-              {
-                label: "Pending",
-                value: formatLargeCurrency(fin?.collection_pending_inr ?? Math.max(0, collT - coll)),
-                valueCls: "amber",
-              },
               {
                 label: "Unbilled",
                 value: `${formatPercent(unbPctRev)} of rev · ${formatLargeCurrency(unb)}`,
@@ -827,7 +821,7 @@ export const CeoView = () => {
       <div className="ceo-section-label">Board narrative — slide deck</div>
       <CeoBoardSlides config={slideDeck} />
 
-      <CeoSlideDeckEditor
+      <CeoSlideDeckStudio
         open={deckEditorOpen}
         onOpenChange={setDeckEditorOpen}
         config={slideDeck}

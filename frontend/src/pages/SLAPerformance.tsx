@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { api, adminApi, invalidateCache, queries } from "@/lib/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, adminApi, generateSlaInsights, invalidateCache, queries } from "@/lib/api";
 import type { PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
 import {
   SlaAccountMultiProjectPicker,
@@ -31,9 +31,22 @@ import {
   type SlaSeriesPoint,
 } from "@/components/platform/Charts";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
+import {
+  SlaAccountHealthRail,
+  SlaBenchmarkForecastCards,
+  SlaBifurcationTiles,
+  SlaExportInlineBar,
+  SlaInsightsStrip,
+  SlaRegionZonesMap,
+  regionToZoneFromLabel,
+  type SlaBifurcationSlice,
+  type SlaHealthBucket,
+  type SlaInsight,
+  type SlaZoneStat,
+} from "@/components/platform/SlaDashInspired";
 import { SlaMetricFormDialog } from "@/components/platform/SlaMetricFormDialog";
 import { slaRowsVm } from "@/lib/view-models/sla";
-import { Calendar, Check, ChevronDown, Filter, Menu, Plus, Tags, X } from "lucide-react";
+import { Calendar, Check, ChevronDown, Filter, MapPin, Menu, Plus, Tags, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import "@/styles/finance-exec-dashboard.css";
 import "@/styles/new-contract-panel.css";
@@ -274,6 +287,10 @@ function penaltyLabel(metricNature: string | null | undefined): { label: string;
   return { label: "Non-Penalty", ok: true };
 }
 
+function isPenaltyNature(metricNature: string | null | undefined): boolean {
+  return !penaltyLabel(metricNature).ok;
+}
+
 /** Indian FY quarter from calendar month in YYYY-MM. */
 function monthToIndianQuarter(ym: string): "Q1" | "Q2" | "Q3" | "Q4" | null {
   if (!ym || ym.length < 7) return null;
@@ -296,6 +313,8 @@ type SlaDashView =
   | "region"
   | "practice"
   | "notreported"
+  | "benchmarking"
+  | "forecasting"
   | "manual";
 
 const SL_NAV: { id: SlaDashView; label: string; icon: string }[] = [
@@ -308,6 +327,8 @@ const SL_NAV: { id: SlaDashView; label: string; icon: string }[] = [
   { id: "region", label: "Regional Analysis", icon: "fa-map-location-dot" },
   { id: "practice", label: "Practice Head Analysis", icon: "fa-users" },
   { id: "notreported", label: "Not Reported Analysis", icon: "fa-triangle-exclamation" },
+  { id: "benchmarking", label: "Benchmarking", icon: "fa-bullseye" },
+  { id: "forecasting", label: "Forecasting", icon: "fa-chart-line" },
   { id: "manual", label: "User Manual", icon: "fa-book-open" },
 ];
 
@@ -365,6 +386,19 @@ export function SLAPerformance() {
   const [fyRegionFilter, setFyRegionFilter] = useState<string>("all");
 
   const [slaMetricDialogOpen, setSlaMetricDialogOpen] = useState(false);
+  /** KPI card → list metrics in drawer (reference SLA Dash drilldown). */
+  const [kpiDrillOpen, setKpiDrillOpen] = useState(false);
+  const [kpiDrillKind, setKpiDrillKind] = useState<"met" | "breached" | "not_reported" | "all">("all");
+  const [bifurDrillKey, setBifurDrillKey] = useState<string | null>(null);
+  /** Optional: filter SLA table rows by coarse map zone (North / South / …). */
+  const [tableRegionZone, setTableRegionZone] = useState<string | null>(null);
+  /** Filter table to accounts in a health tier (red / amber / green). */
+  const [healthAccountPick, setHealthAccountPick] = useState<Set<string> | null>(null);
+  /** Label for health chip in Advanced filters (set together with `healthAccountPick`). */
+  const [healthFilterTier, setHealthFilterTier] = useState<"red" | "amber" | "green" | null>(null);
+  /** Gemini-generated overview insights (fallback to `slaDashboardInsights` when null / loading error). */
+  const [slaLlmInsights, setSlaLlmInsights] = useState<SlaInsight[] | null>(null);
+  const [slaLlmInsightsLoading, setSlaLlmInsightsLoading] = useState(false);
   const [slaView, setSlaView] = useState<SlaDashView>("overview");
   /** On narrow SLA layout the sidebar is off-canvas until opened; start collapsed so the toggle does something useful. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -437,6 +471,10 @@ export function SLAPerformance() {
   }, [slaView]);
 
   useEffect(() => {
+    if (!healthAccountPick || healthAccountPick.size === 0) setHealthFilterTier(null);
+  }, [healthAccountPick]);
+
+  useEffect(() => {
     let cancelled = false;
     Promise.all([
       queries.taskAssignableUsers().catch(() => [] as PlatformUserLite[]),
@@ -504,6 +542,46 @@ export function SLAPerformance() {
     return Array.from(monthSet).sort((a, b) => a.localeCompare(b));
   }, [rawTimeseries]);
 
+  const onTrendChartMonthFromChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    if (!v) {
+      setMonthFrom("all");
+      return;
+    }
+    setMonthFrom(v);
+    setMonthTo((prev) => (prev !== "all" && prev < v ? v : prev));
+  }, []);
+
+  const onTrendChartMonthToChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    if (!v) {
+      setMonthTo("all");
+      return;
+    }
+    setMonthTo(v);
+    setMonthFrom((prev) => (prev !== "all" && prev > v ? v : prev));
+  }, []);
+
+  const onTableMonthFromChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    if (!v) {
+      setTableMonthFrom("all");
+      return;
+    }
+    setTableMonthFrom(v);
+    setTableMonthTo((prev) => (prev !== "all" && prev < v ? v : prev));
+  }, []);
+
+  const onTableMonthToChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    if (!v) {
+      setTableMonthTo("all");
+      return;
+    }
+    setTableMonthTo(v);
+    setTableMonthFrom((prev) => (prev !== "all" && prev > v ? v : prev));
+  }, []);
+
   const rows = useMemo(
     () => globalFilterRows(rawRows, slaGfApplied, allMonths),
     [rawRows, slaGfApplied, allMonths],
@@ -512,6 +590,34 @@ export function SLAPerformance() {
     () => globalFilterTimeseries(rawTimeseries, slaGfApplied, rawRows, allMonths),
     [rawTimeseries, slaGfApplied, rawRows, allMonths],
   );
+
+  /** Account health + zone “overview” filters narrow KPIs / charts / LLM payload (table still uses `filtered`). */
+  const kpiViewAccountSet = useMemo(() => {
+    const z = tableRegionZone;
+    const h = healthAccountPick && healthAccountPick.size > 0 ? healthAccountPick : null;
+    if (!z && !h) return null;
+    const zoneAccounts =
+      z == null
+        ? null
+        : new Set(
+            rows
+              .filter((r) => regionToZoneFromLabel(String((r as any).region ?? "")) === z)
+              .map((r) => String((r as any).account_name || "Unknown")),
+          );
+    if (h && z && zoneAccounts) return new Set([...h].filter((a) => zoneAccounts.has(a)));
+    if (h) return h;
+    return zoneAccounts as Set<string>;
+  }, [rows, tableRegionZone, healthAccountPick]);
+
+  const slaKpiScopeRows = useMemo(() => {
+    if (!kpiViewAccountSet) return rows;
+    return rows.filter((r) => kpiViewAccountSet.has(String((r as any).account_name || "Unknown")));
+  }, [rows, kpiViewAccountSet]);
+
+  const timeseriesKpiScoped = useMemo(() => {
+    if (!kpiViewAccountSet) return timeseries;
+    return (timeseries as any[]).filter((a: any) => kpiViewAccountSet!.has(a.account_name));
+  }, [timeseries, kpiViewAccountSet]);
 
   const accountMetaFull = useMemo(() => accountMetaByAccount(rawRows), [rawRows]);
   const slaGfFyOptions = useMemo(() => indianFyLabelsFromMonths(allMonths), [allMonths]);
@@ -561,7 +667,7 @@ export function SLAPerformance() {
   const slaKpiMetNotMet = useMemo(() => {
     let met = 0;
     let breached = 0;
-    for (const r of rows) {
+    for (const r of slaKpiScopeRows) {
       const b = statusBucket(r.status);
       if (b === "met") met++;
       else if (b === "breached") breached++;
@@ -570,15 +676,16 @@ export function SLAPerformance() {
     const metPct = withOutcome > 0 ? Math.round((met / withOutcome) * 1000) / 10 : 0;
     const notMetPct = withOutcome > 0 ? Math.round((breached / withOutcome) * 1000) / 10 : 0;
     return { met, breached, withOutcome, metPct, notMetPct };
-  }, [rows]);
+  }, [slaKpiScopeRows]);
   const notReportedCount = useMemo(
-    () => rows.filter((r: any) => statusBucket(r.status) === "not_reported").length,
-    [rows],
+    () => slaKpiScopeRows.filter((r: any) => statusBucket(r.status) === "not_reported").length,
+    [slaKpiScopeRows],
   );
-  const notReportedPct = rows.length > 0 ? Math.round((notReportedCount / rows.length) * 100) : 0;
+  const notReportedPct =
+    slaKpiScopeRows.length > 0 ? Math.round((notReportedCount / slaKpiScopeRows.length) * 100) : 0;
   const scopedAccountCount = useMemo(
-    () => new Set(rows.map((r: any) => r.account_name || "Unknown")).size,
-    [rows],
+    () => new Set(slaKpiScopeRows.map((r: any) => r.account_name || "Unknown")).size,
+    [slaKpiScopeRows],
   );
 
   // ─── All accounts list (full workspace — local table filter) ────────────────
@@ -665,9 +772,9 @@ export function SLAPerformance() {
 
   // ─── Compliance by account bar ────────────────────────────────────────────────
   const accountComplianceData = useMemo(() => {
-    if (!rows.length) return [];
+    if (!slaKpiScopeRows.length) return [];
     const byAccount: Record<string, { met: number; notMet: number; notReported: number }> = {};
-    for (const r of rows) {
+    for (const r of slaKpiScopeRows) {
       const acc = r.account_name || "Unknown";
       if (!byAccount[acc]) byAccount[acc] = { met: 0, notMet: 0, notReported: 0 };
       const bucket = statusBucket(r.status);
@@ -682,7 +789,7 @@ export function SLAPerformance() {
       }))
       .sort((a, b) => b.met - a.met)
       .slice(0, 12);
-  }, [rows]);
+  }, [slaKpiScopeRows]);
 
   const accountMetaMap = useMemo(() => accountMetaByAccount(rawRows), [rawRows]);
 
@@ -723,7 +830,7 @@ export function SLAPerformance() {
 
   const fyRegionalChartData = useMemo(() => {
     const roll = new Map<string, { met1: number; nm1: number; met2: number; nm2: number }>();
-    for (const acc of timeseries) {
+    for (const acc of timeseriesKpiScoped) {
       const region = accountMetaMap.get(acc.account_name)?.region || "Unknown";
       if (!roll.has(region)) roll.set(region, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
       const b = roll.get(region)!;
@@ -749,15 +856,15 @@ export function SLAPerformance() {
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [timeseries, p1Months, p2Months, accountMetaMap]);
+  }, [timeseriesKpiScoped, p1Months, p2Months, accountMetaMap]);
 
   const fyComparisonTableRows = useMemo(() => {
-    const names = [...new Set(timeseries.map((a: any) => a.account_name))].sort((a, b) =>
-      String(a).localeCompare(String(b))
+    const names = [...new Set(timeseriesKpiScoped.map((a: any) => a.account_name))].sort((a, b) =>
+      String(a).localeCompare(String(b)),
     );
     return names.map((account) => {
       const meta = accountMetaMap.get(account) || { region: "—", practice_head: "—" };
-      const ts = timeseries.find((t: any) => t.account_name === account);
+      const ts = timeseriesKpiScoped.find((t: any) => t.account_name === account);
       const a1 = ts ? aggregatePeriod(ts.timeline, p1Months) : { met_pct: null as number | null };
       const a2 = ts ? aggregatePeriod(ts.timeline, p2Months) : { met_pct: null as number | null };
       const p1 = a1.met_pct ?? null;
@@ -771,11 +878,11 @@ export function SLAPerformance() {
         change: formatChange(p1, p2),
       };
     });
-  }, [timeseries, accountMetaMap, p1Months, p2Months]);
+  }, [timeseriesKpiScoped, accountMetaMap, p1Months, p2Months]);
 
   const fyPracticeChartData = useMemo(() => {
     const roll = new Map<string, { met1: number; nm1: number; met2: number; nm2: number }>();
-    for (const acc of timeseries) {
+    for (const acc of timeseriesKpiScoped) {
       const ph = accountMetaMap.get(acc.account_name)?.practice_head || "Unknown";
       if (!roll.has(ph)) roll.set(ph, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
       const b = roll.get(ph)!;
@@ -801,13 +908,13 @@ export function SLAPerformance() {
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [timeseries, p1Months, p2Months, accountMetaMap]);
+  }, [timeseriesKpiScoped, p1Months, p2Months, accountMetaMap]);
 
   const portfolioTrendAllMonths = useMemo((): SlaSeriesPoint[] => {
     return allMonths.map((month) => {
       let met = 0;
       let nm = 0;
-      for (const acc of timeseries) {
+      for (const acc of timeseriesKpiScoped) {
         const t = acc.timeline.find((x: any) => x.month === month);
         if (t) {
           met += t.met;
@@ -817,7 +924,7 @@ export function SLAPerformance() {
       const denom = met + nm;
       return { month, Portfolio: denom > 0 ? Math.round((met / denom) * 1000) / 10 : null };
     });
-  }, [allMonths, timeseries]);
+  }, [allMonths, timeseriesKpiScoped]);
 
   const quarterlyRollup = useMemo(() => {
     const qs = ["Q1", "Q2", "Q3", "Q4"] as const;
@@ -827,7 +934,7 @@ export function SLAPerformance() {
       Q3: { met: 0, nm: 0 },
       Q4: { met: 0, nm: 0 },
     };
-    for (const acc of timeseries) {
+    for (const acc of timeseriesKpiScoped) {
       for (const t of acc.timeline) {
         const q = monthToIndianQuarter(t.month);
         if (!q) continue;
@@ -845,7 +952,7 @@ export function SLAPerformance() {
         met_pct: tot > 0 ? Math.round((met / tot) * 1000) / 10 : null,
       };
     });
-  }, [timeseries]);
+  }, [timeseriesKpiScoped]);
 
   const quarterlyChartData = useMemo(
     () =>
@@ -858,13 +965,13 @@ export function SLAPerformance() {
 
   const accountOverallMetPct = useMemo(() => {
     const monthSet = new Set(allMonths);
-    return timeseries
+    return timeseriesKpiScoped
       .map((acc: any) => {
         const a = aggregatePeriod(acc.timeline, monthSet);
         return { account: acc.account_name as string, met_pct: a.met_pct };
       })
       .filter((x) => x.met_pct != null) as { account: string; met_pct: number }[];
-  }, [timeseries, allMonths]);
+  }, [timeseriesKpiScoped, allMonths]);
 
   const executiveBest = useMemo(
     () => [...accountOverallMetPct].sort((a, b) => b.met_pct - a.met_pct).slice(0, 5),
@@ -897,7 +1004,7 @@ export function SLAPerformance() {
     let p1nm = 0;
     let p2m = 0;
     let p2nm = 0;
-    for (const acc of timeseries) {
+    for (const acc of timeseriesKpiScoped) {
       for (const t of acc.timeline) {
         if (p1Months.has(t.month)) {
           p1m += t.met;
@@ -920,11 +1027,228 @@ export function SLAPerformance() {
       p2: { met: p2m, notMet: p2nm },
       p2_pct,
     };
-  }, [timeseries, p1Months, p2Months, fyMode, fyLabelP1, fyLabelP2]);
+  }, [timeseriesKpiScoped, p1Months, p2Months, fyMode, fyLabelP1, fyLabelP2]);
+
+  const slaBifurcationSlices = useMemo((): SlaBifurcationSlice[] => {
+    const agg = (pred: (r: any) => boolean) => {
+      let met = 0;
+      let notMet = 0;
+      for (const r of slaKpiScopeRows) {
+        if (!pred(r)) continue;
+        const b = statusBucket(r.status);
+        if (b === "met") met++;
+        else if (b === "breached") notMet++;
+      }
+      const total = met + notMet;
+      const pct = total > 0 ? (met / total) * 100 : 0;
+      return { met, notMet, total, pct };
+    };
+    const contractual = (r: any) => kpiTypeLabel(r.metric_nature).toLowerCase().includes("contract");
+    const internal = (r: any) => !contractual(r) && kpiTypeLabel(r.metric_nature).toLowerCase().includes("internal");
+    const c = agg(contractual);
+    const i = agg(internal);
+    const p = agg((r) => isPenaltyNature(r.metric_nature));
+    const np = agg((r) => !isPenaltyNature(r.metric_nature));
+    return [
+      {
+        key: "contractual",
+        label: "Contractual SLA",
+        subtitle: "KPI type contains “contract”",
+        accent: "blue",
+        ...c,
+      },
+      {
+        key: "internal",
+        label: "Internal KPI",
+        subtitle: "Internal (excl. contractual rows)",
+        accent: "violet",
+        ...i,
+      },
+      {
+        key: "penalty",
+        label: "Penalty",
+        subtitle: "Nature mentions penalty",
+        accent: "rose",
+        ...p,
+      },
+      {
+        key: "non_penalty",
+        label: "Non-penalty",
+        subtitle: "All other natures",
+        accent: "emerald",
+        ...np,
+      },
+    ];
+  }, [slaKpiScopeRows]);
+
+  const slaZoneStats = useMemo((): SlaZoneStat[] => {
+    const zones = ["North", "South", "West", "East", "Central"] as const;
+    const roll = new Map<string, { met: number; notMet: number }>();
+    for (const z of zones) roll.set(z, { met: 0, notMet: 0 });
+    for (const r of slaKpiScopeRows) {
+      const z = regionToZoneFromLabel((r as any).region as string);
+      const b = statusBucket(r.status);
+      const o = roll.get(z)!;
+      if (b === "met") o.met++;
+      else if (b === "breached") o.notMet++;
+    }
+    return zones.map((zone) => {
+      const { met, notMet } = roll.get(zone)!;
+      const t = met + notMet;
+      return {
+        zone,
+        met,
+        notMet,
+        metPct: t > 0 ? Math.round((met / t) * 1000) / 10 : null,
+      };
+    });
+  }, [slaKpiScopeRows]);
+
+  const slaAccountHealthBuckets = useMemo((): SlaHealthBucket[] => {
+    const by = new Map<string, { met: number; nm: number }>();
+    for (const r of rows) {
+      const a = (r.account_name as string) || "Unknown";
+      if (!by.has(a)) by.set(a, { met: 0, nm: 0 });
+      const b = statusBucket(r.status);
+      if (b === "met") by.get(a)!.met++;
+      else if (b === "breached") by.get(a)!.nm++;
+    }
+    const scored = [...by.entries()]
+      .map(([name, c]) => {
+        const total = c.met + c.nm;
+        return { name, met: c.met, total, metPct: total > 0 ? (c.met / total) * 100 : 0 };
+      })
+      .filter((x) => x.total > 0);
+    const red = scored.filter((x) => x.metPct < 50).sort((a, b) => a.metPct - b.metPct);
+    const amber = scored.filter((x) => x.metPct >= 50 && x.metPct < 75).sort((a, b) => a.metPct - b.metPct);
+    const green = scored.filter((x) => x.metPct >= 75).sort((a, b) => b.metPct - a.metPct);
+    return [
+      { tier: "red", label: "Red", hint: "< 50% Met", accounts: red.slice(0, 40) },
+      { tier: "amber", label: "Amber", hint: "50–74%", accounts: amber.slice(0, 40) },
+      { tier: "green", label: "Green", hint: "≥ 75%", accounts: green.slice(0, 40) },
+    ];
+  }, [rows]);
+
+  const slaDashboardInsights = useMemo((): SlaInsight[] => {
+    const out: SlaInsight[] = [];
+    const p1 = portfolioFySnapshots.p1;
+    const p2 = portfolioFySnapshots.p2;
+    const t1 = p1.met + p1.notMet;
+    const t2 = p2.met + p2.notMet;
+    if (t2 > 0) {
+      const pct2 = (p2.met / t2) * 100;
+      out.push({
+        title: `${fyLabelP2} snapshot mix`,
+        description: `Across filtered time-series in the current FY window (${t2.toLocaleString()} Met+Not met cells), ${pct2.toFixed(1)}% are Met.`,
+        tone: pct2 >= 72 ? "success" : "info",
+      });
+    }
+    if (t1 > 0 && t2 > 0) {
+      const d = (p2.met / t2 - p1.met / t1) * 100;
+      out.push({
+        title: "FY trajectory",
+        description:
+          d >= 0
+            ? `Met share vs ${fyLabelP1} improved by ${d.toFixed(1)} percentage points.`
+            : `Met share vs ${fyLabelP1} is ${(-d).toFixed(1)} points lower — worth a portfolio review.`,
+        tone: d >= 0 ? "success" : "warn",
+      });
+    }
+    if (slaKpiMetNotMet.withOutcome > 0) {
+      out.push({
+        title: "Latest metric posture",
+        description: `${formatPercent(slaKpiMetNotMet.metPct)} of metrics with a decisive latest row are Met / Green.`,
+        tone: "info",
+      });
+    }
+    if (notReportedCount > 0) {
+      out.push({
+        title: "Reporting gaps",
+        description: `${notReportedCount} metric${notReportedCount === 1 ? "" : "s"} still have no Met / Not met outcome on the latest row.`,
+        tone: "warn",
+      });
+    }
+    return out.slice(0, 5);
+  }, [portfolioFySnapshots, fyLabelP1, fyLabelP2, slaKpiMetNotMet, notReportedCount]);
+
+  const slaInsightsPayload = useMemo(
+    () => ({
+      fy: { p1: fyLabelP1, p2: fyLabelP2 },
+      portfolioFyCells: {
+        p1_outcomes: portfolioFySnapshots.p1.met + portfolioFySnapshots.p1.notMet,
+        p2_outcomes: portfolioFySnapshots.p2.met + portfolioFySnapshots.p2.notMet,
+        p2_met: portfolioFySnapshots.p2.met,
+        p2_not_met: portfolioFySnapshots.p2.notMet,
+        p2_met_pct: portfolioFySnapshots.p2_pct,
+      },
+      latest_decisive_row: {
+        met: slaKpiMetNotMet.met,
+        breached: slaKpiMetNotMet.breached,
+        with_outcome: slaKpiMetNotMet.withOutcome,
+        met_pct: slaKpiMetNotMet.metPct,
+      },
+      not_reported_metric_rows: notReportedCount,
+      scoped_metric_rows: slaKpiScopeRows.length,
+      scoped_distinct_accounts: scopedAccountCount,
+      overview_quick_filter:
+        kpiViewAccountSet == null
+          ? null
+          : {
+              health_tier: healthFilterTier,
+              zone: tableRegionZone,
+              matched_accounts: healthAccountPick?.size ?? null,
+            },
+    }),
+    [
+      fyLabelP1,
+      fyLabelP2,
+      portfolioFySnapshots,
+      slaKpiMetNotMet,
+      notReportedCount,
+      slaKpiScopeRows.length,
+      scopedAccountCount,
+      kpiViewAccountSet,
+      healthFilterTier,
+      tableRegionZone,
+      healthAccountPick,
+    ],
+  );
+
+  const slaInsightsPayloadKey = useMemo(() => JSON.stringify(slaInsightsPayload), [slaInsightsPayload]);
+
+  const slaInsightsFetchGen = useRef(0);
+  const refreshSlaLlmInsights = useCallback(async () => {
+    const gen = ++slaInsightsFetchGen.current;
+    setSlaLlmInsightsLoading(true);
+    try {
+      const ins = await generateSlaInsights(slaInsightsPayload);
+      if (gen !== slaInsightsFetchGen.current) return;
+      setSlaLlmInsights(ins.length ? (ins as SlaInsight[]) : null);
+    } catch {
+      if (gen !== slaInsightsFetchGen.current) return;
+      setSlaLlmInsights(null);
+    } finally {
+      if (gen === slaInsightsFetchGen.current) {
+        setSlaLlmInsightsLoading(false);
+      }
+    }
+  }, [slaInsightsPayload]);
+
+  useEffect(() => {
+    if (loading || slaView !== "overview") return;
+    const timer = window.setTimeout(() => {
+      void refreshSlaLlmInsights();
+    }, 900);
+    return () => {
+      window.clearTimeout(timer);
+      slaInsightsFetchGen.current += 1;
+      setSlaLlmInsightsLoading(false);
+    };
+  }, [loading, slaView, slaInsightsPayloadKey, refreshSlaLlmInsights]);
 
   /** Top accounts by snapshot volume — FY Met % line (HTML account trend). */
   const accountTopFyTrendData = useMemo(() => {
-    const ranked = [...timeseries]
+    const ranked = [...timeseriesKpiScoped]
       .map((acc: any) => ({
         account: acc.account_name as string,
         vol: acc.timeline.reduce(
@@ -935,17 +1259,17 @@ export function SLAPerformance() {
       .sort((a, b) => b.vol - a.vol)
       .slice(0, 10);
     return ranked.map(({ account }) => {
-      const ts = timeseries.find((t: any) => t.account_name === account);
+      const ts = timeseriesKpiScoped.find((t: any) => t.account_name === account);
       if (!ts) return { name: account, p1: null, p2: null };
       const a1 = aggregatePeriod(ts.timeline, p1Months);
       const a2 = aggregatePeriod(ts.timeline, p2Months);
       const short = account.length > 14 ? `${account.slice(0, 13)}…` : account;
       return { name: short, p1: a1.met_pct, p2: a2.met_pct };
     });
-  }, [timeseries, p1Months, p2Months]);
+  }, [timeseriesKpiScoped, p1Months, p2Months]);
 
   const notReportedByAccount = useMemo(() => {
-    return timeseries
+    return timeseriesKpiScoped
       .map((acc: any) => {
         const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
         const name = acc.account_name as string;
@@ -955,11 +1279,11 @@ export function SLAPerformance() {
       .filter((x) => x.count > 0)
       .sort((a, b) => b.count - a.count)
       .slice(0, 12);
-  }, [timeseries]);
+  }, [timeseriesKpiScoped]);
 
   const notReportedByRegion = useMemo(() => {
     const roll = new Map<string, number>();
-    for (const acc of timeseries) {
+    for (const acc of timeseriesKpiScoped) {
       const region = accountMetaMap.get(acc.account_name)?.region || "Unknown";
       const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
       roll.set(region, (roll.get(region) ?? 0) + n);
@@ -971,11 +1295,11 @@ export function SLAPerformance() {
       }))
       .filter((x) => x.count > 0)
       .sort((a, b) => b.count - a.count);
-  }, [timeseries, accountMetaMap]);
+  }, [timeseriesKpiScoped, accountMetaMap]);
 
   const notReportedByPractice = useMemo(() => {
     const roll = new Map<string, number>();
-    for (const acc of timeseries) {
+    for (const acc of timeseriesKpiScoped) {
       const ph = accountMetaMap.get(acc.account_name)?.practice_head || "Unknown";
       const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
       roll.set(ph, (roll.get(ph) ?? 0) + n);
@@ -987,11 +1311,11 @@ export function SLAPerformance() {
       }))
       .filter((x) => x.count > 0)
       .sort((a, b) => b.count - a.count);
-  }, [timeseries, accountMetaMap]);
+  }, [timeseriesKpiScoped, accountMetaMap]);
 
   const notReportedMonthlySeries = useMemo(() => {
     const byMonth = new Map<string, number>();
-    for (const acc of timeseries) {
+    for (const acc of timeseriesKpiScoped) {
       for (const t of acc.timeline) {
         const nr = t.not_reported ?? 0;
         if (nr <= 0) continue;
@@ -1002,7 +1326,7 @@ export function SLAPerformance() {
       name: formatMonthColHeader(m),
       count: byMonth.get(m) ?? 0,
     }));
-  }, [timeseries, allMonths]);
+  }, [timeseriesKpiScoped, allMonths]);
 
   const notReportedMonthlyChartData = useMemo(() => {
     const nz = notReportedMonthlySeries.filter((x) => x.count > 0);
@@ -1011,8 +1335,12 @@ export function SLAPerformance() {
   }, [notReportedMonthlySeries]);
 
   const notReportedSnapshotsTotal = useMemo(
-    () => timeseries.reduce((sum, acc: any) => sum + acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0), 0),
-    [timeseries],
+    () =>
+      timeseriesKpiScoped.reduce(
+        (sum, acc: any) => sum + acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0),
+        0,
+      ),
+    [timeseriesKpiScoped],
   );
 
   const regionalRankP2 = useMemo(() => {
@@ -1038,8 +1366,32 @@ export function SLAPerformance() {
       tableFilteredMonthSet === null
         ? true
         : rm && rm !== "N/A" && tableFilteredMonthSet.has(rm);
-    return okSearch && okStatus && okAcct && okTime;
-  }), [rows, search, statusFilter, acctFilter, tableFilteredMonthSet]);
+    const okZone =
+      tableRegionZone === null || regionToZoneFromLabel((r as any).region as string) === tableRegionZone;
+    const okHealth =
+      healthAccountPick === null || healthAccountPick.has(String((r as any).account_name || "Unknown"));
+    return okSearch && okStatus && okAcct && okTime && okZone && okHealth;
+  }), [rows, search, statusFilter, acctFilter, tableFilteredMonthSet, tableRegionZone, healthAccountPick]);
+
+  const kpiDrillRows = useMemo(() => {
+    if (kpiDrillKind === "all") return slaKpiScopeRows;
+    return slaKpiScopeRows.filter((r) => statusBucket(r.status) === kpiDrillKind);
+  }, [slaKpiScopeRows, kpiDrillKind]);
+
+  const bifurDrillRows = useMemo(() => {
+    if (!bifurDrillKey) return [];
+    const contractual = (r: any) => kpiTypeLabel(r.metric_nature).toLowerCase().includes("contract");
+    const internal = (r: any) => !contractual(r) && kpiTypeLabel(r.metric_nature).toLowerCase().includes("internal");
+    const preds: Record<string, (r: any) => boolean> = {
+      contractual,
+      internal,
+      penalty: (r) => isPenaltyNature(r.metric_nature),
+      non_penalty: (r) => !isPenaltyNature(r.metric_nature),
+    };
+    const pred = preds[bifurDrillKey];
+    if (!pred) return [];
+    return slaKpiScopeRows.filter(pred);
+  }, [slaKpiScopeRows, bifurDrillKey]);
 
   // ─── Account drilldown data ───────────────────────────────────────────────────
   const drillData = useMemo(() => {
@@ -1065,27 +1417,43 @@ export function SLAPerformance() {
 
   const drillMatrixRows = useMemo(() => {
     if (!drillData?.metrics) return [];
-    const targetByDef = new Map<number, any>();
-    for (const r of drillData.metrics) {
-      targetByDef.set(r.id, r);
-    }
-    const fromTs = accountMetricsTs?.metrics;
-    if (fromTs?.length) {
-      return fromTs.map((m) => ({
-        definition_id: m.definition_id,
+    const defNum = (v: unknown) => Number(v);
+    const tsByDef = new Map<
+      number,
+      { timeline: TimelinePt[]; metric_nature?: string | null; metric_label?: string }
+    >();
+    for (const m of accountMetricsTs?.metrics ?? []) {
+      tsByDef.set(defNum(m.definition_id), {
+        timeline: (m.timeline ?? []) as TimelinePt[],
+        metric_nature: m.metric_nature,
         metric_label: m.metric_label,
-        metric_nature: m.metric_nature ?? targetByDef.get(m.definition_id)?.metric_nature ?? null,
-        target: targetByDef.get(m.definition_id)?.target ?? "—",
-        timeline: m.timeline as TimelinePt[],
-      }));
+      });
     }
-    return drillData.metrics.map((r: any) => ({
-      definition_id: r.id,
-      metric_label: r.metric_label,
-      metric_nature: r.metric_nature,
-      target: r.target ?? "—",
-      timeline: [] as TimelinePt[],
-    }));
+    const drillIds = new Set<number>(drillData.metrics.map((r: any) => defNum(r.id)));
+    const fromDrill = drillData.metrics.map((r: any) => {
+      const id = defNum(r.id);
+      const ts = tsByDef.get(id);
+      return {
+        definition_id: id,
+        metric_label: (r.metric_label as string) ?? ts?.metric_label ?? "",
+        metric_nature: (r.metric_nature as string | null | undefined) ?? ts?.metric_nature ?? null,
+        target: r.target ?? "—",
+        timeline: ts?.timeline ?? ([] as TimelinePt[]),
+      };
+    });
+    const extras: typeof fromDrill = [];
+    for (const m of accountMetricsTs?.metrics ?? []) {
+      const id = defNum(m.definition_id);
+      if (drillIds.has(id)) continue;
+      extras.push({
+        definition_id: id,
+        metric_label: m.metric_label ?? "",
+        metric_nature: m.metric_nature ?? null,
+        target: "—",
+        timeline: (m.timeline ?? []) as TimelinePt[],
+      });
+    }
+    return extras.length ? [...fromDrill, ...extras] : fromDrill;
   }, [drillData, accountMetricsTs]);
 
   const drillAccountMeta = useMemo(() => {
@@ -1236,6 +1604,49 @@ export function SLAPerformance() {
                       aria-hidden
                     />
                   </button>
+                  {((healthAccountPick && healthAccountPick.size > 0) || tableRegionZone) && (
+                    <div className="sla-adv-filters__kpi-view-strip" aria-label="Active KPI view filters">
+                      <span className="sla-adv-filters__kpi-view-strip-lbl">From overview</span>
+                      {healthAccountPick && healthAccountPick.size > 0 ? (
+                        <button
+                          type="button"
+                          className={cn(
+                            "sla-adv-filters__kpi-chip",
+                            healthFilterTier && `sla-adv-filters__kpi-chip--health-${healthFilterTier}`,
+                          )}
+                          onClick={() => {
+                            setHealthAccountPick(null);
+                            setHealthFilterTier(null);
+                          }}
+                        >
+                          <span className="sla-adv-filters__kpi-chip-main">
+                            Account health
+                            {healthFilterTier ? (
+                              <span className="sla-adv-filters__kpi-chip-tier">
+                                · {healthFilterTier === "red" ? "Red" : healthFilterTier === "amber" ? "Amber" : "Green"}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="sla-adv-filters__kpi-chip-meta">{healthAccountPick.size} accounts</span>
+                          <X className="sla-adv-filters__kpi-chip-x" strokeWidth={2.5} aria-hidden />
+                          <span className="sr-only">Remove account health filter</span>
+                        </button>
+                      ) : null}
+                      {tableRegionZone ? (
+                        <button
+                          type="button"
+                          className="sla-adv-filters__kpi-chip sla-adv-filters__kpi-chip--zone"
+                          onClick={() => setTableRegionZone(null)}
+                        >
+                          <MapPin className="sla-adv-filters__kpi-chip-pin" strokeWidth={2} aria-hidden />
+                          <span className="sla-adv-filters__kpi-chip-main">Zone</span>
+                          <span className="sla-adv-filters__kpi-chip-meta">{tableRegionZone}</span>
+                          <X className="sla-adv-filters__kpi-chip-x" strokeWidth={2.5} aria-hidden />
+                          <span className="sr-only">Remove zone filter</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
                   <div
                     id="sla-adv-filters-panel"
                     className="sla-adv-filters__panel"
@@ -1394,6 +1805,9 @@ export function SLAPerformance() {
                           onClick={() => {
                             setSlaGfDraft(SLA_GF_INITIAL);
                             setSlaGfApplied(SLA_GF_INITIAL);
+                            setTableRegionZone(null);
+                            setHealthAccountPick(null);
+                            setHealthFilterTier(null);
                           }}
                         >
                           <X className="sla-adv-filters__btn-ic" strokeWidth={2.5} aria-hidden />
@@ -1446,7 +1860,23 @@ export function SLAPerformance() {
                     <SkeletonKpiRow count={4} />
                   ) : (
                     <div className="sla-metric-grid">
-                      <div className="sla-metric-card">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="sla-metric-card sla-metric-card--drill"
+                        onClick={() => {
+                          setKpiDrillKind("met");
+                          setKpiDrillOpen(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setKpiDrillKind("met");
+                            setKpiDrillOpen(true);
+                          }
+                        }}
+                        title="Show metrics counted as Met"
+                      >
                         <div className="sla-metric-card-hd">Metrics met</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">
@@ -1461,8 +1891,23 @@ export function SLAPerformance() {
                           </div>
                         </div>
                       </div>
-                      <div className="sla-metric-card">
-                        <div className="sla-metric-card-hd">Not met</div>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="sla-metric-card sla-metric-card--drill"
+                        onClick={() => {
+                          setKpiDrillKind("breached");
+                          setKpiDrillOpen(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setKpiDrillKind("breached");
+                            setKpiDrillOpen(true);
+                          }
+                        }}
+                        title="Show metrics counted as Not met"
+                      >
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">
                             {rows.length > 0 ? formatPercent(slaKpiMetNotMet.notMetPct) : "—"}
@@ -1476,15 +1921,45 @@ export function SLAPerformance() {
                           </div>
                         </div>
                       </div>
-                      <div className="sla-metric-card">
-                        <div className="sla-metric-card-hd">Not reported</div>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="sla-metric-card sla-metric-card--drill"
+                        onClick={() => {
+                          setKpiDrillKind("not_reported");
+                          setKpiDrillOpen(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setKpiDrillKind("not_reported");
+                            setKpiDrillOpen(true);
+                          }
+                        }}
+                        title="Show metrics with no decisive outcome"
+                      >
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notReportedPct) : "—"}</div>
                           <div className="sla-metric-sub">{rows.length > 0 ? `${notReportedCount} metrics` : "—"}</div>
                         </div>
                       </div>
-                      <div className="sla-metric-card">
-                        <div className="sla-metric-card-hd">Total metrics</div>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="sla-metric-card sla-metric-card--drill"
+                        onClick={() => {
+                          setKpiDrillKind("all");
+                          setKpiDrillOpen(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setKpiDrillKind("all");
+                            setKpiDrillOpen(true);
+                          }
+                        }}
+                        title="Show all metrics in current filters"
+                      >
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length || "—"}</div>
                           <div className="sla-metric-sub">
@@ -1602,6 +2077,45 @@ export function SLAPerformance() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {slaView === "overview" && (
+                <>
+                  <SlaExportInlineBar rows={rows as unknown as Record<string, unknown>[]} />
+                  <SlaInsightsStrip
+                    insights={slaLlmInsights ?? slaDashboardInsights}
+                    loading={slaLlmInsightsLoading}
+                    source={slaLlmInsights && slaLlmInsights.length ? "llm" : "heuristic"}
+                    onRefresh={() => void refreshSlaLlmInsights()}
+                    refreshDisabled={loading}
+                  />
+                  <SlaBifurcationTiles
+                    slices={slaBifurcationSlices}
+                    onDrill={(key) => {
+                      setBifurDrillKey(key);
+                    }}
+                  />
+                  <div className="sla-rank-grid sla-rank-grid--pair" style={{ marginBottom: 14 }}>
+                    <SlaAccountHealthRail
+                      buckets={slaAccountHealthBuckets}
+                      onPickTier={(tier) => {
+                        const b = slaAccountHealthBuckets.find((x) => x.tier === tier);
+                        if (b && b.accounts.length) {
+                          setHealthFilterTier(tier);
+                          setHealthAccountPick(new Set(b.accounts.map((a) => a.name)));
+                        } else {
+                          setHealthFilterTier(null);
+                          setHealthAccountPick(null);
+                        }
+                      }}
+                    />
+                    <SlaRegionZonesMap
+                      zones={slaZoneStats}
+                      activeZone={tableRegionZone}
+                      onSelectZone={(z) => setTableRegionZone(z)}
+                    />
+                  </div>
+                </>
               )}
 
               {slaView === "overview" && (
@@ -1748,35 +2262,53 @@ export function SLAPerformance() {
           </button>
         </div>
 
-        {/* Month range filter */}
+        {/* Month range filter — native month inputs (easier than long <select> lists) */}
         {allMonths.length > 2 && (
-          <div style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace" }}>Range:</span>
-            <select
-              value={monthFrom}
-              onChange={(e) => setMonthFrom(e.target.value)}
-              style={{ background: "var(--surface-raised)", border: "1px solid color-mix(in srgb, var(--accent) 20%, transparent)", color: "var(--text)", borderRadius: 4, padding: "2px 6px", fontSize: 10, fontFamily: "'DM Mono',monospace" }}
-            >
-              <option value="all">From (all)</option>
-              {allMonths.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <select
-              value={monthTo}
-              onChange={(e) => setMonthTo(e.target.value)}
-              style={{ background: "var(--surface-raised)", border: "1px solid color-mix(in srgb, var(--accent) 20%, transparent)", color: "var(--text)", borderRadius: 4, padding: "2px 6px", fontSize: 10, fontFamily: "'DM Mono',monospace" }}
-            >
-              <option value="all">To (all)</option>
-              {allMonths.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            {(monthFrom !== "all" || monthTo !== "all") && (
-              <button
-                className="platform-chip"
-                style={{ fontSize: 10, cursor: "pointer" }}
-                onClick={() => { setMonthFrom("all"); setMonthTo("all"); }}
-              >
-                Reset
-              </button>
-            )}
+          <div
+            className="sla-period-month-range"
+            title="Leave a field empty to include all months on that end. The chart uses months present in your loaded time-series."
+          >
+            <div className="sla-period-month-range__lead">
+              <Calendar className="sla-period-month-range__ic" strokeWidth={2} aria-hidden />
+              <span className="sla-period-month-range__lead-label">Month range</span>
+            </div>
+            <div className="sla-period-month-range__fields">
+              <div className="sla-period-month-range__cell">
+                <label htmlFor="sla-trend-month-from">From</label>
+                <input
+                  id="sla-trend-month-from"
+                  type="month"
+                  min={allMonths[0]}
+                  max={allMonths[allMonths.length - 1]}
+                  value={monthFrom === "all" ? "" : monthFrom}
+                  onChange={onTrendChartMonthFromChange}
+                />
+              </div>
+              <div className="sla-period-month-range__cell">
+                <label htmlFor="sla-trend-month-to">To</label>
+                <input
+                  id="sla-trend-month-to"
+                  type="month"
+                  min={allMonths[0]}
+                  max={allMonths[allMonths.length - 1]}
+                  value={monthTo === "all" ? "" : monthTo}
+                  onChange={onTrendChartMonthToChange}
+                />
+              </div>
+              {(monthFrom !== "all" || monthTo !== "all") && (
+                <button
+                  type="button"
+                  className="sla-period-month-range__reset platform-chip"
+                  style={{ fontSize: 10, cursor: "pointer" }}
+                  onClick={() => {
+                    setMonthFrom("all");
+                    setMonthTo("all");
+                  }}
+                >
+                  Reset range
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -2171,6 +2703,24 @@ export function SLAPerformance() {
         </div>
       )}
 
+      {(slaView === "benchmarking" || slaView === "forecasting") && (
+        <div className="sla-dash-card" style={{ marginBottom: 14 }}>
+          <div className="sla-dash-card-hd">
+            <div className="sla-dash-card-title">
+              {slaView === "benchmarking" ? "Benchmarking workspace" : "Forecasting workspace"}
+            </div>
+            <div className="sla-dash-card-sub">
+              {slaView === "benchmarking"
+                ? "Industry and peer benchmarks — scaffolded from the reference SLA dashboard."
+                : "Forward-looking scenarios from portfolio time-series — scaffold for model hook-up."}
+            </div>
+          </div>
+          <div className="sla-dash-card-bd">
+            <SlaBenchmarkForecastCards variant={slaView === "benchmarking" ? "bench" : "forecast"} />
+          </div>
+        </div>
+      )}
+
       {(slaView === "manual") && (
         <div className="sla-info-box">
           <strong>Using this dashboard:</strong> pick a view in the left rail. Upload SLA Excel from the toolbar or use{" "}
@@ -2274,38 +2824,44 @@ export function SLAPerformance() {
             {allAccounts.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
 
-          {/* Reporting period (matches Reported column) */}
+          {/* Reporting period (matches Reported column) — month inputs */}
           {monthsOrderedForTable.length > 0 && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace", whiteSpace: "nowrap" }}>
-                Reported period:
-              </span>
-              <select
-                value={tableMonthFrom}
-                onChange={(e) => setTableMonthFrom(e.target.value)}
-                style={{ background: "var(--surface-raised)", border: "1px solid color-mix(in srgb, var(--accent) 20%, transparent)", color: "var(--text)", borderRadius: 4, padding: "3px 8px", fontSize: 10, fontFamily: "'DM Mono',monospace", maxWidth: 160 }}
-              >
-                <option value="all">From (all)</option>
-                {monthsOrderedForTable.map((m) => (
-                  <option key={`tf-${m}`} value={m}>{m}</option>
-                ))}
-              </select>
-              <select
-                value={tableMonthTo}
-                onChange={(e) => setTableMonthTo(e.target.value)}
-                style={{ background: "var(--surface-raised)", border: "1px solid color-mix(in srgb, var(--accent) 20%, transparent)", color: "var(--text)", borderRadius: 4, padding: "3px 8px", fontSize: 10, fontFamily: "'DM Mono',monospace", maxWidth: 160 }}
-              >
-                <option value="all">To (all)</option>
-                {monthsOrderedForTable.map((m) => (
-                  <option key={`tt-${m}`} value={m}>{m}</option>
-                ))}
-              </select>
+            <div
+              className="sla-period-month-range sla-period-month-range--inline"
+              title="Filter table rows by reporting month. Leave empty for no bound on that side."
+            >
+              <span className="sla-period-month-range__inline-lbl">Reported period</span>
+              <div className="sla-period-month-range__cell">
+                <label htmlFor="sla-table-month-from">From</label>
+                <input
+                  id="sla-table-month-from"
+                  type="month"
+                  min={monthsOrderedForTable[0]}
+                  max={monthsOrderedForTable[monthsOrderedForTable.length - 1]}
+                  value={tableMonthFrom === "all" ? "" : tableMonthFrom}
+                  onChange={onTableMonthFromChange}
+                />
+              </div>
+              <div className="sla-period-month-range__cell">
+                <label htmlFor="sla-table-month-to">To</label>
+                <input
+                  id="sla-table-month-to"
+                  type="month"
+                  min={monthsOrderedForTable[0]}
+                  max={monthsOrderedForTable[monthsOrderedForTable.length - 1]}
+                  value={tableMonthTo === "all" ? "" : tableMonthTo}
+                  onChange={onTableMonthToChange}
+                />
+              </div>
               {(tableMonthFrom !== "all" || tableMonthTo !== "all") && (
                 <button
                   type="button"
-                  className="platform-chip"
+                  className="sla-period-month-range__reset platform-chip"
                   style={{ fontSize: 10, cursor: "pointer" }}
-                  onClick={() => { setTableMonthFrom("all"); setTableMonthTo("all"); }}
+                  onClick={() => {
+                    setTableMonthFrom("all");
+                    setTableMonthTo("all");
+                  }}
                 >
                   Clear period
                 </button>
@@ -2383,6 +2939,96 @@ export function SLAPerformance() {
           </div>
         </div>
       </div>
+
+      <PlatformDrawer
+        open={kpiDrillOpen}
+        title={
+          kpiDrillKind === "met"
+            ? "Metrics — Met / Green"
+            : kpiDrillKind === "breached"
+              ? "Metrics — Not met / breach"
+              : kpiDrillKind === "not_reported"
+                ? "Metrics — Not reported"
+                : "Metrics — All (filtered)"
+        }
+        onClose={() => setKpiDrillOpen(false)}
+        width={560}
+      >
+        <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
+          {kpiDrillRows.length} row{kpiDrillRows.length === 1 ? "" : "s"} (KPI portfolio slice: Advanced filters + overview
+          health / zone picks; the table may narrow further with search / status / month). Use{" "}
+          <strong>Export → CSV</strong> for a full extract.
+        </p>
+        <div className="platform-table-wrap" style={{ maxHeight: "min(480px, 65vh)", overflow: "auto" }}>
+          <table className="platform-table" style={{ fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Metric</th>
+                <th>Status</th>
+                <th>Region</th>
+              </tr>
+            </thead>
+            <tbody>
+              {kpiDrillRows.slice(0, 200).map((r: any) => (
+                <tr key={r.id}>
+                  <td>{r.account_name}</td>
+                  <td>{r.metric_label}</td>
+                  <td>
+                    <StatusTag status={statusTagFromRaw(r.status)} />
+                  </td>
+                  <td style={{ color: "var(--text-subtle)" }}>{r.region ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {kpiDrillRows.length > 200 ? (
+            <p style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 8 }}>Showing first 200 — narrow filters or export CSV.</p>
+          ) : null}
+        </div>
+      </PlatformDrawer>
+
+      <PlatformDrawer
+        open={Boolean(bifurDrillKey)}
+        title={
+          bifurDrillKey === "contractual"
+            ? "Bifurcation — Contractual SLA"
+            : bifurDrillKey === "internal"
+              ? "Bifurcation — Internal KPI"
+              : bifurDrillKey === "penalty"
+                ? "Bifurcation — Penalty"
+                : bifurDrillKey === "non_penalty"
+                  ? "Bifurcation — Non-penalty"
+                  : "Bifurcation"
+        }
+        onClose={() => setBifurDrillKey(null)}
+        width={560}
+      >
+        <div className="platform-table-wrap" style={{ maxHeight: "min(480px, 65vh)", overflow: "auto" }}>
+          <table className="platform-table" style={{ fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Metric</th>
+                <th>Nature</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bifurDrillRows.slice(0, 200).map((r: any) => (
+                <tr key={r.id}>
+                  <td>{r.account_name}</td>
+                  <td>{r.metric_label}</td>
+                  <td style={{ color: "var(--text-subtle)" }}>{r.metric_nature ?? "—"}</td>
+                  <td>
+                    <StatusTag status={statusTagFromRaw(r.status)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </PlatformDrawer>
 
       <PlatformDrawer open={Boolean(metric)} title="SLA Metric Drilldown" onClose={() => setMetric(null)}>
         {metric && (
