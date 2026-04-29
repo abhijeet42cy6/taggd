@@ -18,6 +18,10 @@ PUBLIC_PATHS = frozenset(
         "/",
         "/auth/login",
         "/favicon.ico",
+        # Composio OAuth return URL opens in a popup without Bearer token.
+        "/integrations/composio/callback",
+        # Composio webhook is signed with shared secret, not JWT auth.
+        "/integrations/composio/webhook",
     }
 )
 
