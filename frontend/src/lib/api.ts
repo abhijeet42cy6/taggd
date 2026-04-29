@@ -966,6 +966,23 @@ export async function downloadCandidateCvFile(candidateId: number, filename?: st
   window.URL.revokeObjectURL(url);
 }
 
+/** POST /sla/insights/generate — Gemini flash; requires server GEMINI_API_KEY. */
+export type SlaInsightLlm = {
+  title: string;
+  description: string;
+  tone?: "info" | "success" | "warn";
+};
+
+export async function generateSlaInsights(payload: Record<string, unknown>): Promise<SlaInsightLlm[]> {
+  const { data } = await api.post<{ insights: SlaInsightLlm[] }>("/sla/insights/generate", { payload });
+  const list = Array.isArray(data?.insights) ? data.insights : [];
+  return list.map((i) => ({
+    title: String(i.title ?? "").trim(),
+    description: String(i.description ?? "").trim(),
+    tone: i.tone === "success" || i.tone === "warn" ? i.tone : "info",
+  }));
+}
+
 export type RecordsPage = {
   records: RecordRow[];
   total: number;
@@ -2254,6 +2271,16 @@ export const revenueLeakageApi = {
 
 /** CEO board deck JSON — Gemini applies a natural-language instruction (server needs GEMINI_API_KEY). */
 export const ceoDeckAiApi = {
-  edit: (body: { current_json: string; instruction: string }) =>
-    api.post<{ deck_json: string }>("/ceo-deck/ai-edit", body).then((r) => r.data),
+  edit: (body: {
+    current_json: string;
+    instruction: string;
+    /** When set, backend asks the model for a JSON fragment only at these paths (smaller output). */
+    focus_paths?: string[] | null;
+  }) =>
+    api
+      .post<{ deck_json: string }>("/ceo-deck/ai-edit", body, {
+        /** Whole-deck JSON + JSON-mode generation often exceeds the default 120s client cap. */
+        timeout: 360_000,
+      })
+      .then((r) => r.data),
 };

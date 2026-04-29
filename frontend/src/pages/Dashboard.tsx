@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
+import { cn, formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { queries, type GlobalMonitor, type GlobalStats, type Project, type RequisitionKpis } from "@/lib/api";
 import { buildClientRiskRadarRows, worstDomainName, type ClientRiskRadarRow } from "@/lib/executive-risk-radar";
 import { financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
@@ -33,6 +33,7 @@ import {
 } from "@/lib/dashboard-aggregates";
 import { ExecutiveHeroCard as HeroCard, QuarterBand } from "@/components/platform/ExecutiveFinanceHero";
 import "@/styles/exec-dashboard.css";
+import "@/styles/new-contract-panel.css";
 
 function fyShortLabel(start: number): string {
   return `FY${String(start).slice(2)}–${String(start + 1).slice(2)}`;
@@ -126,6 +127,7 @@ export const Dashboard = () => {
   const [loadingCore, setLoadingCore] = useState(true);
   const [coreError, setCoreError] = useState<string | null>(null);
   const [drawerClient, setDrawerClient] = useState<string | null>(null);
+  const [clientSheetTab, setClientSheetTab] = useState(0);
   const [heatmapFullOpen, setHeatmapFullOpen] = useState(false);
   const [filters, setFilters] = useState<DF>(DEFAULT_DASHBOARD_FILTERS);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
@@ -204,6 +206,10 @@ export const Dashboard = () => {
     })();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    setClientSheetTab(0);
+  }, [drawerClient]);
 
   const fyYears = useMemo(() => {
     const set = new Set<number>();
@@ -777,35 +783,162 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* ── Client drawer ── */}
-      <PlatformDrawer open={Boolean(drawerClient)} title={`◎ ${drawerClient}`} onClose={() => setDrawerClient(null)}>
+      {/* ── Client drawer (new-contract-sheet chrome) ── */}
+      <PlatformDrawer
+        open={Boolean(drawerClient)}
+        embeddedChrome
+        className="platform-drawer--ncp-embed"
+        title=""
+        onClose={() => setDrawerClient(null)}
+      >
         {selectedClient && (
-          <div style={{ display: "grid", gap: 12 }}>
-            <div className="drawer-section">
-              <div className="drawer-section-title">Account</div>
-              <div className="kv-row"><span className="kv-key">Client</span><span className="kv-val">{selectedClient.name}</span></div>
-              <div className="kv-row"><span className="kv-key">Positions</span><span className="kv-val">{selectedClient.positions}</span></div>
-              <div className="kv-row"><span className="kv-key">Revenue</span><span className="kv-val">{formatCurrency(selectedClient.revenue)}</span></div>
-              <div className="kv-row"><span className="kv-key">Composite score</span><span className="kv-val">{selectedClient.composite == null ? "—" : `${selectedClient.composite} / 100`}</span></div>
-              <div className="kv-row"><span className="kv-key">Risk level</span><span className="kv-val">
-                {selectedClient.risk == null ? "—" : (
-                <span className={`exec-risk-dot exec-risk-dot--${selectedClient.risk === "OK" ? "green" : selectedClient.risk === "MED" ? "amber" : "red"}`}>
-                  {selectedClient.risk}
-                </span>
-                )}
-              </span></div>
-              <div className="kv-row"><span className="kv-key">Weakest domain</span><span className="kv-val">{worstDomainName(selectedClient)}</span></div>
-              <div className="kv-row"><span className="kv-key">Domain scores (0–100)</span><span className="kv-val" style={{ fontSize: 11, lineHeight: 1.5 }}>
-                Rev {selectedClient.scores.revenue ?? "—"} · Fin {selectedClient.scores.finance ?? "—"} · Fcst {selectedClient.scores.forecast ?? "—"}
-                <br />
-                SLA {selectedClient.scores.sla ?? "—"} · WFM {selectedClient.scores.wfm ?? "—"}
-              </span></div>
-            </div>
-            <div className="drawer-section">
-              <div className="drawer-section-title">Hiring pipeline</div>
-              <div className="kv-row"><span className="kv-key">Closed</span><span className="kv-val">{selectedClient.closed}</span></div>
-              <div className="kv-row"><span className="kv-key">Active</span><span className="kv-val">{selectedClient.active}</span></div>
-              <div className="kv-row"><span className="kv-key">On hold</span><span className="kv-val">{selectedClient.on_hold}</span></div>
+          <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+            <div className="ncp-scroll min-h-0 flex-1">
+              <div className="ncp-page">
+                <div className="ncp-header">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="ncp-breadcrumb">
+                      <span>Dashboard</span>
+                      <span className="ncp-breadcrumb-sep">›</span>
+                      <span>Client</span>
+                    </div>
+                    <h1 className="ncp-h1">{selectedClient.name}</h1>
+                    <p className="ncp-subtitle" style={{ marginTop: 4 }}>
+                      Portfolio snapshot for this client — revenue, composite health score, domain mix, and hiring
+                      pipeline counts. Data respects your dashboard filters and fiscal context.
+                    </p>
+                  </div>
+                  <button type="button" className="ncp-close-btn" aria-label="Close" onClick={() => setDrawerClient(null)}>
+                    ✕
+                  </button>
+                </div>
+
+                <div className="ncp-steps" role="tablist" style={{ marginBottom: 18 }}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={clientSheetTab === 0}
+                    className={cn("ncp-step", clientSheetTab === 0 && "ncp-active")}
+                    onClick={() => setClientSheetTab(0)}
+                  >
+                    <span className="ncp-step-num">◇</span>
+                    Overview
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={clientSheetTab === 1}
+                    className={cn("ncp-step", clientSheetTab === 1 && "ncp-active")}
+                    onClick={() => setClientSheetTab(1)}
+                  >
+                    <span className="ncp-step-num">📊</span>
+                    Hiring pipeline
+                  </button>
+                </div>
+
+                <div className={cn("ncp-panel", clientSheetTab === 0 && "ncp-panel-active")}>
+                  <div className="ncp-section">
+                    <div className="ncp-section-header" style={{ cursor: "default", pointerEvents: "none" }}>
+                      <span className="ncp-section-icon ncp-orange">◇</span>
+                      <div>
+                        <div className="ncp-section-label">Account</div>
+                        <div className="ncp-section-desc">Commercial and health signals for this client.</div>
+                      </div>
+                    </div>
+                    <div className="ncp-section-body">
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Client</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ncp-text-primary)", padding: "6px 8px" }}>
+                          {selectedClient.name}
+                        </div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Positions</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)", padding: "6px 8px" }}>
+                          {selectedClient.positions}
+                        </div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Revenue</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>
+                          {formatCurrency(selectedClient.revenue)}
+                        </div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Composite score</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>
+                          {selectedClient.composite == null ? "—" : `${selectedClient.composite} / 100`}
+                        </div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Risk level</div>
+                        <div style={{ padding: "6px 8px" }}>
+                          {selectedClient.risk == null ? (
+                            <span style={{ fontSize: 13, color: "var(--ncp-text-muted)" }}>—</span>
+                          ) : (
+                            <span
+                              className={cn(
+                                "ncp-status-pill",
+                                selectedClient.risk === "OK" && "ncp-st-active",
+                                selectedClient.risk === "MED" && "ncp-st-pending",
+                                selectedClient.risk === "HIGH" && "ncp-st-risk-high",
+                              )}
+                              style={{ cursor: "default", pointerEvents: "none" }}
+                              role="status"
+                            >
+                              <span
+                                className={`exec-risk-dot exec-risk-dot--${
+                                  selectedClient.risk === "OK" ? "green" : selectedClient.risk === "MED" ? "amber" : "red"
+                                }`}
+                              />
+                              {selectedClient.risk}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Weakest domain</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>{worstDomainName(selectedClient)}</div>
+                      </div>
+                      <div className="ncp-prop-row ncp-prop-row--tall-value">
+                        <div className="ncp-prop-label">Domain scores (0–100)</div>
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: "var(--ncp-text-primary)", padding: "6px 8px" }}>
+                          Rev {selectedClient.scores.revenue ?? "—"} · Fin {selectedClient.scores.finance ?? "—"} · Fcst{" "}
+                          {selectedClient.scores.forecast ?? "—"}
+                          <br />
+                          SLA {selectedClient.scores.sla ?? "—"} · WFM {selectedClient.scores.wfm ?? "—"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className={cn("ncp-panel", clientSheetTab === 1 && "ncp-panel-active")}>
+                  <div className="ncp-section">
+                    <div className="ncp-section-header" style={{ cursor: "default", pointerEvents: "none" }}>
+                      <span className="ncp-section-icon ncp-blue">📊</span>
+                      <div>
+                        <div className="ncp-section-label">Hiring pipeline</div>
+                        <div className="ncp-section-desc">Requisition lifecycle counts for this client.</div>
+                      </div>
+                    </div>
+                    <div className="ncp-section-body">
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Closed</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>{selectedClient.closed}</div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Active</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>{selectedClient.active}</div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">On hold</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>{selectedClient.on_hold}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

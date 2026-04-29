@@ -1,0 +1,248 @@
+/* Board deck studio modal — floats below viewport chrome, 70/30 split */
+
+.deck-studio {
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.deck-studio__split {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(280px, 3fr);
+  min-height: 0;
+  flex: 1;
+}
+
+@media (max-width: 900px) {
+  .deck-studio__split {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(280px, 50vh) minmax(240px, 1fr);
+  }
+}
+
+.deck-studio__slides {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--sp-4, 16px);
+  gap: var(--sp-3, 12px);
+  background: color-mix(in srgb, var(--surface-muted) 88%, var(--surface-page));
+  border-radius: var(--radius-base) 0 0 var(--radius-base);
+  border-right: 1px solid var(--border);
+}
+
+.deck-studio__slideToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.deck-studio__pickBtn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--sans, inherit);
+  padding: 6px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast),
+    box-shadow var(--t-fast);
+}
+
+.deck-studio__pickBtn:hover {
+  border-color: var(--border2);
+  color: var(--text);
+}
+
+.deck-studio__pickBtn--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  background: var(--surface-page);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.deck-studio__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.deck-studio__navBtn {
+  font-size: 12px;
+  font-family: var(--mono);
+  padding: 6px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+
+.deck-studio__navBtn:hover:not(:disabled) {
+  border-color: var(--border2);
+  background: var(--surface-page);
+}
+
+.deck-studio__navBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.deck-studio__slideLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-studio__thumbstrip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0;
+  scrollbar-width: thin;
+}
+
+.deck-studio__thumbBtn {
+  flex: 0 0 auto;
+  max-width: 140px;
+  padding: 6px 10px;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border);
+  background: var(--surface-page);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition:
+    border-color var(--t-fast),
+    box-shadow var(--t-fast),
+    background var(--t-fast);
+}
+
+.deck-studio__thumbBtn:hover {
+  border-color: var(--border-focus);
+}
+
+.deck-studio__thumbBtn--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.deck-studio__viewport {
+  position: relative;
+  flex: 1;
+  min-height: 200px;
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border);
+  background: var(--surface-page);
+  overflow: hidden;
+}
+
+.deck-studio__viewportInner {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--sp-3, 12px);
+}
+
+.deck-studio__scaleWrap {
+  transform-origin: top center;
+  width: max-content;
+  max-width: 100%;
+}
+
+/* Single slide in viewer: override vertical stack spacing from ceo-board-slides */
+.deck-studio__scaleWrap .ceo-board-slides {
+  margin-top: 0;
+  gap: 0;
+}
+
+.deck-studio__placeholder {
+  align-self: center;
+  padding: var(--sp-6, 24px);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.deck-studio__agentWrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-radius: 0 var(--radius-base) var(--radius-base) 0;
+  overflow: hidden;
+}
+
+.deck-studio__targetsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.deck-studio__targetsLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.deck-studio__targetsClear {
+  font-size: 12px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.deck-studio__targetsClear:hover {
+  color: var(--text);
+}
+
+.deck-studio__chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deck-studio__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+
+.deck-studio__chip:hover {
+  border-color: var(--accent);
+  background: var(--surface-page);
+}
