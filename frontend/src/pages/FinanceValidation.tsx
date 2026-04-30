@@ -1,5 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Badge as TremorBadge,
+  Button as TremorButton,
+  Divider,
+  Flex,
+  Grid,
+  Select,
+  SelectItem,
+  Switch,
+  Tab,
+  TabGroup,
+  TabList,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  TextInput,
+  Title,
+} from "@tremor/react";
+import {
   queries,
   type FinanceBillingValidationEventRow,
   type FinanceBillingWorkflowDto,
@@ -7,25 +29,15 @@ import {
 } from "@/lib/api";
 import { canAccessFinanceValidation, useAuth } from "@/lib/auth";
 import { cn, formatDate, formatLargeCurrency } from "@/lib/utils";
-import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
+import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { FilterX, PanelRightOpen } from "lucide-react";
+import { FilterX, PanelRightOpen, Search } from "lucide-react";
 import "@/styles/new-contract-panel.css";
 
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
-
-const selectFilterStyle: React.CSSProperties = {
-  padding: "6px 10px",
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--bg2)",
-  color: "var(--text)",
-  fontSize: 11,
-  fontFamily: "'DM Mono',monospace",
-};
 
 function rowMatchesFvQueueTableFilters(
   r: RevenueBillingWithWorkflow,
@@ -70,25 +82,18 @@ function formatWorkflowLabel(raw: string | null | undefined): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function QueueWorkflowCell({ row }: { row: RevenueBillingWithWorkflow }) {
-  const raw = (row.workflow?.validation_status || "draft").toLowerCase();
-  const label = formatWorkflowLabel(row.workflow?.validation_status || "draft");
-  if (raw === "fully_approved") {
-    return <span className="platform-badge green">{label}</span>;
-  }
-  if (raw === "rejected") {
-    return <span className="platform-badge red">{label}</span>;
-  }
-  if (raw === "submitted" || raw === "under_review") {
-    return <span className="platform-badge blue">{label}</span>;
-  }
-  if (raw === "cfo_pending") {
-    return <span className="platform-badge teal">{label}</span>;
-  }
-  if (raw === "disputed") {
-    return <span className="platform-badge amber">{label}</span>;
-  }
-  return <span className="platform-badge grey">{label}</span>;
+function fvWorkflowTremorBadge(raw: string | null | undefined): {
+  label: string;
+  color: "emerald" | "rose" | "sky" | "violet" | "amber" | "slate";
+} {
+  const s = (raw || "draft").toLowerCase();
+  const label = formatWorkflowLabel(raw);
+  if (s === "fully_approved") return { label, color: "emerald" };
+  if (s === "rejected") return { label, color: "rose" };
+  if (s === "submitted" || s === "under_review") return { label, color: "sky" };
+  if (s === "cfo_pending") return { label, color: "violet" };
+  if (s === "disputed") return { label, color: "amber" };
+  return { label, color: "slate" };
 }
 
 /** Server `status` query param — one chip maps to one value (no backend change). */
@@ -359,6 +364,11 @@ export function FinanceValidation() {
   const tableFiltersActive =
     tableSearch.trim() !== "" || tableFy !== "all" || tablePm !== "all" || tableInvoice !== "all";
 
+  const workflowTabIndex = useMemo(() => {
+    const i = STATUS_CHIPS.findIndex((c) => c.value === status);
+    return i >= 0 ? i : 0;
+  }, [status]);
+
   function clearTableFilters() {
     setTableSearch("");
     setTableFy("all");
@@ -368,276 +378,298 @@ export function FinanceValidation() {
 
   if (!allowed) {
     return (
-      <div className="space-y-4 pb-16">
-        <PageHeader
-          title="Finance validation"
-          subtitle="Invoice lifecycle, approvals, and collections governance."
-        />
-        <PlatformSection title="Access">
-          <p className="text-sm text-muted-foreground font-mono">
-            This screen is not in your navigation allow-list. Operations and client portal users need the{" "}
-            <strong>finance_validation</strong> vertical in <strong>Users &amp; access</strong>. Other roles use role-based
-            routing; recruiters do not have this module.
-          </p>
-        </PlatformSection>
+      <div className="finance-validation-tremor space-y-7 pb-16 pt-2">
+        <div className="min-w-0">
+          <Title className="text-tremor-content-strong">Finance validation</Title>
+          <Text className="mt-1 block text-sm font-medium text-tremor-content-emphasis">
+            Invoice lifecycle, approvals, and collections governance.
+          </Text>
+        </div>
+        <TremorDashboardSection tag="Access" title="Access restricted" noPad>
+          <div className="border-t border-tremor-border bg-white px-6 py-6">
+            <Text className="text-sm leading-relaxed text-tremor-content-emphasis">
+              This screen is not in your navigation allow-list. Operations and client portal users need the{" "}
+              <span className="font-semibold text-tremor-content-strong">finance_validation</span> vertical in{" "}
+              <span className="font-semibold text-tremor-content-strong">Users &amp; access</span>. Other roles use role-based
+              routing; recruiters do not have this module.
+            </Text>
+          </div>
+        </TremorDashboardSection>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 pb-16">
-      <PageHeader
-        title="Finance validation"
-        subtitle="Queue for TAGGD billing rows — submit from Billing, then review, junior-validate, and CFO-approve when over threshold."
-      />
+    <div className="finance-validation-tremor space-y-7 pb-16 pt-2">
+      <div className="min-w-0">
+        <Title className="text-tremor-content-strong">Finance validation</Title>
+        <Text className="mt-1 block text-sm font-medium text-tremor-content-emphasis">
+          Queue for TAGGD billing rows — submit from Billing, then review, junior-validate, and CFO-approve when over threshold.
+        </Text>
+      </div>
 
-      <PlatformSection title="Filters" action="Refresh" onAction={() => void load()}>
-        <div className="flex flex-col gap-4">
+      <TremorDashboardSection tag="Filters" title="Filters" action="Refresh" onAction={() => void load()} noPad>
+        <div className="space-y-5 border-t border-tremor-border bg-white px-6 py-5">
           <div>
-            <p className="text-[11px] font-medium text-muted-foreground mb-2">Workflow status</p>
-            <div className="flex flex-wrap gap-1.5">
-              {STATUS_CHIPS.map(({ value: v, label }) => {
-                const on = status === v;
-                return (
-                  <Button
-                    key={v || "all"}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-pressed={on}
-                    className={cn(
-                      "h-8 rounded-full border px-3 text-xs font-medium transition-colors",
-                      on
-                        ? "border-primary/45 bg-primary/10 text-foreground shadow-sm"
-                        : "border-border/80 bg-background text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-                    )}
-                    onClick={() => setStatus(v)}
-                  >
-                    {label}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-          <div className="flex flex-col gap-3 border-t border-border/60 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                role="switch"
-                aria-checked={mine}
-                className={cn(
-                  "h-8 rounded-full border px-3 text-xs font-medium",
-                  mine
-                    ? "border-primary/45 bg-primary/10 text-foreground"
-                    : "border-border/80 bg-background text-muted-foreground hover:bg-muted/40",
-                )}
-                onClick={() => setMine((x) => !x)}
-              >
-                Assigned to me
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                role="switch"
-                aria-checked={overdueOnly}
-                className={cn(
-                  "h-8 rounded-full border px-3 text-xs font-medium max-w-full sm:max-w-[min(100%,22rem)]",
-                  overdueOnly
-                    ? "border-amber-500/40 bg-amber-500/10 text-foreground"
-                    : "border-border/80 bg-background text-muted-foreground hover:bg-muted/40",
-                )}
-                onClick={() => setOverdueOnly((x) => !x)}
-                title="Due date passed and not fully approved"
-              >
-                <span className="hidden sm:inline">Overdue — due passed, not approved</span>
-                <span className="sm:hidden">Overdue</span>
-              </Button>
-            </div>
-            <span className="text-xs tabular-nums text-muted-foreground sm:text-right">
-              {total} row{total === 1 ? "" : "s"}
-            </span>
-          </div>
-        </div>
-        {err && !drawerOpen ? <div className="text-xs text-destructive font-mono mt-3">{err}</div> : null}
-      </PlatformSection>
-
-      <PlatformSection title="Queue" action="Refresh" onAction={() => void load()}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
-          <input
-            className="platform-search"
-            placeholder="Search ID, account, PM, invoice, FY, PRJ…"
-            value={tableSearch}
-            onChange={(e) => setTableSearch(e.target.value)}
-            style={{ flex: "1 1 220px", maxWidth: 400, minWidth: 180 }}
-          />
-          <select value={tableFy} onChange={(e) => setTableFy(e.target.value)} style={{ ...selectFilterStyle, minWidth: 140 }}>
-            <option value="all">All years</option>
-            {hasEmptyFy ? (
-              <option value={FY_NONE}>No FY set</option>
-            ) : null}
-            {distinctFiscalYears.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-          <select value={tablePm} onChange={(e) => setTablePm(e.target.value)} style={{ ...selectFilterStyle, minWidth: 160 }}>
-            <option value="all">All PMs</option>
-            {hasEmptyPm ? (
-              <option value={PM_NONE}>No PM set</option>
-            ) : null}
-            {distinctPMs.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={tableInvoice}
-            onChange={(e) => setTableInvoice(e.target.value as "all" | "has" | "none")}
-            style={{ ...selectFilterStyle, minWidth: 130 }}
-          >
-            <option value="all">All invoices</option>
-            <option value="has">Has invoice #</option>
-            <option value="none">No invoice</option>
-          </select>
-          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginLeft: "auto" }}>
-            {tableFiltersActive ? `${filteredRows.length} of ${rows.length} shown` : `${rows.length} loaded`}
-            {total > rows.length ? ` · ${total} total` : ""}
-          </span>
-          {tableFiltersActive ? (
-            <button
-              type="button"
-              className="platform-dialog__btn"
-              style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", display: "inline-flex", alignItems: "center", gap: 6 }}
-              onClick={clearTableFilters}
+            <Text className="mb-3 text-xs font-semibold uppercase tracking-wide text-orange-600">Workflow status</Text>
+            <TabGroup
+              index={workflowTabIndex}
+              onIndexChange={(i) => {
+                const chip = STATUS_CHIPS[i];
+                if (chip) setStatus(chip.value);
+              }}
             >
-              <FilterX className="h-3 w-3" />
-              Clear filters
-            </button>
+              <TabList variant="line" color="orange" className="overflow-x-auto [&::-webkit-scrollbar]:h-0 [&::-webkit-scrollbar]:w-0">
+                {STATUS_CHIPS.map(({ value: v, label }) => (
+                  <Tab key={v || "all"}>{label}</Tab>
+                ))}
+              </TabList>
+            </TabGroup>
+            <Text className="mt-2 text-xs text-tremor-content-subtle">
+              Loads billing rows in this lifecycle stage from the server — use Refresh after switching.
+            </Text>
+          </div>
+
+          <Divider />
+
+          <Grid numItems={1} numItemsMd={2} className="gap-4">
+            <Flex
+              justifyContent="between"
+              alignItems="center"
+              className="rounded-tremor-default border border-tremor-border bg-tremor-background-muted px-4 py-3 dark:bg-dark-tremor-background-muted"
+            >
+              <label htmlFor="fv-filter-mine" className="text-sm font-medium text-tremor-content-emphasis">
+                Assigned to me
+              </label>
+              <Switch id="fv-filter-mine" checked={mine} onChange={(next) => setMine(next)} color="orange" />
+            </Flex>
+            <Flex
+              justifyContent="between"
+              alignItems="center"
+              className="rounded-tremor-default border border-tremor-border bg-tremor-background-muted px-4 py-3 dark:bg-dark-tremor-background-muted"
+            >
+              <label htmlFor="fv-filter-overdue" className="min-w-0 flex-1 pr-3 text-sm font-medium text-tremor-content-emphasis">
+                <span className="hidden sm:inline">Overdue — due passed, not approved</span>
+                <span className="sm:hidden">Overdue only</span>
+              </label>
+              <Switch
+                id="fv-filter-overdue"
+                checked={overdueOnly}
+                onChange={(next) => setOverdueOnly(next)}
+                color="amber"
+                tooltip="Due date passed and not fully approved"
+              />
+            </Flex>
+          </Grid>
+
+          <Flex justifyContent="end" alignItems="center">
+            <Text className="text-xs tabular-nums text-tremor-content-subtle">
+              {total} row{total === 1 ? "" : "s"} matching server filters
+            </Text>
+          </Flex>
+
+          {err && !drawerOpen ? (
+            <Text className="text-xs font-medium text-rose-600 dark:text-rose-400">{err}</Text>
           ) : null}
         </div>
+      </TremorDashboardSection>
 
-        <div className="platform-table-wrap" style={{ overflowX: "auto" }}>
-          <table className="platform-table" style={{ minWidth: 980 }}>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Project</th>
-                <th>Update</th>
-                <th>FY</th>
-                <th>PM</th>
-                <th style={{ textAlign: "right" }}>Net rev</th>
-                <th style={{ textAlign: "right" }}>MMF</th>
-                <th>Invoice</th>
-                <th>Due</th>
-                <th>Workflow</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && (
-                <tr>
-                  <td colSpan={11} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
-                    Loading…
-                  </td>
-                </tr>
-              )}
-              {!loading && rows.length === 0 && (
-                <tr>
-                  <td colSpan={11} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
-                    No rows match the filters above. Try another workflow status, assignment, or overdue toggle, then refresh.
-                  </td>
-                </tr>
-              )}
-              {!loading && rows.length > 0 && filteredRows.length === 0 && (
-                <tr>
-                  <td colSpan={11} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
-                    No rows match these table filters.{" "}
-                    <button
-                      type="button"
-                      className="text-primary underline-offset-2 hover:underline text-xs bg-transparent border-0 cursor-pointer p-0 font-medium"
-                      onClick={clearTableFilters}
-                    >
-                      Clear filters
-                    </button>
-                  </td>
-                </tr>
-              )}
-              {!loading &&
-                filteredRows.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="hover:bg-muted/20 cursor-pointer"
-                    onClick={() => void openRow(r.id)}
-                  >
-                    <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>{r.id}</td>
-                    <td style={{ maxWidth: 200 }}>
-                      <div style={{ fontWeight: 600, fontSize: 11 }}>{r.account_name || "—"}</div>
-                      <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
-                        PRJ-{r.project_id}
-                      </div>
-                    </td>
-                    <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{r.update_date?.slice(0, 10) || "—"}</td>
-                    <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{r.fiscal_year_label || "—"}</td>
-                    <td
-                      style={{
-                        fontSize: 10,
-                        color: "var(--text-muted)",
-                        maxWidth: 120,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                      title={r.project_manager || ""}
-                    >
-                      {r.project_manager || "—"}
-                    </td>
-                    <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, textAlign: "right" }}>
-                      {r.net_revenue_inr != null ? formatLargeCurrency(r.net_revenue_inr) : "—"}
-                    </td>
-                    <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, textAlign: "right" }}>
-                      {r.mmf_inr != null ? formatLargeCurrency(r.mmf_inr) : "—"}
-                    </td>
-                    <td
-                      style={{
-                        fontFamily: "'DM Mono',monospace",
-                        fontSize: 10,
-                        maxWidth: 120,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        color: r.invoice_number ? "var(--accent)" : "var(--text-muted)",
-                      }}
-                      title={r.invoice_number || ""}
-                    >
-                      {r.invoice_number || "—"}
-                    </td>
-                    <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>{r.payment_due_date?.slice(0, 10) || "—"}</td>
-                    <td>
-                      <QueueWorkflowCell row={r} />
-                    </td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 gap-1 text-[10px]"
-                        onClick={() => void openRow(r.id)}
-                        title="Open validation drawer"
-                      >
-                        <PanelRightOpen className="h-3.5 w-3.5" />
-                        Open
-                      </Button>
-                    </td>
-                  </tr>
+      <TremorDashboardSection
+        tag="Queue"
+        title="Queue"
+        action="Refresh"
+        onAction={() => void load()}
+        noPad
+        toolbar={
+          <Grid numItems={1} numItemsSm={2} numItemsLg={6} className="items-end gap-3">
+            <div className="lg:col-span-2">
+              <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">Search</Text>
+              <TextInput
+                icon={Search}
+                placeholder="Search ID, account, PM, invoice, FY, PRJ…"
+                value={tableSearch}
+                onValueChange={setTableSearch}
+              />
+            </div>
+            <div>
+              <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">Year</Text>
+              <Select value={tableFy} onValueChange={setTableFy}>
+                <SelectItem value="all">All years</SelectItem>
+                {hasEmptyFy ? <SelectItem value={FY_NONE}>No FY set</SelectItem> : null}
+                {distinctFiscalYears.map((y) => (
+                  <SelectItem key={y} value={y}>
+                    {y}
+                  </SelectItem>
                 ))}
-            </tbody>
-          </table>
+              </Select>
+            </div>
+            <div>
+              <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">PM</Text>
+              <Select value={tablePm} onValueChange={setTablePm}>
+                <SelectItem value="all">All PMs</SelectItem>
+                {hasEmptyPm ? <SelectItem value={PM_NONE}>No PM set</SelectItem> : null}
+                {distinctPMs.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">Invoice</Text>
+              <Select
+                value={tableInvoice}
+                onValueChange={(v) => setTableInvoice(v as "all" | "has" | "none")}
+              >
+                <SelectItem value="all">All invoices</SelectItem>
+                <SelectItem value="has">Has invoice #</SelectItem>
+                <SelectItem value="none">No invoice</SelectItem>
+              </Select>
+            </div>
+            <Flex justifyContent="end" alignItems="end" className="flex-col gap-2 sm:flex-row sm:items-end lg:flex-col lg:items-end">
+              <Text className="text-right text-xs tabular-nums text-tremor-content-subtle">
+                {tableFiltersActive ? `${filteredRows.length} of ${rows.length} shown` : `${rows.length} loaded`}
+                {total > rows.length ? ` · ${total} total` : ""}
+              </Text>
+              {tableFiltersActive ? (
+                <TremorButton
+                  type="button"
+                  variant="light"
+                  color="orange"
+                  size="xs"
+                  icon={FilterX}
+                  onClick={clearTableFilters}
+                >
+                  Clear filters
+                </TremorButton>
+              ) : null}
+            </Flex>
+          </Grid>
+        }
+      >
+        <div className="overflow-x-auto border-t border-tremor-border bg-white px-2 pb-4 pt-2">
+          <Table className="min-w-[980px]">
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>ID</TableHeaderCell>
+                <TableHeaderCell>Project</TableHeaderCell>
+                <TableHeaderCell>Update</TableHeaderCell>
+                <TableHeaderCell>FY</TableHeaderCell>
+                <TableHeaderCell>PM</TableHeaderCell>
+                <TableHeaderCell className="text-right">Net rev</TableHeaderCell>
+                <TableHeaderCell className="text-right">MMF</TableHeaderCell>
+                <TableHeaderCell>Invoice</TableHeaderCell>
+                <TableHeaderCell>Due</TableHeaderCell>
+                <TableHeaderCell>Workflow</TableHeaderCell>
+                <TableHeaderCell className="text-right">Actions</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={11}>
+                    <Text className="block py-10 text-center text-tremor-content-subtle">Loading…</Text>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {!loading && rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={11}>
+                    <Text className="block px-4 py-10 text-center text-tremor-content-subtle">
+                      No rows match the filters above. Try another workflow status, assignment, or overdue toggle, then refresh.
+                    </Text>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {!loading && rows.length > 0 && filteredRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={11}>
+                    <Text className="block px-4 py-10 text-center text-tremor-content-subtle">
+                      No rows match these table filters.{" "}
+                      <button
+                        type="button"
+                        className="text-sm font-semibold text-orange-600 underline-offset-2 hover:underline dark:text-orange-400"
+                        onClick={clearTableFilters}
+                      >
+                        Clear filters
+                      </button>
+                    </Text>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {!loading &&
+                filteredRows.map((r) => {
+                  const wfBadge = fvWorkflowTremorBadge(r.workflow?.validation_status);
+                  return (
+                    <TableRow
+                      key={r.id}
+                      className="cursor-pointer hover:bg-tremor-background-muted dark:hover:bg-dark-tremor-background-muted"
+                      onClick={() => void openRow(r.id)}
+                    >
+                      <TableCell className="tabular-nums text-xs font-medium text-orange-700 dark:text-orange-400">
+                        {r.id}
+                      </TableCell>
+                      <TableCell className="max-w-[200px]">
+                        <Text className="block text-xs font-semibold text-tremor-content-strong">{r.account_name || "—"}</Text>
+                        <Text className="mt-0.5 block text-[10px] tabular-nums text-tremor-content-subtle">
+                          PRJ-{r.project_id}
+                        </Text>
+                      </TableCell>
+                      <TableCell className="tabular-nums text-xs text-tremor-content-emphasis">
+                        {r.update_date?.slice(0, 10) || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-tremor-content-subtle">{r.fiscal_year_label || "—"}</TableCell>
+                      <TableCell
+                        className="max-w-[120px] truncate text-xs text-tremor-content-subtle"
+                        title={r.project_manager || ""}
+                      >
+                        {r.project_manager || "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-xs text-tremor-content-strong">
+                        {r.net_revenue_inr != null ? formatLargeCurrency(r.net_revenue_inr) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-xs text-tremor-content-strong">
+                        {r.mmf_inr != null ? formatLargeCurrency(r.mmf_inr) : "—"}
+                      </TableCell>
+                      <TableCell
+                        className={`max-w-[120px] truncate text-xs tabular-nums ${r.invoice_number ? "text-orange-700 dark:text-orange-400" : "text-tremor-content-subtle"}`}
+                        title={r.invoice_number || ""}
+                      >
+                        {r.invoice_number || "—"}
+                      </TableCell>
+                      <TableCell className="tabular-nums text-xs text-tremor-content-emphasis">
+                        {r.payment_due_date?.slice(0, 10) || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <TremorBadge color={wfBadge.color} size="sm">
+                          {wfBadge.label}
+                        </TremorBadge>
+                      </TableCell>
+                      <TableCell
+                        className="text-right whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <TremorButton
+                          type="button"
+                          variant="light"
+                          color="orange"
+                          size="xs"
+                          icon={PanelRightOpen}
+                          className="shrink-0"
+                          onClick={() => void openRow(r.id)}
+                          title="Open validation drawer"
+                        >
+                          Open
+                        </TremorButton>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+            </TableBody>
+          </Table>
         </div>
-      </PlatformSection>
+      </TremorDashboardSection>
 
       <Sheet
         open={drawerOpen}

@@ -13,6 +13,31 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { Search } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Card,
+  Flex,
+  Grid,
+  Metric,
+  Select,
+  SelectItem,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  TextInput,
+  Title,
+} from "@tremor/react";
+import { ProjectionsModelChartWindow } from "@/components/tremor-blocks/ProjectionsModelChartWindow";
+import {
+  ProjectionsLedgerScopeCard,
+  ProjectionsScenariosCard,
+} from "@/components/tremor-blocks/ProjectionsScopeSurface";
 import { queries, type Project } from "@/lib/api";
 import { financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import { DashboardFilters } from "@/components/platform/DashboardFilters";
@@ -38,8 +63,6 @@ import {
   lastMonthKeyFromSeries,
   type ChartTimeRange,
 } from "@/lib/projections-forecast";
-import "@/styles/projections-page.css";
-
 const HORIZONS = [3, 6, 9] as const;
 
 const CHART_TIME_RANGES: { value: ChartTimeRange; label: string; hint: string }[] = [
@@ -85,6 +108,13 @@ function ledgerScopeSummary(f: DF, fyStart: number): string {
   return bits.join(" · ");
 }
 
+function deltaTrendClass(v: number | null | undefined): string {
+  if (v == null) return "tabular-nums text-right";
+  if (v > 0) return "tabular-nums text-right font-semibold text-emerald-600 dark:text-emerald-400";
+  if (v < 0) return "tabular-nums text-right font-semibold text-rose-600 dark:text-rose-400";
+  return "tabular-nums text-right";
+}
+
 type ScenarioBlockProps = {
   title: string;
   hint: string;
@@ -116,63 +146,71 @@ function ScenarioProjectPicker({
   const sel = new Set(selectedIds);
 
   return (
-    <div className="pg-scenario">
-      <div className="pg-scenario__head">
-        <h3 className="pg-scenario__title">{title}</h3>
-        <p className="pg-scenario__hint">{hint}</p>
-        <input
-          type="search"
-          className="pg-scenario__search"
+    <Card className="overflow-hidden ring-1 ring-tremor-ring dark:ring-dark-tremor-ring">
+      <div className="border-b border-tremor-border px-3 py-2.5 dark:border-dark-tremor-border">
+        <Title className="text-sm font-semibold text-tremor-content-strong">{title}</Title>
+        <Text className="mt-0.5 text-xs text-tremor-content-subtle">{hint}</Text>
+        <TextInput
+          className="mt-2"
+          icon={Search}
           placeholder="Search project…"
           value={search}
-          onChange={(e) => onSearch(e.target.value)}
+          onValueChange={onSearch}
           aria-label="Filter project list"
         />
       </div>
-      <div className="pg-scenario__chips">
+      <div className="flex flex-wrap gap-1.5 border-b border-tremor-border px-3 py-2 dark:border-dark-tremor-border">
         {selectedIds.length > 0 ? (
           selectedIds.map((id) => {
             const p = projects.find((x) => x.id === id);
             if (!p) return null;
             return (
-              <button
+              <Button
                 key={id}
                 type="button"
-                className="pg-chip pg-chip--on"
+                size="xs"
+                variant="light"
+                color="orange"
+                className="max-w-full rounded-full"
                 onClick={() => onToggle(id)}
                 title="Remove from scenario"
               >
-                {projectLabel(p)}
-                <span className="pg-chip__x" aria-hidden>×</span>
-              </button>
+                <span className="truncate">{projectLabel(p)}</span>
+                <span className="ml-1 shrink-0 opacity-70" aria-hidden>
+                  ×
+                </span>
+              </Button>
             );
           })
         ) : (
-          <span className="pg-scenario__empty-pick">All accounts in the filter scope (full slice)</span>
+          <Text className="text-xs text-tremor-content-subtle">All accounts in the filter scope (full slice)</Text>
         )}
       </div>
-      <ul className="pg-project-list" role="listbox" aria-label={`${title} project list`}>
+      <div className="max-h-52 overflow-y-auto px-1.5 py-1.5" role="listbox" aria-label={`${title} project list`}>
         {filtered.map((p) => {
           const on = sel.has(p.id);
           return (
-            <li key={p.id}>
-              <label className="pg-project-row">
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => onToggle(p.id)}
-                />
-                <span className="pg-project-row__name">{projectLabel(p)}</span>
+            <label
+              key={p.id}
+              className="flex cursor-pointer items-start gap-2 rounded-tremor-default px-2 py-1.5 hover:bg-tremor-background-muted dark:hover:bg-dark-tremor-background-muted"
+            >
+              <input type="checkbox" checked={on} onChange={() => onToggle(p.id)} className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <Text className="block text-xs font-medium leading-snug text-tremor-content-strong">{projectLabel(p)}</Text>
                 {p.project_head ? (
-                  <span className="pg-project-row__meta" title="Project head">{p.project_head}</span>
+                  <Text className="mt-0.5 block text-[11px] leading-snug text-tremor-content-subtle" title="Project head">
+                    {p.project_head}
+                  </Text>
                 ) : null}
-              </label>
-            </li>
+              </span>
+            </label>
           );
         })}
-        {filtered.length === 0 && <li className="pg-project-list__empty">No projects match.</li>}
-      </ul>
-    </div>
+        {filtered.length === 0 ? (
+          <Text className="block py-4 text-center text-xs text-tremor-content-subtle">No projects match.</Text>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
@@ -333,159 +371,136 @@ export function Projections() {
   const canProjectB = monthlyB.length >= 4;
   const deltaRev = kpiA.m1 != null && kpiB.m1 != null ? kpiB.m1 - kpiA.m1 : null;
   const delta3 = compareOn && canProjectA && canProjectB ? kpiB.sum3 - kpiA.sum3 : null;
+  const deltaCm = kpiA.cm1 != null && kpiB.cm1 != null ? kpiB.cm1 - kpiA.cm1 : null;
+  const deltaColl = kpiA.coll1 != null && kpiB.coll1 != null ? kpiB.coll1 - kpiA.coll1 : null;
 
   const timeRangeLabel = CHART_TIME_RANGES.find((x) => x.value === chartTimeRange)?.label ?? chartTimeRange;
 
   return (
-    <div className="projections-page">
-      <header className="pg-hero">
-        <div className="pg-hero__top">
-          <div>
-            <div className="pg-hero__eyebrow">Finance · Planning</div>
-            <h1 className="pg-hero__title">Projections</h1>
-            <p className="pg-hero__lead">
-              What-if <strong>revenue, CM, and collections</strong> from ledger history — for planning, not a replacement for
-              official budget. Set <strong>chart history</strong> and <strong>forward horizon</strong> first, then scope the
-              ledger; optionally club projects in scenarios.
-            </p>
-          </div>
-          <div className="pg-hero__meta" aria-label="Context">
-            {fyYears.length > 0 && <span className="pg-hero__chip">{fyShortLabel(selectedFyStart)}</span>}
-            {fyRowCount > 0 && (
-              <span className="pg-hero__chip pg-hero__chip--muted">
-                {fyRowCount} row{fyRowCount === 1 ? "" : "s"} in FY
-              </span>
-            )}
-            <span className="pg-hero__chip pg-hero__chip--muted">
-              {timeRangeLabel} + {monthsAhead}M
+    <div className="projections-tremor space-y-3 pb-6 md:space-y-4 md:pb-8">
+      <div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0 flex-1">
+            {/* Use span (not Tremor Text / <p>) so the eyebrow never collapses to width 0 in flex layouts */}
+            <span className="inline-flex max-w-full items-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-orange-600">
+              Finance&nbsp;·&nbsp;Planning
             </span>
+            <Title className="mt-0.5 text-2xl font-bold tracking-tight text-tremor-content-strong md:text-3xl">
+              Projections
+            </Title>
           </div>
+          <Flex className="shrink-0 flex-wrap gap-1.5 sm:justify-end sm:pt-0.5" aria-label="Context">
+            {fyYears.length > 0 ? (
+              <Badge color="orange" size="xs">
+                {fyShortLabel(selectedFyStart)}
+              </Badge>
+            ) : null}
+            {fyRowCount > 0 ? (
+              <Badge color="slate" size="xs">
+                {fyRowCount} row{fyRowCount === 1 ? "" : "s"} in FY
+              </Badge>
+            ) : null}
+            <Badge color="slate" size="xs">
+              {timeRangeLabel} + {monthsAhead}M
+            </Badge>
+          </Flex>
         </div>
-        <details className="pg-prose-details">
-          <summary className="pg-prose-details__summary">How time &amp; scope work</summary>
-          <div className="pg-prose-details__body">
-            <p>
-              <strong>History (6M–All)</strong> only changes the <em>plotted</em> past. The <strong>model</strong> still uses
-              every in-scope month to estimate trend and CM/cash ratios.
-            </p>
-            <p>
-              <strong>Ledger scope</strong> (FY, region, account) defines the universe. <strong>Scenarios</strong> can further
-              restrict to checked projects; empty = full portfolio in scope.
-            </p>
+        <Text className="mt-1.5 max-w-3xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
+          What-if <span className="font-semibold text-tremor-content-strong">revenue, CM, and collections</span> from ledger
+          history — for planning, not a replacement for official budget. Set{" "}
+          <span className="font-semibold">chart history</span> and <span className="font-semibold">forward horizon</span> first,
+          then scope the ledger; optionally club projects in scenarios.
+        </Text>
+        <details className="mt-2 rounded-tremor-default border border-tremor-border bg-tremor-background-subtle px-3 py-2 dark:border-dark-tremor-border dark:bg-dark-tremor-background-subtle">
+          <summary className="cursor-pointer text-xs font-semibold text-tremor-content-strong">
+            How time &amp; scope work
+          </summary>
+          <div className="mt-2 space-y-1.5 border-t border-tremor-border pt-2 text-xs leading-snug text-tremor-content-emphasis dark:border-dark-tremor-border md:text-sm md:leading-snug">
+            <Text>
+              <span className="font-semibold">History (6M–All)</span> only changes the plotted past. The{" "}
+              <span className="font-semibold">model</span> still uses every in-scope month to estimate trend and CM/cash
+              ratios.
+            </Text>
+            <Text>
+              <span className="font-semibold">Ledger scope</span> (FY, region, account) defines the universe.{" "}
+              <span className="font-semibold">Scenarios</span> can further restrict to checked projects; empty = full portfolio
+              in scope.
+            </Text>
           </div>
         </details>
-      </header>
+      </div>
 
-      {loadErr && (
-        <div className="projections-page__err" role="alert">{loadErr}</div>
-      )}
+      {loadErr ? (
+        <Card className="border-rose-200 bg-rose-50 ring-1 ring-rose-200 dark:border-rose-900/40 dark:bg-rose-950/30 dark:ring-rose-900/50">
+          <Text className="px-3 py-2 text-xs font-medium text-rose-800 dark:text-rose-200 md:text-sm" role="alert">
+            {loadErr}
+          </Text>
+        </Card>
+      ) : null}
 
       {loading ? (
-        <div className="projections-page__loading">Loading finance history…</div>
+        <Card>
+          <Flex className="min-h-[96px] items-center justify-center py-6">
+            <Text className="text-sm font-medium text-tremor-content-subtle">Loading finance history…</Text>
+          </Flex>
+        </Card>
       ) : (
         <>
-      <section className="pg-panel pg-panel--accent" aria-labelledby="pg-model-title">
-        <div className="pg-panel__head">
-          <h2 id="pg-model-title" className="pg-panel__title">Model &amp; chart window</h2>
-          <p className="pg-panel__desc">What you see on the x-axis. Engine uses full in-scope history for math.</p>
-        </div>
-        <div className="pg-toolbar__row pg-toolbar__row--flush">
-          <div className="pg-segment-wrap">
-            <span className="pg-segment-legend" id="chart-hist-label">History on chart</span>
-            <div className="pg-segment" role="group" aria-labelledby="chart-hist-label">
-              {CHART_TIME_RANGES.map((r) => (
-                <button
-                  key={r.value}
-                  type="button"
-                  className={r.value === chartTimeRange ? "pg-segment__btn pg-segment__btn--active" : "pg-segment__btn"}
-                  onClick={() => setChartTimeRange(r.value)}
-                  title={r.hint}
-                  aria-pressed={r.value === chartTimeRange}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="pg-field">
-            <span className="pg-field__label">Forward horizon</span>
-            <select
-              className="pg-field__select"
-              value={monthsAhead}
-              onChange={(e) => setMonthsAhead(Number(e.target.value))}
-              aria-label="Months forward for model"
-            >
-              {HORIZONS.map((h) => (
-                <option key={h} value={h}>{h} months</option>
-              ))}
-            </select>
-          </label>
-          <label className="pg-field">
-            <span className="pg-field__label">Shortlist by head</span>
-            <select
-              className="pg-field__select"
-              value={projectHeadFilter}
-              onChange={(e) => {
-                setProjectHeadFilter(e.target.value);
-                setSearchA("");
-                setSearchB("");
-              }}
-            >
-              {projectHeadOptions.map((h) => (
-                <option key={h} value={h}>{h === "all" ? "All" : h}</option>
-              ))}
-            </select>
-          </label>
-          <div className="pg-toolbar__compare">
-            <label className="pg-compare-toggle">
-              <input type="checkbox" checked={compareOn} onChange={(e) => setCompareOn(e.target.checked)} />
-              <span>Compare A / B</span>
-            </label>
-          </div>
-        </div>
-      </section>
+          <ProjectionsModelChartWindow
+            titleId="pg-model-title"
+            chartTimeRange={chartTimeRange}
+            chartTimeRanges={CHART_TIME_RANGES}
+            onChartTimeRangeChange={setChartTimeRange}
+            monthsAhead={monthsAhead}
+            horizons={HORIZONS}
+            onMonthsAheadChange={setMonthsAhead}
+            projectHeadFilter={projectHeadFilter}
+            projectHeadOptions={projectHeadOptions}
+            onProjectHeadFilterChange={(v) => {
+              setProjectHeadFilter(v);
+              setSearchA("");
+              setSearchB("");
+            }}
+            compareOn={compareOn}
+            onCompareOnChange={setCompareOn}
+          />
 
-      <details className="pg-details">
-        <summary className="pg-details__summary">
-          <span className="pg-details__summary-title">Ledger &amp; portfolio scope</span>
-          <span className="pg-details__summary-hint">{ledgerScopeSummary(filters, selectedFyStart)}</span>
-        </summary>
-        <div className="pg-details__body">
-          <div className="projections-page__bar">
-            <DashboardFilters
-              value={filters}
-              onChange={setFilters}
-              projects={projects}
-              financeRows={financeRows}
-              fyYears={fyYears}
-              selectedFyStart={selectedFyStart}
-              onFyChange={setSelectedFyStart}
-            />
-          </div>
-          <p className="pg-filter-footnote">
-            Period/month here do <strong>not</strong> change the projection model (all in-scope months are used). They affect
-            account picklists. {fyRowCount > 0 && <span>· {fyRowCount} row{fyRowCount === 1 ? "" : "s"} in this FY</span>}
-          </p>
-        </div>
-      </details>
+          <ProjectionsLedgerScopeCard
+            summaryLine={ledgerScopeSummary(filters, selectedFyStart)}
+            filters={
+              <DashboardFilters
+                value={filters}
+                onChange={setFilters}
+                projects={projects}
+                financeRows={financeRows}
+                fyYears={fyYears}
+                selectedFyStart={selectedFyStart}
+                onFyChange={setSelectedFyStart}
+              />
+            }
+            footnote={
+              <Text className="text-[11px] leading-snug text-tremor-content-subtle md:text-xs">
+                Period/month here do <span className="font-semibold text-tremor-content-emphasis">not</span> change the
+                projection model (all in-scope months are used). They affect account picklists.
+                {fyRowCount > 0 ? (
+                  <span>
+                    {" "}
+                    · {fyRowCount} row{fyRowCount === 1 ? "" : "s"} in this FY
+                  </span>
+                ) : null}
+              </Text>
+            }
+          />
 
-      <div className="pg-scenario-wrap">
-        <button
-          type="button"
-          className="pg-scenario-toggle"
-          aria-expanded={scenariosOpen}
-          onClick={() => setScenariosOpen((o) => !o)}
-        >
-          <span className="pg-scenario-toggle__title">Scenarios</span>
-          <span className="pg-scenario-toggle__meta">
-            {projectIdsA.length + projectIdsB.length === 0
-              ? "Full portfolio in scope"
-              : `${projectIdsA.length + projectIdsB.length} project(s)${compareOn ? " · A/B" : " · A"}`}
-          </span>
-          <span className="pg-scenario-toggle__chev" aria-hidden>{scenariosOpen ? "▾" : "▸"}</span>
-        </button>
-        {scenariosOpen && (
-          <div className="pg-scenarios pg-scenarios--in-flow">
+          <ProjectionsScenariosCard
+            open={scenariosOpen}
+            onToggle={() => setScenariosOpen((o) => !o)}
+            summaryMeta={
+              projectIdsA.length + projectIdsB.length === 0
+                ? "Full portfolio in scope"
+                : `${projectIdsA.length + projectIdsB.length} project(s)${compareOn ? " · A/B" : " · A"}`
+            }
+          >
             <ScenarioProjectPicker
               title="Scenario A"
               hint="No selection = full slice. Check projects to club."
@@ -495,7 +510,7 @@ export function Projections() {
               search={searchA}
               onSearch={setSearchA}
             />
-            {compareOn && (
+            {compareOn ? (
               <ScenarioProjectPicker
                 title="Scenario B"
                 hint="e.g. club accounts to compare run-rate to A."
@@ -505,56 +520,64 @@ export function Projections() {
                 search={searchB}
                 onSearch={setSearchB}
               />
-            )}
-          </div>
-        )}
-      </div>
+            ) : null}
+          </ProjectionsScenariosCard>
 
-          {!canProjectA && (
-            <div className="projections-page__empty">
-              <p>
-                <strong>Scenario A:</strong> need at least 4 months of revenue actuals in this slice
+          {!canProjectA ? (
+            <Card decoration="left" decorationColor="amber" className="p-3">
+              <Text className="text-xs text-tremor-content-emphasis md:text-sm">
+                <span className="font-semibold text-tremor-content-strong">Scenario A:</span> need at least 4 months of revenue
+                actuals in this slice
                 {projectIdsA.length ? " for the selected project(s)" : ""}. Adjust filters or project pick.
-              </p>
-            </div>
-          )}
+              </Text>
+            </Card>
+          ) : null}
 
-          {canProjectA && !compareOn && (
+          {canProjectA && !compareOn ? (
             <>
-              <section className="pg-kpi-compare" aria-label="Key metrics — scenario A">
-                <div className="projections-kpi">
-                  <div className="projections-kpi__label">Next month · revenue (proj.)</div>
-                  <div className="projections-kpi__val">{kpiA.m1 != null ? formatLargeCurrency(kpiA.m1) : "—"}</div>
-                </div>
-                <div className="projections-kpi">
-                  <div className="projections-kpi__label">Implied CM</div>
-                  <div className="projections-kpi__val">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="Key metrics — scenario A">
+                <Card decoration="top" decorationColor="orange" className="p-3">
+                  <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600">Next month · revenue (proj.)</Text>
+                  <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
+                    {kpiA.m1 != null ? formatLargeCurrency(kpiA.m1) : "—"}
+                  </Metric>
+                </Card>
+                <Card decoration="top" decorationColor="teal" className="p-3">
+                  <Text className="text-[10px] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">Implied CM</Text>
+                  <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
                     {kpiA.cm1 != null ? formatLargeCurrency(kpiA.cm1) : "—"}
-                    {kpiA.cmPct != null && <span className="projections-kpi__sub"> · {formatPercent(kpiA.cmPct, 1)} of rev</span>}
+                  </Metric>
+                  {kpiA.cmPct != null ? (
+                    <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">{formatPercent(kpiA.cmPct, 1)} of rev</Text>
+                  ) : null}
+                </Card>
+                <Card decoration="top" decorationColor="blue" className="p-3">
+                  <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+                    Implied collections
+                  </Text>
+                  <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
+                    {kpiA.coll1 != null ? formatLargeCurrency(kpiA.coll1) : "—"}
+                  </Metric>
+                </Card>
+                <Card decoration="top" decorationColor="slate" className="p-3">
+                  <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
+                    Sum · forward {monthsAhead}M revenue (proj.)
+                  </Text>
+                  <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{formatLargeCurrency(kpiA.sum3)}</Metric>
+                </Card>
+              </div>
+
+              <Grid numItems={1} numItemsLg={2} className="gap-3">
+                <Card className="overflow-hidden ring-1 ring-tremor-ring dark:ring-dark-tremor-ring">
+                  <div className="border-b border-tremor-border px-3 py-2 dark:border-dark-tremor-border">
+                    <Title className="text-base font-semibold text-tremor-content-strong">Revenue</Title>
+                    <Text className="mt-0.5 text-xs text-tremor-content-subtle md:text-sm">
+                      ₹ Cr · <Badge size="xs" color="orange">History {timeRangeLabel}</Badge> + {monthsAhead}M projected. Solid =
+                      actual, dashed = model, thin = official ledger forecast when present.
+                    </Text>
                   </div>
-                </div>
-                <div className="projections-kpi">
-                  <div className="projections-kpi__label">Implied collections</div>
-                  <div className="projections-kpi__val">{kpiA.coll1 != null ? formatLargeCurrency(kpiA.coll1) : "—"}</div>
-                </div>
-                <div className="projections-kpi">
-                  <div className="projections-kpi__label">Sum · forward {monthsAhead}M revenue (proj.)</div>
-                  <div className="projections-kpi__val">{formatLargeCurrency(kpiA.sum3)}</div>
-                </div>
-              </section>
-              <div className="projections-page__grid">
-                <div className="projections-card projections-card--chart">
-                  <div className="projections-card__head">
-                    <div>
-                      <h2 className="projections-card__title">Revenue</h2>
-                      <p className="projections-card__sub">
-                        ₹ Cr · <span className="projections-card__tag">History {timeRangeLabel}</span> + {monthsAhead}M projected. Solid = actual, dashed
-                        = model, thin = official ledger forecast when present.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="projections-card__chart">
-                    <ResponsiveContainer width="100%" height={320}>
+                  <div className="h-[260px] w-full px-1.5 pb-2 pt-1 md:h-[280px]">
+                    <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart data={chartDataSingle} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
@@ -567,19 +590,18 @@ export function Projections() {
                       </ComposedChart>
                     </ResponsiveContainer>
                   </div>
-                </div>
-                <div className="projections-card projections-card--chart">
-                  <div className="projections-card__head">
-                    <div>
-                      <h2 className="projections-card__title">CM &amp; collections</h2>
-                      <p className="projections-card__sub">
-                        Trailing <strong>actual</strong> CM and cash in scope ({timeRangeLabel}) + <strong>implied</strong> path for the
-                        next {monthsAhead}M (ratio × projected revenue).
-                      </p>
-                    </div>
+                </Card>
+                <Card className="overflow-hidden ring-1 ring-tremor-ring dark:ring-dark-tremor-ring">
+                  <div className="border-b border-tremor-border px-3 py-2 dark:border-dark-tremor-border">
+                    <Title className="text-base font-semibold text-tremor-content-strong">CM &amp; collections</Title>
+                    <Text className="mt-0.5 text-xs text-tremor-content-subtle md:text-sm">
+                      Trailing <span className="font-semibold text-tremor-content-emphasis">actual</span> CM and cash in scope (
+                      {timeRangeLabel}) + <span className="font-semibold text-tremor-content-emphasis">implied</span> path for the
+                      next {monthsAhead}M (ratio × projected revenue).
+                    </Text>
                   </div>
-                  <div className="projections-card__chart">
-                    <ResponsiveContainer width="100%" height={280}>
+                  <div className="h-[220px] w-full px-1.5 pb-2 pt-1 md:h-[240px]">
+                    <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart data={cmCollA} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
@@ -591,76 +613,88 @@ export function Projections() {
                       </ComposedChart>
                     </ResponsiveContainer>
                   </div>
-                </div>
-              </div>
-              <p className="projections-page__method-note pg-note-inline"><strong>Scenario A run:</strong> {methodA}</p>
+                </Card>
+              </Grid>
+              <Card className="bg-tremor-background-muted p-3 dark:bg-dark-tremor-background-muted">
+                <Text className="text-xs text-tremor-content-emphasis md:text-sm">
+                  <span className="font-semibold text-tremor-content-strong">Scenario A run:</span> {methodA}
+                </Text>
+              </Card>
             </>
-          )}
+          ) : null}
 
-          {compareOn && canProjectA && canProjectB && (
+          {compareOn && canProjectA && canProjectB ? (
             <>
-              <section className="pg-compare-kpi" aria-label="Compare KPIs">
-                <h2 className="pg-compare-kpi__title">Comparison</h2>
-                <div className="pg-compare-table-wrap">
-                  <table className="pg-compare-table">
-                    <thead>
-                      <tr>
-                        <th>Metric</th>
-                        <th>Scenario A {projectIdsA.length ? `(${projectIdsA.length} project${projectIdsA.length > 1 ? "s" : ""})` : "(full slice)"}</th>
-                        <th>Scenario B {projectIdsB.length ? `(${projectIdsB.length} project${projectIdsB.length > 1 ? "s" : ""})` : "(full slice)"}</th>
-                        <th>Δ (B − A)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>Next month · revenue (proj.)</td>
-                        <td>{kpiA.m1 != null ? formatLargeCurrency(kpiA.m1) : "—"}</td>
-                        <td>{kpiB.m1 != null ? formatLargeCurrency(kpiB.m1) : "—"}</td>
-                        <td className={deltaRev != null && deltaRev > 0 ? "pg-compare-table__up" : deltaRev != null && deltaRev < 0 ? "pg-compare-table__down" : ""}>
-                          {deltaRev != null ? formatLargeCurrency(deltaRev) : "—"}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>Implied CM (next month)</td>
-                        <td>{kpiA.cm1 != null ? formatLargeCurrency(kpiA.cm1) : "—"}</td>
-                        <td>{kpiB.cm1 != null ? formatLargeCurrency(kpiB.cm1) : "—"}</td>
-                        <td>
-                          {kpiA.cm1 != null && kpiB.cm1 != null
-                            ? formatLargeCurrency(kpiB.cm1 - kpiA.cm1)
-                            : "—"}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>Implied collections (next month)</td>
-                        <td>{kpiA.coll1 != null ? formatLargeCurrency(kpiA.coll1) : "—"}</td>
-                        <td>{kpiB.coll1 != null ? formatLargeCurrency(kpiB.coll1) : "—"}</td>
-                        <td>
-                          {kpiA.coll1 != null && kpiB.coll1 != null
-                            ? formatLargeCurrency(kpiB.coll1 - kpiA.coll1)
-                            : "—"}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>Sum · forward {monthsAhead}M revenue (proj.)</td>
-                        <td>{formatLargeCurrency(kpiA.sum3)}</td>
-                        <td>{formatLargeCurrency(kpiB.sum3)}</td>
-                        <td className={delta3 != null && delta3 > 0 ? "pg-compare-table__up" : delta3 != null && delta3 < 0 ? "pg-compare-table__down" : ""}>
-                          {delta3 != null ? formatLargeCurrency(delta3) : "—"}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+              <section aria-label="Compare KPIs">
+              <Card className="overflow-hidden ring-1 ring-tremor-ring dark:ring-dark-tremor-ring">
+                <div className="border-b border-tremor-border px-3 py-2 dark:border-dark-tremor-border">
+                  <Title className="text-base font-semibold text-tremor-content-strong">Comparison</Title>
                 </div>
+                <div className="overflow-x-auto px-1.5 pb-2 pt-1">
+                  <Table className="min-w-[640px] text-xs md:text-sm">
+                    <TableHead>
+                      <TableRow>
+                        <TableHeaderCell>Metric</TableHeaderCell>
+                        <TableHeaderCell>
+                          Scenario A{" "}
+                          {projectIdsA.length
+                            ? `(${projectIdsA.length} project${projectIdsA.length > 1 ? "s" : ""})`
+                            : "(full slice)"}
+                        </TableHeaderCell>
+                        <TableHeaderCell>
+                          Scenario B{" "}
+                          {projectIdsB.length
+                            ? `(${projectIdsB.length} project${projectIdsB.length > 1 ? "s" : ""})`
+                            : "(full slice)"}
+                        </TableHeaderCell>
+                        <TableHeaderCell className="text-right">Δ (B − A)</TableHeaderCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell>Next month · revenue (proj.)</TableCell>
+                        <TableCell className="tabular-nums">{kpiA.m1 != null ? formatLargeCurrency(kpiA.m1) : "—"}</TableCell>
+                        <TableCell className="tabular-nums">{kpiB.m1 != null ? formatLargeCurrency(kpiB.m1) : "—"}</TableCell>
+                        <TableCell className={deltaTrendClass(deltaRev)}>
+                          {deltaRev != null ? formatLargeCurrency(deltaRev) : "—"}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Implied CM (next month)</TableCell>
+                        <TableCell className="tabular-nums">{kpiA.cm1 != null ? formatLargeCurrency(kpiA.cm1) : "—"}</TableCell>
+                        <TableCell className="tabular-nums">{kpiB.cm1 != null ? formatLargeCurrency(kpiB.cm1) : "—"}</TableCell>
+                        <TableCell className={deltaTrendClass(deltaCm)}>{deltaCm != null ? formatLargeCurrency(deltaCm) : "—"}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Implied collections (next month)</TableCell>
+                        <TableCell className="tabular-nums">{kpiA.coll1 != null ? formatLargeCurrency(kpiA.coll1) : "—"}</TableCell>
+                        <TableCell className="tabular-nums">{kpiB.coll1 != null ? formatLargeCurrency(kpiB.coll1) : "—"}</TableCell>
+                        <TableCell className={deltaTrendClass(deltaColl)}>
+                          {deltaColl != null ? formatLargeCurrency(deltaColl) : "—"}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Sum · forward {monthsAhead}M revenue (proj.)</TableCell>
+                        <TableCell className="tabular-nums">{formatLargeCurrency(kpiA.sum3)}</TableCell>
+                        <TableCell className="tabular-nums">{formatLargeCurrency(kpiB.sum3)}</TableCell>
+                        <TableCell className={deltaTrendClass(delta3)}>{delta3 != null ? formatLargeCurrency(delta3) : "—"}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </Card>
               </section>
 
-              <div className="projections-card projections-card--chart pg-compare-chart-card">
-                <h2 className="projections-card__title">Revenue overlay (₹ Cr) — A vs B</h2>
-                <p className="projections-card__sub">
-                  Chart history <span className="projections-card__tag">{timeRangeLabel}</span> (aligned to the later of the two
-                  series) + forward. Solid = actual; dashed = model. A: coral / teal · B: violet / amber
-                </p>
-                <div className="projections-card__chart">
-                  <ResponsiveContainer width="100%" height={360}>
+              <Card className="overflow-hidden ring-1 ring-tremor-ring dark:ring-dark-tremor-ring">
+                <div className="border-b border-tremor-border px-3 py-2 dark:border-dark-tremor-border">
+                  <Title className="text-base font-semibold text-tremor-content-strong">Revenue overlay (₹ Cr) — A vs B</Title>
+                  <Text className="mt-0.5 text-xs text-tremor-content-subtle md:text-sm">
+                    Chart history <Badge size="xs" color="orange">{timeRangeLabel}</Badge> (aligned to the later of the two series)
+                    + forward. Solid = actual; dashed = model. A: coral / teal · B: violet / amber
+                  </Text>
+                </div>
+                <div className="h-[300px] w-full px-1.5 pb-2 pt-1 md:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={dualChartFiltered} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="name" tick={{ fontSize: 10 }} />
@@ -677,38 +711,54 @@ export function Projections() {
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
-              </div>
-              <div className="pg-dual-method">
-                <p><strong>Scenario A</strong> {methodA}</p>
-                <p><strong>Scenario B</strong> {methodB}</p>
-              </div>
+              </Card>
+              <Grid numItems={1} numItemsMd={2} className="gap-3">
+                <Card className="bg-tremor-background-muted p-3 dark:bg-dark-tremor-background-muted">
+                  <Text className="text-xs text-tremor-content-emphasis md:text-sm">
+                    <span className="font-semibold text-tremor-content-strong">Scenario A</span> {methodA}
+                  </Text>
+                </Card>
+                <Card className="bg-tremor-background-muted p-3 dark:bg-dark-tremor-background-muted">
+                  <Text className="text-xs text-tremor-content-emphasis md:text-sm">
+                    <span className="font-semibold text-tremor-content-strong">Scenario B</span> {methodB}
+                  </Text>
+                </Card>
+              </Grid>
             </>
-          )}
+          ) : null}
 
-          {compareOn && canProjectA && !canProjectB && (
-            <div className="projections-page__empty">
-              <p><strong>Scenario B</strong> needs at least 4 months of history for the selected project(s) (or use an empty pick for full slice).</p>
-            </div>
-          )}
+          {compareOn && canProjectA && !canProjectB ? (
+            <Card decoration="left" decorationColor="amber" className="p-3">
+              <Text className="text-xs text-tremor-content-emphasis md:text-sm">
+                <span className="font-semibold text-tremor-content-strong">Scenario B</span> needs at least 4 months of history for
+                the selected project(s) (or use an empty pick for full slice).
+              </Text>
+            </Card>
+          ) : null}
         </>
       )}
 
-      <section className="projections-page__method">
-        <h2 className="projections-page__method-title">How to use the playground</h2>
-        <ul className="projections-page__list">
+      <Card className="ring-1 ring-tremor-ring dark:ring-dark-tremor-ring">
+        <div className="border-b border-tremor-border px-3 py-2 dark:border-dark-tremor-border">
+          <Title className="text-base font-semibold text-tremor-content-strong">How to use the playground</Title>
+        </div>
+        <ul className="list-disc space-y-2 px-6 py-3 text-xs text-tremor-content-emphasis marker:text-tremor-content-subtle md:px-7 md:text-sm">
           <li>
-            <strong>Club projects:</strong> in Scenario B, check two (or more) project rows — the model sums their ledger
-            and runs one forward path, so you can compare a single account (A) against the same account plus another (B).
+            <span className="font-semibold text-tremor-content-strong">Club projects:</span> in Scenario B, check two (or more)
+            project rows — the model sums their ledger and runs one forward path, so you can compare a single account (A)
+            against the same account plus another (B).
           </li>
           <li>
-            <strong>People / collaboration:</strong> use <strong>Shortlist by head</strong> to filter the project list;
-            the main filters still have Region head / Practice head for the wider team view.
+            <span className="font-semibold text-tremor-content-strong">People / collaboration:</span> use{" "}
+            <span className="font-semibold">Shortlist by head</span> to filter the project list; the main filters still have
+            Region head / Practice head for the wider team view.
           </li>
           <li>
-            <strong>Time:</strong> horizon changes how many forward months appear in the chart and the rolling sum column.
+            <span className="font-semibold text-tremor-content-strong">Time:</span> horizon changes how many forward months appear
+            in the chart and the rolling sum column.
           </li>
         </ul>
-      </section>
+      </Card>
     </div>
   );
 }

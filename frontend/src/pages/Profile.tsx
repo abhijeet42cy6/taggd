@@ -1,4 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Upload } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Card,
+  Flex,
+  Text,
+  TextInput,
+  Title,
+} from "@tremor/react";
 import { queries, type Project, authProfileApi } from "@/lib/api";
 import {
   displayNameFromUser,
@@ -8,10 +18,22 @@ import {
 } from "@/lib/auth";
 import { VERTICAL_MODULES } from "@/pages/AdminUsers";
 import { UserAvatarImg } from "@/components/UserAvatarImg";
-import "@/styles/profile-page.css";
+import { cn } from "@/lib/utils";
+
+const flatCard =
+  "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
 
 const verticalLabel = (key: string) =>
   VERTICAL_MODULES.find((m) => m.key.toLowerCase() === key.toLowerCase())?.label ?? key;
+
+function ReadonlyField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:gap-4">
+      <Text className="w-full shrink-0 text-xs font-medium text-tremor-content-subtle sm:w-36">{label}</Text>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
 
 export function Profile() {
   const { user, refreshMe, projectIds } = useAuth();
@@ -23,6 +45,7 @@ export function Profile() {
   const [err, setErr] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setGivenName((user?.givenName ?? "").trim());
@@ -118,20 +141,7 @@ export function Profile() {
   }, [user, refreshMe]);
 
   const initialsEl = (u: AuthUser) => (
-    <div
-      style={{
-        width: 96,
-        height: 96,
-        borderRadius: 12,
-        background: "linear-gradient(135deg, var(--accent), var(--accent2))",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 28,
-        fontWeight: 700,
-        color: "#fff",
-      }}
-    >
+    <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-teal-600 text-2xl font-bold text-white shadow-tremor-card">
       {initialsFromUser(u)}
     </div>
   );
@@ -142,23 +152,42 @@ export function Profile() {
   const showLegacyRole = user.effectiveRole != null && user.effectiveRole !== user.role;
 
   return (
-    <div className="profile-page">
-      <header className="profile-page__header">
-        <div className="profile-page__eyebrow">Account</div>
-        <h1 className="profile-page__title">My profile</h1>
-        <p className="profile-page__lead">
+    <div className="profile-tremor space-y-4 pb-10 md:space-y-5">
+      <div className="flex w-full min-w-0 flex-col gap-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-orange-600">Account</span>
+        <Title className="text-2xl font-bold tracking-tight text-tremor-content-strong md:text-3xl">My profile</Title>
+        <Text className="max-w-2xl text-sm leading-relaxed text-tremor-content-emphasis">
           Your display name, contact details, and a read-only summary of workspace access. Permissions are assigned by an
           administrator.
-        </p>
-      </header>
+        </Text>
+      </div>
 
-      {err ? <div className="profile-page__alert">{err}</div> : null}
-      {msg ? <div className="profile-page__flash">{msg}</div> : null}
+      {err ? (
+        <Card
+          decoration="top"
+          decorationColor="rose"
+          className="border-0 p-3 shadow-tremor-card ring-1 ring-rose-200 dark:bg-dark-tremor-background dark:ring-rose-900/40"
+        >
+          <Text className="text-sm text-rose-800 dark:text-rose-100">{err}</Text>
+        </Card>
+      ) : null}
+      {msg ? (
+        <Card
+          decoration="top"
+          decorationColor="emerald"
+          className="border-0 p-3 shadow-tremor-card ring-1 ring-emerald-200 dark:bg-dark-tremor-background dark:ring-emerald-900/40"
+        >
+          <Text className="text-sm text-emerald-900 dark:text-emerald-100">{msg}</Text>
+        </Card>
+      ) : null}
 
-      <div className="profile-page__grid">
-        <aside className="profile-page__aside">
-          <div className="profile-page__avatar-card">
-            <span className="profile-page__avatar-label">Photo</span>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+        <Card className={cn(flatCard, "w-full shrink-0 lg:max-w-[17.5rem]")}>
+          <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Photo</Text>
+            <Title className="mt-0.5 text-sm font-semibold text-tremor-content-strong">Profile image</Title>
+          </div>
+          <div className="flex flex-col items-center gap-4 px-4 py-5">
             <UserAvatarImg
               userId={user.id}
               hasAvatar={user.hasAvatar}
@@ -166,163 +195,182 @@ export function Profile() {
               size={96}
               borderRadius={12}
             />
-            <div className="profile-page__upload">
-              <span className="profile-page__upload-hint">JPEG, PNG, or WebP · max 2MB</span>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
+            <Text className="text-center text-xs text-tremor-content-subtle">JPEG, PNG, or WebP · max 2MB</Text>
+            <input
+              ref={avatarFileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              disabled={avatarBusy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) void onAvatar(f);
+              }}
+            />
+            <Flex className="w-full flex-col gap-2 sm:flex-row sm:justify-center">
+              <Button
+                type="button"
+                size="xs"
+                variant="secondary"
                 disabled={avatarBusy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) void onAvatar(f);
-                }}
-              />
+                className="w-full sm:w-auto"
+                onClick={() => avatarFileRef.current?.click()}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Upload size={14} strokeWidth={2} aria-hidden />
+                  Upload photo
+                </span>
+              </Button>
               {user.hasAvatar ? (
-                <button
+                <Button
                   type="button"
-                  className="platform-dialog__btn"
+                  size="xs"
+                  variant="light"
+                  color="slate"
                   disabled={avatarBusy}
+                  className="w-full sm:w-auto"
                   onClick={() => void onRemoveAvatar()}
                 >
                   Remove photo
-                </button>
+                </Button>
               ) : null}
-            </div>
+            </Flex>
           </div>
-        </aside>
+        </Card>
 
-        <div className="profile-page__main">
-          <section className="profile-page__section" aria-labelledby="profile-contact-heading">
-            <h2 id="profile-contact-heading" className="profile-page__section-title">
-              Contact
-            </h2>
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Email</div>
-              <div className="profile-page__field-value profile-page__field-value--mono">{user.email}</div>
+        <div className="min-w-0 flex-1 space-y-4">
+          <Card className={flatCard} aria-labelledby="profile-contact-heading">
+            <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+              <Title id="profile-contact-heading" className="text-base font-semibold text-tremor-content-strong">
+                Contact
+              </Title>
+              <Text className="mt-0.5 text-xs text-tremor-content-subtle">Editable fields sync to your sign-in identity.</Text>
             </div>
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Given name</div>
-              <div className="profile-page__field-value">
-                <input
-                  className="profile-page__input"
+            <div className="space-y-0 px-4 py-2">
+              <ReadonlyField label="Email">
+                <Text className="break-all text-sm tabular-nums text-tremor-content-strong">{user.email}</Text>
+              </ReadonlyField>
+              <div className="space-y-1 border-b border-tremor-border py-3 dark:border-dark-tremor-border">
+                <Text className="text-xs font-medium text-tremor-content-subtle">Given name</Text>
+                <TextInput
                   value={givenName}
-                  onChange={(e) => setGivenName(e.target.value)}
+                  onValueChange={setGivenName}
+                  placeholder="Given name"
                   autoComplete="given-name"
+                  aria-label="Given name"
                 />
               </div>
-            </div>
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Family name</div>
-              <div className="profile-page__field-value">
-                <input
-                  className="profile-page__input"
+              <div className="space-y-1 border-b border-tremor-border py-3 dark:border-dark-tremor-border">
+                <Text className="text-xs font-medium text-tremor-content-subtle">Family name</Text>
+                <TextInput
                   value={familyName}
-                  onChange={(e) => setFamilyName(e.target.value)}
+                  onValueChange={setFamilyName}
+                  placeholder="Family name"
                   autoComplete="family-name"
+                  aria-label="Family name"
                 />
               </div>
-            </div>
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Phone</div>
-              <div className="profile-page__field-value">
-                <input
-                  className="profile-page__input"
+              <div className="space-y-1 py-3">
+                <Text className="text-xs font-medium text-tremor-content-subtle">Phone</Text>
+                <TextInput
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onValueChange={setPhone}
+                  placeholder="Phone"
                   autoComplete="tel"
                   inputMode="tel"
+                  aria-label="Phone"
                 />
               </div>
             </div>
-            <div className="profile-page__actions">
-              <button
+            <div className="border-t border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+              <Button
                 type="button"
-                className="platform-dialog__btn platform-dialog__btn--primary"
+                size="xs"
+                variant="primary"
+                color="orange"
                 disabled={saving}
                 onClick={() => void onSaveProfile()}
               >
                 {saving ? "Saving…" : "Save details"}
-              </button>
+              </Button>
             </div>
-          </section>
+          </Card>
 
-          <hr className="profile-page__divider" />
+          <Card className={flatCard} aria-labelledby="profile-access-heading">
+            <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+              <Title id="profile-access-heading" className="text-base font-semibold text-tremor-content-strong">
+                Access & permissions
+              </Title>
+            </div>
+            <div className="space-y-4 px-4 py-4">
+              <div className="rounded-tremor-default border-l-4 border-orange-500 bg-orange-50/80 px-3 py-2.5 dark:border-orange-400 dark:bg-orange-950/30">
+                <Text className="text-xs font-semibold text-tremor-content-strong">Read-only summary</Text>
+                <Text className="mt-1 text-xs leading-relaxed text-tremor-content-emphasis">
+                  Role, module access, and project scope are managed by a platform administrator. Use this section to verify what
+                  is active for your sign-in.
+                </Text>
+              </div>
 
-          <section className="profile-page__section" aria-labelledby="profile-access-heading">
-            <h2 id="profile-access-heading" className="profile-page__section-title">
-              Access &amp; permissions
-            </h2>
-            <div className="profile-page__callout">
-              <strong>Read-only summary</strong>
-              Role, module access, and project scope are managed by a platform administrator. Use this section to verify what
-              is active for your sign-in.
-            </div>
-
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Display name</div>
-              <div className="profile-page__field-value">{displayNameFromUser(user)}</div>
-            </div>
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">User ID</div>
-              <div className="profile-page__field-value profile-page__field-value--mono">{user.id}</div>
-            </div>
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Effective role</div>
-              <div className="profile-page__field-value">
-                <span className="profile-page__tag profile-page__tag--accent">{effectiveRole}</span>
+              <div className="divide-y divide-tremor-border dark:divide-dark-tremor-border">
+                <ReadonlyField label="Display name">
+                  <Text className="text-sm font-medium text-tremor-content-strong">{displayNameFromUser(user)}</Text>
+                </ReadonlyField>
+                <ReadonlyField label="User ID">
+                  <Text className="text-sm tabular-nums text-tremor-content-emphasis">{user.id}</Text>
+                </ReadonlyField>
+                <ReadonlyField label="Effective role">
+                  <Badge color="orange" size="xs">
+                    {effectiveRole}
+                  </Badge>
+                </ReadonlyField>
+                {showLegacyRole ? (
+                  <ReadonlyField label="Stored role">
+                    <Text className="text-sm tabular-nums text-tremor-content-emphasis">{user.role}</Text>
+                  </ReadonlyField>
+                ) : null}
+                <ReadonlyField label="Modules">
+                  {user.verticalAccess == null ? (
+                    <Badge color="orange" size="xs">
+                      All modules
+                    </Badge>
+                  ) : user.verticalAccess.length === 0 ? (
+                    <Badge color="slate" size="xs">
+                      None (empty allow-list)
+                    </Badge>
+                  ) : (
+                    <Flex className="flex-wrap gap-1.5">
+                      {user.verticalAccess.map((k) => (
+                        <Badge key={k} color="slate" size="xs">
+                          {verticalLabel(k)}
+                        </Badge>
+                      ))}
+                    </Flex>
+                  )}
+                </ReadonlyField>
+                <ReadonlyField label="Projects">
+                  <Text className="text-sm leading-relaxed text-tremor-content-emphasis">{projectsSummary}</Text>
+                </ReadonlyField>
+                {user.managerUserId != null ? (
+                  <ReadonlyField label="Reports to">
+                    <Text className="text-sm tabular-nums text-tremor-content-emphasis">User #{user.managerUserId}</Text>
+                  </ReadonlyField>
+                ) : null}
+                {user.isReadOnly ? (
+                  <ReadonlyField label="Portal mode">
+                    <div>
+                      <Badge color="amber" size="xs">
+                        Read-only client portal
+                      </Badge>
+                      <Text className="mt-2 text-xs leading-relaxed text-tremor-content-subtle">
+                        Business data cannot be changed from this account; you can still update your profile and photo.
+                      </Text>
+                    </div>
+                  </ReadonlyField>
+                ) : null}
               </div>
             </div>
-            {showLegacyRole ? (
-              <div className="profile-page__field">
-                <div className="profile-page__field-label">Stored role</div>
-                <div className="profile-page__field-value profile-page__field-value--mono">{user.role}</div>
-              </div>
-            ) : null}
-
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Modules</div>
-              <div className="profile-page__field-value">
-                {user.verticalAccess == null ? (
-                  <span className="profile-page__tag profile-page__tag--accent">All modules</span>
-                ) : user.verticalAccess.length === 0 ? (
-                  <span className="profile-page__tag">None (empty allow-list)</span>
-                ) : (
-                  <div className="profile-page__tag-row">
-                    {user.verticalAccess.map((k) => (
-                      <span key={k} className="profile-page__tag">
-                        {verticalLabel(k)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="profile-page__field">
-              <div className="profile-page__field-label">Projects</div>
-              <div className="profile-page__field-value profile-page__projects">{projectsSummary}</div>
-            </div>
-
-            {user.managerUserId != null ? (
-              <div className="profile-page__field">
-                <div className="profile-page__field-label">Reports to</div>
-                <div className="profile-page__field-value profile-page__field-value--mono">User #{user.managerUserId}</div>
-              </div>
-            ) : null}
-
-            {user.isReadOnly ? (
-              <div className="profile-page__field">
-                <div className="profile-page__field-label">Portal mode</div>
-                <div className="profile-page__field-value">
-                  <span className="profile-page__tag">Read-only client portal</span>
-                  <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                    Business data cannot be changed from this account; you can still update your profile and photo.
-                  </p>
-                </div>
-              </div>
-            ) : null}
-          </section>
+          </Card>
         </div>
       </div>
     </div>

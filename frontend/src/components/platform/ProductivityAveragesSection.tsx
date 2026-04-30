@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { Info } from "lucide-react";
+import { Button, Card, Grid, Metric, Select, SelectItem, Text } from "@tremor/react";
 import { formatCurrency } from "@/lib/utils";
-import { PlatformKpi, PlatformSection } from "@/components/platform/PlatformBlocks";
-import { SkeletonKpiRow } from "@/components/platform/Skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
 import type { FinanceRowVm } from "@/lib/view-models/finance";
 
 export const PRODUCTIVITY_AVG_INFO =
@@ -11,18 +11,6 @@ export const PRODUCTIVITY_AVG_INFO =
 
 export const PRODUCTIVITY_AVG_INFO_DASHBOARD =
   "Same metrics as Finance Command. Dashboard filters narrow client-month rows first. Avg PPC = Σ(Rev − CM) ÷ Σ overall HC over those rows.";
-
-const selectStyle: React.CSSProperties = {
-  background: "var(--surface-raised)",
-  border: "1px solid color-mix(in srgb, var(--accent) 20%, transparent)",
-  color: "var(--text)",
-  borderRadius: 4,
-  padding: "4px 8px",
-  fontSize: 10,
-  fontFamily: "'DM Mono',monospace",
-  maxWidth: 200,
-  flex: "0 1 auto",
-};
 
 export function fmtFinRatio(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -77,14 +65,30 @@ export function avgPpcSigmaRevMinusCmOverSigmaHc(rows: FinanceRowVm[]): {
   };
 }
 
+/** Tremor-native KPI tile: top decoration stripe + Metric stack (no custom header chrome). */
+function ProductivityMetricTile({
+  decorationColor,
+  label,
+  value,
+  subtext,
+}: {
+  decorationColor: "teal" | "blue" | "orange";
+  label: string;
+  value: string;
+  subtext: string;
+}) {
+  return (
+    <Card decoration="top" decorationColor={decorationColor}>
+      <Text className="font-medium text-tremor-content-emphasis">{label}</Text>
+      <Metric className="mt-2 text-tremor-content-strong">{value}</Metric>
+      <Text className="mt-2 text-tremor-default leading-snug text-tremor-content-subtle">{subtext}</Text>
+    </Card>
+  );
+}
+
 type Props = {
   rows: FinanceRowVm[];
-  /** When true, shows KPI skeletons (e.g. initial dashboard load). */
   loading?: boolean;
-  /**
-   * When true, `rows` are already scoped (e.g. dashboard `filteredRows`); hide client/month dropdowns.
-   * When false (default), section includes its own client + month filters.
-   */
   externalFilters?: boolean;
 };
 
@@ -129,8 +133,11 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
     return { tag, ppc, rev };
   }, [rowsForProductivityAvg]);
 
+  const infoTooltip = externalFilters ? PRODUCTIVITY_AVG_INFO_DASHBOARD : PRODUCTIVITY_AVG_INFO;
+
   return (
-    <PlatformSection
+    <TremorDashboardSection
+      tag="Productivity"
       title="Productivity averages"
       titleAccessory={(
         <TooltipProvider delayDuration={200}>
@@ -138,93 +145,94 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className="inline-flex shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:outline focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                className="inline-flex shrink-0 rounded-tremor-small p-1 text-orange-700 transition-colors hover:bg-orange-50 hover:text-orange-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
                 aria-label="How productivity averages are calculated"
               >
-                <Info size={15} strokeWidth={2} aria-hidden />
+                <Info size={18} strokeWidth={2} aria-hidden />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" align="start" className="max-w-sm text-left">
-              {externalFilters ? PRODUCTIVITY_AVG_INFO_DASHBOARD : PRODUCTIVITY_AVG_INFO}
+              {infoTooltip}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )}
     >
       {externalFilters ? (
-        <p style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", lineHeight: 1.45, margin: "0 0 12px" }}>
-          {rowsForProductivityAvg.length} client-month{rowsForProductivityAvg.length === 1 ? "" : "s"} match dashboard filters
-        </p>
+        <Text className="mb-4 font-medium text-tremor-content-emphasis">
+          {rowsForProductivityAvg.length} client-month{rowsForProductivityAvg.length === 1 ? "" : "s"} match dashboard
+          filters
+        </Text>
       ) : (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <select
-            value={avgFilterClient}
-            onChange={(e) => setAvgFilterClient(e.target.value)}
-            style={selectStyle}
-            title="Filter by client"
-            disabled={loading}
-          >
-            <option value="all">All clients</option>
-            {accountOptions.map((a) => (
-              <option key={a} value={a}>{a.length > 42 ? `${a.slice(0, 40)}…` : a}</option>
-            ))}
-          </select>
-          <select
-            value={avgFilterMonth}
-            onChange={(e) => setAvgFilterMonth(e.target.value)}
-            style={selectStyle}
-            title="Filter by month"
-            disabled={loading}
-          >
-            <option value="all">All months</option>
-            {monthOptions.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
+        <div className="mb-4 flex flex-wrap items-end gap-4">
+          <div className="min-w-[12rem] flex-1">
+            <Text className="mb-1 font-semibold text-tremor-content-emphasis">Client</Text>
+            <Select value={avgFilterClient} onValueChange={setAvgFilterClient} disabled={loading}>
+              <SelectItem value="all">All clients</SelectItem>
+              {accountOptions.map((a) => (
+                <SelectItem key={a} value={a}>
+                  {a.length > 42 ? `${a.slice(0, 40)}…` : a}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+          <div className="min-w-[10rem] flex-1">
+            <Text className="mb-1 font-semibold text-tremor-content-emphasis">Month</Text>
+            <Select value={avgFilterMonth} onValueChange={setAvgFilterMonth} disabled={loading}>
+              <SelectItem value="all">All months</SelectItem>
+              {monthOptions.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
           {(avgFilterClient !== "all" || avgFilterMonth !== "all") && (
-            <button
+            <Button
               type="button"
-              className="platform-chip"
-              style={{ fontSize: 10, cursor: "pointer" }}
+              variant="secondary"
+              color="orange"
+              disabled={loading}
               onClick={() => {
                 setAvgFilterClient("all");
                 setAvgFilterMonth("all");
               }}
             >
               Clear filters
-            </button>
+            </Button>
           )}
-          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginLeft: "auto" }}>
+          <Text className="ml-auto w-full font-medium text-tremor-content-emphasis sm:w-auto">
             {rowsForProductivityAvg.length} client-month{rowsForProductivityAvg.length === 1 ? "" : "s"} in scope
-          </span>
+          </Text>
         </div>
       )}
+
       {loading ? (
-        <SkeletonKpiRow count={3} />
+        <Grid numItems={1} numItemsMd={3} className="gap-4">
+          {(["teal", "blue", "orange"] as const).map((c) => (
+            <Card key={c} decoration="top" decorationColor={c} className="animate-pulse">
+              <div className="h-4 w-2/3 rounded bg-tremor-background-subtle" />
+              <div className="mt-3 h-8 w-1/2 rounded bg-tremor-background-subtle" />
+              <div className="mt-3 h-3 w-full rounded bg-tremor-background-subtle" />
+            </Card>
+          ))}
+        </Grid>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-          <PlatformKpi
+        <Grid numItems={1} numItemsMd={3} className="gap-4">
+          <ProductivityMetricTile
+            decorationColor="teal"
             label="Avg Taggd source prod."
             value={fmtFinRatio(productivityAvgs.tag.mean)}
-            accent="teal"
             subtext={
               productivityAvgs.tag.count
                 ? `Mean of ${productivityAvgs.tag.count} values`
                 : "No Taggd source prod. values in scope"
             }
           />
-          <PlatformKpi
+          <ProductivityMetricTile
+            decorationColor="blue"
             label="Avg PPC"
             value={fmtFinInrMetric(productivityAvgs.ppc.value)}
-            accent="blue"
             subtext={
               productivityAvgs.ppc.rowCount === 0
                 ? "No rows in scope"
@@ -233,18 +241,18 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
                   : "Σ(Rev − CM) ÷ Σ HC"
             }
           />
-          <PlatformKpi
+          <ProductivityMetricTile
+            decorationColor="orange"
             label="Avg Rev / WL1"
             value={fmtFinInrMetric(productivityAvgs.rev.mean)}
-            accent="amber"
             subtext={
               productivityAvgs.rev.count
                 ? `Mean of ${productivityAvgs.rev.count} values`
                 : "No Rev / WL1 values in scope"
             }
           />
-        </div>
+        </Grid>
       )}
-    </PlatformSection>
+    </TremorDashboardSection>
   );
 }

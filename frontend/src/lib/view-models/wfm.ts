@@ -3,6 +3,14 @@
  * Product rule: values at or below 100% are on plan; over 100% is over-capacity (at risk).
  */
 
+export type WfmHcBulletCore = {
+  name: string;
+  actual: number;
+  ideal: number;
+  color: string;
+  pct: number;
+};
+
 export function wfmFillPct(actual: number, ideal: number): number {
   const a = Number(actual);
   const i = Number(ideal);

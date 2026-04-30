@@ -1,9 +1,29 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Button,
+  Card,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  TextInput,
+  Title,
+  Select,
+  SelectItem,
+} from "@tremor/react";
 import { downloadCandidateCvFile, queries, type CandidateRow, type Project } from "@/lib/api";
 import { isPlatformAdminRole, isReadOnlyClient, isRecruiterUser, useAuth } from "@/lib/auth";
 import { CandidateFormDrawer } from "@/components/platform/CandidateFormDrawer";
-import { PageHeader, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
+import { StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
+
+const flatCard =
+  "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
+
+const ALL_PROJECTS = "__all_projects__";
 
 export function Candidates() {
   const { user } = useAuth();
@@ -75,83 +95,92 @@ export function Candidates() {
     void load();
   }, [load]);
 
-  return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <PageHeader
-        title="Candidates"
-        subtitle={
-          recruiterView
-            ? "Mandate-level pipeline rows where you are the assigned recruiter or hiring manager (or on your projects)."
-            : readOnly
-              ? "Candidates on the projects enabled for your portal account."
-              : "RPO candidate rows scoped to your projects — each line is tied to one requisition."
-        }
-      />
+  const subtitle = recruiterView
+    ? "Mandate-level pipeline rows where you are the assigned recruiter or hiring manager (or on your projects)."
+    : readOnly
+      ? "Candidates on the projects enabled for your portal account."
+      : "RPO candidate rows scoped to your projects — each line is tied to one requisition.";
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-        <input
-          className="platform-search"
-          placeholder="Search name, email, client id, org, professional summary…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: "1 1 220px", maxWidth: 420, minWidth: 180 }}
-        />
-        <select
-          className="platform-search"
-          style={{ minWidth: 160 }}
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-        >
-          <option value="">All projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={String(p.id)}>
-              PRJ-{p.id} {p.account_name || p.filename || ""}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="platform-dialog__btn"
-          style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
-          onClick={() => void load()}
-        >
-          Refresh
-        </button>
-        {!readOnly ? (
-          <button
-            type="button"
-            className="platform-dialog__btn platform-dialog__btn--primary"
-            style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
-            onClick={openCreateDrawer}
-          >
-            Add candidate
-          </button>
-        ) : null}
+  const projectSelectValue = projectId.trim() === "" ? ALL_PROJECTS : projectId;
+
+  return (
+    <div className="candidates-tremor space-y-3 pb-8 md:space-y-4">
+      <div>
+        <span className="inline-flex max-w-full items-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-orange-600">
+          People&nbsp;·&nbsp;Talent
+        </span>
+        <Title className="mt-0.5 text-2xl font-bold tracking-tight text-tremor-content-strong md:text-3xl">Candidates</Title>
+        <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
+          {subtitle}
+        </Text>
       </div>
 
       {loadError ? (
-        <div
-          className="alert-banner amber"
-          style={{ fontSize: 12, margin: 0 }}
-          role="alert"
-        >
-          <strong>Could not load candidates.</strong> {loadError}
-          {loadError.includes("403") || loadError.toLowerCase().includes("vertical") ? (
-            <>
-              {" "}
-              Your account may need the <strong>Candidates</strong> module enabled in Users &amp; access, or broader
-              project assignments.
-            </>
-          ) : null}
-        </div>
+        <Card className="border-amber-200 bg-amber-50 ring-1 ring-amber-200 dark:border-amber-900/40 dark:bg-amber-950/25 dark:ring-amber-900/50">
+          <Text className="px-4 py-3 text-xs text-amber-950 dark:text-amber-100 md:text-sm" role="alert">
+            <span className="font-semibold">Could not load candidates.</span> {loadError}
+            {loadError.includes("403") || loadError.toLowerCase().includes("vertical") ? (
+              <span>
+                {" "}
+                Your account may need the <span className="font-semibold">Candidates</span> module enabled in Users &amp;
+                access, or broader project assignments.
+              </span>
+            ) : null}
+          </Text>
+        </Card>
       ) : null}
 
-      <PlatformSection title={`Results (${total})`}>
+      <Card className={flatCard}>
+        <div className="flex w-full min-w-0 flex-col gap-3 border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+          <div className="flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:gap-4">
+            <div className="min-w-0 w-full flex-1">
+              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Search</Text>
+              <TextInput
+                placeholder="Search name, email, client id, org, professional summary…"
+                value={search}
+                onValueChange={setSearch}
+                className="w-full"
+                aria-label="Search candidates"
+              />
+            </div>
+            <div className="w-full min-w-0 shrink-0 lg:w-64">
+              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Project</Text>
+              <Select
+                value={projectSelectValue}
+                onValueChange={(v) => setProjectId(v === ALL_PROJECTS ? "" : v)}
+                aria-label="Filter by project"
+              >
+                <SelectItem value={ALL_PROJECTS}>All projects</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    PRJ-{p.id} {p.account_name || p.filename || ""}
+                  </SelectItem>
+                ))}
+              </Select>
+            </div>
+            <div className="flex w-full shrink-0 flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+              <Button type="button" size="xs" variant="secondary" onClick={() => void load()}>
+                Refresh
+              </Button>
+              {!readOnly ? (
+                <Button type="button" size="xs" variant="primary" color="orange" onClick={openCreateDrawer}>
+                  Add candidate
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="border-b border-tremor-border px-4 py-2.5 dark:border-dark-tremor-border">
+          <Title className="text-sm font-semibold text-tremor-content-strong">Results ({total.toLocaleString()})</Title>
+        </div>
+
         <input
           ref={cvFileRef}
           type="file"
           accept=".pdf,.doc,.docx,application/pdf"
-          style={{ display: "none" }}
+          className="hidden"
+          aria-hidden
           onChange={(e) => {
             const f = e.target.files?.[0];
             const cid = cvUploadFor;
@@ -165,146 +194,138 @@ export function Candidates() {
               .finally(() => setCvBusy(null));
           }}
         />
-        {loading ? (
-          <Skeleton height={220} />
-        ) : rows.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--text-muted)", padding: 16, lineHeight: 1.55 }}>
-            <p style={{ margin: "0 0 8px" }}>No candidate rows returned.</p>
-            <p style={{ margin: "0 0 12px" }}>
-              The <strong>Requisitions</strong> screen reads the <code>records</code> table (ingested positions). This tab
-              reads the separate <code>candidates</code> table, which is only populated via the Candidates API unless you
-              run a migration from records → candidates. If you expect data here, confirm rows exist in the database and
-              that master backfill has been run after candidates exist.
-            </p>
-            {!readOnly ? (
-              <button
-                type="button"
-                className="platform-dialog__btn platform-dialog__btn--primary"
-                style={{ fontSize: 11 }}
-                onClick={openCreateDrawer}
-              >
-                Add candidate
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="platform-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-              <thead>
-                <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
-                  <th style={{ padding: "8px 6px" }}>ID</th>
-                  <th style={{ padding: "8px 6px" }}>Master</th>
-                  <th style={{ padding: "8px 6px" }}>Name</th>
-                  <th style={{ padding: "8px 6px" }}>Client ID</th>
-                  <th style={{ padding: "8px 6px" }}>Project</th>
-                  <th style={{ padding: "8px 6px" }}>Req</th>
-                  <th style={{ padding: "8px 6px" }}>Recruiter</th>
-                  <th style={{ padding: "8px 6px" }}>Created by</th>
-                  <th style={{ padding: "8px 6px" }}>Experience</th>
-                  <th style={{ padding: "8px 6px" }}>CV</th>
-                  <th style={{ padding: "8px 6px" }}>Stage</th>
-                  <th style={{ padding: "8px 6px" }}>Status</th>
-                  {!readOnly ? <th style={{ padding: "8px 6px" }}>Actions</th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} style={{ borderBottom: "1px solid color-mix(in srgb, var(--border) 60%, transparent)" }}>
-                    <td style={{ padding: "8px 6px", fontFamily: "'DM Mono',monospace" }}>CAN-{r.id}</td>
-                    <td style={{ padding: "8px 6px", fontFamily: "'DM Mono',monospace", color: "var(--accent)" }}>
-                      {r.master_id != null ? `MST-${r.master_id}` : "—"}
-                    </td>
-                    <td style={{ padding: "8px 6px" }}>{r.full_name || "—"}</td>
-                    <td style={{ padding: "8px 6px" }}>{r.client_candidate_id}</td>
-                    <td style={{ padding: "8px 6px" }}>PRJ-{r.project_id}</td>
-                    <td style={{ padding: "8px 6px" }}>REQ-{r.record_id}</td>
-                    <td style={{ padding: "8px 6px", maxWidth: 120 }} title={r.assigned_recruiter || undefined}>
-                      {r.assigned_recruiter_user_id != null
-                        ? `UID ${r.assigned_recruiter_user_id}`
-                        : r.assigned_recruiter || "—"}
-                    </td>
-                    <td style={{ padding: "8px 6px", maxWidth: 140, wordBreak: "break-word" }} title={r.created_by_email || undefined}>
-                      {r.created_by_email || (r.created_by_user_id != null ? `UID ${r.created_by_user_id}` : "—")}
-                    </td>
-                    <td style={{ padding: "8px 6px", maxWidth: 160 }} title={r.professional_summary || undefined}>
-                      {(r.experience_role_count ?? 0) > 0 ? `${r.experience_role_count} role(s)` : "—"}
-                      {r.professional_summary ? (
-                        <span style={{ display: "block", color: "var(--text-muted)", fontSize: 10, marginTop: 2 }}>
-                          {(r.professional_summary || "").slice(0, 48)}
-                          {(r.professional_summary || "").length > 48 ? "…" : ""}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
-                      {r.has_cv ? (
-                        <button
-                          type="button"
-                          className="platform-dialog__btn"
-                          style={{ fontSize: 10, marginRight: 4 }}
-                          onClick={() =>
-                            void downloadCandidateCvFile(r.id, r.cv_original_filename).catch(() => undefined)
-                          }
-                        >
-                          Download
-                        </button>
-                      ) : null}
-                      {!readOnly && r.has_cv ? (
-                        <button
-                          type="button"
-                          className="platform-dialog__btn"
-                          style={{ fontSize: 10 }}
-                          disabled={cvBusy === r.id}
-                          onClick={() => {
-                            if (!window.confirm("Remove CV from this candidate?")) return;
-                            setCvBusy(r.id);
-                            void queries
-                              .candidateDeleteCv(r.id)
-                              .then(() => void load())
-                              .finally(() => setCvBusy(null));
-                          }}
-                        >
-                          Remove
-                        </button>
-                      ) : null}
+
+        <div className="px-2 pb-3 pt-1">
+          {loading ? (
+            <Skeleton height={220} />
+          ) : rows.length === 0 ? (
+            <div className="px-3 py-6">
+              <Text className="text-sm font-medium text-tremor-content-strong">No candidate rows returned.</Text>
+              <Text className="mt-3 text-xs leading-relaxed text-tremor-content-emphasis">
+                The <span className="font-semibold">Requisitions</span> screen reads the <code className="rounded bg-tremor-background-muted px-1 py-0.5 text-[11px] dark:bg-dark-tremor-background-muted">records</code>{" "}
+                table (ingested positions). This tab reads the separate{" "}
+                <code className="rounded bg-tremor-background-muted px-1 py-0.5 text-[11px] dark:bg-dark-tremor-background-muted">candidates</code> table, which is only populated via the Candidates API unless you run a migration from records → candidates. If you expect data here, confirm rows exist in the database and that master backfill has been run after candidates exist.
+              </Text>
+              {!readOnly ? (
+                <Button type="button" size="xs" className="mt-4" variant="primary" color="orange" onClick={openCreateDrawer}>
+                  Add candidate
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1100px]">
+                <TableHead>
+                  <TableRow>
+                    <TableHeaderCell>ID</TableHeaderCell>
+                    <TableHeaderCell>Master</TableHeaderCell>
+                    <TableHeaderCell>Name</TableHeaderCell>
+                    <TableHeaderCell>Client ID</TableHeaderCell>
+                    <TableHeaderCell>Project</TableHeaderCell>
+                    <TableHeaderCell>Req</TableHeaderCell>
+                    <TableHeaderCell>Recruiter</TableHeaderCell>
+                    <TableHeaderCell>Created by</TableHeaderCell>
+                    <TableHeaderCell>Experience</TableHeaderCell>
+                    <TableHeaderCell>CV</TableHeaderCell>
+                    <TableHeaderCell>Stage</TableHeaderCell>
+                    <TableHeaderCell>Status</TableHeaderCell>
+                    {!readOnly ? <TableHeaderCell>Actions</TableHeaderCell> : null}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rows.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell className="text-xs tabular-nums text-tremor-content-strong">CAN-{r.id}</TableCell>
+                      <TableCell className="text-xs font-medium text-orange-600 tabular-nums dark:text-orange-400">
+                        {r.master_id != null ? `MST-${r.master_id}` : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm">{r.full_name || "—"}</TableCell>
+                      <TableCell className="text-sm tabular-nums">{r.client_candidate_id}</TableCell>
+                      <TableCell className="text-sm tabular-nums">PRJ-{r.project_id}</TableCell>
+                      <TableCell className="text-sm tabular-nums">REQ-{r.record_id}</TableCell>
+                      <TableCell className="max-w-[7.5rem] truncate text-sm" title={r.assigned_recruiter || undefined}>
+                        {r.assigned_recruiter_user_id != null
+                          ? `UID ${r.assigned_recruiter_user_id}`
+                          : r.assigned_recruiter || "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[8.75rem] break-words text-sm" title={r.created_by_email || undefined}>
+                        {r.created_by_email || (r.created_by_user_id != null ? `UID ${r.created_by_user_id}` : "—")}
+                      </TableCell>
+                      <TableCell className="max-w-[10rem] text-sm" title={r.professional_summary || undefined}>
+                        {(r.experience_role_count ?? 0) > 0 ? `${r.experience_role_count} role(s)` : "—"}
+                        {r.professional_summary ? (
+                          <span className="mt-0.5 block text-[10px] leading-snug text-tremor-content-subtle">
+                            {(r.professional_summary || "").slice(0, 48)}
+                            {(r.professional_summary || "").length > 48 ? "…" : ""}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {r.has_cv ? (
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="light"
+                              onClick={() => void downloadCandidateCvFile(r.id, r.cv_original_filename).catch(() => undefined)}
+                            >
+                              Download
+                            </Button>
+                          ) : null}
+                          {!readOnly && r.has_cv ? (
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="light"
+                              disabled={cvBusy === r.id}
+                              onClick={() => {
+                                if (!window.confirm("Remove CV from this candidate?")) return;
+                                setCvBusy(r.id);
+                                void queries
+                                  .candidateDeleteCv(r.id)
+                                  .then(() => void load())
+                                  .finally(() => setCvBusy(null));
+                              }}
+                            >
+                              Remove
+                            </Button>
+                          ) : null}
+                          {!readOnly ? (
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="secondary"
+                              disabled={cvBusy === r.id}
+                              onClick={() => {
+                                setCvUploadFor(r.id);
+                                cvFileRef.current?.click();
+                              }}
+                            >
+                              {r.has_cv ? "Replace" : "Upload"}
+                            </Button>
+                          ) : null}
+                          {readOnly && !r.has_cv ? (
+                            <Text className="text-xs text-tremor-content-subtle">—</Text>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">{r.current_stage || "—"}</TableCell>
+                      <TableCell>{r.global_status ? <StatusTag status={r.global_status} /> : "—"}</TableCell>
                       {!readOnly ? (
-                        <button
-                          type="button"
-                          className="platform-dialog__btn"
-                          style={{ fontSize: 10, marginLeft: r.has_cv ? 4 : 0 }}
-                          disabled={cvBusy === r.id}
-                          onClick={() => {
-                            setCvUploadFor(r.id);
-                            cvFileRef.current?.click();
-                          }}
-                        >
-                          {r.has_cv ? "Replace" : "Upload"}
-                        </button>
+                        <TableCell>
+                          <Button type="button" size="xs" variant="light" color="orange" onClick={() => openEditDrawer(r.id)}>
+                            Edit
+                          </Button>
+                        </TableCell>
                       ) : null}
-                      {readOnly && !r.has_cv ? "—" : null}
-                    </td>
-                    <td style={{ padding: "8px 6px" }}>{r.current_stage || "—"}</td>
-                    <td style={{ padding: "8px 6px" }}>
-                      {r.global_status ? <StatusTag status={r.global_status} /> : "—"}
-                    </td>
-                    {!readOnly ? (
-                      <td style={{ padding: "8px 6px" }}>
-                        <button
-                          type="button"
-                          className="platform-dialog__btn"
-                          style={{ fontSize: 10 }}
-                          onClick={() => openEditDrawer(r.id)}
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </PlatformSection>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      </Card>
 
       <CandidateFormDrawer
         open={drawerOpen}
@@ -317,10 +338,14 @@ export function Candidates() {
       />
 
       {isPlatformAdminRole(user?.role) ? (
-        <p style={{ fontSize: 10, color: "var(--text-muted)", margin: 0 }}>
-          Use <strong>Candidate store</strong> to run enterprise search; use <strong>Admin → backfill</strong> from API
-          <code style={{ fontSize: 9 }}> POST /candidate-masters/backfill</code> to link legacy rows to masters.
-        </p>
+        <Text className="text-[11px] leading-snug text-tremor-content-subtle">
+          Use <span className="font-semibold text-tremor-content-emphasis">Candidate store</span> to run enterprise search;
+          use <span className="font-semibold text-tremor-content-emphasis">Admin → backfill</span> from API{" "}
+          <code className="rounded bg-tremor-background-muted px-1 py-0.5 font-mono text-[10px] dark:bg-dark-tremor-background-muted">
+            POST /candidate-masters/backfill
+          </code>{" "}
+          to link legacy rows to masters.
+        </Text>
       ) : null}
     </div>
   );

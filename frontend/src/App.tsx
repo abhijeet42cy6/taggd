@@ -24,6 +24,7 @@ import {
   KeyRound,
   Landmark,
   LayoutDashboard,
+  LayoutGrid,
   LineChart,
   Package,
   PieChart,
@@ -90,6 +91,7 @@ import { Requisitions } from "./pages/Requisitions";
 import { Candidates } from "./pages/Candidates";
 import { CandidateStore } from "./pages/CandidateStore";
 import { SLAPerformance } from "./pages/SLAPerformance";
+import { ClientDashboard } from "./pages/ClientDashboard";
 import { RevenueLeakage } from "./pages/RevenueLeakage";
 import { WorkforceManagement } from "./pages/WorkforceManagement";
 import { Login } from "./pages/Login";
@@ -131,6 +133,7 @@ const NAV_PATH_ICONS: Record<string, LucideIcon> = {
   "/portfolio": PieChart,
   "/clients": Users,
   "/client-contracts": FileText,
+  "/client-dashboard": LayoutGrid,
   "/meetings": Calendar,
   "/transitions": ArrowRightLeft,
   "/requisitions": ClipboardList,
@@ -177,6 +180,7 @@ const RECRUITER_NAV_GROUPS: NavGroup[] = [
     title: "Clients & onboarding",
     items: [
       { label: "Clients", path: "/clients" },
+      { label: "Client dashboard", path: "/client-dashboard" },
       { label: "Client onboarding", path: "/transitions" },
     ],
   },
@@ -230,6 +234,7 @@ const STAFF_MAIN_NAV_ACCORDIONS: MainNavAccordion[] = [
       { label: "Candidate store", path: "/candidate-store" },
       { label: "Meetings", path: "/meetings" },
       { label: "Clients", path: "/clients" },
+      { label: "Client dashboard", path: "/client-dashboard" },
     ],
   },
   {
@@ -638,6 +643,7 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
               <Route path="/clients" element={<ClientsHub />} />
               <Route path="/clients/:clientId" element={<ClientDetail />} />
               <Route path="/client-contracts" element={<ClientContracts />} />
+              <Route path="/client-dashboard" element={<ClientDashboard />} />
               <Route path="/meetings" element={<Meetings />} />
               <Route path="/requisitions" element={<Requisitions />} />
               <Route path="/candidates" element={<Candidates />} />

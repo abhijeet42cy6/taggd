@@ -1,11 +1,39 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { Expand, Plus, Upload } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Card,
+  Flex,
+  Grid,
+  Metric,
+  ProgressBar,
+  Table,
+  TableBody,
+  TableCell,
+  TableFoot,
+  TableFooterCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  TextInput,
+  Title,
+} from "@tremor/react";
 import { api, invalidateCache, queries } from "@/lib/api";
-import { formatNumber, formatPercent } from "@/lib/utils";
-import { PlatformSection, PageHeader } from "@/components/platform/PlatformBlocks";
 import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
 import { GaugeRing, HcIdealActualGroupedChart, WlDistributionBar, WfmProductivityFillChart } from "@/components/platform/Charts";
 import { WfmBenchmarkFormDialog } from "@/components/platform/WfmBenchmarkFormDialog";
+import {
+  WfmExpandDialog,
+  WfmFilterChipRow,
+  wfmStatusToBadgeColor,
+  type WfmBulletItem,
+  type WfmExpandMode,
+  type WfmPerformFilter,
+} from "@/components/tremor-dashboard/WfmExpandDialog";
+import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
+import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import {
   wfmFillPct,
   wfmFillColor,
@@ -16,290 +44,17 @@ import {
   type WfmBenchmarkRowVm,
 } from "@/lib/view-models/wfm";
 
-type PerformFilter = "all" | "strong" | "watch" | "risk";
-type ExpandMode = null | "hc" | "gap" | "benchmark";
-
-type BulletItem = {
-  name: string;
-  actual: number;
-  ideal: number;
-  color: string;
-  pct: number;
-  row: WfmBenchmarkRowVm;
-};
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-function bandClass(band: "strong" | "watch" | "risk") {
-  if (band === "strong") return "wfm-kpi-fill--green";
-  if (band === "watch")  return "wfm-kpi-fill--amber";
-  return "wfm-kpi-fill--red";
-}
-
-function deltaClass(band: "strong" | "watch" | "risk") {
-  if (band === "strong") return "wfm-kpi-delta--green";
-  if (band === "watch")  return "wfm-kpi-delta--amber";
-  return "wfm-kpi-delta--red";
-}
-
-function statusClass(label: "Strong" | "Watch" | "At Risk") {
-  if (label === "Strong")   return "wfm-status--on-track";
-  if (label === "Watch")    return "wfm-status--watch";
-  return "wfm-status--at-risk";
-}
-
-function barFillClass(pct: number, ideal: number) {
+function fillBarTremorColor(pct: number, ideal: number): "emerald" | "amber" | "rose" {
   const b = wfmFillBand(pct, ideal);
-  if (b === "strong") return "wfm-bar-fill--green";
-  if (b === "watch")  return "wfm-bar-fill--amber";
-  return "wfm-bar-fill--red";
+  if (b === "strong") return "emerald";
+  if (b === "watch") return "amber";
+  return "rose";
 }
 
-// ─── FILTER CHIPS ─────────────────────────────────────────────────────────────
-const CHIPS: { key: PerformFilter; label: string; cls: string }[] = [
-  { key: "all",    label: "All",          cls: "wfm-chip--active-accent" },
-  { key: "strong", label: "On plan 70–100%", cls: "wfm-chip--active-green" },
-  { key: "watch",  label: "Watch 50–69%",    cls: "wfm-chip--active-amber" },
-  { key: "risk",   label: ">100% or <50%",   cls: "wfm-chip--active-red" },
-];
+const flatCard =
+  "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
 
-function FilterChips({ value, onChange }: { value: PerformFilter; onChange: (v: PerformFilter) => void }) {
-  return (
-    <div className="wfm-chip-row">
-      {CHIPS.map((c) => (
-        <button
-          key={c.key}
-          className={`wfm-chip ${value === c.key ? c.cls : ""}`}
-          onClick={() => onChange(c.key)}
-        >
-          {c.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─── KPI CARD ────────────────────────────────────────────────────────────────
-function KpiCard({
-  label, value, sub, delta, deltaClass: dCls, color, fillPct, fillClass,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  delta?: string;
-  deltaClass?: string;
-  color: string;
-  fillPct?: number;
-  fillClass?: string;
-}) {
-  return (
-    <div className={`wfm-kpi-card wfm-kpi-card--${color}`}>
-      <div className="wfm-kpi-label">{label}</div>
-      <div className="wfm-kpi-primary">{value}</div>
-      {delta && <span className={`wfm-kpi-delta ${dCls ?? "wfm-kpi-delta--muted"}`}>{delta}</span>}
-      {sub && <div className="wfm-kpi-sub">{sub}</div>}
-      {fillPct !== undefined && fillClass && (
-        <div className="wfm-kpi-track">
-          <div className={`wfm-kpi-fill ${fillClass}`} style={{ width: `${Math.min(fillPct, 100)}%` }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── STATUS BADGE ─────────────────────────────────────────────────────────────
-function WfmStatus({ label }: { label: "Strong" | "Watch" | "At Risk" }) {
-  return <span className={`wfm-status ${statusClass(label)}`}>{label}</span>;
-}
-
-// ─── EXPAND MODAL ─────────────────────────────────────────────────────────────
-function WfmExpandModal({
-  mode, items, rows, filter, onFilterChange, onClose,
-}: {
-  mode: ExpandMode;
-  items: BulletItem[];
-  rows: WfmBenchmarkRowVm[];
-  filter: PerformFilter;
-  onFilterChange: (v: PerformFilter) => void;
-  onClose: () => void;
-}) {
-  if (!mode) return null;
-
-  const titles: Record<NonNullable<ExpandMode>, string> = {
-    hc: "Ideal vs Actual HC — All Clients",
-    gap: "Resource Gap Summary — All Clients",
-    benchmark: "Workforce Benchmark Snapshot — All Clients",
-  };
-
-  const filteredItems = items.filter((b) => wfmMatchesFilter(b.pct, b.ideal, filter));
-  const filteredRows = rows.filter((r) => {
-    const ideal = Number(r.ideal_hc ?? 0);
-    const actual = Number(r.actual_hc_total ?? 0);
-    const pct = wfmFillPct(actual, ideal);
-    return wfmMatchesFilter(pct, ideal, filter);
-  });
-
-  return (
-    <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "color-mix(in srgb, var(--surface-page) 85%, transparent)",
-        backdropFilter: "blur(4px)",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div style={{
-        background: "var(--bg1)", border: "1px solid var(--border)",
-        borderRadius: 14, width: "100%", maxWidth: 1080,
-        maxHeight: "88vh", display: "flex", flexDirection: "column",
-        boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
-      }}>
-        <div style={{
-          padding: "14px 20px", borderBottom: "1px solid var(--border)",
-          display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, gap: 12,
-        }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>{titles[mode]}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <FilterChips value={filter} onChange={onFilterChange} />
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>
-              {mode === "benchmark" ? filteredRows.length : filteredItems.length} clients
-            </span>
-            <button
-              onClick={onClose}
-              style={{
-                background: "var(--red-soft)", border: "1px solid color-mix(in srgb, var(--red) 30%, transparent)",
-                color: "var(--red)", borderRadius: 6, padding: "4px 12px", cursor: "pointer",
-                fontSize: 11, fontFamily: "var(--mono)",
-              }}
-            >
-              ✕ Close
-            </button>
-          </div>
-        </div>
-
-        <div style={{ overflowY: "auto", padding: "16px 20px", flex: 1 }}>
-          {/* HC BULLET CHART — expanded */}
-          {mode === "hc" && (
-            filteredItems.length === 0
-              ? <div className="wfm-empty">No clients match this filter</div>
-              : <div style={{ display: "grid", gap: 8 }}>
-                  {filteredItems.map((item) => {
-                    const barPct = Math.min(100, item.pct);
-                    const statusLbl = wfmStatusLabel(item.pct, item.ideal);
-                    const fc = barFillClass(item.pct, item.ideal);
-                    return (
-                      <div key={item.name} style={{ display: "grid", gridTemplateColumns: "180px 1fr 100px 70px 90px", alignItems: "center", gap: 10 }}>
-                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.name}</div>
-                        <div className="wfm-bar-track" style={{ height: 6 }}>
-                          <div className={`wfm-bar-fill ${fc}`} style={{ width: `${barPct}%`, height: "100%" }} />
-                        </div>
-                        <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: item.color, textAlign: "right" }}>
-                          {formatNumber(item.actual)} / {formatNumber(item.ideal)}
-                        </div>
-                        <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: item.color, textAlign: "right" }}>
-                          {formatPercent(item.pct)}
-                        </div>
-                        <div style={{ textAlign: "right" }}><WfmStatus label={statusLbl} /></div>
-                      </div>
-                    );
-                  })}
-                </div>
-          )}
-
-          {/* RESOURCE GAP TABLE — expanded */}
-          {mode === "gap" && (
-            filteredItems.length === 0
-              ? <div className="wfm-empty">No clients match this filter</div>
-              : <div style={{ overflowX: "auto" }}>
-                  <table className="wfm-table">
-                    <thead>
-                      <tr>
-                        <th>Client</th>
-                        <th className="right">Ideal HC</th>
-                        <th className="right">Actual HC</th>
-                        <th className="right">HC Gap</th>
-                        <th className="right">Fill Rate</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredItems.map((b) => {
-                        const gap = b.ideal - b.actual;
-                        const statusLbl = wfmStatusLabel(b.pct, b.ideal);
-                        return (
-                          <tr key={b.name}>
-                            <td><span className="wfm-table__name">{b.name}</span></td>
-                            <td className="right">{formatNumber(b.ideal)}</td>
-                            <td className="right" style={{ color: b.color }}>{formatNumber(b.actual)}</td>
-                            <td className="right" style={{ color: b.color }}>
-                              {gap >= 0 ? "−" : "+"}{formatNumber(Math.abs(gap))}
-                            </td>
-                            <td className="right" style={{ color: b.color }}>{formatPercent(b.pct)}</td>
-                            <td><WfmStatus label={statusLbl} /></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-          )}
-
-          {/* FULL BENCHMARK TABLE — expanded */}
-          {mode === "benchmark" && (
-            filteredRows.length === 0
-              ? <div className="wfm-empty">No clients match this filter</div>
-              : <div style={{ overflowX: "auto" }}>
-                  <table className="wfm-table">
-                    <thead>
-                      <tr>
-                        <th>Client</th>
-                        <th>Practice Head</th>
-                        <th className="right">Lateral Tgt</th>
-                        <th className="right">Productivity</th>
-                        <th className="right">Ideal HC</th>
-                        <th className="right">Actual HC</th>
-                        <th className="right">HC Gap</th>
-                        <th className="right">Fill Rate</th>
-                        <th className="right">WL1</th>
-                        <th className="right">WL2</th>
-                        <th className="right">WL3+</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRows.map((r, i) => {
-                        const idealN = Number(r.ideal_hc ?? 0);
-                        const actualN = Number(r.actual_hc_total ?? 0);
-                        const hcGap = idealN - actualN;
-                        const pct = wfmFillPct(actualN, idealN);
-                        const gapColor = wfmFillColor(pct, idealN);
-                        const statusLbl = wfmStatusLabel(pct, idealN);
-                        return (
-                          <tr key={i}>
-                            <td><span className="wfm-table__name">{r.account_name || `Project ${r.project_id}`}</span></td>
-                            <td><span className="wfm-table__muted" title={r.practice_head || ""}>{r.practice_head || "—"}</span></td>
-                            <td className="right">{r.lateral_hc_target != null ? formatNumber(r.lateral_hc_target) : "—"}</td>
-                            <td className="right">{r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}</td>
-                            <td className="right">{formatNumber(idealN)}</td>
-                            <td className="right" style={{ color: gapColor }}>{formatNumber(actualN)}</td>
-                            <td className="right" style={{ color: gapColor }}>{hcGap >= 0 ? "−" : "+"}{formatNumber(Math.abs(hcGap))}</td>
-                            <td className="right" style={{ color: gapColor }}>{formatPercent(pct)}</td>
-                            <td className="right">{r.wl1_hires ?? "—"}</td>
-                            <td className="right">{r.wl2_hires ?? "—"}</td>
-                            <td className="right">{(r.wl3_hires ?? 0) + (r.wl4_hires ?? 0) || "—"}</td>
-                            <td><WfmStatus label={statusLbl} /></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+const WFM_BLOCK_TAG = "mt-3 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle md:mt-4";
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export function WorkforceManagement() {
@@ -315,9 +70,10 @@ export function WorkforceManagement() {
     if (d.status === "fulfilled") setRows(wfmRowsVm(d.value || []));
   }, []);
 
-  const [tableFilter, setTableFilter] = useState<PerformFilter>("all");
-  const [expandMode, setExpandMode] = useState<ExpandMode>(null);
-  const [expandFilter, setExpandFilter] = useState<PerformFilter>("all");
+  const [tableFilter, setTableFilter] = useState<WfmPerformFilter>("all");
+  const [expandMode, setExpandMode] = useState<WfmExpandMode>(null);
+  const [expandFilter, setExpandFilter] = useState<WfmPerformFilter>("all");
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   // Productivity chart client picker
   const [prodChartSelected, setProdChartSelected] = useState<string[]>([]);
@@ -378,7 +134,7 @@ export function WorkforceManagement() {
   const fgColor = idealHc > 0 ? wfmFillColor(fillRate, idealHc) : "var(--accent)";
 
   // Bullet items for all clients
-  const allBulletItems = useMemo((): BulletItem[] =>
+  const allBulletItems = useMemo((): WfmBulletItem[] =>
     rows.map((r) => {
       const ideal = Number(r.ideal_hc ?? 0);
       const actual = Number(r.actual_hc_total ?? 0);
@@ -445,399 +201,536 @@ export function WorkforceManagement() {
       .slice(0, 60);
   }, [productivityFillChartAll, prodChartSearch, prodChartSelected]);
 
+  const projectTableTotals = useMemo(() => {
+    if (filteredRows.length <= 1) return null;
+    const totIdeal = filteredRows.reduce((s, r) => s + Number(r.ideal_hc ?? 0), 0);
+    const totActual = filteredRows.reduce((s, r) => s + Number(r.actual_hc_total ?? 0), 0);
+    const totAdditional = filteredRows.reduce(
+      (s, r) => s + Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0),
+      0,
+    );
+    const totVariance = totIdeal - totActual;
+    const totOpenPos = totVariance > 0 ? totVariance : 0;
+    const totProj = totActual;
+    const totFill = wfmFillPct(totActual, totIdeal);
+    return { totIdeal, totActual, totAdditional, totVariance, totOpenPos, totProj, totFill };
+  }, [filteredRows]);
+
   // ── render ──────────────────────────────────────────────────────────────────
+  const fillStatusBadge =
+    fillBand === "strong" ? (
+      <Badge color="emerald" size="xs">On Plan</Badge>
+    ) : fillBand === "watch" ? (
+      <Badge color="amber" size="xs">Watch</Badge>
+    ) : (
+      <Badge color="rose" size="xs">At Risk</Badge>
+    );
+
+  const gapChipLabel = `${hcGap >= 0 ? "−" : "+"}${formatNumber(Math.abs(hcGap))} gap`;
+  const hcGapBadge =
+    hcGap > 0 ? (
+      <Badge color="rose" size="xs">{gapChipLabel}</Badge>
+    ) : hcGap < 0 ? (
+      <Badge color="amber" size="xs">{gapChipLabel}</Badge>
+    ) : (
+      <Badge color="emerald" size="xs">Balanced</Badge>
+    );
+
   return (
-    <div className="wfm-page">
+    <div className="wfm-tremor space-y-3 pb-8 md:space-y-4">
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={(e) => {
+          void onUpload(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
 
-      {/* ── Header row ── */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <PageHeader
-          title="Workforce Management"
-          subtitle="Fill rate vs ideal HC · Productivity targets · WL mix"
-        />
-        <div className="wfm-actions">
-          <button
-            type="button"
-            className="wfm-btn wfm-btn--primary"
-            onClick={() => setWfmDialogOpen(true)}
-          >
-            <Plus size={14} strokeWidth={2.5} aria-hidden />
-            Add / edit WFM data
-          </button>
-          <label className="wfm-btn" style={{ cursor: "pointer" }}>
-            ↑ Upload WFM
-            <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => onUpload(e.target.files?.[0])} />
-          </label>
+      <Flex justifyContent="between" alignItems="start" className="flex-wrap gap-3">
+        <div className="min-w-0 flex-1">
+          <span className="inline-flex max-w-full items-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-orange-600">
+            Operations&nbsp;·&nbsp;Workforce
+          </span>
+          <Title className="mt-0.5 text-2xl font-bold tracking-tight text-tremor-content-strong md:text-3xl">
+            Workforce Management
+          </Title>
+          <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
+            Fill rate vs ideal HC · Productivity targets · WL mix
+          </Text>
         </div>
-      </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button type="button" size="xs" variant="primary" color="orange" onClick={() => setWfmDialogOpen(true)}>
+            <span className="inline-flex items-center gap-1">
+              <Plus size={12} strokeWidth={2.5} aria-hidden />
+              Add / edit WFM data
+            </span>
+          </Button>
+          <Button type="button" size="xs" variant="secondary" color="slate" onClick={() => uploadInputRef.current?.click()}>
+            <span className="inline-flex items-center gap-1">
+              <Upload size={12} aria-hidden />
+              Upload WFM
+            </span>
+          </Button>
+        </div>
+      </Flex>
 
-      {/* ── Section label ── */}
-      <div className="wfm-section-label">Key Performance Indicators</div>
+      {loading ? (
+        <SkeletonKpiRow count={5} />
+      ) : (
+        <Grid numItems={1} numItemsSm={2} numItemsLg={3} className="gap-2 md:gap-3">
+          <Card decoration="top" decorationColor="teal" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">Ideal headcount</Text>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{formatNumber(idealHc)}</Metric>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Target strength</Text>
+          </Card>
+          <Card decoration="top" decorationColor="blue" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Actual headcount</Text>
+            <Flex justifyContent="between" alignItems="center" className="mt-1 gap-2">
+              <Metric className="text-xl tabular-nums md:text-2xl">{formatNumber(actualHc)}</Metric>
+              {hcGapBadge}
+            </Flex>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">On rolls today</Text>
+          </Card>
+          <Card
+            decoration="top"
+            decorationColor={fillBand === "strong" ? "emerald" : fillBand === "watch" ? "amber" : "rose"}
+            className="p-3"
+          >
+            <Text
+              className={`text-[10px] font-semibold uppercase tracking-wide ${
+                fillBand === "strong"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : fillBand === "watch"
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-rose-600 dark:text-rose-400"
+              }`}
+            >
+              Fill rate
+            </Text>
+            <Flex justifyContent="between" alignItems="center" className="mt-1 flex-wrap gap-2">
+              <Metric className="text-xl tabular-nums md:text-2xl">{idealHc > 0 ? formatPercent(fillRate) : "—"}</Metric>
+              {fillStatusBadge}
+            </Flex>
+            <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">≤100% on plan; &gt;100% over-capacity</Text>
+            {idealHc > 0 ? (
+              <ProgressBar value={Math.min(100, fillRate)} color={fillBarTremorColor(fillRate, idealHc)} className="mt-2 [&>div]:min-w-[2px]" />
+            ) : null}
+          </Card>
+          <Card decoration="top" decorationColor="rose" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">Open positions</Text>
+            <Flex justifyContent="between" alignItems="center" className="mt-1 flex-wrap gap-2">
+              <Metric className="text-xl tabular-nums md:text-2xl">{formatNumber(openPositions)}</Metric>
+              <Badge color={openPositions > 0 ? "rose" : "emerald"} size="xs">
+                {openPositions > 0 ? "Unfilled" : "Fully staffed"}
+              </Badge>
+            </Flex>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Active openings (gap)</Text>
+          </Card>
+          <Card decoration="top" decorationColor="orange" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">Clients at risk</Text>
+            <Flex justifyContent="between" alignItems="center" className="mt-1 flex-wrap gap-2">
+              <Metric className="text-xl tabular-nums md:text-2xl">{String(atRiskCount)}</Metric>
+              <Badge color={atRiskCount > 0 ? "rose" : "emerald"} size="xs">
+                {atRiskCount > 0 ? `${atRiskCount} need attention` : "All on plan"}
+              </Badge>
+            </Flex>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">{`${onPlanCount} on plan · ${rows.length} total`}</Text>
+          </Card>
+        </Grid>
+      )}
 
-      {/* ── 5-up KPI grid ── */}
-      {loading
-        ? <SkeletonKpiRow count={5} />
-        : (
-          <div className="wfm-kpi-grid">
-            <KpiCard
-              label="Ideal Headcount"
-              value={formatNumber(idealHc)}
-              sub="Target Strength"
-              color="teal"
-            />
-            <KpiCard
-              label="Actual Headcount"
-              value={formatNumber(actualHc)}
-              sub="On Rolls Today"
-              delta={`${hcGap >= 0 ? "−" : "+"}${formatNumber(Math.abs(hcGap))} gap`}
-              deltaClass={hcGap > 0 ? "wfm-kpi-delta--red" : hcGap < 0 ? "wfm-kpi-delta--amber" : "wfm-kpi-delta--green"}
-              color="blue"
-            />
-            <KpiCard
-              label="Fill Rate"
-              value={idealHc > 0 ? formatPercent(fillRate) : "—"}
-              sub="≤100% on plan; >100% over-capacity"
-              delta={fillBand === "strong" ? "On Plan" : fillBand === "watch" ? "Watch" : "At Risk"}
-              deltaClass={deltaClass(fillBand)}
-              fillPct={fillRate}
-              fillClass={bandClass(fillBand)}
-              color={fillBand === "strong" ? "green" : fillBand === "watch" ? "amber" : "red"}
-            />
-            <KpiCard
-              label="Open Positions"
-              value={formatNumber(openPositions)}
-              sub="Active Openings (gap)"
-              delta={openPositions > 0 ? "Unfilled" : "Fully Staffed"}
-              deltaClass={openPositions > 0 ? "wfm-kpi-delta--red" : "wfm-kpi-delta--green"}
-              color="red"
-            />
-            <KpiCard
-              label="Clients at Risk"
-              value={String(atRiskCount)}
-              sub={`${onPlanCount} on plan · ${rows.length} total`}
-              delta={atRiskCount > 0 ? `${atRiskCount} need attention` : "All on plan"}
-              deltaClass={atRiskCount > 0 ? "wfm-kpi-delta--red" : "wfm-kpi-delta--green"}
-              color="orange"
-            />
-          </div>
-        )
-      }
-
-      {/* ── Projected HC 3-up ── */}
       {!loading && rows.length > 0 && (
         <>
-          <div className="wfm-section-label">Roster vs target</div>
-          <div className="wfm-proj-grid">
-            <div className="wfm-proj-card">
-              <div className="wfm-proj-card__label">Roster (actual HC)</div>
-              <div className="wfm-proj-card__value">{formatNumber(projectedHc)}</div>
-              <div className="wfm-proj-card__sub">On rolls; WL1–4 are band mix (not double-counted)</div>
-            </div>
-            <div className="wfm-proj-card">
-              <div className="wfm-proj-card__label">Net new vs Roster</div>
-              <div className="wfm-proj-card__value" style={{ color: varActual > 0 ? "var(--green)" : "var(--text-muted)" }}>
+          <Text className={WFM_BLOCK_TAG}>Roster vs target</Text>
+          <Grid numItems={1} numItemsSm={2} numItemsLg={3} className="gap-2 md:gap-3">
+            <Card decoration="top" decorationColor="teal" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">Roster (actual HC)</Text>
+              <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{formatNumber(projectedHc)}</Metric>
+              <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">
+                On rolls; WL1–4 are band mix (not double-counted)
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="emerald" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Net new vs roster</Text>
+              <Metric
+                className={`mt-1 text-xl tabular-nums md:text-2xl ${varActual > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-tremor-content-strong"}`}
+              >
                 {varActual > 0 ? `+${formatNumber(varActual)}` : "0"}
-              </div>
-              <div className="wfm-proj-card__sub">Pipeline beyond actual (0 when WL = headcount mix)</div>
-            </div>
-            <div className="wfm-proj-card">
-              <div className="wfm-proj-card__label">Gap to ideal target</div>
-              <div className="wfm-proj-card__value" style={{ color: netRosterGapToIdeal < 0 ? "var(--amber)" : netRosterGapToIdeal > 0 ? "var(--red)" : "var(--text)" }}>
+              </Metric>
+              <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">
+                Pipeline beyond actual (0 when WL = headcount mix)
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="orange" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">Gap to ideal target</Text>
+              <Metric
+                className={`mt-1 text-xl tabular-nums md:text-2xl ${
+                  netRosterGapToIdeal < 0 ? "text-orange-500 dark:text-orange-400" : netRosterGapToIdeal > 0 ? "text-rose-600 dark:text-rose-400" : "text-tremor-content-strong"
+                }`}
+              >
                 {netRosterGapToIdeal >= 0 ? "−" : "+"}
                 {formatNumber(Math.abs(netRosterGapToIdeal))}
-              </div>
-              <div className="wfm-proj-card__sub">Ideal − actual (same as ideal HC gap above)</div>
-            </div>
-          </div>
+              </Metric>
+              <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">Ideal − actual (same as ideal HC gap above)</Text>
+            </Card>
+          </Grid>
         </>
       )}
 
-      {/* ── WL Mix summary ── */}
       {!loading && rows.length > 0 && (
         <>
-          <div className="wfm-section-label">WL Hire Mix (Additional Support)</div>
-          <div className="wfm-wl-grid">
-            {[
-              { label: "WL1 Hires", value: totalWl1, sub: "Entry level" },
-              { label: "WL2 Hires", value: totalWl2, sub: "Mid level" },
-              { label: "WL3+ Hires", value: totalWl3, sub: "Senior / leadership" },
-              { label: "WL headcount (sum)", value: totalAdditional, sub: "Equals roster when data is a band split" },
-            ].map((c) => (
-              <div key={c.label} className="wfm-wl-cell">
-                <div className="wfm-wl-cell__label">{c.label}</div>
-                <div className="wfm-wl-cell__value">{formatNumber(c.value)}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{c.sub}</div>
-              </div>
+          <Text className={WFM_BLOCK_TAG}>WL hire mix (additional support)</Text>
+          <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-2 md:gap-3">
+            {(
+              [
+                { label: "WL1 hires", value: totalWl1, sub: "Entry level", color: "cyan" as const, text: "text-cyan-600 dark:text-cyan-400" },
+                { label: "WL2 hires", value: totalWl2, sub: "Mid level", color: "blue" as const, text: "text-blue-600 dark:text-blue-400" },
+                { label: "WL3+ hires", value: totalWl3, sub: "Senior / leadership", color: "violet" as const, text: "text-violet-600 dark:text-violet-400" },
+                {
+                  label: "WL headcount (sum)",
+                  value: totalAdditional,
+                  sub: "Equals roster when data is a band split",
+                  color: "orange" as const,
+                  text: "text-orange-600 dark:text-orange-400",
+                },
+              ] as const
+            ).map((c) => (
+              <Card key={c.label} decoration="top" decorationColor={c.color} className="p-3">
+                <Text className={`text-[10px] font-semibold uppercase tracking-wide ${c.text}`}>{c.label}</Text>
+                <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{formatNumber(c.value)}</Metric>
+                <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">{c.sub}</Text>
+              </Card>
             ))}
-          </div>
+          </Grid>
         </>
       )}
 
-      {/* ── Project-wise table ── */}
-      <div className="wfm-section-label" style={{ marginTop: 4 }}>Project Wise</div>
-      <div className="wfm-section-card">
-        <div className="wfm-section-card__header">
-          <div>
-            <div className="wfm-section-card__tag">Client Headcount Detail</div>
-            <div className="wfm-section-card__title">Fill Rate & Resource Gap by Client</div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <FilterChips value={tableFilter} onChange={setTableFilter} />
-            <button
-              className="wfm-section-card__action"
-              onClick={() => { setExpandMode("benchmark"); setExpandFilter(tableFilter); }}
+      <TremorDashboardSection
+        className={flatCard}
+        compact
+        tag="Client headcount detail"
+        title="Fill rate & resource gap by client"
+        toolbar={(
+          <Flex justifyContent="between" alignItems="center" className="flex-wrap gap-2">
+            <WfmFilterChipRow value={tableFilter} onChange={setTableFilter} />
+            <Button
+              type="button"
+              variant="light"
+              color="orange"
+              size="xs"
+              onClick={() => {
+                setExpandMode("benchmark");
+                setExpandFilter(tableFilter);
+              }}
             >
-              ⤢ Expand all
-            </button>
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                <Expand size={12} aria-hidden />
+                Expand all
+              </span>
+            </Button>
+          </Flex>
+        )}
+        noPad
+      >
+        {loading ? (
+          <div className="p-4">
+            <SkeletonTable rows={6} cols={10} />
           </div>
-        </div>
-        <div className="wfm-section-card__body" style={{ padding: 0 }}>
-          {loading
-            ? <SkeletonTable rows={6} cols={10} />
-            : rows.length === 0
-              ? <div className="wfm-empty">Upload WFM data to populate this table</div>
-              : filteredRows.length === 0
-                ? <div className="wfm-empty">No clients match this filter</div>
-                : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="wfm-table">
-                      <thead>
-                        <tr>
-                          <th>Department / Client</th>
-                          <th className="right">Target Productivity</th>
-                          <th className="right">Ideal HC</th>
-                          <th className="right">Actual HC</th>
-                          <th className="right">Variance (ideal−actual)</th>
-                          <th className="right">WL band sum</th>
-                          <th className="right">Open Positions</th>
-                          <th className="right">Roster</th>
-                          <th>Fill Rate</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredRows.map((r, i) => {
-                          const idealN = Number(r.ideal_hc ?? 0);
-                          const actualN = Number(r.actual_hc_total ?? 0);
-                          const variance = idealN - actualN;
-                          const wlBandSum = Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0);
-                          const openPos = variance > 0 ? variance : 0;
-                          const projHc = actualN; // WL1–4 are band mix of this roster, not add-on
-                          const pct = wfmFillPct(actualN, idealN);
-                          const gapColor = wfmFillColor(pct, idealN);
-                          const statusLbl = wfmStatusLabel(pct, idealN);
-                          const fc = barFillClass(pct, idealN);
-                          return (
-                            <tr key={i}>
-                              <td>
-                                <div className="wfm-table__name">{r.account_name || `Project ${r.project_id}`}</div>
-                                {r.practice_head && <div className="wfm-table__muted">{r.practice_head}</div>}
-                              </td>
-                              <td className="right">{r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}</td>
-                              <td className="right">{formatNumber(idealN)}</td>
-                              <td className="right">{formatNumber(actualN)}</td>
-                              <td className="right" style={{ color: variance > 0 ? "var(--red)" : variance < 0 ? "var(--amber)" : "var(--green)", fontWeight: 600 }}>
-                                {variance > 0 ? "+" : ""}{formatNumber(variance)}
-                              </td>
-                              <td className="right">{formatNumber(wlBandSum)}</td>
-                              <td className="right" style={{ color: openPos > 0 ? "var(--red)" : "var(--text-muted)" }}>
-                                {formatNumber(openPos)}
-                              </td>
-                              <td className="right" style={{ color: "var(--blue)" }}>{formatNumber(projHc)}</td>
-                              <td style={{ minWidth: 130 }}>
-                                <div className="wfm-bar-wrap">
-                                  <div className="wfm-bar-track">
-                                    <div className={`wfm-bar-fill ${fc}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-                                  </div>
-                                  <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: gapColor, minWidth: 36 }}>
-                                    {formatPercent(pct)}
-                                  </span>
-                                </div>
-                              </td>
-                              <td><WfmStatus label={statusLbl} /></td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                      {/* TOTAL row */}
-                      {filteredRows.length > 1 && (() => {
-                        const totIdeal = filteredRows.reduce((s, r) => s + Number(r.ideal_hc ?? 0), 0);
-                        const totActual = filteredRows.reduce((s, r) => s + Number(r.actual_hc_total ?? 0), 0);
-                        const totAdditional = filteredRows.reduce((s, r) =>
-                          s + Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0), 0);
-                        const totVariance = totIdeal - totActual;
-                        const totOpenPos = totVariance > 0 ? totVariance : 0;
-                        const totProj = totActual;
-                        const totFill = wfmFillPct(totActual, totIdeal);
-                        return (
-                          <tfoot>
-                            <tr style={{ background: "var(--surface-muted)", fontWeight: 700 }}>
-                              <td style={{ fontWeight: 700 }}>TOTAL</td>
-                              <td className="right">—</td>
-                              <td className="right">{formatNumber(totIdeal)}</td>
-                              <td className="right">{formatNumber(totActual)}</td>
-                              <td className="right" style={{ color: totVariance > 0 ? "var(--red)" : "var(--green)" }}>
-                                {totVariance > 0 ? "+" : ""}{formatNumber(totVariance)}
-                              </td>
-                              <td className="right">{formatNumber(totAdditional)}</td>
-                              <td className="right" style={{ color: totOpenPos > 0 ? "var(--red)" : "var(--text-muted)" }}>
-                                {formatNumber(totOpenPos)}
-                              </td>
-                              <td className="right" style={{ color: "var(--blue)" }}>{formatNumber(totProj)}</td>
-                              <td>
-                                <div className="wfm-bar-wrap">
-                                  <div className="wfm-bar-track">
-                                    <div className={`wfm-bar-fill ${bandClass(wfmFillBand(totFill, totIdeal))}`} style={{ width: `${Math.min(totFill, 100)}%` }} />
-                                  </div>
-                                  <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: wfmFillColor(totFill, totIdeal), minWidth: 36 }}>
-                                    {formatPercent(totFill)}
-                                  </span>
-                                </div>
-                              </td>
-                              <td>—</td>
-                            </tr>
-                          </tfoot>
-                        );
-                      })()}
-                    </table>
-                  </div>
-                )
-          }
-        </div>
-      </div>
+        ) : rows.length === 0 ? (
+          <div className="p-4">
+            <Text className="text-sm text-tremor-content-subtle">Upload WFM data to populate this table</Text>
+          </div>
+        ) : filteredRows.length === 0 ? (
+          <div className="p-4">
+            <Text className="text-sm text-tremor-content-subtle">No clients match this filter</Text>
+          </div>
+        ) : (
+          <div className="overflow-x-auto bg-gradient-to-b from-orange-50/30 to-white px-2 pb-3 pt-1 dark:from-orange-950/20 dark:to-dark-tremor-background-default sm:px-3">
+            <Table className="text-tremor-default [&_tbody_td]:px-2 [&_tbody_td]:py-1.5 [&_tbody_td]:text-xs [&_tfoot_td]:px-2 [&_tfoot_td]:py-1.5 [&_tfoot_td]:text-xs [&_thead_th]:px-2 [&_thead_th]:py-2 [&_thead_th]:text-[11px] [&_thead_th]:font-semibold [&_thead_th]:uppercase [&_thead_th]:tracking-wide">
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Department / client</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Target productivity</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Ideal HC</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Actual HC</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Variance (ideal−actual)</TableHeaderCell>
+                  <TableHeaderCell className="text-right">WL band sum</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Open positions</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Roster</TableHeaderCell>
+                  <TableHeaderCell>Fill rate</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredRows.map((r, i) => {
+                  const idealN = Number(r.ideal_hc ?? 0);
+                  const actualN = Number(r.actual_hc_total ?? 0);
+                  const variance = idealN - actualN;
+                  const wlBandSum =
+                    Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0);
+                  const openPos = variance > 0 ? variance : 0;
+                  const projHc = actualN;
+                  const pct = wfmFillPct(actualN, idealN);
+                  const gapColor = wfmFillColor(pct, idealN);
+                  const statusLbl = wfmStatusLabel(pct, idealN);
+                  return (
+                    <TableRow key={i}>
+                      <TableCell className="max-w-[200px]">
+                        <Text className="text-xs font-semibold text-tremor-content-strong">{r.account_name || `Project ${r.project_id}`}</Text>
+                        {r.practice_head ? (
+                          <Text className="block text-[11px] text-tremor-content-subtle">{r.practice_head}</Text>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">
+                        {r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-strong">{formatNumber(idealN)}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-strong">{formatNumber(actualN)}</TableCell>
+                      <TableCell
+                        className={`text-right text-xs tabular-nums font-semibold ${
+                          variance > 0 ? "text-rose-600" : variance < 0 ? "text-amber-600" : "text-emerald-600"
+                        }`}
+                      >
+                        {variance > 0 ? "+" : ""}
+                        {formatNumber(variance)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">{formatNumber(wlBandSum)}</TableCell>
+                      <TableCell className={`text-right text-xs tabular-nums ${openPos > 0 ? "text-rose-600" : "text-tremor-content-subtle"}`}>
+                        {formatNumber(openPos)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-sky-700 dark:text-sky-300">{formatNumber(projHc)}</TableCell>
+                      <TableCell className="min-w-[120px]">
+                        <Flex justifyContent="start" alignItems="center" className="gap-1.5">
+                          <ProgressBar value={Math.min(100, pct)} color={fillBarTremorColor(pct, idealN)} className="min-w-[52px] flex-1 !h-1.5" />
+                          <Text className="shrink-0 text-[11px] tabular-nums" style={{ color: gapColor }}>
+                            {formatPercent(pct)}
+                          </Text>
+                        </Flex>
+                      </TableCell>
+                      <TableCell>
+                        <Badge size="xs" color={wfmStatusToBadgeColor(statusLbl)}>{statusLbl}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+              {projectTableTotals ? (
+                <TableFoot>
+                  <TableRow className="border-t border-orange-200/80 bg-orange-50/50 dark:border-orange-900/50 dark:bg-orange-950/25">
+                    <TableFooterCell className="text-xs font-bold uppercase tracking-wide text-orange-800 dark:text-orange-200">Total</TableFooterCell>
+                    <TableFooterCell className="text-right text-xs">—</TableFooterCell>
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totIdeal)}</TableFooterCell>
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totActual)}</TableFooterCell>
+                    <TableFooterCell
+                      className={`text-right text-xs tabular-nums font-semibold ${
+                        projectTableTotals.totVariance > 0 ? "text-rose-600" : "text-emerald-600"
+                      }`}
+                    >
+                      {projectTableTotals.totVariance > 0 ? "+" : ""}
+                      {formatNumber(projectTableTotals.totVariance)}
+                    </TableFooterCell>
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totAdditional)}</TableFooterCell>
+                    <TableFooterCell
+                      className={`text-right text-xs tabular-nums font-semibold ${
+                        projectTableTotals.totOpenPos > 0 ? "text-rose-600" : "text-tremor-content-subtle"
+                      }`}
+                    >
+                      {formatNumber(projectTableTotals.totOpenPos)}
+                    </TableFooterCell>
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-sky-700 dark:text-sky-300">
+                      {formatNumber(projectTableTotals.totProj)}
+                    </TableFooterCell>
+                    <TableFooterCell>
+                      <Flex justifyContent="start" alignItems="center" className="gap-1.5">
+                        <ProgressBar
+                          value={Math.min(100, projectTableTotals.totFill)}
+                          color={fillBarTremorColor(projectTableTotals.totFill, projectTableTotals.totIdeal)}
+                          className="min-w-[52px] flex-1 !h-1.5"
+                        />
+                        <Text className="shrink-0 text-[11px] tabular-nums font-semibold" style={{ color: wfmFillColor(projectTableTotals.totFill, projectTableTotals.totIdeal) }}>
+                          {formatPercent(projectTableTotals.totFill)}
+                        </Text>
+                      </Flex>
+                    </TableFooterCell>
+                    <TableFooterCell className="text-xs">—</TableFooterCell>
+                  </TableRow>
+                </TableFoot>
+              ) : null}
+            </Table>
+          </div>
+        )}
+      </TremorDashboardSection>
 
-      {/* ── HC Chart + Gauge side by side ── */}
       {!loading && rows.length > 0 && (
         <>
-          <div className="wfm-section-label">Client HC — Ideal vs Actual</div>
-          <div className="wfm-charts-grid">
-            <div className="wfm-section-card">
-              <div className="wfm-section-card__header">
-                <div className="wfm-section-card__title">HC Comparison</div>
-                <button
-                  className="wfm-section-card__action"
-                  onClick={() => { setExpandMode("hc"); setExpandFilter("all"); }}
-                >
-                  ⤢ Full list
-                </button>
+          <Text className={WFM_BLOCK_TAG}>Client HC — ideal vs actual</Text>
+          <Grid numItems={1} numItemsLg={2} className="gap-3">
+            <Card className={flatCard}>
+              <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+                <Flex justifyContent="between" alignItems="center" className="gap-2">
+                  <Title className="text-base font-semibold text-tremor-content-strong">HC comparison</Title>
+                  <Button
+                    type="button"
+                    variant="light"
+                    color="orange"
+                    size="xs"
+                    onClick={() => {
+                      setExpandMode("hc");
+                      setExpandFilter("all");
+                    }}
+                  >
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                      <Expand size={12} aria-hidden />
+                      Full list
+                    </span>
+                  </Button>
+                </Flex>
               </div>
-              <div className="wfm-section-card__body">
-                {allBulletItems.length === 0
-                  ? <div className="wfm-empty">No data</div>
-                  : <HcIdealActualGroupedChart items={allBulletItems.slice(0, 8)} />
-                }
+              <div className="px-4 py-3">
+                {allBulletItems.length === 0 ? (
+                  <Text className="text-xs text-tremor-content-subtle">No data</Text>
+                ) : (
+                  <HcIdealActualGroupedChart items={allBulletItems.slice(0, 8)} />
+                )}
               </div>
-            </div>
-
-            <div className="wfm-section-card">
-              <div className="wfm-section-card__header">
-                <div className="wfm-section-card__title">Capacity Fill Gauge</div>
+            </Card>
+            <Card className={flatCard}>
+              <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+                <Title className="text-base font-semibold text-tremor-content-strong">Capacity fill gauge</Title>
+                <Text className="mt-0.5 text-xs text-tremor-content-subtle">Ideal vs actual roster strength</Text>
               </div>
-              <div className="wfm-section-card__body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div className="flex flex-col gap-4 px-4 py-3">
                 <GaugeRing
                   value={fillRate}
                   label="Capacity Fill Rate"
                   sublabel={`${formatNumber(actualHc)} of ${formatNumber(idealHc)} positions`}
                   color={fgColor}
                 />
-                {wlData.length > 0 && <WlDistributionBar data={wlData} />}
+                {wlData.length > 0 ? <WlDistributionBar data={wlData} /> : null}
               </div>
-            </div>
-          </div>
+            </Card>
+          </Grid>
         </>
       )}
 
-      {/* ── Productivity vs Fill chart ── */}
       {!loading && rows.length > 0 && (
-        <PlatformSection title="Productivity Target vs Fill Rate (by client)">
-          <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 10, fontFamily: "var(--mono)", lineHeight: 1.5 }}>
-            Bars: fill rate (actual ÷ ideal HC). Line: productivity target. Dashed line: 100% fill — above = over-capacity.
-            {productivityFillChartAll.length > 0 && (
-              <span style={{ display: "block", marginTop: 2 }}>
-                {prodChartSelected.length === 0
-                  ? `Showing all ${productivityFillChartAll.length} clients — search to narrow.`
-                  : `Showing ${productivityFillChartData.length} of ${productivityFillChartAll.length} selected.`}
-              </span>
-            )}
+        <Card className={cn(flatCard, "border-t-4 border-t-orange-400 dark:border-t-orange-500")}>
+          <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+            <Title className="text-base font-semibold text-tremor-content-strong">Productivity target vs fill rate (by client)</Title>
+            <Text className="mt-0.5 text-xs leading-snug text-tremor-content-subtle">
+              Bars: fill rate (actual ÷ ideal HC). Line: productivity target. Dashed line: 100% fill — above = over-capacity.
+              {productivityFillChartAll.length > 0 ? (
+                <span className="mt-1 block text-[11px]">
+                  {prodChartSelected.length === 0
+                    ? `Showing all ${productivityFillChartAll.length} clients — search to narrow.`
+                    : `Showing ${productivityFillChartData.length} of ${productivityFillChartAll.length} selected.`}
+                </span>
+              ) : null}
+            </Text>
           </div>
-          {productivityFillChartAll.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div ref={prodChartPickerWrapRef} style={{ position: "relative" }}>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                  <input
-                    className="platform-search"
-                    style={{ flex: "1 1 200px", minWidth: 160, maxWidth: 320, fontSize: 12 }}
+          <div className="px-4 py-3">
+          {productivityFillChartAll.length > 0 ? (
+            <div className="mb-3">
+              <div ref={prodChartPickerWrapRef} className="relative">
+                <Flex className="flex-wrap items-center gap-1.5">
+                  <TextInput
+                    className="min-w-[140px] max-w-xs flex-1 text-xs"
                     placeholder="Search clients to add…"
                     value={prodChartSearch}
-                    onChange={(e) => setProdChartSearch(e.target.value)}
+                    onValueChange={setProdChartSearch}
                     onFocus={() => setProdChartPickerOpen(true)}
                     onClick={() => setProdChartPickerOpen(true)}
-                    onKeyDown={(e) => { if (e.key === "Escape") setProdChartPickerOpen(false); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setProdChartPickerOpen(false);
+                    }}
                     autoComplete="off"
                   />
-                  <button type="button" className="platform-chip" style={{ cursor: "pointer" }}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
+                    color="slate"
+                    className="!text-[11px]"
                     onClick={() => {
                       const next = prodChartPickerCandidates[0]?.fullName;
                       if (next && !prodChartSelected.includes(next)) setProdChartSelected((s) => [...s, next]);
                       setProdChartSearch("");
                     }}
                     disabled={!prodChartPickerCandidates.length}
-                  >+ Add first match</button>
-                  <button type="button" className="platform-chip active" style={{ cursor: "pointer" }}
-                    onClick={() => { setProdChartSelected([]); setProdChartSearch(""); setProdChartPickerOpen(false); }}
-                  >Show all</button>
-                </div>
-                {prodChartPickerOpen && prodChartPickerCandidates.length > 0 && (
-                  <div role="listbox" style={{
-                    position: "absolute", left: 0, right: 0, top: "100%", marginTop: 6, zIndex: 40,
-                    maxHeight: 160, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8,
-                    padding: "6px 0", background: "var(--surface-muted)", boxShadow: "0 12px 32px rgba(0,0,0,0.45)",
-                  }}>
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", padding: "0 12px 6px", fontFamily: "var(--mono)" }}>
-                      Click to add · search narrows the list
-                    </div>
+                  >
+                    + Add first match
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="xs"
+                    color="orange"
+                    className="!text-[11px]"
+                    onClick={() => {
+                      setProdChartSelected([]);
+                      setProdChartSearch("");
+                      setProdChartPickerOpen(false);
+                    }}
+                  >
+                    Show all
+                  </Button>
+                </Flex>
+                {prodChartPickerOpen && prodChartPickerCandidates.length > 0 ? (
+                  <div
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full z-40 mt-1 max-h-36 overflow-y-auto rounded-tremor-default border border-tremor-border bg-white py-1 shadow-tremor-dropdown dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted"
+                  >
+                    <Text className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Add client</Text>
                     {prodChartPickerCandidates.map((d) => (
-                      <button key={d.fullName} type="button" role="option"
+                      <button
+                        key={d.fullName}
+                        type="button"
+                        role="option"
+                        className="block w-full cursor-pointer border-0 bg-transparent px-2.5 py-1 text-left text-xs text-tremor-content-subtle hover:bg-orange-50 dark:hover:bg-dark-tremor-background-subtle"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => { setProdChartSelected((s) => (s.includes(d.fullName) ? s : [...s, d.fullName])); setProdChartSearch(""); }}
-                        style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 12px", border: "none", background: "transparent", color: "var(--text-muted)", fontSize: 12, cursor: "pointer" }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "color-mix(in srgb, var(--accent) 10%, transparent)"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                        onClick={() => {
+                          setProdChartSelected((s) => (s.includes(d.fullName) ? s : [...s, d.fullName]));
+                          setProdChartSearch("");
+                        }}
                       >
                         {d.fullName}
                       </button>
                     ))}
                   </div>
-                )}
+                ) : null}
               </div>
-              {prodChartSelected.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 8 }}>
-                  <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>SELECTED</span>
+              {prodChartSelected.length > 0 ? (
+                <Flex className="mt-2 flex-wrap items-center gap-1.5">
+                  <Text className="text-[10px] font-bold uppercase tracking-wide text-tremor-content-subtle">Selected</Text>
                   {prodChartSelected.map((fn) => (
-                    <button key={fn} type="button"
+                    <Button
+                      key={fn}
+                      type="button"
+                      size="xs"
+                      variant="light"
+                      color="orange"
+                      className="!max-w-[200px] !truncate !text-[11px]"
                       onClick={() => setProdChartSelected((s) => s.filter((x) => x !== fn))}
-                      style={{
-                        display: "inline-flex", alignItems: "center", gap: 4,
-                        padding: "2px 8px", borderRadius: 20,
-                        border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
-                        background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-                        color: "var(--accent)", fontSize: 10.5, fontFamily: "var(--mono)", cursor: "pointer",
-                      }}
                     >
                       {fn.length > 28 ? `${fn.slice(0, 27)}…` : fn}
-                      <span style={{ opacity: 0.7 }}>×</span>
-                    </button>
+                      <span className="ml-0.5 opacity-70">×</span>
+                    </Button>
                   ))}
-                </div>
-              )}
+                </Flex>
+              ) : null}
             </div>
-          )}
-          <WfmProductivityFillChart data={productivityFillChartData} />
-        </PlatformSection>
+          ) : null}
+          <div className="mt-1">
+            <WfmProductivityFillChart data={productivityFillChartData} />
+          </div>
+          </div>
+        </Card>
       )}
 
-      {/* ── Expand Modal ── */}
-      <WfmExpandModal
+      <WfmExpandDialog
         mode={expandMode}
         items={allBulletItems}
         rows={rows}

@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, String, Float, JSON, DateTime, Date, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, sessionmaker, relationship
+from sqlalchemy.orm import Session, sessionmaker, relationship, backref
 import datetime
 
 import os
@@ -138,6 +138,28 @@ class Client(Base, AuditMixin):
     hierarchy_tag_sbe = Column(String(255), nullable=True)
 
     projects = relationship("Project", back_populates="client")
+
+
+class ClientDashboardConfig(Base):
+    """Per-client dashboard layout & visibility — curated client portal (staff-editable)."""
+
+    __tablename__ = "client_dashboard_configs"
+    __table_args__ = (UniqueConstraint("client_id", name="uq_client_dashboard_config_client"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True)
+    config_json = Column(JSON, nullable=False)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    client = relationship(
+        "Client",
+        backref=backref(
+            "dashboard_config_row",
+            uselist=False,
+            cascade="all, delete-orphan",
+        ),
+    )
 
 
 class Project(Base, AuditMixin):

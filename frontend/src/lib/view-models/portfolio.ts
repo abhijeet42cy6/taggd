@@ -7,6 +7,8 @@ type ProjectStat = {
   on_hold: number;
   pipeline: number;
   revenue: number;
+  /** Enriched from `Project.vertical` when available */
+  vertical?: string;
 };
 
 /**
@@ -34,6 +36,8 @@ export type PortfolioRow = {
   holdPenalty: number;     // 0–100 (lower on_hold % = higher score)
   revenueScore: number;    // 0–100 (relative to portfolio median)
   composite: number;       // weighted 0–100
+  /** Project vertical when linked from master data */
+  vertical: string;
 };
 
 export function portfolioCompositeVm(
@@ -79,9 +83,12 @@ export function portfolioCompositeVm(
         revenueScore * 0.10
       );
 
+      const vertRaw = (p.vertical ?? "—").trim();
+
       return {
         id: p.id,
         name: p.name,
+        vertical: vertRaw || "—",
         positions: total,
         closed,
         active: actv,

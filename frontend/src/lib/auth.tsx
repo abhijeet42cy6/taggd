@@ -207,6 +207,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/",
     "/ceo-view",
     "/portfolio",
+    "/client-dashboard",
     "/clients",
     "/client-contracts",
     "/meetings",
@@ -235,6 +236,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/",
     "/ceo-view",
     "/portfolio",
+    "/client-dashboard",
     "/clients",
     "/client-contracts",
     "/meetings",
@@ -263,6 +265,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/",
     "/ceo-view",
     "/portfolio",
+    "/client-dashboard",
     "/clients",
     "/client-contracts",
     "/meetings",
@@ -288,6 +291,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
   ],
   project_head: [
     "/",
+    "/client-dashboard",
     "/clients",
     "/client-contracts",
     "/meetings",
@@ -310,6 +314,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
   ],
   manager: [
     "/",
+    "/client-dashboard",
     "/clients",
     "/client-contracts",
     "/meetings",
@@ -333,6 +338,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
   operations: [
     "/",
     "/portfolio",
+    "/client-dashboard",
     "/clients",
     "/client-contracts",
     "/meetings",
@@ -364,6 +370,7 @@ export const ROLE_NAV_PATHS: Record<string, string[]> = {
     "/candidate-store",
     "/meetings",
     "/clients",
+    "/client-dashboard",
     "/transitions",
     "/ingestion",
     "/activity",
@@ -403,6 +410,7 @@ export function homePathAfterAuth(user: AuthUser | null | undefined): string {
 /** Backend `VERTICAL_KEYS` → app routes (client portal allow-list). */
 const VERTICAL_TO_NAV_PATHS: Record<string, string[]> = {
   executive_dashboard: ["/"],
+  client_dashboard: ["/client-dashboard"],
   finance: ["/finance", "/projections"],
   sla: ["/sla-performance"],
   wfm: ["/wfm"],
@@ -433,6 +441,7 @@ export type NavAllowedOpts = {
  * Keys match backend `VERTICAL_KEYS` / AdminUsers `VERTICAL_MODULES`.
  */
 const STAFF_PATH_VERTICAL_PREFIXES: [string, string][] = [
+  ["/client-dashboard", "client_dashboard"],
   ["/client-contracts", "contracts"],
   ["/candidate-store", "candidates"],
   ["/revenue-trackers", "revenue_forecast"],
@@ -508,6 +517,7 @@ export function clientPortalNavPaths(verticalAccess: string[] | null | undefined
 
 /** Prefer executive-style order when choosing a default landing route. */
 export const CLIENT_NAV_PRIORITY = [
+  "/client-dashboard",
   "/",
   "/portfolio",
   "/clients",

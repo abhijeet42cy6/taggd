@@ -440,7 +440,8 @@
 }
 .ceo-mix-table td.right {
   text-align: right;
-  font-family: var(--mono);
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
 }
 .ceo-mix-table tr:last-child td { border-bottom: none; }
 .ceo-mix-table tr:hover td { background: var(--surface-muted); }
@@ -596,7 +597,7 @@
   text-align: center;
   color: var(--text-subtle);
   font-size: 12px;
-  font-family: var(--mono);
+  font-family: var(--font);
 }
 
 /* ═══════════════════════════════════
@@ -623,7 +624,8 @@
   padding: 9px 12px;
   border-bottom: 1px solid var(--border);
   text-align: right;
-  font-family: var(--mono);
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -631,6 +633,7 @@
 .ceo-summary-table td:first-child {
   text-align: left;
   font-family: var(--font);
+  font-variant-numeric: normal;
   font-weight: 600;
   color: var(--text);
   font-size: 12px;

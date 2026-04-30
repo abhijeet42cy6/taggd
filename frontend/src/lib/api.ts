@@ -1082,6 +1082,7 @@ const TTL_MS: Record<string, number> = {
   "sla/stats":      20_000,
   "sla/data":       20_000,
   "sla/account-metrics": 20_000,
+  "client-dashboard": 20_000,
   "wfm/stats":      20_000,
   "wfm/data":       20_000,
 };
@@ -1135,6 +1136,67 @@ export function clearApiCache() {
 }
 
 // ─── QUERY FUNCTIONS ──────────────────────────────────────────────────────────
+
+/** Curated client portal dashboard (`GET /client-dashboard/summary`). */
+export type ClientDashboardConfig = {
+  version?: number;
+  widgets?: {
+    kpi_row?: boolean;
+    sla_summary?: boolean;
+    sla_metrics_table?: boolean;
+    finance_summary?: boolean;
+    projects_table?: boolean;
+  };
+  sla_show_internal_kpis?: boolean;
+  finance_show_revenue?: boolean;
+  finance_show_collections?: boolean;
+  finance_show_unbilled?: boolean;
+  finance_show_cm?: boolean;
+  project_vertical_filter?: string[];
+  project_region_filter?: string[];
+};
+
+export type ClientDashboardSummary = {
+  clients: Array<{ id: number; official_name: string }>;
+  selected_client_id: number | null;
+  projects: Array<{
+    id: number;
+    client_id: number | null;
+    account_name: string;
+    engagement_name: string;
+    region: string;
+    practice_head: string;
+    vertical: string;
+  }>;
+  vertical_options: string[];
+  region_options: string[];
+  config: ClientDashboardConfig;
+  sla: {
+    portfolio_health: number | null;
+    met_count: number | null;
+    not_met_count: number | null;
+    not_reported_count: number | null;
+    total_metrics: number | null;
+  };
+  sla_metrics: Array<{
+    id: number;
+    project_id: number;
+    account_name: string;
+    region: string;
+    practice_head: string | null;
+    metric_nature: string | null;
+    metric_label: string;
+    metric_group: string | null;
+    target: string | null;
+    latest_score: string | number | null;
+    status: string;
+    reporting_month: string;
+  }>;
+  finance: Record<string, number>;
+  requisitions_total: number;
+  is_client_user: boolean;
+  can_edit_config: boolean;
+};
 
 export const queries = {
   globalStats: () =>
@@ -2064,6 +2126,25 @@ export const queries = {
           .get(
             `/sla/account-metrics-timeseries?account=${encodeURIComponent(account)}`
           )
+          .then((r) => r.data)
+    ),
+
+  clientDashboardSummary: (params?: { client_id?: number }) => {
+    const q =
+      params?.client_id != null
+        ? `?client_id=${encodeURIComponent(String(params.client_id))}`
+        : "";
+    return cachedGet<ClientDashboardSummary>(`client-dashboard/summary${q}`, () =>
+      api.get(`/client-dashboard/summary${q}`).then((r) => r.data)
+    );
+  },
+
+  clientDashboardConfig: (clientId: number) =>
+    cachedGet<{ client_id: number; config: ClientDashboardConfig }>(
+      `client-dashboard/config/${clientId}`,
+      () =>
+        api
+          .get("/client-dashboard/config", { params: { client_id: clientId } })
           .then((r) => r.data)
     ),
 

@@ -16,11 +16,15 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { Badge, Button, Card, Flex, Grid, Metric, Select, SelectItem, Text, TextInput, Title } from "@tremor/react";
 import { queries, type GlobalStats, type Project, type RequisitionKpis } from "@/lib/api";
 import { financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import { slaStatsVm } from "@/lib/view-models/sla";
-import { ExecutiveRevenueYoYChart, ExecutiveCmYoYChart, RegionalRevenueBarChart } from "@/components/platform/Charts";
-import { SkeletonKpiRow } from "@/components/platform/Skeleton";
+import {
+  CeoCmYoYTremorChart,
+  CeoRegionalRevenueTremorChart,
+  CeoRevenueYoYTremorChart,
+} from "@/components/tremor-blocks/CeoViewTremorCharts";
 import {
   DEFAULT_DASHBOARD_FILTERS,
   filterFinanceRows,
@@ -34,17 +38,23 @@ import {
   quarterlyCmForFy,
   fiscalYearStart,
   parseMonthSort,
-  type DashboardFilters as DF,
 } from "@/lib/dashboard-aggregates";
 import { formatLargeCurrency, formatPercent } from "@/lib/utils";
-import { ExecutiveHeroCard, QuarterBand } from "@/components/platform/ExecutiveFinanceHero";
-import "@/styles/exec-dashboard.css";
+import { ExecSectionTitle } from "@/components/tremor-dashboard/ExecSectionTitle";
+import { ExecutiveMetricHeroCard } from "@/components/tremor-dashboard/ExecutiveMetricHeroCard";
+import {
+  OperationalPulseCard,
+  pulseBadgeFromExecCls,
+} from "@/components/tremor-dashboard/OperationalPulseCards";
+import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
+import { buildCeoProjectFyRows, CeoProjectsPortfolioModal } from "@/components/tremor-dashboard/CeoProjectsPortfolioModal";
 import "@/styles/ceo-view.css";
+import "@/styles/exec-dash-premium.css";
 import "@/styles/ceo-board-slides.css";
 import { CeoBoardSlides } from "@/components/ceo/CeoBoardSlides";
 import { CeoSlideDeckStudio } from "@/components/ceo/CeoSlideDeckStudio";
-import { loadCeoSlideDeck, saveCeoSlideDeck, type CeoSlideDeckConfig } from "@/lib/ceo-slide-deck";
-import { Pencil } from "lucide-react";
+import { loadCeoSlideDeck, type CeoSlideDeckConfig } from "@/lib/ceo-slide-deck";
+import { Maximize2, Pencil, Search } from "lucide-react";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -66,64 +76,12 @@ function fmtPct(n: number, decimals = 1): string {
   return `${n.toFixed(decimals)}%`;
 }
 
-function chipCls(val: number, goodIfPositive = true): string {
-  if (Math.abs(val) < 0.01) return "ceo-chip--muted";
-  const good = goodIfPositive ? val > 0 : val < 0;
-  return good ? "ceo-chip--green" : "ceo-chip--red";
-}
-
 /** Aligns with Executive Overview (`Dashboard`) YoY chip styling. */
 function yoyDeltaChip(curr: number, prev: number): { label: string; cls: string } {
   if (prev <= 0 || curr <= 0) return { label: "—", cls: "exec-delta-chip--muted" };
   const p = ((curr - prev) / prev) * 100;
   const cls = p > 0.5 ? "exec-delta-chip--green" : p < -0.5 ? "exec-delta-chip--red" : "exec-delta-chip--amber";
   return { label: `${p >= 0 ? "▲" : "▼"} ${Math.abs(p).toFixed(1)}% YoY`, cls };
-}
-
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function PulseCard({
-  icon, iconVariant, label, primary, sub, chip,
-}: {
-  icon: string;
-  iconVariant: "blue" | "green" | "amber" | "red" | "orange" | "teal";
-  label: string;
-  primary: React.ReactNode;
-  sub?: React.ReactNode;
-  chip?: { label: string; cls: string };
-}) {
-  return (
-    <div className="ceo-pulse-card">
-      <div className="ceo-pulse-card__icon-row">
-        <div className={`ceo-pulse-card__icon ceo-pulse-card__icon--${iconVariant}`}>{icon}</div>
-        {chip && <span className={`ceo-chip ${chip.cls}`}>{chip.label}</span>}
-      </div>
-      <div className="ceo-pulse-card__label">{label}</div>
-      <div className="ceo-pulse-card__primary">{primary}</div>
-      {sub && <div className="ceo-pulse-card__sub">{sub}</div>}
-    </div>
-  );
-}
-
-function SectionCard({
-  tag, title, children, noPad,
-}: {
-  tag?: string;
-  title: string;
-  children: React.ReactNode;
-  noPad?: boolean;
-}) {
-  return (
-    <div className="ceo-section-card">
-      <div className="ceo-section-card__header">
-        <div>
-          {tag && <div className="ceo-section-card__tag">{tag}</div>}
-          <div className="ceo-section-card__title">{title}</div>
-        </div>
-      </div>
-      <div className={noPad ? undefined : "ceo-section-card__body"}>{children}</div>
-    </div>
-  );
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -140,6 +98,10 @@ export const CeoView = () => {
   const [drilldown, setDrilldown] = useState<Array<{ name: string; revenue: number; count: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
+  const [accountIntelSearch, setAccountIntelSearch] = useState("");
+  const [accountIntelVertical, setAccountIntelVertical] = useState("all");
+  const [accountIntelStatus, setAccountIntelStatus] = useState<"all" | "on_track" | "monitor" | "at_risk">("all");
+  const [accountProjectsModalOpen, setAccountProjectsModalOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -328,8 +290,8 @@ export const CeoView = () => {
       .slice(0, 8);
   }, [fyRows, projects]);
 
-  // Top 8 accounts by actual revenue
-  const topAccounts = useMemo(() => {
+  // Account-level rollups for selected FY (all accounts — section applies top-N / filters in UI)
+  const ceoAccountRollups = useMemo(() => {
     const pmap = new Map(projects.map((p) => [p.id, p]));
     const by: Record<string, { name: string; vertical: string; actual: number; budget: number }> = {};
     for (const r of fyRows) {
@@ -342,75 +304,125 @@ export const CeoView = () => {
     }
     return Object.values(by)
       .sort((a, b) => b.actual - a.actual)
-      .slice(0, 8)
       .map((a) => ({ ...a, attainment: a.budget > 0 ? (a.actual / a.budget) * 100 : null }));
   }, [fyRows, projects]);
 
+  const accountIntelVerticalOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of ceoAccountRollups) {
+      if (a.vertical && a.vertical !== "—") s.add(a.vertical);
+    }
+    return [...s].sort((x, y) => x.localeCompare(y));
+  }, [ceoAccountRollups]);
+
+  const filteredCeoAccounts = useMemo(() => {
+    let rows = ceoAccountRollups;
+    const needle = accountIntelSearch.trim().toLowerCase();
+    if (needle) {
+      rows = rows.filter((a) => a.name.toLowerCase().includes(needle) || a.vertical.toLowerCase().includes(needle));
+    }
+    if (accountIntelVertical !== "all") {
+      rows = rows.filter((a) => a.vertical === accountIntelVertical);
+    }
+    if (accountIntelStatus !== "all") {
+      rows = rows.filter((a) => {
+        const att = a.attainment;
+        if (accountIntelStatus === "on_track") return att != null && att >= 100;
+        if (accountIntelStatus === "monitor") return att != null && att >= 70 && att < 100;
+        return att != null && att < 70;
+      });
+    }
+    return rows;
+  }, [ceoAccountRollups, accountIntelSearch, accountIntelVertical, accountIntelStatus]);
+
+  const accountIntelHasFilters =
+    accountIntelSearch.trim().length > 0 ||
+    accountIntelVertical !== "all" ||
+    accountIntelStatus !== "all";
+
+  const displayedCeoAccounts = accountIntelHasFilters ? filteredCeoAccounts.slice(0, 80) : filteredCeoAccounts.slice(0, 8);
+
+  const ceoProjectFyRows = useMemo(() => buildCeoProjectFyRows(fyRows, projects), [fyRows, projects]);
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="ceo-view">
-
-      {/* ── Controls ── */}
-      <div className="ceo-controls">
-        <div className="ceo-controls__left">
-          <div className="ceo-controls__title">CEO's View</div>
-          <div className="ceo-controls__subtitle">
+    <div className="exec-dash-tremor space-y-7 pb-12 pt-2">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="exec-dash-tremor__hero-main min-w-0">
+          <Title className="exec-dash-tremor__title text-3xl font-bold tracking-tight">CEO&apos;s View</Title>
+          <Text className="mt-1 block text-sm font-medium text-tremor-content-emphasis">
             Strategic performance dashboard · {stats?.total_projects ?? "—"} clients · {fyShortLabel(selectedFyStart)}
+          </Text>
+          <div className="exec-dash-tremor__meta-row mt-3">
+            <span className="exec-dash-tremor__meta-pill">
+              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--clients" aria-hidden />
+              <span>{stats?.total_projects ?? "—"} clients</span>
+            </span>
+            <span className="exec-dash-tremor__meta-pill">
+              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--fy" aria-hidden />
+              <span>{fyShortLabel(selectedFyStart)}</span>
+            </span>
           </div>
         </div>
-        <div className="ceo-controls__right">
-          <button
+        <Flex flexDirection="col" alignItems="stretch" justifyContent="start" className="shrink-0 gap-3 sm:flex-row sm:items-end">
+          <Button
             type="button"
-            className="platform-chip"
+            variant="secondary"
+            color="orange"
+            size="sm"
             onClick={() => setDeckEditorOpen(true)}
             title="Edit board slide deck (JSON)"
+            className="inline-flex items-center gap-2"
           >
             <Pencil size={14} aria-hidden />
-            <span style={{ marginLeft: 6 }}>Edit deck</span>
-          </button>
-          <span className="ceo-fy-label">Fiscal year</span>
-          <select
-            className="ceo-fy-select"
-            aria-label="Fiscal year"
-            value={
-              fyYears.length === 0
-                ? ""
-                : fyYears.includes(selectedFyStart)
-                  ? selectedFyStart
-                  : fyYears[0]
-            }
-            onChange={(e) => setSelectedFyStart(Number(e.target.value))}
-            disabled={loading || fyYears.length === 0}
-          >
+            Edit deck
+          </Button>
+          <div className="min-w-[10rem]">
+            <Text className="mb-1 font-semibold text-tremor-content-emphasis">Fiscal year</Text>
             {fyYears.length === 0 ? (
-              <option value="">No fiscal years in ledger</option>
+              <Text className="text-tremor-content-subtle">No fiscal years in ledger</Text>
             ) : (
-              fyYears.map((y) => (
-                <option key={y} value={y}>
-                  {fyShortLabel(y)}
-                </option>
-              ))
+              <Select
+                value={String(fyYears.includes(selectedFyStart) ? selectedFyStart : fyYears[0])}
+                onValueChange={(v) => setSelectedFyStart(Number(v))}
+                disabled={loading}
+              >
+                {fyYears.map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {fyShortLabel(y)}
+                  </SelectItem>
+                ))}
+              </Select>
             )}
-          </select>
-        </div>
+          </div>
+        </Flex>
       </div>
 
-      {/* ══ SECTION 1: FINANCIAL SCORECARDS ══ */}
-      <div className="ceo-section-label">Financial performance — {fyShortLabel(selectedFyStart)}</div>
+      <ExecSectionTitle>Financial performance — {fyShortLabel(selectedFyStart)}</ExecSectionTitle>
 
       {loading ? (
-        <SkeletonKpiRow count={3} />
+        <Grid numItems={1} numItemsMd={3} className="gap-4">
+          {(["orange", "teal", "blue"] as const).map((c) => (
+            <Card
+              key={c}
+              decoration="left"
+              decorationColor={c}
+              className="h-[min(360px,55vh)] animate-pulse ring-1 ring-tremor-border"
+            />
+          ))}
+        </Grid>
       ) : (
-        <div className="exec-hero">
-          <ExecutiveHeroCard
+        <Grid numItems={1} numItemsMd={3} className="gap-4">
+          <ExecutiveMetricHeroCard
             eyebrow="Revenue — Actual"
-            variant="orange"
+            decorationColor="orange"
             primary={formatLargeCurrency(revA)}
             deltas={
               [priorRevA > 0 ? yoyDeltaChip(revA, priorRevA) : null].filter(Boolean) as { label: string; cls: string }[]
             }
             attainmentLabel={`vs ₹ Budget ${formatLargeCurrency(revBud)}`}
             attainmentPct={revAtt}
+            quarters={revQuarters}
             meta={[
               { label: "Full-year forecast", value: formatLargeCurrency(fin?.revenue_forecast_inr ?? 0) },
               ...(priorFin && priorRevA > 0
@@ -418,13 +430,10 @@ export const CeoView = () => {
                 : []),
               ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
             ]}
-          >
-            <QuarterBand quarters={revQuarters} variant="orange" />
-          </ExecutiveHeroCard>
-
-          <ExecutiveHeroCard
+          />
+          <ExecutiveMetricHeroCard
             eyebrow="Contribution Margin"
-            variant="teal"
+            decorationColor="teal"
             primary={formatPercent(cmPct)}
             deltas={[
               cmPct >= 35
@@ -440,19 +449,15 @@ export const CeoView = () => {
             ]}
             attainmentLabel="vs 35% target"
             attainmentPct={(cmPct / 35) * 100}
+            quarters={cmQuarters}
             meta={[
               { label: "Target CM%", value: "35.0%" },
-              ...(priorCmPct != null
-                ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(priorCmPct) }]
-                : []),
+              ...(priorCmPct != null ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(priorCmPct) }] : []),
             ]}
-          >
-            <QuarterBand quarters={cmQuarters} variant="teal" />
-          </ExecutiveHeroCard>
-
-          <ExecutiveHeroCard
+          />
+          <ExecutiveMetricHeroCard
             eyebrow="Collection"
-            variant="blue"
+            decorationColor="blue"
             primary={formatLargeCurrency(coll)}
             deltas={
               [
@@ -464,6 +469,7 @@ export const CeoView = () => {
             }
             attainmentLabel={`vs ₹ Target ${formatLargeCurrency(collT)}`}
             attainmentPct={collAtt}
+            quarters={collQuarters}
             meta={[
               {
                 label: "Unbilled",
@@ -473,56 +479,64 @@ export const CeoView = () => {
               { label: "Bad debt", value: formatLargeCurrency(bd), valueCls: bd > 0 ? "red" : undefined },
               { label: "Bad debt % coll.", value: formatPercent(bdPctColl) },
             ]}
-          >
-            <QuarterBand quarters={collQuarters} variant="blue" />
-          </ExecutiveHeroCard>
-        </div>
+          />
+        </Grid>
       )}
 
-      {/* ══ SECTION 2: OPERATIONAL PULSE — 5 cards ══ */}
-      <div className="ceo-section-label">Operational pulse</div>
+      <ExecSectionTitle>Operational pulse</ExecSectionTitle>
 
-      {loading ? <SkeletonKpiRow count={5} /> : (
-        <div className="ceo-pulse">
-
-          {/* RPH */}
-          <PulseCard
-            icon="₹"
-            iconVariant="orange"
+      {loading ? (
+        <Grid numItems={1} numItemsSm={2} numItemsLg={5} className="exec-dash-tremor__pulse-grid gap-4">
+          {[0, 1, 2, 3, 4].map((k) => (
+            <Card key={k} className="h-36 animate-pulse ring-1 ring-tremor-border" />
+          ))}
+        </Grid>
+      ) : (
+        <Grid numItems={1} numItemsSm={2} numItemsLg={5} className="exec-dash-tremor__pulse-grid gap-4">
+          <OperationalPulseCard
+            tone="orange"
             label="Revenue per Hire"
             primary={rph > 0 ? fmtLakh(rph) : "—"}
             sub={totalTajeJoiners > 0 ? `${totalTajeJoiners.toFixed(0)} Taggd joiners` : "No joiner data"}
-            chip={rph > 0
-              ? { label: rph >= 49000 ? "On target" : "Below ₹49K", cls: rph >= 49000 ? "ceo-chip--green" : "ceo-chip--amber" }
-              : undefined}
+            badge={
+              rph > 0
+                ? {
+                    label: rph >= 49000 ? "On target" : "Below ₹49K",
+                    color: pulseBadgeFromExecCls(rph >= 49000 ? "exec-delta-chip--green" : "exec-delta-chip--amber"),
+                  }
+                : undefined
+            }
           />
-
-          {/* Productivity */}
-          <PulseCard
-            icon="⚡"
-            iconVariant="teal"
+          <OperationalPulseCard
+            tone="teal"
             label="Rev / Recruiter (WL1)"
             primary={revPerWl1 > 0 ? fmtLakh(revPerWl1) : "—"}
             sub={totalWl1Hc > 0 ? `Avg ${totalWl1Hc.toFixed(0)} WL1 HC` : "No WL1 data"}
-            chip={revPerWl1 > 0
-              ? { label: revPerWl1 >= 1e5 ? "On track" : "Watch", cls: revPerWl1 >= 1e5 ? "ceo-chip--green" : "ceo-chip--amber" }
-              : undefined}
+            badge={
+              revPerWl1 > 0
+                ? {
+                    label: revPerWl1 >= 1e5 ? "On track" : "Watch",
+                    color: pulseBadgeFromExecCls(revPerWl1 >= 1e5 ? "exec-delta-chip--green" : "exec-delta-chip--amber"),
+                  }
+                : undefined
+            }
           />
-
-          {/* WFM Fill Rate */}
-          <PulseCard
-            icon="👥"
-            iconVariant={wfmFill >= 70 && wfmFill <= 100 ? "green" : wfmFill > 100 ? "amber" : "red"}
+          <OperationalPulseCard
+            tone="teal"
             label="WFM Fill Rate"
             primary={wfmIdeal > 0 ? `${wfmFill.toFixed(1)}%` : "—"}
             sub={wfmIdeal > 0 ? `${wfmActual.toFixed(0)} of ${wfmIdeal.toFixed(0)} HC · ${wfmGap.toFixed(0)} gaps` : "No WFM data"}
-            chip={wfmIdeal > 0 ? { label: wfmFill >= 70 && wfmFill <= 100 ? "On Plan" : wfmFill > 100 ? "Over-cap" : "Under-staffed", cls: wfmFillCls } : undefined}
+            badge={
+              wfmIdeal > 0
+                ? {
+                    label: wfmFill >= 70 && wfmFill <= 100 ? "On Plan" : wfmFill > 100 ? "Over-cap" : "Under-staffed",
+                    color: pulseBadgeFromExecCls(wfmFillCls),
+                  }
+                : undefined
+            }
           />
-
-          {/* SLA Attainment */}
-          <PulseCard
-            icon="📊"
-            iconVariant={slaPct >= 80 ? "green" : slaPct >= 60 ? "amber" : "red"}
+          <OperationalPulseCard
+            tone="sky"
             label="SLA Attainment"
             primary={slaRagDen > 0 ? `${slaPct.toFixed(0)}%` : "—"}
             sub={
@@ -530,276 +544,390 @@ export const CeoView = () => {
                 ? `${slaMet.toLocaleString()} met · ${slaNotMet.toLocaleString()} not met`
                 : "No SLA RAG data"
             }
-            chip={slaRagDen > 0 ? { label: slaPct >= 80 ? "Good" : slaPct >= 60 ? "Monitor" : "At Risk", cls: slaCls } : undefined}
+            badge={
+              slaRagDen > 0
+                ? {
+                    label: slaPct >= 80 ? "Good" : slaPct >= 60 ? "Monitor" : "At Risk",
+                    color: pulseBadgeFromExecCls(slaCls),
+                  }
+                : undefined
+            }
           />
-
-          {/* Working Capital Risk */}
-          <PulseCard
-            icon="⚠"
-            iconVariant={workCapRiskPct < 20 ? "green" : workCapRiskPct < 40 ? "amber" : "red"}
+          <OperationalPulseCard
+            tone="orange"
             label="Working Capital Risk"
             primary={fmtCr(unb + bd)}
             sub={revA > 0 ? `${workCapRiskPct.toFixed(1)}% of revenue at risk` : "Unbilled + bad debt"}
-            chip={revA > 0
-              ? { label: workCapRiskPct < 20 ? "Low risk" : workCapRiskPct < 40 ? "Moderate" : "High risk",
-                  cls: workCapRiskPct < 20 ? "ceo-chip--green" : workCapRiskPct < 40 ? "ceo-chip--amber" : "ceo-chip--red" }
-              : undefined}
+            badge={
+              revA > 0
+                ? {
+                    label: workCapRiskPct < 20 ? "Low risk" : workCapRiskPct < 40 ? "Moderate" : "High risk",
+                    color: pulseBadgeFromExecCls(
+                      workCapRiskPct < 20
+                        ? "exec-delta-chip--green"
+                        : workCapRiskPct < 40
+                          ? "exec-delta-chip--amber"
+                          : "exec-delta-chip--red",
+                    ),
+                  }
+                : undefined
+            }
           />
-        </div>
+        </Grid>
       )}
 
-      {/* ══ SECTION 3: STRATEGIC NARRATIVE — Summary table + YoY ══ */}
-      <div className="ceo-section-label">Year-on-Year — {fyShortLabel(selectedFyStart)} vs {compareFyLabel}</div>
+      <ExecSectionTitle>
+        Year-on-Year — {fyShortLabel(selectedFyStart)} vs {compareFyLabel}
+      </ExecSectionTitle>
 
       <div className="ceo-intel">
-        {/* YoY Revenue chart */}
-        <SectionCard tag="Trend" title={`Revenue — monthly actual vs ${compareFyLabel}`}>
-          {yoyRev.some((r) => r.actual > 0 || r.priorActual > 0) ? (
-            <ExecutiveRevenueYoYChart data={yoyRev} priorLabel={`${compareFyLabel} Actual`} />
-          ) : (
-            <div className="ceo-empty">No revenue data for selected FY</div>
-          )}
-        </SectionCard>
+        <TremorDashboardSection tag="Trend" title={`Revenue — monthly actual vs ${compareFyLabel}`} noPad>
+          <div className="bg-white px-5 py-4">
+            {yoyRev.some((r) => r.actual > 0 || r.priorActual > 0) ? (
+              <CeoRevenueYoYTremorChart data={yoyRev} priorLabel={`${compareFyLabel} Actual`} />
+            ) : (
+              <Text className="block text-center font-medium text-tremor-content-emphasis">No revenue data for selected FY</Text>
+            )}
+          </div>
+        </TremorDashboardSection>
 
-        {/* Executive summary table */}
-        <SectionCard tag="Summary" title="Key financials at a glance">
+        <TremorDashboardSection tag="Summary" title="Key financials at a glance">
           {execRows.length > 0 ? (
-            <table className="ceo-summary-table">
-              <thead>
-                <tr>
-                  <th>Metric</th>
-                  <th>Actual</th>
-                  <th>Budget</th>
-                  <th>vs Bud</th>
-                  <th>YoY</th>
-                </tr>
-              </thead>
-              <tbody>
-                {execRows.map((row) => {
-                  const varNum = parseFloat(row.varBudget);
-                  const yoyNum = parseFloat(row.yoy);
-                  const varCls = Number.isFinite(varNum) ? (varNum >= 0 ? "ceo-summary-table__pos" : "ceo-summary-table__neg") : "";
-                  const yoyCls2 = Number.isFinite(yoyNum) ? (yoyNum >= 0 ? "ceo-summary-table__pos" : "ceo-summary-table__neg") : "";
-                  return (
-                    <tr key={row.metric}>
-                      <td>{row.metric}</td>
-                      <td>{row.actual}</td>
-                      <td>{row.budget}</td>
-                      <td className={varCls}>{row.varBudget}</td>
-                      <td className={yoyCls2}>{row.yoy}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="ceo-summary-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Actual</th>
+                    <th>Budget</th>
+                    <th>vs Bud</th>
+                    <th>YoY</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {execRows.map((row) => {
+                    const varNum = parseFloat(row.varBudget);
+                    const yoyNum = parseFloat(row.yoy);
+                    const varCls = Number.isFinite(varNum)
+                      ? varNum >= 0
+                        ? "ceo-summary-table__pos"
+                        : "ceo-summary-table__neg"
+                      : "";
+                    const yoyCls2 = Number.isFinite(yoyNum)
+                      ? yoyNum >= 0
+                        ? "ceo-summary-table__pos"
+                        : "ceo-summary-table__neg"
+                      : "";
+                    return (
+                      <tr key={row.metric}>
+                        <td>{row.metric}</td>
+                        <td>{row.actual}</td>
+                        <td>{row.budget}</td>
+                        <td className={varCls}>{row.varBudget}</td>
+                        <td className={yoyCls2}>{row.yoy}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            <div className="ceo-empty">Upload finance data to populate</div>
+            <Text className="block text-center font-medium text-tremor-content-emphasis">Upload finance data to populate</Text>
           )}
-        </SectionCard>
+        </TremorDashboardSection>
       </div>
 
-      {/* ══ SECTION 4: CM% TREND ══ */}
       {yoyCm.some((r) => r.actualPct > 0) && (
         <>
-          <div className="ceo-section-label">Contribution margin trend</div>
-          <SectionCard tag="Profitability" title={`CM% — actual vs ${compareFyLabel} (35% reference)`}>
-            <ExecutiveCmYoYChart data={yoyCm} compareLabel={`CM% (${compareFyLabel})`} />
-          </SectionCard>
+          <ExecSectionTitle>Contribution margin trend</ExecSectionTitle>
+          <TremorDashboardSection tag="Profitability" title={`CM% — actual vs ${compareFyLabel} (35% reference)`} noPad>
+            <div className="bg-white px-5 py-4">
+              <CeoCmYoYTremorChart data={yoyCm} compareLabel={`CM% (${compareFyLabel})`} />
+            </div>
+          </TremorDashboardSection>
         </>
       )}
 
-      {/* ══ SECTION 5: EFFICIENCY DEEP DIVE ══ */}
-      <div className="ceo-section-label">Efficiency — People & Cost</div>
+      <ExecSectionTitle>Efficiency — People & Cost</ExecSectionTitle>
 
       <div className="ceo-efficiency-grid">
-        {/* Productivity KPIs */}
-        <SectionCard tag="Unit Economics" title="People productivity metrics">
-          <div className="ceo-narrative-grid">
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">Revenue per Hire (RPH)</div>
-              <div className="ceo-narrative-item__value">{rph > 0 ? fmtLakh(rph) : "—"}</div>
-              <div className="ceo-narrative-item__sub">
+        <TremorDashboardSection tag="Unit Economics" title="People productivity metrics">
+          <Grid numItems={1} numItemsMd={2} className="gap-4">
+            <Card decoration="top" decorationColor="orange">
+              <Text className="font-medium text-tremor-content-emphasis">Revenue per Hire (RPH)</Text>
+              <Metric className="mt-2 text-tremor-content-strong">{rph > 0 ? fmtLakh(rph) : "—"}</Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
                 {totalTajeJoiners > 0
                   ? `Based on ${totalTajeJoiners.toFixed(0)} Taggd joiners in ${fyShortLabel(selectedFyStart)}`
                   : "Requires joiner data from finance master"}
-              </div>
-            </div>
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">Revenue / WL1 Recruiter</div>
-              <div className="ceo-narrative-item__value">{revPerWl1 > 0 ? fmtLakh(revPerWl1) : "—"}</div>
-              <div className="ceo-narrative-item__sub">
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="teal">
+              <Text className="font-medium text-tremor-content-emphasis">Revenue / WL1 Recruiter</Text>
+              <Metric className="mt-2 text-tremor-content-strong">{revPerWl1 > 0 ? fmtLakh(revPerWl1) : "—"}</Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
                 {totalWl1Hc > 0
                   ? `Avg ${totalWl1Hc.toFixed(0)} WL1 HC · target ₹1.57L`
                   : "Requires WL1 HC from finance master"}
-              </div>
-            </div>
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">PPC (Cost / Overall HC)</div>
-              <div className="ceo-narrative-item__value">{ppc > 0 ? fmtLakh(ppc) : "—"}</div>
-              <div className="ceo-narrative-item__sub">
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="blue">
+              <Text className="font-medium text-tremor-content-emphasis">PPC (Cost / Overall HC)</Text>
+              <Metric className="mt-2 text-tremor-content-strong">{ppc > 0 ? fmtLakh(ppc) : "—"}</Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
                 {totalOverallHc > 0 && totalCost > 0
                   ? `₹${(totalCost / 1e7).toFixed(2)} Cr total cost · ${totalOverallHc.toFixed(0)} avg HC`
                   : "Requires cost data from finance master"}
-              </div>
-            </div>
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">WFM Capacity</div>
-              <div className="ceo-narrative-item__value">{wfmIdeal > 0 ? `${wfmFill.toFixed(1)}%` : "—"}</div>
-              <div className="ceo-narrative-item__sub">
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="violet">
+              <Text className="font-medium text-tremor-content-emphasis">WFM Capacity</Text>
+              <Metric className="mt-2 text-tremor-content-strong">{wfmIdeal > 0 ? `${wfmFill.toFixed(1)}%` : "—"}</Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
                 {wfmIdeal > 0
                   ? `${wfmActual.toFixed(0)} actual / ${wfmIdeal.toFixed(0)} ideal · ${wfmGap.toFixed(0)} open gaps`
                   : "No WFM benchmark data"}
-              </div>
-            </div>
-          </div>
-        </SectionCard>
+              </Text>
+            </Card>
+          </Grid>
+        </TremorDashboardSection>
 
-        {/* Regional revenue */}
-        <SectionCard tag="Geography" title="Revenue by region">
-          {regional.length > 0 ? (
-            <RegionalRevenueBarChart data={regional} />
-          ) : (
-            <div className="ceo-empty">No regional data</div>
-          )}
-        </SectionCard>
+        <TremorDashboardSection tag="Geography" title="Revenue by region" noPad>
+          <div className="bg-white px-5 py-4">
+            {regional.length > 0 ? (
+              <CeoRegionalRevenueTremorChart data={regional} />
+            ) : (
+              <Text className="block text-center font-medium text-tremor-content-emphasis">No regional data</Text>
+            )}
+          </div>
+        </TremorDashboardSection>
       </div>
 
-      {/* ══ SECTION 6: VERTICAL MIX ══ */}
-      <div className="ceo-section-label">Industry mix — revenue by vertical</div>
+      <ExecSectionTitle>Industry mix — revenue by vertical</ExecSectionTitle>
 
-      <SectionCard tag="Diversification" title={`Vertical revenue share — ${fyShortLabel(selectedFyStart)}`} noPad>
+      <TremorDashboardSection tag="Diversification" title={`Vertical revenue share — ${fyShortLabel(selectedFyStart)}`} noPad>
         {verticalMix.length > 0 ? (
-          <table className="ceo-mix-table">
-            <thead>
-              <tr>
-                <th>Vertical / Industry</th>
-                <th className="right">Actual</th>
-                <th className="right">Budget</th>
-                <th className="right">Share</th>
-                <th>Mix</th>
-              </tr>
-            </thead>
-            <tbody>
-              {verticalMix.map((v) => (
-                <tr key={v.vertical}>
-                  <td style={{ fontWeight: 500 }}>{v.vertical}</td>
-                  <td className="right">{fmtCr(v.actual)}</td>
-                  <td className="right" style={{ color: "var(--text-muted)" }}>{fmtCr(v.budget)}</td>
-                  <td className="right" style={{ fontWeight: 600 }}>{fmtPct(v.share)}</td>
-                  <td style={{ minWidth: 120 }}>
-                    <div className="ceo-share-bar-wrap">
-                      <div className="ceo-share-bar-track">
-                        <div className="ceo-share-bar-fill" style={{ width: `${Math.min(100, v.share)}%` }} />
-                      </div>
-                      <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-muted)", minWidth: 32, textAlign: "right" }}>
-                        {fmtPct(v.share, 0)}
-                      </span>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto bg-white">
+            <table className="ceo-mix-table">
+              <thead>
+                <tr>
+                  <th>Vertical / Industry</th>
+                  <th className="right">Actual</th>
+                  <th className="right">Budget</th>
+                  <th className="right">Share</th>
+                  <th>Mix</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="ceo-empty">No vertical data — ensure projects have a vertical tag</div>
-        )}
-      </SectionCard>
-
-      {/* ══ SECTION 7: ACCOUNT REVENUE INTELLIGENCE ══ */}
-      <div className="ceo-section-label">Account intelligence — top clients by revenue</div>
-
-      <SectionCard tag="Account" title={`Top accounts — ${fyShortLabel(selectedFyStart)}`} noPad>
-        {topAccounts.length > 0 ? (
-          <table className="ceo-risk-table">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Vertical</th>
-                <th style={{ textAlign: "right" }}>Revenue</th>
-                <th style={{ textAlign: "right" }}>Budget</th>
-                <th style={{ textAlign: "right" }}>Attainment</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topAccounts.map((a) => {
-                const att = a.attainment;
-                const statusLabel = att == null ? "—" : att >= 100 ? "On Track" : att >= 70 ? "Monitor" : "At Risk";
-                const statusCls = att == null ? "" : att >= 100 ? "green" : att >= 70 ? "amber" : "red";
-                return (
-                  <tr key={a.name}>
-                    <td>
-                      <span className="ceo-risk-table__name">{a.name}</span>
-                    </td>
-                    <td>
-                      <span className="ceo-risk-table__sub">{a.vertical || "—"}</span>
-                    </td>
-                    <td style={{ textAlign: "right", fontFamily: "var(--mono)", fontSize: 12 }}>{fmtCr(a.actual)}</td>
-                    <td style={{ textAlign: "right", fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-muted)" }}>
-                      {fmtCr(a.budget)}
-                    </td>
-                    <td style={{ textAlign: "right", fontFamily: "var(--mono)", fontSize: 12 }}>
-                      {att != null ? (
-                        <span style={{ color: att >= 100 ? "#1a7a47" : att >= 70 ? "#92600a" : "#b91c1c", fontWeight: 600 }}>
-                          {fmtPct(att, 0)}
+              </thead>
+              <tbody>
+                {verticalMix.map((v) => (
+                  <tr key={v.vertical}>
+                    <td className="font-medium text-tremor-content-strong">{v.vertical}</td>
+                    <td className="right tabular-nums text-tremor-content-strong">{fmtCr(v.actual)}</td>
+                    <td className="right tabular-nums text-tremor-content-subtle">{fmtCr(v.budget)}</td>
+                    <td className="right font-semibold tabular-nums text-tremor-content-strong">{fmtPct(v.share)}</td>
+                    <td style={{ minWidth: 120 }}>
+                      <div className="ceo-share-bar-wrap">
+                        <div className="ceo-share-bar-track">
+                          <div className="ceo-share-bar-fill" style={{ width: `${Math.min(100, v.share)}%` }} />
+                        </div>
+                        <span className="min-w-[32px] text-right text-xs tabular-nums text-tremor-content-subtle">
+                          {fmtPct(v.share, 0)}
                         </span>
-                      ) : "—"}
-                    </td>
-                    <td>
-                      {statusCls ? (
-                        <span className={`ceo-status ceo-status--${statusCls}`}>{statusLabel}</span>
-                      ) : "—"}
+                      </div>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <div className="ceo-empty">No account data for selected FY</div>
+          <Text className="block px-6 py-8 text-center font-medium text-tremor-content-emphasis">
+            No vertical data — ensure projects have a vertical tag
+          </Text>
         )}
-      </SectionCard>
+      </TremorDashboardSection>
 
-      {/* ══ SECTION 8: DELIVERY HEALTH ══ */}
-      <div className="ceo-section-label">Delivery health — requisitions & SLA</div>
+      <ExecSectionTitle>Account intelligence — top clients by revenue</ExecSectionTitle>
+
+      <TremorDashboardSection
+        tag="Account"
+        title={`Top accounts — ${fyShortLabel(selectedFyStart)}`}
+        noPad
+        toolbar={
+          <Grid numItems={1} numItemsSm={2} numItemsLg={5} className="items-end gap-3">
+            <div className="lg:col-span-2">
+              <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">Search</Text>
+              <TextInput
+                icon={Search}
+                placeholder="Account or vertical…"
+                value={accountIntelSearch}
+                onValueChange={setAccountIntelSearch}
+              />
+            </div>
+            <div>
+              <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">Vertical</Text>
+              <Select value={accountIntelVertical} onValueChange={setAccountIntelVertical}>
+                <SelectItem value="all">All verticals</SelectItem>
+                {accountIntelVerticalOptions.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Text className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">Status</Text>
+              <Select
+                value={accountIntelStatus}
+                onValueChange={(v) => setAccountIntelStatus(v as typeof accountIntelStatus)}
+              >
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="on_track">On track</SelectItem>
+                <SelectItem value="monitor">Monitor</SelectItem>
+                <SelectItem value="at_risk">At risk</SelectItem>
+              </Select>
+            </div>
+            <Flex justifyContent="end" alignItems="end">
+              <Button
+                type="button"
+                variant="secondary"
+                color="orange"
+                icon={Maximize2}
+                onClick={() => setAccountProjectsModalOpen(true)}
+              >
+                Expand projects
+              </Button>
+            </Flex>
+          </Grid>
+        }
+      >
+        {ceoAccountRollups.length > 0 ? (
+          displayedCeoAccounts.length > 0 ? (
+            <div className="overflow-x-auto bg-white">
+              {!accountIntelHasFilters && ceoAccountRollups.length > 8 ? (
+                <Text className="border-b border-tremor-border px-6 py-2 text-xs text-tremor-content-subtle">
+                  Showing top 8 accounts by revenue. Use search or filters to narrow the list, or expand projects for the full FY portfolio.
+                </Text>
+              ) : null}
+              <table className="ceo-risk-table">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Vertical</th>
+                    <th style={{ textAlign: "right" }}>Revenue</th>
+                    <th style={{ textAlign: "right" }}>Budget</th>
+                    <th style={{ textAlign: "right" }}>Attainment</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedCeoAccounts.map((a) => {
+                    const att = a.attainment;
+                    const statusLabel = att == null ? "—" : att >= 100 ? "On Track" : att >= 70 ? "Monitor" : "At Risk";
+                    const badgeColor = att == null ? null : att >= 100 ? "emerald" : att >= 70 ? "amber" : "rose";
+                    return (
+                      <tr key={a.name}>
+                        <td>
+                          <span className="ceo-risk-table__name">{a.name}</span>
+                        </td>
+                        <td>
+                          <span className="ceo-risk-table__sub">{a.vertical || "—"}</span>
+                        </td>
+                        <td className="text-right text-sm font-semibold tabular-nums text-tremor-content-strong">{fmtCr(a.actual)}</td>
+                        <td className="text-right text-sm tabular-nums text-tremor-content-subtle">{fmtCr(a.budget)}</td>
+                        <td className="text-right text-sm tabular-nums">
+                          {att != null ? (
+                            <span
+                              className={
+                                att >= 100 ? "font-semibold text-emerald-600" : att >= 70 ? "font-semibold text-amber-700" : "font-semibold text-rose-600"
+                              }
+                            >
+                              {fmtPct(att, 0)}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {badgeColor ? (
+                            <Badge color={badgeColor} size="sm">
+                              {statusLabel}
+                            </Badge>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <Text className="block px-6 py-8 text-center font-medium text-tremor-content-emphasis">
+              No accounts match these filters
+            </Text>
+          )
+        ) : (
+          <Text className="block px-6 py-8 text-center font-medium text-tremor-content-emphasis">No account data for selected FY</Text>
+        )}
+      </TremorDashboardSection>
+
+      <CeoProjectsPortfolioModal
+        open={accountProjectsModalOpen}
+        onOpenChange={setAccountProjectsModalOpen}
+        fyLabel={fyShortLabel(selectedFyStart)}
+        rows={ceoProjectFyRows}
+      />
+
+      <ExecSectionTitle>Delivery health — requisitions & SLA</ExecSectionTitle>
 
       <div className="ceo-efficiency-grid">
-        <SectionCard tag="Recruitment" title="Requisition funnel summary">
-          <div className="ceo-narrative-grid">
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">Total Requisitions</div>
-              <div className="ceo-narrative-item__value">{totalReqs > 0 ? totalReqs.toLocaleString() : "—"}</div>
-              <div className="ceo-narrative-item__sub">All mandates tracked in TARA</div>
-            </div>
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">Closed / Filled</div>
-              <div className="ceo-narrative-item__value">{closedReqs > 0 ? closedReqs.toLocaleString() : "—"}</div>
-              <div className="ceo-narrative-item__sub">
+        <TremorDashboardSection tag="Recruitment" title="Requisition funnel summary">
+          <Grid numItems={1} numItemsMd={2} className="gap-4">
+            <Card decoration="top" decorationColor="violet">
+              <Text className="font-medium text-tremor-content-emphasis">Total Requisitions</Text>
+              <Metric className="mt-2 text-tremor-content-strong">{totalReqs > 0 ? totalReqs.toLocaleString() : "—"}</Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">All mandates tracked in TARA</Text>
+            </Card>
+            <Card decoration="top" decorationColor="orange">
+              <Text className="font-medium text-tremor-content-emphasis">Closed / Filled</Text>
+              <Metric className="mt-2 text-tremor-content-strong">{closedReqs > 0 ? closedReqs.toLocaleString() : "—"}</Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
                 {closureRate > 0 ? `${closureRate.toFixed(1)}% closure rate` : "No closure data"}
-              </div>
-            </div>
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">Active Pipeline</div>
-              <div className="ceo-narrative-item__value">{activeReqs > 0 ? activeReqs.toLocaleString() : "—"}</div>
-              <div className="ceo-narrative-item__sub">Open mandates in progress</div>
-            </div>
-            <div className="ceo-narrative-item">
-              <div className="ceo-narrative-item__label">SLA — Green %</div>
-              <div className="ceo-narrative-item__value" style={{ color: slaPct >= 80 ? "#1a7a47" : slaPct >= 60 ? "#92600a" : "#b91c1c" }}>
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="teal">
+              <Text className="font-medium text-tremor-content-emphasis">Active Pipeline</Text>
+              <Metric className="mt-2 text-tremor-content-strong">{activeReqs > 0 ? activeReqs.toLocaleString() : "—"}</Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">Open mandates in progress</Text>
+            </Card>
+            <Card decoration="top" decorationColor="sky">
+              <Text className="font-medium text-tremor-content-emphasis">SLA — Green %</Text>
+              <Metric
+                className={
+                  slaRagDen > 0
+                    ? slaPct >= 80
+                      ? "mt-2 text-emerald-600"
+                      : slaPct >= 60
+                        ? "mt-2 text-amber-700"
+                        : "mt-2 text-rose-600"
+                    : "mt-2 text-tremor-content-strong"
+                }
+              >
                 {slaRagDen > 0 ? `${slaPct.toFixed(0)}%` : "—"}
-              </div>
-              <div className="ceo-narrative-item__sub">
+              </Metric>
+              <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
                 {slaRagDen > 0
                   ? `${slaMet.toLocaleString()} met · ${slaNotMet.toLocaleString()} not met (RAG outcomes)`
                   : "No SLA RAG data"}
-              </div>
-            </div>
-          </div>
-        </SectionCard>
+              </Text>
+            </Card>
+          </Grid>
+        </TremorDashboardSection>
 
-        {/* Commercial overview */}
-        <SectionCard tag="Commercial" title="Clients & contracts at a glance">
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <TremorDashboardSection tag="Commercial" title="Clients & contracts at a glance">
+          <div className="divide-y divide-tremor-border">
             {[
               { label: "Total clients", value: stats?.total_projects ?? "—" },
               { label: "Requisitions tracked", value: totalReqs > 0 ? totalReqs.toLocaleString() : "—" },
@@ -808,17 +936,16 @@ export const CeoView = () => {
               { label: "WFM — actual HC", value: wfmActual > 0 ? wfmActual.toFixed(0) : "—" },
               { label: "Open gaps", value: wfmGap > 0 ? wfmGap.toFixed(0) : "0" },
             ].map((row) => (
-              <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{row.label}</span>
-                <span style={{ fontSize: 13, fontFamily: "var(--mono)", fontWeight: 500, color: "var(--text)" }}>{row.value}</span>
-              </div>
+              <Flex key={row.label} justifyContent="between" alignItems="center" className="gap-3 py-2">
+                <Text className="text-tremor-default text-tremor-content-subtle">{row.label}</Text>
+                <Text className="text-right text-sm font-semibold tabular-nums text-tremor-content-strong">{row.value}</Text>
+              </Flex>
             ))}
           </div>
-        </SectionCard>
+        </TremorDashboardSection>
       </div>
 
-      {/* ══ BOARD SLIDE DECK (reference narrative) ══ */}
-      <div className="ceo-section-label">Board narrative — slide deck</div>
+      <ExecSectionTitle>Board narrative — slide deck</ExecSectionTitle>
       <CeoBoardSlides config={slideDeck} />
 
       <CeoSlideDeckStudio

@@ -11,7 +11,20 @@ import {
   platformTaskLinkSummary,
 } from "@/lib/task-platform-links";
 import { isPlatformAdminRole, isReadOnlyClient, isRecruiterUser, useAuth } from "@/lib/auth";
-import { PageHeader, PlatformKpi, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
+import {
+  Button,
+  Card,
+  Flex,
+  Grid,
+  Metric,
+  Select,
+  SelectItem,
+  Switch,
+  Text,
+  Title,
+} from "@tremor/react";
+import { StatusTag } from "@/components/platform/PlatformBlocks";
+import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
 import { Skeleton } from "@/components/platform/Skeleton";
 import {
   Dialog,
@@ -44,6 +57,9 @@ function getApiErrorMessage(e: unknown): string {
   if (e instanceof Error && e.message) return e.message;
   return "Save failed";
 }
+
+const flatCard =
+  "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
 
 const STATUSES = ["open", "in_progress", "blocked", "done", "cancelled"] as const;
 
@@ -962,134 +978,145 @@ export function Tasks() {
   }
 
   return (
-    <div className="tsk-page">
-      {/* ── PAGE HEADER ─────────────────────────────── */}
-      <div className="tsk-header">
-        <div className="tsk-header-left">
-          <h1 className="tsk-page-title">Tasks</h1>
-          <p className="tsk-page-sub">
+    <div className="tasks-tremor space-y-3 pb-8 md:space-y-4">
+      <Flex justifyContent="between" alignItems="start" className="flex-wrap gap-3">
+        <div className="min-w-0 flex-1">
+          <span className="inline-flex max-w-full items-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-orange-600">
+            Workspace · Execution
+          </span>
+          <Title className="mt-0.5 text-2xl font-bold tracking-tight text-tremor-content-strong md:text-3xl">Tasks</Title>
+          <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
             {recruiterView
               ? "Your queue — tasks you created, are assigned to, or that touch your projects."
               : "Cross-cutting work: deadlines, assignees, and links to ingestion, contracts, meetings, billing and more."}
-          </p>
+          </Text>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-        {!readOnlyPortal ? (
-            <button type="button" className="tsk-btn-primary" onClick={() => openCreate()}>
-            + New task
-          </button>
-        ) : null}
-      {readOnlyPortal ? (
-            <span className="tsk-readonly-notice">⚠ View only — cannot create or edit tasks</span>
-      ) : null}
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {!readOnlyPortal ? (
+            <Button type="button" size="xs" variant="primary" color="orange" onClick={() => openCreate()}>
+              + New task
+            </Button>
+          ) : null}
+          {readOnlyPortal ? (
+            <Text className="max-w-xs rounded-tremor-default border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-right text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+              View only — cannot create or edit tasks
+            </Text>
+          ) : null}
         </div>
-      </div>
+      </Flex>
 
-      {/* ── KPI STRIP ─────────────────────────────────── */}
       {loading ? (
-        <div className="tsk-skeleton-strip">
+        <Grid numItems={1} numItemsSm={3} className="gap-2 md:gap-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} height={68} />
+            <Skeleton key={i} height={72} />
           ))}
-        </div>
+        </Grid>
       ) : (
-        <div className="tsk-kpi-strip">
-          <div className="tsk-kpi tsk-kpi--blue">
-            <span className="tsk-kpi-label">Visible tasks</span>
-            <span className="tsk-kpi-value">{displayRows.length}</span>
-            <span className="tsk-kpi-sub">Current filters</span>
-          </div>
-          <div className="tsk-kpi tsk-kpi--teal">
-            <span className="tsk-kpi-label">Open / active</span>
-            <span className="tsk-kpi-value">{openCount}</span>
-            <span className="tsk-kpi-sub">Not done or cancelled</span>
-          </div>
-          <div className={cn("tsk-kpi", overdueCount > 0 ? "tsk-kpi--red" : "tsk-kpi--amber")}>
-            <span className="tsk-kpi-label">Overdue (in list)</span>
-            <span className="tsk-kpi-value">{overdueCount}</span>
-            <span className="tsk-kpi-sub">Due in past &amp; open</span>
-          </div>
-        </div>
+        <Grid numItems={1} numItemsSm={3} className="gap-2 md:gap-3">
+          <Card decoration="top" decorationColor="blue" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Visible tasks</Text>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{displayRows.length}</Metric>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Current filters</Text>
+          </Card>
+          <Card decoration="top" decorationColor="emerald" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Open / active</Text>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{openCount}</Metric>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Not done or cancelled</Text>
+          </Card>
+          <Card decoration="top" decorationColor={overdueCount > 0 ? "rose" : "amber"} className="p-3">
+            <Text
+              className={`text-[10px] font-semibold uppercase tracking-wide ${
+                overdueCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
+              }`}
+            >
+              Overdue (in list)
+            </Text>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{overdueCount}</Metric>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Due in past &amp; open</Text>
+          </Card>
+        </Grid>
       )}
 
-      {/* ── BOARD SHELL ───────────────────────────────── */}
-      <div className="tsk-board-shell">
-        {/* toolbar */}
-        <div className="tsk-board-toolbar">
-          <span className="tsk-board-toolbar-title">Task board</span>
-        </div>
-
-        {/* filters */}
-        <div className="tsk-filters">
-          <select
-            className={cn("tsk-filter-select", filterStatus && "tsk-filter-active")}
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-          >
-            <option value="">All statuses</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-
-          <select
-            className={cn("tsk-filter-select", filterProjectId && "tsk-filter-active")}
-            value={filterProjectId}
-            onChange={(e) => setFilterProjectId(e.target.value)}
-          >
-            <option value="">All projects</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                PRJ-{p.id} · {(p.engagement_name || p.account_name || "").slice(0, 32)}
-              </option>
-            ))}
-          </select>
-
-          <select
-            className={cn("tsk-filter-select", filterCategory && "tsk-filter-active")}
-            value={filterCategory}
-            onChange={(e) => setFilterCategory(e.target.value)}
-          >
-            <option value="">All categories</option>
-            {CATEGORIES.filter((c) => c.value).map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-
-          <select
-            className={cn("tsk-filter-select", filterLinkKind && "tsk-filter-active")}
-            value={filterLinkKind}
-            onChange={(e) => setFilterLinkKind(e.target.value)}
-          >
-            <option value="">All link types</option>
-            {PLATFORM_TASK_LINK_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>{k.label}</option>
-            ))}
-          </select>
-
-          <label className="tsk-filter-toggle">
-            <input type="checkbox" checked={filterMine} onChange={(e) => setFilterMine(e.target.checked)} />
-            Mine only
-          </label>
-          <label className="tsk-filter-toggle">
-            <input type="checkbox" checked={filterOverdue} onChange={(e) => setFilterOverdue(e.target.checked)} />
-            Overdue
-          </label>
-        </div>
-
-        {usingSampleBoard && (
-          <div className="tsk-sample-notice">
-            Showing <strong>sample tasks</strong> — realistic placeholders for an empty workspace. Create a task or sync live data to replace this board.
-            <span style={{ display: "block", marginTop: 4 }}>
+      <TremorDashboardSection
+        className={flatCard}
+        compact
+        title="Task board"
+        noPad
+        toolbar={(
+          <div className="space-y-3">
+            <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-2 md:gap-3">
+              <div className="min-w-0">
+                <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Status</Text>
+                <Select value={filterStatus || "all"} onValueChange={(v) => setFilterStatus(v === "all" ? "" : v)}>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  {STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s.replace(/_/g, " ")}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+              <div className="min-w-0">
+                <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Project</Text>
+                <Select value={filterProjectId || "all"} onValueChange={(v) => setFilterProjectId(v === "all" ? "" : v)}>
+                  <SelectItem value="all">All projects</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      PRJ-{p.id} · {(p.engagement_name || p.account_name || "").slice(0, 32)}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+              <div className="min-w-0">
+                <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Category</Text>
+                <Select value={filterCategory || "all"} onValueChange={(v) => setFilterCategory(v === "all" ? "" : v)}>
+                  <SelectItem value="all">All categories</SelectItem>
+                  {CATEGORIES.filter((c) => c.value).map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+              <div className="min-w-0">
+                <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Link type</Text>
+                <Select value={filterLinkKind || "all"} onValueChange={(v) => setFilterLinkKind(v === "all" ? "" : v)}>
+                  <SelectItem value="all">All link types</SelectItem>
+                  {PLATFORM_TASK_LINK_KINDS.map((k) => (
+                    <SelectItem key={k.value} value={k.value}>
+                      {k.label}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+            </Grid>
+            <Flex className="flex-wrap items-center gap-4">
+              <Flex alignItems="center" className="gap-2">
+                <Text className="text-xs text-tremor-content-subtle">Mine only</Text>
+                <Switch checked={filterMine} onChange={setFilterMine} color="orange" />
+              </Flex>
+              <Flex alignItems="center" className="gap-2">
+                <Text className="text-xs text-tremor-content-subtle">Overdue</Text>
+                <Switch checked={filterOverdue} onChange={setFilterOverdue} color="orange" />
+              </Flex>
+            </Flex>
+          </div>
+        )}
+      >
+        <div className="space-y-3 px-2 pb-4 pt-2 sm:px-4">
+          {usingSampleBoard && (
+          <div className="rounded-tremor-default border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs leading-snug text-sky-950 dark:border-sky-800 dark:bg-sky-950/35 dark:text-sky-100">
+            <strong>Sample tasks</strong> — realistic placeholders for an empty workspace. Create a task or sync live data to replace this board.
+            <span className="mt-1 block text-[11px] opacity-90">
               Drag a card into another column to change status; confirm in the dialog.
             </span>
           </div>
-        )}
+          )}
 
         {!loading && displayRows.length === 0 && (
-          <div className="tsk-empty-state">
-            <div className="tsk-empty-state-icon">✓</div>
-            No tasks match the current filters.
+          <div className="flex flex-col items-center justify-center rounded-tremor-default border border-dashed border-tremor-border bg-tremor-background-muted/40 py-10 text-center dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/30">
+            <Text className="text-sm font-medium text-tremor-content-strong">No tasks match the current filters.</Text>
+            <Text className="mt-1 text-xs text-tremor-content-subtle">Try clearing status or project filters.</Text>
           </div>
         )}
 
@@ -1234,23 +1261,31 @@ export function Tasks() {
                         )}
 
                         <div className="tsk-card-actions">
-                          <button
+                          <Button
                             type="button"
-                            className="tsk-action-btn"
+                            size="xs"
+                            variant="light"
+                            color="slate"
+                            className="!text-[11px]"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => { if (!readOnlyPortal) openEdit(t); }}
+                            onClick={() => {
+                              if (!readOnlyPortal) openEdit(t);
+                            }}
                           >
                             Edit
-                          </button>
+                          </Button>
                           {canDelete(t) && (
-                            <button
+                            <Button
                               type="button"
-                              className="tsk-action-btn tsk-action-btn--danger"
+                              size="xs"
+                              variant="light"
+                              color="rose"
+                              className="!text-[11px]"
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={() => void removeTask(t)}
                             >
                               Delete
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </div>
@@ -1261,7 +1296,8 @@ export function Tasks() {
             );
           })}
         </div>
-      </div>
+        </div>
+      </TremorDashboardSection>
 
       <Sheet
         open={dialogOpen}
@@ -1735,17 +1771,19 @@ export function Tasks() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="platform-dialog__footer">
-            <button type="button" className="platform-dialog__btn" onClick={() => cancelStatusMove()} disabled={moveSaving}>
+            <Button type="button" variant="secondary" color="slate" size="xs" onClick={() => cancelStatusMove()} disabled={moveSaving}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="platform-dialog__btn platform-dialog__btn--primary"
+              size="xs"
+              variant="primary"
+              color="orange"
               onClick={() => void confirmStatusMove()}
               disabled={moveSaving || !pendingMove}
             >
               {moveSaving ? "Updating…" : "Confirm update"}
-            </button>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

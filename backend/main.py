@@ -119,6 +119,7 @@ from .routers.finance_billing_workflow import router as finance_billing_workflow
 from .routers.ceo_deck_ai import router as ceo_deck_ai_router
 from .routers.composio_integrations import router as composio_integrations_router
 from .routers.sla_insights_ai import router as sla_insights_ai_router
+from .routers.client_dashboard import router as client_dashboard_router
 
 app.include_router(sla_metrics_write_router)
 app.include_router(finance_ledger_router)
@@ -137,6 +138,7 @@ app.include_router(finance_billing_workflow_router)
 app.include_router(ceo_deck_ai_router)
 app.include_router(composio_integrations_router)
 app.include_router(sla_insights_ai_router)
+app.include_router(client_dashboard_router)
 
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (

@@ -624,7 +624,8 @@
   padding: 9px 12px;
   border-bottom: 1px solid var(--border);
   text-align: right;
-  font-family: var(--mono);
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -632,6 +633,7 @@
 .exec-summary-table td:first-child {
   text-align: left;
   font-family: var(--font);
+  font-variant-numeric: normal;
   font-weight: 600;
   color: var(--text);
   font-size: 12px;
@@ -665,7 +667,8 @@
   color: var(--text);
 }
 .exec-drilldown-table td:last-child {
-  font-family: var(--mono);
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   text-align: right;
 }

@@ -1,6 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Badge,
+  Button,
+  Card,
+  Flex,
+  Grid,
+  Metric,
+  ProgressBar,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  TextInput,
+  Title,
+} from "@tremor/react";
 import { queries, type Project, type RecordRow, type RecordsPage, type RequisitionKpis } from "@/lib/api";
-import { PlatformKpi, PlatformSection, PageHeader, StatusTag } from "@/components/platform/PlatformBlocks";
+import { StatusTag } from "@/components/platform/PlatformBlocks";
 import { isRecruiterUser, useAuth } from "@/lib/auth";
 import { RequisitionCreateDrawer } from "@/components/platform/RequisitionCreateDrawer";
 import { RequisitionRecordDrawer } from "@/components/platform/RequisitionRecordDrawer";
@@ -11,7 +29,9 @@ import { formatCurrency } from "@/lib/utils";
 
 const PER_PAGE = 50;
 
-// Build department frequency chart from loaded records (same logic as ClientDetail)
+const flatCard =
+  "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
+
 function buildDeptData(records: import("@/lib/api").RecordRow[]) {
   const freq: Record<string, number> = {};
   for (const r of records) {
@@ -27,6 +47,15 @@ function buildDeptData(records: import("@/lib/api").RecordRow[]) {
   return result;
 }
 
+const funnelBarColor: Record<string, React.ComponentProps<typeof ProgressBar>["color"]> = {
+  Draft: "slate",
+  Open: "orange",
+  Screening: "teal",
+  Offer: "amber",
+  Joined: "emerald",
+  Cancelled: "rose",
+};
+
 export function Requisitions() {
   const { user } = useAuth();
   const recruiterView = isRecruiterUser(user);
@@ -37,7 +66,6 @@ export function Requisitions() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<RecordRow | null>(null);
 
-  // Full-dataset stats from monitor (not affected by pagination)
   const [globalStatusBreakdown, setGlobalStatusBreakdown] = useState<Record<string, number>>({});
   const [monitor, setMonitor] = useState<import("@/lib/api").GlobalMonitor | null>(null);
   const [reqKpis, setReqKpis] = useState<RequisitionKpis | null>(null);
@@ -48,7 +76,6 @@ export function Requisitions() {
     queries.projects().then(setProjects).catch(() => setProjects([]));
   }, []);
 
-  // Load global monitor once (status breakdown + ageing summary)
   useEffect(() => {
     queries.globalMonitor().then((m) => {
       setGlobalStatusBreakdown(m.status_breakdown ?? {});
@@ -60,13 +87,11 @@ export function Requisitions() {
     queries.requisitionKpis().then(setReqKpis).catch(() => setReqKpis(null));
   }, []);
 
-  // Debounce search input
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  // Fetch when page or search changes
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -77,54 +102,48 @@ export function Requisitions() {
     return () => { mounted = false; };
   }, [page, debouncedSearch]);
 
-  // Reset to page 1 when search changes
   useEffect(() => { setPage(1); }, [debouncedSearch]);
 
   const records = result?.records ?? [];
   const totalRecords = result?.total ?? 0;
   const totalPages = result?.pages ?? 1;
 
-  // Build funnel from full global status breakdown when available,
-  // fall back to current-page records when searching (filtered view)
   const funnel = useMemo(() => {
     if (debouncedSearch) {
-      // When searching, use page records (relative counts within search results)
       return requisitionFunnelVm(records);
     }
-    // Map normalised global_status keys to funnel labels
     const sb = globalStatusBreakdown;
     if (Object.keys(sb).length === 0) return requisitionFunnelVm(records);
     return {
-      Draft:     sb["UNPROCESSED"] ?? 0,
-      Open:      sb["ACTIVE"]      ?? 0,
-      Screening: sb["PIPELINE"]    ?? 0,
-      Offer:     0,  // not a distinct global_status — grouped into ACTIVE
-      Joined:    sb["CLOSED"]      ?? 0,
-      Cancelled: sb["ON HOLD"]     ?? 0,
+      Draft: sb["UNPROCESSED"] ?? 0,
+      Open: sb["ACTIVE"] ?? 0,
+      Screening: sb["PIPELINE"] ?? 0,
+      Offer: 0,
+      Joined: sb["CLOSED"] ?? 0,
+      Cancelled: sb["ON HOLD"] ?? 0,
     };
   }, [globalStatusBreakdown, records, debouncedSearch]);
 
-  // Scale bars relative to the largest bucket in the funnel (not total records)
   const funnelMax = Math.max(...Object.values(funnel), 1);
 
-  const funnelColors: Record<string, string> = {
-    Draft: "var(--text3)", Open: "var(--accent)", Screening: "var(--accent2)",
-    Offer: "var(--amber)", Joined: "var(--green)", Cancelled: "var(--red)",
-  };
-
-  // Ageing buckets from globalMonitor (covers entire dataset, not just current page)
   const monitorBuckets = monitor?.ageing_summary?.buckets ?? {};
   const ageingMax = Math.max(...Object.values(monitorBuckets), 1);
   const ageingBuckets = [
-    // Backend bucket keys are: "0-30 days", "31-60 days", "61-90 days", "90+ days"
-    { label: "0–30 days",  count: monitorBuckets["0-30 days"]  ?? monitorBuckets["0–30 days"]  ?? 0, max: ageingMax, color: "var(--green)" },
+    { label: "0–30 days", count: monitorBuckets["0-30 days"] ?? monitorBuckets["0–30 days"] ?? 0, max: ageingMax, color: "var(--green)" },
     { label: "31–60 days", count: monitorBuckets["31-60 days"] ?? monitorBuckets["31–60 days"] ?? 0, max: ageingMax, color: "var(--amber)" },
     { label: "61–90 days", count: monitorBuckets["61-90 days"] ?? monitorBuckets["61–90 days"] ?? 0, max: ageingMax, color: "var(--red)" },
-    { label: "90+ days",   count: monitorBuckets["90+ days"]   ?? monitorBuckets["90–plus days"] ?? 0, max: ageingMax, color: "var(--red)" },
+    { label: "90+ days", count: monitorBuckets["90+ days"] ?? monitorBuckets["90–plus days"] ?? 0, max: ageingMax, color: "var(--red)" },
   ];
 
-  // Department donut from current page's records (updates as user pages/searches)
   const deptData = useMemo(() => buildDeptData(records), [records]);
+
+  const subtitle = recruiterView
+    ? reqKpis
+      ? `${reqKpis.total_records.toLocaleString()} visible to you — assigned to you or on your projects (same scope as the table below)`
+      : `${totalRecords.toLocaleString()} on this view · loading KPIs…`
+    : reqKpis
+      ? `${reqKpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are portfolio-wide`
+      : `${totalRecords.toLocaleString()} on this view · loading portfolio KPIs…`;
 
   const onRequisitionSaved = useCallback((updated: RecordRow) => {
     setSelected(updated);
@@ -139,10 +158,10 @@ export function Requisitions() {
     setResult((prev) => {
       if (!prev) return prev;
       if (!prev.records.some((r) => r.id === id)) return prev;
-      const records = prev.records.filter((row) => row.id !== id);
+      const nextRecords = prev.records.filter((row) => row.id !== id);
       const total = Math.max(0, prev.total - 1);
       const pages = Math.max(1, Math.ceil(total / prev.per_page));
-      return { ...prev, records, total, pages };
+      return { ...prev, records: nextRecords, total, pages };
     });
     queries.requisitionKpis().then(setReqKpis).catch(() => {});
     queries.globalMonitor().then((m) => {
@@ -152,191 +171,238 @@ export function Requisitions() {
   }, []);
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <PageHeader
-        title="Requisitions"
-        subtitle={
-          recruiterView
-            ? reqKpis
-              ? `${reqKpis.total_records.toLocaleString()} visible to you — assigned to you or on your projects (same scope as the table below)`
-              : `${totalRecords.toLocaleString()} on this view · loading KPIs…`
-            : reqKpis
-              ? `${reqKpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are portfolio-wide`
-              : `${totalRecords.toLocaleString()} on this view · loading portfolio KPIs…`
-        }
-      />
+    <div className="req-dash-tremor space-y-3 pb-8 md:space-y-4">
+      <div>
+        <span className="inline-flex max-w-full items-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-orange-600">
+          Hiring&nbsp;·&nbsp;Pipeline
+        </span>
+        <Title className="mt-0.5 text-2xl font-bold tracking-tight text-tremor-content-strong md:text-3xl">
+          Requisitions
+        </Title>
+        <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
+          {subtitle}
+        </Text>
+      </div>
 
-      {/* TOP KPIs — Open / Offer / Joiner from tracker `records` */}
       {reqKpis ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-          <PlatformKpi
-            label="Open reqs"
-            value={reqKpis.open_req.toLocaleString()}
-            accent="blue"
-            delta="ACTIVE (no offer signal in status)"
-          />
-          <PlatformKpi
-            label="Offer reqs"
-            value={reqKpis.offer_req.toLocaleString()}
-            accent="amber"
-            delta="PIPELINE or status contains “offer”"
-          />
-          <PlatformKpi
-            label="Joiners"
-            value={reqKpis.joiners.toLocaleString()}
-            accent="green"
-            delta="CLOSED (joined / closed hires)"
-          />
-        </div>
+        <Grid numItems={1} numItemsSm={3} className="gap-2 md:gap-3">
+          <Card decoration="top" decorationColor="blue" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Open reqs</Text>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{reqKpis.open_req.toLocaleString()}</Metric>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">
+              ACTIVE (no offer signal in status)
+            </Text>
+          </Card>
+          <Card decoration="top" decorationColor="amber" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Offer reqs</Text>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{reqKpis.offer_req.toLocaleString()}</Metric>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">
+              PIPELINE or status contains &quot;offer&quot;
+            </Text>
+          </Card>
+          <Card decoration="top" decorationColor="emerald" className="p-3">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Joiners</Text>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{reqKpis.joiners.toLocaleString()}</Metric>
+            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">CLOSED (joined / closed hires)</Text>
+          </Card>
+        </Grid>
       ) : (
         <SkeletonKpiRow count={3} />
       )}
 
-      {/* FUNNEL + AGEING */}
-      <div className="platform-grid-5-7">
-        <PlatformSection title="Pipeline Funnel">
-          {loading && !result
-            ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{Array(5).fill(0).map((_, i) => <Skeleton key={i} height={20} />)}</div>
-            : (
-              <div style={{ padding: "4px 0" }}>
-                {Object.entries(funnel).map(([k, v]) => (
-                  <div key={k} className="funnel-item">
-                    <div className="funnel-label">{k}</div>
-                    <div className="funnel-bar-wrap">
-                      <div className="funnel-bar" style={{
-                        width: `${Math.max(3, (v / funnelMax) * 92)}%`,
-                        background: funnelColors[k] ?? "var(--accent)",
-                      }}>{v.toLocaleString()}</div>
-                    </div>
-                    <div className="funnel-count">{v}</div>
-                  </div>
+      <Grid numItems={1} numItemsLg={2} className="gap-3">
+        <Card className={flatCard}>
+          <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+            <Title className="text-base font-semibold text-tremor-content-strong">Pipeline funnel</Title>
+            <Text className="mt-0.5 text-xs text-tremor-content-subtle">Counts from global status (search uses this page only)</Text>
+          </div>
+          <div className="px-4 py-3">
+            {loading && !result ? (
+              <div className="flex flex-col gap-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} height={20} />
                 ))}
               </div>
-            )
-          }
-        </PlatformSection>
-
-        <PlatformSection title="Ageing Distribution + Dept Mix">
-          <AgeingBars buckets={ageingBuckets} />
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 9, textTransform: "uppercase", color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace", marginBottom: 4 }}>
-              Req by Department (Top 8)
-            </div>
-            {deptData.length === 0
-              ? <div style={{ height: 80, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 11 }}>
-                  No department data on this page
-                </div>
-              : <LevelDonutChart data={deptData} />
-            }
+            ) : (
+              <div className="space-y-2">
+                {Object.entries(funnel).map(([k, v]) => {
+                  const pct = funnelMax > 0 ? (v / funnelMax) * 100 : 0;
+                  return (
+                    <div key={k} className="flex items-center gap-2">
+                      <Text className="w-[5.5rem] shrink-0 text-xs font-medium text-tremor-content-strong">{k}</Text>
+                      <div className="min-w-0 flex-1">
+                        <ProgressBar
+                          value={pct}
+                          color={funnelBarColor[k] ?? "orange"}
+                          className="[&>div]:min-w-[2px]"
+                        />
+                      </div>
+                      <Badge color="slate" size="xs" className="shrink-0 tabular-nums">
+                        {v.toLocaleString()}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </PlatformSection>
-      </div>
+        </Card>
 
-      {/* MASTER TABLE */}
-      <PlatformSection
-        title={`Requisition Master Table — ${totalRecords.toLocaleString()} records`}
-        action="Export"
-        headerRight={
-          projects.length > 0 ? (
-            <button
-              type="button"
-              className="req-drawer-btn-edit"
-              onClick={() => setAddReqOpen(true)}
-            >
-              Add requisition
-            </button>
-          ) : null
-        }
-      >
-        {/* SEARCH + PAGINATION */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10 }}>
-          <input
-            className="platform-search"
-            placeholder="Filter by candidate, position, HM..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: 260 }}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'DM Mono',monospace", fontSize: 10.5 }}>
-            <span style={{ color: "var(--text-muted)" }}>
+        <Card className={flatCard}>
+          <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+            <Title className="text-base font-semibold text-tremor-content-strong">Ageing + department mix</Title>
+            <Text className="mt-0.5 text-xs text-tremor-content-subtle">Ageing from monitor; department chart from this page</Text>
+          </div>
+          <div className="px-4 py-3">
+            <AgeingBars buckets={ageingBuckets} />
+            <div className="mt-4">
+              <Text className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
+                Req by department (top 8)
+              </Text>
+              {deptData.length === 0 ? (
+                <div className="flex min-h-[80px] items-center justify-center rounded-tremor-default border border-dashed border-tremor-border bg-tremor-background-muted/40 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/30">
+                  <Text className="text-center text-xs text-tremor-content-subtle">No department data on this page</Text>
+                </div>
+              ) : (
+                <LevelDonutChart data={deptData} />
+              )}
+            </div>
+          </div>
+        </Card>
+      </Grid>
+
+      <Card className={flatCard}>
+        <div className="flex w-full min-w-0 flex-col gap-3 border-b border-tremor-border px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 dark:border-dark-tremor-border">
+          <div className="min-w-0 w-full flex-1 sm:pr-2">
+            <Title className="text-base font-semibold text-tremor-content-strong">
+              Requisition master table — {totalRecords.toLocaleString()} records
+            </Title>
+            <Text className="mt-0.5 block text-xs text-tremor-content-subtle">Click a row to view or edit</Text>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {projects.length > 0 ? (
+              <Button type="button" size="xs" variant="primary" color="orange" onClick={() => setAddReqOpen(true)}>
+                Add requisition
+              </Button>
+            ) : null}
+            <Button type="button" size="xs" variant="secondary" disabled title="Export is not wired for this view yet">
+              Export
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex w-full min-w-0 flex-col gap-2 border-b border-tremor-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 dark:border-dark-tremor-border">
+          <div className="w-full min-w-0 sm:max-w-md sm:flex-1">
+            <TextInput
+              placeholder="Filter by candidate, position, HM…"
+              value={search}
+              onValueChange={setSearch}
+              className="w-full"
+              aria-label="Filter requisitions"
+            />
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Text className="text-xs tabular-nums text-tremor-content-subtle">
               {totalRecords > 0
                 ? `${((page - 1) * PER_PAGE) + 1}–${Math.min(page * PER_PAGE, totalRecords)} of ${totalRecords.toLocaleString()}`
                 : "—"}
-            </span>
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: page <= 1 ? "var(--text-muted)" : "var(--text)", cursor: page <= 1 ? "not-allowed" : "pointer" }}
-            >←</button>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-              style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: page >= totalPages ? "var(--text-muted)" : "var(--text)", cursor: page >= totalPages ? "not-allowed" : "pointer" }}
-            >→</button>
+            </Text>
+            <Button type="button" size="xs" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              ←
+            </Button>
+            <Button type="button" size="xs" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              →
+            </Button>
           </div>
         </div>
 
-        {/* TABLE */}
-        <div className="platform-table-wrap">
-          {loading && !result
-            ? <SkeletonTable rows={8} cols={9} />
-            : (
-              <table className="platform-table">
-                <thead>
-                  <tr>
-                    <th>Req ID</th><th>Candidate</th><th>Position</th><th>Status</th>
-                    <th>HM</th><th>Dept</th><th>Location</th><th>CTC</th><th>Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.length === 0 && (
-                    <tr><td colSpan={9} style={{ color: "var(--text-muted)", textAlign: "center" }}>
-                      {totalRecords === 0 ? "Upload a project file to see requisitions" : "No matching records"}
-                    </td></tr>
-                  )}
-                  {records.map((r) => {
+        <div className="overflow-x-auto px-2 pb-3 pt-1">
+          {loading && !result ? (
+            <SkeletonTable rows={8} cols={9} />
+          ) : (
+            <Table className="min-w-[920px]">
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Req ID</TableHeaderCell>
+                  <TableHeaderCell>Candidate</TableHeaderCell>
+                  <TableHeaderCell>Position</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell>HM</TableHeaderCell>
+                  <TableHeaderCell>Dept</TableHeaderCell>
+                  <TableHeaderCell>Location</TableHeaderCell>
+                  <TableHeaderCell className="text-right">CTC</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Revenue</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {records.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9}>
+                      <Text className="block py-8 text-center text-sm text-tremor-content-subtle">
+                        {totalRecords === 0 ? "Upload a project file to see requisitions" : "No matching records"}
+                      </Text>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  records.map((r) => {
                     const reqId = (r.additional_attributes?.position_code as string) || `REQ-${r.id}`;
                     const rev = r.revenue_results?.revenue ?? 0;
-                    const ageColor = (r.ageing ?? 0) > 90 ? "var(--red)" : (r.ageing ?? 0) > 60 ? "var(--amber)" : undefined;
                     return (
-                      <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => setSelected(r)}>
-                        <td style={{ fontFamily: "'DM Mono',monospace", color: "var(--accent)" }}>{reqId}</td>
-                        <td>{r.candidate_name || "—"}</td>
-                        <td>{r.position_title || "—"}</td>
-                        <td><StatusTag status={r.status || r.global_status || "Open"} /></td>
-                        <td>{r.hiring_manager || "—"}</td>
-                        <td>{r.department || "—"}</td>
-                        <td>{r.location || "—"}</td>
-                        <td>{r.offered_ctc ? `₹${(r.offered_ctc / 100000).toFixed(1)}L` : "—"}</td>
-                        <td style={{ color: rev > 0 ? "var(--green)" : "var(--text-muted)" }}>{rev > 0 ? formatCurrency(rev) : "—"}</td>
-                      </tr>
+                      <TableRow
+                        key={r.id}
+                        className="cursor-pointer hover:bg-tremor-background-muted dark:hover:bg-dark-tremor-background-muted"
+                        onClick={() => setSelected(r)}
+                      >
+                        <TableCell className="font-medium text-orange-600 tabular-nums dark:text-orange-400">{reqId}</TableCell>
+                        <TableCell className="text-sm">{r.candidate_name || "—"}</TableCell>
+                        <TableCell className="text-sm">{r.position_title || "—"}</TableCell>
+                        <TableCell>
+                          <StatusTag status={r.status || r.global_status || "Open"} />
+                        </TableCell>
+                        <TableCell className="text-sm">{r.hiring_manager || "—"}</TableCell>
+                        <TableCell className="text-sm">{r.department || "—"}</TableCell>
+                        <TableCell className="text-sm">{r.location || "—"}</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">
+                          {r.offered_ctc ? `₹${(r.offered_ctc / 100000).toFixed(1)}L` : "—"}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right text-sm tabular-nums ${rev > 0 ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-tremor-content-subtle"}`}
+                        >
+                          {rev > 0 ? formatCurrency(rev) : "—"}
+                        </TableCell>
+                      </TableRow>
                     );
-                  })}
-                </tbody>
-              </table>
-            )
-          }
+                  })
+                )}
+              </TableBody>
+            </Table>
+          )}
         </div>
 
-        {/* BOTTOM PAGINATION */}
-        {totalPages > 1 && (
-          <div style={{ display: "flex", justifyContent: "center", gap: 5, marginTop: 12 }}>
+        {totalPages > 1 ? (
+          <Flex justifyContent="center" className="flex-wrap gap-1.5 border-t border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
             {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
               const p = i + 1;
               return (
-                <button key={p} onClick={() => setPage(p)}
-                  style={{
-                    width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border)",
-                    background: page === p ? "color-mix(in srgb, var(--accent) 20%, transparent)" : "var(--bg2)",
-                    color: page === p ? "var(--accent)" : "var(--text-subtle)", cursor: "pointer",
-                    fontSize: 10.5, fontFamily: "'DM Mono',monospace",
-                  }}>{p}</button>
+                <Button
+                  key={p}
+                  type="button"
+                  size="xs"
+                  variant={page === p ? "primary" : "light"}
+                  color="orange"
+                  className="min-w-[1.75rem] px-0 tabular-nums"
+                  onClick={() => setPage(p)}
+                >
+                  {p}
+                </Button>
               );
             })}
-            {totalPages > 7 && <span style={{ color: "var(--text-muted)", alignSelf: "center", fontSize: 10 }}>…{totalPages} pages</span>}
-          </div>
-        )}
-      </PlatformSection>
+            {totalPages > 7 ? (
+              <Text className="self-center text-xs text-tremor-content-subtle">…{totalPages} pages</Text>
+            ) : null}
+          </Flex>
+        ) : null}
+      </Card>
 
       <RequisitionCreateDrawer
         open={addReqOpen}
@@ -358,7 +424,6 @@ export function Requisitions() {
         }}
       />
 
-      {/* REQUISITION DETAIL DRAWER */}
       <RequisitionRecordDrawer
         record={selected}
         onClose={() => setSelected(null)}

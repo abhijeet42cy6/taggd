@@ -59,6 +59,7 @@ VERTICAL_KEYS = frozenset(
         "data_operations",
         "admin_users",
         "transitions",
+        "client_dashboard",
     }
 )
 

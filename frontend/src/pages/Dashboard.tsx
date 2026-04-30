@@ -1,18 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Card, Grid, Text, Title } from "@tremor/react";
 import { cn, formatCurrency, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { queries, type GlobalMonitor, type GlobalStats, type Project, type RequisitionKpis } from "@/lib/api";
 import { buildClientRiskRadarRows, worstDomainName, type ClientRiskRadarRow } from "@/lib/executive-risk-radar";
 import { financeRowsVm, type FinanceRowVm } from "@/lib/view-models/finance";
 import { slaStatsVm } from "@/lib/view-models/sla";
-import {
-  ExecutiveRevenueYoYChart,
-  ExecutiveCmYoYChart,
-  RegionalRevenueBarChart,
-  RiskBar,
-} from "@/components/platform/Charts";
+import { ExecutiveCmYoYChart, RegionalRevenueBarChart, RiskBar } from "@/components/platform/Charts";
+import { FinanceRevenueMixedChartBlock } from "@/components/tremor-blocks/FinanceRevenueMixedChartBlock";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { SkeletonKpiRow } from "@/components/platform/Skeleton";
-import { DashboardFilters } from "@/components/platform/DashboardFilters";
+import { DashboardFiltersTremor } from "@/components/tremor-dashboard/DashboardFiltersTremor";
+import { ExecutiveMetricHeroCard } from "@/components/tremor-dashboard/ExecutiveMetricHeroCard";
+import {
+  OperationalPulseCard,
+  OperationalPulseGrid,
+  pulseBadgeFromExecCls,
+} from "@/components/tremor-dashboard/OperationalPulseCards";
+import { ExecSectionTitle } from "@/components/tremor-dashboard/ExecSectionTitle";
+import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
 import { ProductivityAveragesSection } from "@/components/platform/ProductivityAveragesSection";
 import {
   DEFAULT_DASHBOARD_FILTERS,
@@ -31,8 +36,8 @@ import {
   parseMonthSort,
   type DashboardFilters as DF,
 } from "@/lib/dashboard-aggregates";
-import { ExecutiveHeroCard as HeroCard, QuarterBand } from "@/components/platform/ExecutiveFinanceHero";
 import "@/styles/exec-dashboard.css";
+import "@/styles/exec-dash-premium.css";
 import "@/styles/new-contract-panel.css";
 
 function fyShortLabel(start: number): string {
@@ -44,69 +49,6 @@ function yoyDelta(curr: number, prev: number): { label: string; cls: string } {
   const p = ((curr - prev) / prev) * 100;
   const cls = p > 0.5 ? "exec-delta-chip--green" : p < -0.5 ? "exec-delta-chip--red" : "exec-delta-chip--amber";
   return { label: `${p >= 0 ? "▲" : "▼"} ${Math.abs(p).toFixed(1)}% YoY`, cls };
-}
-
-/* ── Sub-components ── */
-
-function PulseCard({
-  icon,
-  iconVariant,
-  label,
-  primary,
-  sub,
-  badge,
-}: {
-  icon: string;
-  iconVariant: "blue" | "green" | "amber" | "red" | "orange" | "teal";
-  label: string;
-  primary: React.ReactNode;
-  sub?: React.ReactNode;
-  badge?: { label: string; cls: string };
-}) {
-  return (
-    <div className="exec-pulse-card">
-      <div className="exec-pulse-card__icon-row">
-        <div className={`exec-pulse-card__icon exec-pulse-card__icon--${iconVariant}`}>{icon}</div>
-        {badge && <span className={`exec-delta-chip ${badge.cls}`}>{badge.label}</span>}
-      </div>
-      <div className="exec-pulse-card__label">{label}</div>
-      <div className="exec-pulse-card__primary">{primary}</div>
-      {sub && <div className="exec-pulse-card__sub">{sub}</div>}
-    </div>
-  );
-}
-
-function SectionCard({
-  tag,
-  title,
-  action,
-  onAction,
-  children,
-  noPad,
-}: {
-  tag?: string;
-  title: string;
-  action?: string;
-  onAction?: () => void;
-  children: React.ReactNode;
-  noPad?: boolean;
-}) {
-  return (
-    <div className="exec-section-card">
-      <div className="exec-section-card__header">
-        <div>
-          {tag && <div className="exec-section-card__tag">{tag}</div>}
-          <div className="exec-section-card__title">{title}</div>
-        </div>
-        {action && (
-          <button type="button" className="exec-section-card__action" onClick={onAction}>
-            {action}
-          </button>
-        )}
-      </div>
-      <div className={noPad ? undefined : "exec-section-card__body"}>{children}</div>
-    </div>
-  );
 }
 
 /* ── Main page ── */
@@ -375,63 +317,77 @@ export const Dashboard = () => {
 
   function riskRadarCell(level: "OK" | "MED" | "HIGH" | null) {
     if (level == null) {
-      return <span style={{ color: "var(--text-subtle)", fontSize: 11, fontFamily: "var(--mono)" }}>—</span>;
+      return (
+        <span className="text-sm font-semibold text-tremor-content-emphasis">—</span>
+      );
     }
     return <span className={riskDotForLevel(level)}>{level}</span>;
   }
 
-  const riskLabel = { green: "OK", amber: "MED", red: "HIGH" } as const;
-
   return (
-    <div className="exec-dash">
-      {/* ── Controls ── */}
-      <div className="exec-controls">
-        <div className="exec-controls__left">
-          <div className="exec-controls__title">Executive Overview</div>
-          <div className="exec-controls__meta">
-            {stats?.total_projects ?? "—"} clients &nbsp;·&nbsp;{" "}
-            {(reqKpis?.total_records ?? stats?.total_records ?? 0).toLocaleString()} requisitions
-            &nbsp;·&nbsp; {fyShortLabel(selectedFyStart)}
-            &nbsp;·&nbsp; Finance · SLA · WFM
+    <div className="exec-dash-tremor space-y-7 pb-12 pt-2">
+      <div className="exec-dash-tremor__hero">
+        <div className="exec-dash-tremor__hero-main">
+          <Title className="exec-dash-tremor__title text-3xl font-bold tracking-tight">Executive Overview</Title>
+          <div className="exec-dash-tremor__meta-row">
+            <span className="exec-dash-tremor__meta-pill">
+              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--clients" aria-hidden />
+              <span>{stats?.total_projects ?? "—"} clients</span>
+            </span>
+            <span className="exec-dash-tremor__meta-pill">
+              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--reqs" aria-hidden />
+              <span>{(reqKpis?.total_records ?? stats?.total_records ?? 0).toLocaleString()} requisitions</span>
+            </span>
+            <span className="exec-dash-tremor__meta-pill">
+              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--fy" aria-hidden />
+              <span>{fyShortLabel(selectedFyStart)}</span>
+            </span>
+            <span className="exec-dash-tremor__meta-muted hidden sm:inline">·</span>
+            <span className="exec-dash-tremor__meta-pill">
+              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--modules" aria-hidden />
+              <span>Finance · SLA · WFM</span>
+            </span>
           </div>
         </div>
       </div>
 
       {coreError && <div className="alert-banner red">{coreError}</div>}
 
-      {/* ── Filters ── */}
-      <div className="exec-filter-bar">
-        <DashboardFilters
-          value={filters}
-          onChange={setFilters}
-          projects={projects}
-          financeRows={financeRows}
-          fyYears={fyYears}
-          selectedFyStart={selectedFyStart}
-          onFyChange={setSelectedFyStart}
-          fySelectDisabled={loadingCore}
-        />
-      </div>
+      <DashboardFiltersTremor
+        value={filters}
+        onChange={setFilters}
+        projects={projects}
+        financeRows={financeRows}
+        fyYears={fyYears}
+        selectedFyStart={selectedFyStart}
+        onFyChange={setSelectedFyStart}
+        fySelectDisabled={loadingCore}
+      />
 
-      {/* ══ SECTION: THE MONEY ══ */}
-      <div className="exec-section-label">Financial performance — {fyShortLabel(selectedFyStart)}</div>
+      <ExecSectionTitle>Financial performance — {fyShortLabel(selectedFyStart)}</ExecSectionTitle>
 
       {loadingCore ? (
-        <SkeletonKpiRow count={3} />
+        <Grid numItems={1} numItemsLg={3} className="gap-4">
+          {[0, 1, 2].map((k) => (
+            <Card key={k} className="exec-dash-tremor__hero-card h-64 animate-pulse bg-gradient-to-br from-orange-50 to-white ring-1 ring-black/[0.05]" />
+          ))}
+        </Grid>
       ) : (
-        <div className="exec-hero">
-          {/* Revenue */}
-          <HeroCard
+        <Grid numItems={1} numItemsLg={3} className="gap-4">
+          <ExecutiveMetricHeroCard
             eyebrow="Revenue — Actual"
-            variant="orange"
+            decorationColor="orange"
             primary={formatLargeCurrency(revA)}
-            deltas={[
-              priorFinance && priorFinance.revenue_actual_inr > 0
-                ? yoyDelta(revA, priorFinance.revenue_actual_inr)
-                : null,
-            ].filter(Boolean) as { label: string; cls: string }[]}
-            attainmentLabel={`vs ₹ Budget ${formatLargeCurrency(revBudget)}`}
+            deltas={
+              [
+                priorFinance && priorFinance.revenue_actual_inr > 0
+                  ? yoyDelta(revA, priorFinance.revenue_actual_inr)
+                  : null,
+              ].filter(Boolean) as { label: string; cls: string }[]
+            }
+            attainmentLabel={`Compared to budget · ${formatLargeCurrency(revBudget)}`}
             attainmentPct={revAtt}
+            quarters={revQuarters}
             meta={[
               { label: "Full-year forecast", value: formatLargeCurrency(displayFinance?.revenue_forecast_inr ?? 0) },
               ...(priorFinance
@@ -439,14 +395,11 @@ export const Dashboard = () => {
                 : []),
               ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
             ]}
-          >
-            <QuarterBand quarters={revQuarters} variant="orange" />
-          </HeroCard>
+          />
 
-          {/* CM% */}
-          <HeroCard
+          <ExecutiveMetricHeroCard
             eyebrow="Contribution Margin"
-            variant="teal"
+            decorationColor="amber"
             primary={formatPercent(cmPct)}
             deltas={[
               cmPct >= 35
@@ -460,33 +413,32 @@ export const Dashboard = () => {
                   ]
                 : []),
             ]}
-            attainmentLabel="vs 35% target"
+            attainmentLabel="Compared to 35% CM target"
             attainmentPct={(cmPct / 35) * 100}
+            quarters={cmQuarters}
             meta={[
               { label: "Target CM%", value: "35.0%" },
-              ...(cmPriorPct != null
-                ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(cmPriorPct) }]
-                : []),
+              ...(cmPriorPct != null ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(cmPriorPct) }] : []),
             ]}
-          >
-            <QuarterBand quarters={cmQuarters} variant="teal" />
-          </HeroCard>
+          />
 
-          {/* Collection */}
-          <HeroCard
+          <ExecutiveMetricHeroCard
             eyebrow="Collection"
-            variant="blue"
+            decorationColor="orange"
             primary={formatLargeCurrency(coll)}
-            deltas={[
-              priorFinance && priorFinance.total_collected_inr > 0
-                ? yoyDelta(coll, priorFinance.total_collected_inr)
-                : null,
-              collAtt >= 90
-                ? { label: "On track", cls: "exec-delta-chip--green" }
-                : { label: "Below target", cls: "exec-delta-chip--amber" },
-            ].filter(Boolean) as { label: string; cls: string }[]}
-            attainmentLabel={`vs ₹ Target ${formatLargeCurrency(ct)}`}
+            deltas={
+              [
+                priorFinance && priorFinance.total_collected_inr > 0
+                  ? yoyDelta(coll, priorFinance.total_collected_inr)
+                  : null,
+                collAtt >= 90
+                  ? { label: "On track", cls: "exec-delta-chip--green" }
+                  : { label: "Below target", cls: "exec-delta-chip--amber" },
+              ].filter(Boolean) as { label: string; cls: string }[]
+            }
+            attainmentLabel={`Compared to collection target · ${formatLargeCurrency(ct)}`}
             attainmentPct={collAtt}
+            quarters={collQuarters}
             meta={[
               {
                 label: "Unbilled",
@@ -496,23 +448,19 @@ export const Dashboard = () => {
               { label: "Bad debt", value: formatLargeCurrency(bd), valueCls: bd > 0 ? "red" : undefined },
               { label: "Bad debt % coll.", value: formatPercent(bdPctColl) },
             ]}
-          >
-            <QuarterBand quarters={collQuarters} variant="blue" />
-          </HeroCard>
-        </div>
+          />
+        </Grid>
       )}
 
-      {/* ══ SECTION: OPERATIONAL PULSE ══ */}
-      <div className="exec-section-label">Operational snapshot</div>
+      <ExecSectionTitle>Operational snapshot</ExecSectionTitle>
 
       {loadingCore ? (
         <SkeletonKpiRow count={4} />
       ) : (
-        <div className="exec-pulse">
-          <PulseCard
-            icon="◎"
-            iconVariant="blue"
-            label="SLA Portfolio Health"
+        <OperationalPulseGrid>
+          <OperationalPulseCard
+            tone="sky"
+            label="SLA portfolio health"
             primary={slaStats ? formatPercent(slaStats.portfolio_health) : "—"}
             sub={
               slaStats
@@ -521,17 +469,26 @@ export const Dashboard = () => {
             }
             badge={
               slaStats
-                ? slaStats.portfolio_health >= 80
-                  ? { label: "Healthy", cls: "exec-delta-chip--green" }
-                  : slaStats.portfolio_health >= 60
-                    ? { label: "At risk", cls: "exec-delta-chip--amber" }
-                    : { label: "Critical", cls: "exec-delta-chip--red" }
+                ? {
+                    label:
+                      slaStats.portfolio_health >= 80
+                        ? "Healthy"
+                        : slaStats.portfolio_health >= 60
+                          ? "At risk"
+                          : "Critical",
+                    color: pulseBadgeFromExecCls(
+                      slaStats.portfolio_health >= 80
+                        ? "exec-delta-chip--green"
+                        : slaStats.portfolio_health >= 60
+                          ? "exec-delta-chip--amber"
+                          : "exec-delta-chip--red",
+                    ),
+                  }
                 : undefined
             }
           />
-          <PulseCard
-            icon="◈"
-            iconVariant="teal"
+          <OperationalPulseCard
+            tone="teal"
             label="Workforce HC"
             primary={wfmStats ? Math.round(wfmStats.total_actual_hc ?? 0).toLocaleString() : "—"}
             sub={
@@ -541,34 +498,38 @@ export const Dashboard = () => {
             }
             badge={
               wfmStats
-                ? (wfmStats.capacity_fill_rate ?? 0) >= 90
-                  ? { label: "Staffed", cls: "exec-delta-chip--green" }
-                  : (wfmStats.capacity_fill_rate ?? 0) >= 75
-                    ? { label: "Gap", cls: "exec-delta-chip--amber" }
-                    : { label: "Understaffed", cls: "exec-delta-chip--red" }
+                ? {
+                    label:
+                      (wfmStats.capacity_fill_rate ?? 0) >= 90
+                        ? "Staffed"
+                        : (wfmStats.capacity_fill_rate ?? 0) >= 75
+                          ? "Gap"
+                          : "Understaffed",
+                    color: pulseBadgeFromExecCls(
+                      (wfmStats.capacity_fill_rate ?? 0) >= 90
+                        ? "exec-delta-chip--green"
+                        : (wfmStats.capacity_fill_rate ?? 0) >= 75
+                          ? "exec-delta-chip--amber"
+                          : "exec-delta-chip--red",
+                    ),
+                  }
                 : undefined
             }
           />
-          <PulseCard
-            icon="◷"
-            iconVariant="amber"
-            label="Pipeline — Reqs"
+          <OperationalPulseCard
+            tone="violet"
+            label="Pipeline — reqs"
             primary={reqKpis ? `${reqKpis.open_req.toLocaleString()}` : "—"}
             sub={
               reqKpis
                 ? `${reqKpis.offer_req.toLocaleString()} at offer · ${reqKpis.joiners.toLocaleString()} joined`
                 : "No data"
             }
-            badge={
-              reqKpis
-                ? { label: "Open", cls: "exec-delta-chip--muted" }
-                : undefined
-            }
+            badge={reqKpis ? { label: "Open", color: "slate" } : undefined}
           />
-          <PulseCard
-            icon="⚠"
-            iconVariant={unb + bd > 0 ? "red" : "green"}
-            label="Unbilled + Bad Debt"
+          <OperationalPulseCard
+            tone="orange"
+            label="Unbilled + bad debt"
             primary={formatLargeCurrency(unb + bd)}
             sub={
               unb + bd > 0
@@ -577,68 +538,50 @@ export const Dashboard = () => {
             }
             badge={
               unb + bd === 0
-                ? { label: "Clear", cls: "exec-delta-chip--green" }
+                ? { label: "Clear", color: "emerald" }
                 : unbPctRev > 15
-                  ? { label: "High risk", cls: "exec-delta-chip--red" }
-                  : { label: "Monitor", cls: "exec-delta-chip--amber" }
+                  ? { label: "High risk", color: "rose" }
+                  : { label: "Monitor", color: "amber" }
             }
           />
-        </div>
+        </OperationalPulseGrid>
       )}
 
-      {/* ══ SECTION: TRENDS ══ */}
-      <div className="exec-section-label">Performance trends</div>
+      <ExecSectionTitle>Performance trends</ExecSectionTitle>
 
-      <div className="exec-charts">
-        <SectionCard
+      <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+        <FinanceRevenueMixedChartBlock
           tag="Finance"
           title={`Monthly Revenue — Actual vs Budget vs Forecast vs ${compareFyLabel}`}
-          noPad
-        >
-          <div style={{ padding: "16px 20px" }}>
-            {yoyRev.length === 0 || !filteredRows.length ? (
-              <div className="exec-empty">No finance data for current filters</div>
-            ) : (
-              <ExecutiveRevenueYoYChart
-                data={yoyRev}
-                priorLabel={`${compareFyLabel} Actual`}
-              />
-            )}
-          </div>
-        </SectionCard>
+          data={yoyRev}
+          priorLabel={`${compareFyLabel} Actual`}
+          showChart={filteredRows.length > 0}
+        />
 
-        <SectionCard tag="Margin" title={`CM% — ${fyShortLabel(selectedFyStart)} vs ${compareFyLabel}`} noPad>
-          <div style={{ padding: "16px 20px" }}>
+        <TremorDashboardSection tag="Margin" title={`CM% — ${fyShortLabel(selectedFyStart)} vs ${compareFyLabel}`} noPad>
+          <div className="bg-white px-5 py-4">
             {yoyCm.length === 0 || !filteredRows.length ? (
-              <div className="exec-empty">No CM data</div>
+              <Text className="font-medium text-tremor-content-emphasis">No CM data</Text>
             ) : (
-              <ExecutiveCmYoYChart
-                data={yoyCm}
-                compareLabel={`CM% (${compareFyLabel})`}
-              />
+              <ExecutiveCmYoYChart data={yoyCm} compareLabel={`CM% (${compareFyLabel})`} />
             )}
           </div>
-        </SectionCard>
+        </TremorDashboardSection>
       </div>
 
-      {/* ══ SECTION: PRODUCTIVITY ══ */}
       <ProductivityAveragesSection rows={filteredRows} loading={loadingCore} externalFilters />
 
-      {/* ══ SECTION: REGIONAL (finance ledger / filters) ══ */}
-      <div className="exec-bottom-grid exec-bottom-grid--single">
-        <SectionCard tag="Geography" title="Revenue by region — Actual vs Budget" noPad>
-          <div style={{ padding: "16px 20px" }}>
-            <RegionalRevenueBarChart data={regional} />
-          </div>
-        </SectionCard>
-      </div>
+      <TremorDashboardSection tag="Geography" title="Revenue by region — Actual vs Budget" noPad>
+        <div className="bg-white px-5 py-4">
+          <RegionalRevenueBarChart data={regional} />
+        </div>
+      </TremorDashboardSection>
 
-      {/* ══ SECTION: EXECUTIVE SUMMARY TABLE ══ */}
-      <SectionCard tag="Scorecard" title="Executive summary — Budget vs Forecast vs Actual vs YoY">
+      <TremorDashboardSection tag="Scorecard" title="Executive summary — Budget vs Forecast vs Actual vs YoY">
         {execRows.length === 0 ? (
-          <div className="exec-empty">Upload finance data to populate this table</div>
+          <Text className="font-medium text-tremor-content-emphasis">Upload finance data to populate this table</Text>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="overflow-x-auto">
             <table className="exec-summary-table">
               <thead>
                 <tr>
@@ -679,108 +622,107 @@ export const Dashboard = () => {
             </table>
           </div>
         )}
-      </SectionCard>
+      </TremorDashboardSection>
 
-      {/* ══ SECTION: PORTFOLIO MONITOR — requisition / pipeline (not FY ledger) ══ */}
-      <div className="exec-monitor-section">
-        <div className="exec-section-label">Portfolio monitor and pipeline</div>
-        <p className="exec-monitor-section__intro">
-          <strong>Risk radar</strong> uses only <strong>ledger + SLA + WFM</strong> (selected FY, same account filters
-          as the finance table). Domains: <strong>Revenue</strong> (budget vs actual), <strong>Finance</strong> (CM,
-          collections, unbilled/bad debt), <strong>Forecast</strong> (actual vs forecast, when forecast exists),{" "}
-          <strong>SLA</strong>, <strong>WFM</strong>. Missing data in a column does not drag the score; composite
-          reweights over available domains. Requisition rows are shown in the drawer only, not in the score.
-        </p>
+      <div className="space-y-4">
+        <ExecSectionTitle>Portfolio monitor and pipeline</ExecSectionTitle>
+        <Text className="block font-medium leading-relaxed text-tremor-content-emphasis">
+          <span className="font-semibold text-tremor-content-strong">Risk radar</span> uses only{" "}
+          <span className="font-semibold text-tremor-content-strong">ledger + SLA + WFM</span> (selected FY, same
+          account filters as the finance table). Domains:{" "}
+          <span className="font-semibold text-orange-700">Revenue</span> (budget vs actual),{" "}
+          <span className="font-semibold text-orange-700">Finance</span> (CM, collections, unbilled/bad debt),{" "}
+          <span className="font-semibold text-orange-700">Forecast</span> (actual vs forecast, when forecast exists),{" "}
+          <span className="font-semibold text-orange-700">SLA</span>,{" "}
+          <span className="font-semibold text-orange-700">WFM</span>. Missing data in a column does not drag the score;
+          composite reweights over available domains. Requisition rows are shown in the drawer only, not in the score.
+        </Text>
 
-        <div className="exec-intel">
-          <SectionCard
-            tag="Risk radar"
-            title="Client health snapshot"
-            action="Full view"
-            onAction={() => setHeatmapFullOpen(true)}
-            noPad
-          >
-            <div style={{ overflowX: "auto" }}>
-              <table className="exec-risk-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: "20%" }}>Client</th>
-                    <th>Revenue</th>
-                    <th>Finance</th>
-                    <th>Fcst</th>
-                    <th>SLA</th>
-                    <th>WFM</th>
-                    <th style={{ textAlign: "right" }}>Score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {riskRows.slice(0, 8).map((p) => (
-                    <tr key={p.id} onClick={() => setDrawerClient(p.name)}>
-                      <td>
-                        <div className="exec-risk-table__name" title={p.name}>{p.name}</div>
-                      </td>
-                      <td>{riskRadarCell(p.levels.revenue)}</td>
-                      <td>{riskRadarCell(p.levels.finance)}</td>
-                      <td>{riskRadarCell(p.levels.forecast)}</td>
-                      <td>{riskRadarCell(p.levels.sla)}</td>
-                      <td>{riskRadarCell(p.levels.wfm)}</td>
-                      <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
-                          {p.composite == null ? (
-                            <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-subtle)" }}>—</span>
-                          ) : (
-                            <>
-                              <div style={{
-                                width: 48, height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden",
-                              }}>
-                                <div style={{
-                                  width: `${Math.min(100, p.composite)}%`,
-                                  height: "100%",
-                                  background: p.composite >= 70 ? "var(--green)" : p.composite >= 50 ? "var(--amber)" : "var(--red)",
-                                  borderRadius: 100,
-                                }} />
-                              </div>
-                              <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text-muted)", minWidth: 24 }}>
-                                {p.composite}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {riskRows.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="exec-empty">No client data yet</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </SectionCard>
-        </div>
-
-        <div className="exec-bottom-grid exec-bottom-grid--single exec-monitor-section__drilldown">
-          <SectionCard tag="Drilldown" title="Top hiring managers by revenue">
-            <table className="exec-drilldown-table">
+        <TremorDashboardSection
+          tag="Risk radar"
+          title="Client health snapshot"
+          action="Full view"
+          onAction={() => setHeatmapFullOpen(true)}
+          noPad
+        >
+          <div className="overflow-x-auto bg-white">
+            <table className="exec-risk-table">
               <thead>
-                <tr><th>Hiring manager</th><th style={{ textAlign: "right" }}>Revenue</th><th style={{ textAlign: "right" }}>Reqs</th></tr>
+                <tr>
+                  <th style={{ width: "20%" }}>Client</th>
+                  <th>Revenue</th>
+                  <th>Finance</th>
+                  <th>Fcst</th>
+                  <th>SLA</th>
+                  <th>WFM</th>
+                  <th style={{ textAlign: "right" }}>Score</th>
+                </tr>
               </thead>
               <tbody>
-                {drilldown.slice(0, 8).map((d) => (
-                  <tr key={d.name}>
-                    <td>{d.name}</td>
-                    <td style={{ textAlign: "right", fontFamily: "var(--mono)" }}>{formatCurrency(d.revenue)}</td>
-                    <td style={{ textAlign: "right" }}>{d.count}</td>
+                {riskRows.slice(0, 8).map((p) => (
+                  <tr key={p.id} onClick={() => setDrawerClient(p.name)}>
+                    <td>
+                      <div className="exec-risk-table__name" title={p.name}>{p.name}</div>
+                    </td>
+                    <td>{riskRadarCell(p.levels.revenue)}</td>
+                    <td>{riskRadarCell(p.levels.finance)}</td>
+                    <td>{riskRadarCell(p.levels.forecast)}</td>
+                    <td>{riskRadarCell(p.levels.sla)}</td>
+                    <td>{riskRadarCell(p.levels.wfm)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                        {p.composite == null ? (
+                          <Text className="text-sm font-semibold text-tremor-content-emphasis">—</Text>
+                        ) : (
+                          <>
+                            <div style={{
+                              width: 48, height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden",
+                            }}>
+                              <div style={{
+                                width: `${Math.min(100, p.composite)}%`,
+                                height: "100%",
+                                background: p.composite >= 70 ? "var(--green)" : p.composite >= 50 ? "var(--amber)" : "var(--red)",
+                                borderRadius: 100,
+                              }} />
+                            </div>
+                            <Text className="min-w-[24px] text-sm font-semibold tabular-nums text-tremor-content-strong">
+                              {p.composite}
+                            </Text>
+                          </>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
-                {drilldown.length === 0 && (
-                  <tr><td colSpan={3} className="exec-empty">—</td></tr>
+                {riskRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="exec-empty">No client data yet</td>
+                  </tr>
                 )}
               </tbody>
             </table>
-          </SectionCard>
-        </div>
+          </div>
+        </TremorDashboardSection>
+
+        <TremorDashboardSection tag="Drilldown" title="Top hiring managers by revenue">
+          <table className="exec-drilldown-table">
+            <thead>
+              <tr><th>Hiring manager</th><th style={{ textAlign: "right" }}>Revenue</th><th style={{ textAlign: "right" }}>Reqs</th></tr>
+            </thead>
+            <tbody>
+              {drilldown.slice(0, 8).map((d) => (
+                <tr key={d.name}>
+                  <td>{d.name}</td>
+                  <td className="text-right font-semibold tabular-nums text-tremor-content-strong">{formatCurrency(d.revenue)}</td>
+                  <td style={{ textAlign: "right" }}>{d.count}</td>
+                </tr>
+              ))}
+              {drilldown.length === 0 && (
+                <tr><td colSpan={3} className="exec-empty">—</td></tr>
+              )}
+            </tbody>
+          </table>
+        </TremorDashboardSection>
       </div>
 
       {/* ── Client drawer (new-contract-sheet chrome) ── */}

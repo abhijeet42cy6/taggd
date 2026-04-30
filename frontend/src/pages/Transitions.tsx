@@ -8,9 +8,25 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
+import { Plus } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Card,
+  Flex,
+  Grid,
+  Metric,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  Title,
+} from "@tremor/react";
 import { queries, adminApi, type Project, type ProjectTransitionRow, type MeetingRow } from "@/lib/api";
 import { isReadOnlyClient, useAuth } from "@/lib/auth";
-import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -19,6 +35,9 @@ import {
   type PlatformUserLite,
 } from "@/components/platform/NewContractOrgFlow";
 import "@/styles/new-contract-panel.css";
+
+const flatCard =
+  "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -658,41 +677,6 @@ function StatusPicker({ value, onChange, disabled = false }: { value: string; on
           </button>
         );
       })}
-    </div>
-  );
-}
-
-// ─── MetricCard ───────────────────────────────────────────────────────────────
-
-function MetricCard({ value, label, accent = false, muted = false }: { value: string | number; label: string; accent?: boolean; muted?: boolean }) {
-  return (
-    <div
-      style={{
-        flex: 1,
-        minWidth: 120,
-        background: accent ? "var(--ncp-accent-soft)" : "var(--ncp-surface)",
-        border: `1px solid ${accent ? "var(--ncp-accent-mid)" : "var(--ncp-border)"}`,
-        borderRadius: "var(--ncp-radius-lg)",
-        padding: "14px 18px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 22,
-          fontWeight: 600,
-          letterSpacing: "-0.5px",
-          color: accent ? "var(--ncp-accent)" : muted ? "var(--ncp-text-muted)" : "var(--ncp-text-primary)",
-          fontFamily: "var(--ncp-font)",
-        }}
-      >
-        {value}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--ncp-text-muted)", fontFamily: "var(--ncp-mono)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-        {label}
-      </div>
     </div>
   );
 }
@@ -1760,27 +1744,20 @@ function TransitionSheet({
   );
 }
 
-// ─── StatusBadge ──────────────────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string | null }) {
+function transitionStatusBadge(status: string | null): { label: string; color: "amber" | "emerald" | "blue" | "rose" | "slate" } {
   const s = (status || "draft") as TrnStatus;
   const m = STATUS_META[s] ?? STATUS_META.draft;
-  return (
-    <span
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 5,
-        padding: "2px 9px",
-        borderRadius: "100px",
-        fontSize: 11, fontWeight: 500,
-        background: m.bg, color: m.color,
-        border: `1px solid ${m.border}`,
-        fontFamily: "var(--ncp-font)",
-      }}
-    >
-      <span style={{ width: 5, height: 5, borderRadius: "50%", background: m.dot, flexShrink: 0 }} />
-      {m.label}
-    </span>
-  );
+  const color: "amber" | "emerald" | "blue" | "rose" | "slate" =
+    s === "draft"
+      ? "amber"
+      : s === "in_progress" || s === "live"
+        ? "emerald"
+        : s === "soft_launched"
+          ? "blue"
+          : s === "delayed"
+            ? "rose"
+            : "slate";
+  return { label: m.label, color };
 }
 
 // ─── Transitions page ─────────────────────────────────────────────────────────
@@ -1881,137 +1858,200 @@ export function Transitions() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader
-        title="Client onboarding & transitions"
-        subtitle="Track kickoff through go-live. Log MoMs under Meetings, then maintain this tracker and links to your transition document."
-      />
+    <div className="transitions-tremor space-y-3 pb-8 md:space-y-4">
+      <div>
+        <span className="inline-flex max-w-full items-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+          Client success · Onboarding
+        </span>
+        <Title className="mt-0.5 text-2xl font-bold tracking-tight text-tremor-content-strong md:text-3xl">
+          Client onboarding & transitions
+        </Title>
+        <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
+          Track kickoff through go-live. Log MoMs under Meetings, then maintain this tracker and links to your transition document.
+        </Text>
+      </div>
 
-      {readOnly && (
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          View only — client portal accounts cannot edit this tracker.
-        </div>
-      )}
-      {err && <div className="platform-dialog__alert">{err}</div>}
+      {readOnly ? (
+        <Card className="border-0 p-3 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring">
+          <Text className="text-xs text-tremor-content-subtle">
+            View only — client portal accounts cannot edit this tracker.
+          </Text>
+        </Card>
+      ) : null}
 
-      {/* ── Process checklist ────────────────────────── */}
-      <PlatformSection title="Process checklist">
-        <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12, lineHeight: 1.7, color: "var(--text-muted)" }}>
-          <li>Assign / confirm <strong>project head</strong> on the project directory.</li>
-          <li>
-            Record kickoff and workshop meetings in{" "}
-            <Link to="/meetings" style={{ color: "var(--accent)" }}>Meetings (MoM)</Link>
-            {" "}— use meeting types such as <em>transition_kickoff</em> for filtering.
-          </li>
-          <li>Create a <strong>transition tracker</strong> row per project below; add document URLs and milestone dates.</li>
-          <li>
-            Run day-to-day follow-ups in{" "}
-            <Link to="/tasks" style={{ color: "var(--accent)" }}>Tasks</Link>.
-          </li>
-        </ol>
-      </PlatformSection>
-
-      {/* ── Transition pipeline ──────────────────────── */}
-      <PlatformSection
-        title="Transition pipeline"
-        action="Refresh"
-        onAction={() => void refresh()}
-      >
-        {/* 4 metric cards */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-            marginBottom: 18,
-            padding: "14px 16px",
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-          }}
+      {err ? (
+        <Card
+          decoration="left"
+          decorationColor="rose"
+          className="border-0 p-3 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring"
         >
-          <MetricCard value={metrics.active} label="Open / In progress" accent />
-          <MetricCard value={metrics.closed} label="Closed (Live)" />
-          <MetricCard value={metrics.avgAgeing != null ? `${metrics.avgAgeing}d` : "—"} label="Avg. ageing" />
-          <MetricCard value={metrics.pipeline} label="Pipeline (Draft)" muted />
-        </div>
+          <Text className="text-sm text-rose-700 dark:text-rose-300">{err}</Text>
+        </Card>
+      ) : null}
 
-        {/* Create button */}
-        {!readOnly && (
-          <div style={{ marginBottom: 14 }}>
-          <button
-            type="button"
-            className="platform-dialog__btn platform-dialog__btn--primary"
-              onClick={openCreate}
-          >
-              + Create tracker
-          </button>
+      <Card className={flatCard}>
+        <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+          <Title className="text-base font-semibold text-tremor-content-strong">Process checklist</Title>
+          <Text className="mt-0.5 text-xs text-tremor-content-subtle">Before you open the pipeline table</Text>
         </div>
-        )}
+        <div className="px-4 py-3">
+          <ol className="list-decimal space-y-2 pl-5 text-xs leading-relaxed text-tremor-content-emphasis md:text-sm md:leading-relaxed">
+            <li>
+              Assign / confirm <span className="font-semibold text-tremor-content-strong">project head</span> on the project directory.
+            </li>
+            <li>
+              Record kickoff and workshop meetings in{" "}
+              <Link to="/meetings" className="font-medium text-orange-600 underline-offset-2 hover:underline dark:text-orange-400">
+                Meetings (MoM)
+              </Link>
+              {" "}— use meeting types such as <em>transition_kickoff</em> for filtering.
+            </li>
+            <li>
+              Create a <span className="font-semibold text-tremor-content-strong">transition tracker</span> row per project below; add document URLs and milestone dates.
+            </li>
+            <li>
+              Run day-to-day follow-ups in{" "}
+              <Link to="/tasks" className="font-medium text-orange-600 underline-offset-2 hover:underline dark:text-orange-400">
+                Tasks
+              </Link>
+              .
+            </li>
+          </ol>
+        </div>
+      </Card>
 
-        {/* Table */}
-        {loading ? (
-          <Skeleton height={200} />
-        ) : (
-          <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid var(--border)" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 920 }}>
-              <thead>
-                <tr style={{ textAlign: "left", background: "color-mix(in srgb, var(--accent) 8%, transparent)" }}>
-                  <th style={{ padding: "8px 10px" }}>Project</th>
-                  <th style={{ padding: "8px 10px" }}>Status</th>
-                  <th style={{ padding: "8px 10px" }}>Signed</th>
-                  <th style={{ padding: "8px 10px" }}>Kickoff</th>
-                  <th style={{ padding: "8px 10px" }}>Go live</th>
-                  <th style={{ padding: "8px 10px" }}>Dead days</th>
-                  <th style={{ padding: "8px 10px" }}>Ageing</th>
-                  <th style={{ padding: "8px 10px" }} />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
-                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>
-                      {r.account_name || `PRJ-${r.project_id}`}
-                      {r.engagement_name ? (
-                        <div style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 10 }}>{r.engagement_name}</div>
-                      ) : null}
-                    </td>
-                    <td style={{ padding: "8px 10px" }}>
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td style={{ padding: "8px 10px" }}>{fmt(r.project_signed_date)}</td>
-                    <td style={{ padding: "8px 10px" }}>{fmt(r.kickoff_date)}</td>
-                    <td style={{ padding: "8px 10px" }}>{fmt(r.go_live_date)}</td>
-                    <td style={{ padding: "8px 10px" }}>{r.dead_days_effective ?? "—"}</td>
-                    <td style={{ padding: "8px 10px" }}>
-                      {r.ageing_days_effective != null ? (
-                        <span style={{ color: (r.ageing_days_effective ?? 0) > 90 ? "#b91c1c" : "inherit" }}>
-                          {r.ageing_days_effective}d
-                        </span>
-                      ) : "—"}
-                    </td>
-                    <td style={{ padding: "8px 10px" }}>
-                      <button type="button" className="platform-dialog__btn" onClick={() => openEditor(r)}>
-                        {readOnly ? "View" : "Edit"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={8} style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-                      No transition trackers yet. Click "+ Create tracker" to start one.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            <div style={{ fontSize: 10, color: "var(--text-muted)", padding: "8px 10px" }}>
-              * Dead days and ageing are auto-computed when manual overrides are empty.
+      <Card className={flatCard}>
+        <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+          <Flex justifyContent="between" alignItems="start" className="flex-wrap gap-2">
+            <div className="min-w-0">
+              <Title className="text-base font-semibold text-tremor-content-strong">Transition pipeline</Title>
+              <Text className="mt-0.5 text-xs text-tremor-content-subtle">KPIs and trackers refresh from the server</Text>
             </div>
-          </div>
-        )}
-      </PlatformSection>
+            <Button type="button" size="xs" variant="secondary" onClick={() => void refresh()}>
+              Refresh
+            </Button>
+          </Flex>
+        </div>
+        <div className="space-y-4 px-4 py-3">
+          <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-2 md:gap-3">
+            <Card decoration="top" decorationColor="orange" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+                Open / In progress
+              </Text>
+              <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{metrics.active}</Metric>
+              <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Status in progress</Text>
+            </Card>
+            <Card decoration="top" decorationColor="emerald" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                Closed (live / soft)
+              </Text>
+              <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{metrics.closed}</Metric>
+              <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Live or soft launched</Text>
+            </Card>
+            <Card decoration="top" decorationColor="amber" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Avg. ageing</Text>
+              <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
+                {metrics.avgAgeing != null ? `${metrics.avgAgeing}d` : "—"}
+              </Metric>
+              <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Open rows only</Text>
+            </Card>
+            <Card decoration="top" decorationColor="slate" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">Pipeline (draft)</Text>
+              <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{metrics.pipeline}</Metric>
+              <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Draft or unset status</Text>
+            </Card>
+          </Grid>
+
+          {!readOnly ? (
+            <Button type="button" size="xs" variant="primary" color="orange" onClick={openCreate}>
+              <Plus className="mr-1 inline h-3.5 w-3.5 align-text-bottom" aria-hidden />
+              Create tracker
+            </Button>
+          ) : null}
+
+          {loading ? (
+            <Skeleton height={200} />
+          ) : (
+            <div className="overflow-hidden rounded-tremor-default border border-tremor-border dark:border-dark-tremor-border">
+              <div className="max-h-[min(70vh,36rem)] overflow-auto">
+                <Table className="min-w-[920px]">
+                  <TableHead>
+                    <TableRow className="bg-tremor-background-muted/60 dark:bg-dark-tremor-background-muted/40">
+                      <TableHeaderCell className="text-xs">Project</TableHeaderCell>
+                      <TableHeaderCell className="text-xs">Status</TableHeaderCell>
+                      <TableHeaderCell className="text-xs">Signed</TableHeaderCell>
+                      <TableHeaderCell className="text-xs">Kickoff</TableHeaderCell>
+                      <TableHeaderCell className="text-xs">Go live</TableHeaderCell>
+                      <TableHeaderCell className="text-xs">Dead days</TableHeaderCell>
+                      <TableHeaderCell className="text-xs">Ageing</TableHeaderCell>
+                      <TableHeaderCell className="text-xs" />
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {rows.map((r) => {
+                      const sb = transitionStatusBadge(r.status);
+                      return (
+                        <TableRow key={r.id} className="hover:bg-tremor-background-muted/30 dark:hover:bg-dark-tremor-background-muted/20">
+                          <TableCell className="align-top">
+                            <Text className="text-xs font-semibold text-tremor-content-strong md:text-sm">
+                              {r.account_name || `PRJ-${r.project_id}`}
+                            </Text>
+                            {r.engagement_name ? (
+                              <Text className="mt-0.5 block text-[10px] text-tremor-content-subtle md:text-xs">{r.engagement_name}</Text>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <Badge color={sb.color} size="xs">
+                              {sb.label}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs tabular-nums text-tremor-content-emphasis md:text-sm">{fmt(r.project_signed_date)}</TableCell>
+                          <TableCell className="text-xs tabular-nums text-tremor-content-emphasis md:text-sm">{fmt(r.kickoff_date)}</TableCell>
+                          <TableCell className="text-xs tabular-nums text-tremor-content-emphasis md:text-sm">{fmt(r.go_live_date)}</TableCell>
+                          <TableCell className="text-xs tabular-nums text-tremor-content-emphasis md:text-sm">{r.dead_days_effective ?? "—"}</TableCell>
+                          <TableCell className="text-xs tabular-nums md:text-sm">
+                            {r.ageing_days_effective != null ? (
+                              <span
+                                className={cn(
+                                  "tabular-nums text-tremor-content-emphasis",
+                                  (r.ageing_days_effective ?? 0) > 90 && "font-medium text-rose-600 dark:text-rose-400",
+                                )}
+                              >
+                                {r.ageing_days_effective}d
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <Button type="button" size="xs" variant="light" color="orange" onClick={() => openEditor(r)}>
+                              {readOnly ? "View" : "Edit"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {rows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="py-8 text-center">
+                          <Text className="text-sm text-tremor-content-subtle">
+                            No transition trackers yet. {!readOnly ? "Click “Create tracker” to start one." : null}
+                          </Text>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="border-t border-tremor-border bg-tremor-background-muted/30 px-3 py-2 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/20">
+                <Text className="text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
+                  * Dead days and ageing are auto-computed when manual overrides are empty.
+                </Text>
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
 
       {/* ── Side sheet ───────────────────────────────── */}
       <TransitionSheet

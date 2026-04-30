@@ -26,6 +26,7 @@ export const VERTICAL_MODULES: { key: string; label: string }[] = [
   { key: "tasks", label: "Tasks" },
   { key: "portfolio", label: "Portfolio" },
   { key: "clients", label: "Clients" },
+  { key: "client_dashboard", label: "Client dashboard" },
   { key: "data_operations", label: "Data operations" },
   { key: "admin_users", label: "Users & access (admin)" },
 ];
