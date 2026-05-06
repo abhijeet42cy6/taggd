@@ -207,8 +207,9 @@ class Project(Base, AuditMixin):
     category = Column(String)  # e.g. Non TARA, TARA
     vertical = Column(String) # e.g. Pharma, Auto
     practice = Column(String) # e.g. Lateral, RPO (account type)
-    
-    
+    # True when this account appears on the corporate finance master «Taggd_Source_Joiner» sheet (CEO KPI cohort).
+    has_taggd_joiner_sheet = Column(Boolean, nullable=False, default=False)
+
     # Store the generated mapping and calculation logic for this project
     column_mapping = Column(JSON) # Map of Universal Key -> Excel Header
     revenue_logic_code = Column(Text) # The synthesized Python function
@@ -765,6 +766,9 @@ class WFMHRBenchmark(Base, AuditMixin):
     wl2_hires = Column(Integer, default=0)
     wl3_hires = Column(Integer, default=0)
     wl4_hires = Column(Integer, default=0)
+
+    # Quarter-level + open-position snapshot from "Projected HC - FY**" (JSON for SQLite portability)
+    sheet_metrics_json = Column(JSON, nullable=True)
     
     project = relationship("Project", back_populates="wfm_benchmarks")
 
@@ -830,6 +834,10 @@ class FinanceEfficiencyKPI(Base, AuditMixin):
     actual_headcount_wl1 = Column(Float, default=0.0)
     # Monthly Taggd-sourced joiner count (sheet Taggd_Source_Joiner)
     taggd_joiners = Column(Float, default=0.0)
+    # Non-Taggd joiners (sheet Non Taggd_Source_Joiner); used with partial credit for portfolio RPH
+    non_taggd_joiners = Column(Float, default=0.0)
+    # Rev_Productivity_Actual sheet (INR per WL1 HC); ingest applies lac scaling like target rev productivity
+    rev_productivity_actual_inr = Column(Float, nullable=True)
     # Target PPC (INR per overall HC). Actual PPC is always ledger Actual Cost ÷ overall HC (see /finance/data).
     target_ppc_inr = Column(Float, nullable=True)
     metrics_updated_at = Column(DateTime, nullable=True)
@@ -1343,6 +1351,48 @@ def _ensure_finance_efficiency_taggd_joiners_column():
         logging.warning("finance_efficiency_kpis taggd_joiners migration: %s", e)
 
 
+def _ensure_finance_efficiency_non_taggd_joiners_column():
+    """SQLite: add non_taggd_joiners if missing (Non Taggd_Source_Joiner sheet)."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(finance_efficiency_kpis)")).fetchall()
+            cols = {r[1] for r in rows}
+            if not cols:
+                return
+            if "non_taggd_joiners" not in cols:
+                conn.execute(
+                    text("ALTER TABLE finance_efficiency_kpis ADD COLUMN non_taggd_joiners REAL DEFAULT 0")
+                )
+                conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("finance_efficiency_kpis non_taggd_joiners migration: %s", e)
+
+
+def _ensure_finance_efficiency_rev_productivity_actual_column():
+    """SQLite: add rev_productivity_actual_inr if missing (Rev_Productivity_Actual sheet)."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(finance_efficiency_kpis)")).fetchall()
+            cols = {r[1] for r in rows}
+            if not cols:
+                return
+            if "rev_productivity_actual_inr" not in cols:
+                conn.execute(
+                    text("ALTER TABLE finance_efficiency_kpis ADD COLUMN rev_productivity_actual_inr REAL")
+                )
+                conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("finance_efficiency_kpis rev_productivity_actual_inr migration: %s", e)
+
+
 def _ensure_project_transition_resource_attachments_column():
     """SQLite: JSON list of uploaded transition resource files."""
     from sqlalchemy import text
@@ -1377,6 +1427,25 @@ def _ensure_projects_project_head_column():
         import logging
 
         logging.warning("projects project_head migration: %s", e)
+
+
+def _ensure_projects_taggd_joiner_sheet_column():
+    """SQLite: cohort flag for CEO KPIs (accounts on Taggd_Source_Joiner sheet)."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(projects)")).fetchall()
+            cols = {r[1] for r in rows}
+            if cols and "has_taggd_joiner_sheet" not in cols:
+                conn.execute(
+                    text("ALTER TABLE projects ADD COLUMN has_taggd_joiner_sheet BOOLEAN DEFAULT 0 NOT NULL")
+                )
+                conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("projects has_taggd_joiner_sheet migration: %s", e)
 
 
 def _ensure_user_rbac_and_attribution_columns():
@@ -1753,6 +1822,24 @@ def _ensure_meeting_calendar_integration_columns():
         logging.warning("meeting calendar integration columns migration: %s", e)
 
 
+def _ensure_wfm_benchmark_sheet_metrics_json():
+    """SQLite: extended quarter / open-position snapshot from WFM Projected HC sheet."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(wfm_hr_benchmarks)")).fetchall()
+            cols = {r[1] for r in rows}
+            if not cols or "sheet_metrics_json" in cols:
+                return
+            conn.execute(text("ALTER TABLE wfm_hr_benchmarks ADD COLUMN sheet_metrics_json TEXT"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("wfm_hr_benchmarks sheet_metrics_json migration: %s", e)
+
+
 def get_db():
     """FastAPI dependency: one session per request."""
     db = SessionLocal()
@@ -1778,6 +1865,7 @@ def init_db():
     _ensure_records_rpo_columns()
     _ensure_candidates_profile_columns()
     _ensure_projects_project_head_column()
+    _ensure_projects_taggd_joiner_sheet_column()
     _ensure_user_rbac_and_attribution_columns()
     _ensure_finance_ledger_cash_metrics_audit_columns()
     _ensure_finance_efficiency_scorecard_columns()
@@ -1787,6 +1875,9 @@ def init_db():
     _ensure_sla_period_start_column()
     _ensure_finance_efficiency_wl1_column()
     _ensure_finance_efficiency_taggd_joiners_column()
+    _ensure_finance_efficiency_non_taggd_joiners_column()
+    _ensure_finance_efficiency_rev_productivity_actual_column()
+    _ensure_wfm_benchmark_sheet_metrics_json()
     db = SessionLocal()
     try:
         from .finance_dedupe import dedupe_finance_tables

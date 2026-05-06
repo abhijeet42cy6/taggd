@@ -161,6 +161,24 @@
   transform: translateY(-2px);
 }
 
+/* Clickable hero (revenue drill-down): focus ring + same lift on wrapper hover */
+.exec-dash-tremor__hero-card-wrap {
+  cursor: pointer;
+}
+
+.exec-dash-tremor__hero-card-wrap:focus-visible {
+  box-shadow:
+    0 0 0 2px rgb(255 255 255),
+    0 0 0 4px rgb(234 88 12);
+}
+
+.exec-dash-tremor__hero-card-wrap:hover .exec-dash-tremor__hero-card {
+  box-shadow:
+    0 14px 40px -18px rgb(234 88 12 / 0.35),
+    0 8px 24px -16px rgb(0 0 0 / 0.08);
+  transform: translateY(-2px);
+}
+
 .exec-dash-tremor__pulse-grid {
   gap: 1rem !important;
 }

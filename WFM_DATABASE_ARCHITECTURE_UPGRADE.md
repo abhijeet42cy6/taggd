@@ -28,8 +28,7 @@ This table captures the monthly operational snapshots. It measures the "Density"
 | `actual_hc_total` | INTEGER | The **Current Headcount** of Taggd employees actually working on the account. |
 | **`wl1_hires` to `wl4_hires`**| INTEGER | **The Core KPI**: Measures how many successful placements were made by Taggd recruiters at each specific **Work Level (WL)** designation. |
 | `lateral_productivity_target`| FLOAT | The standard output target (hires per recruiter) expected for this account. |
-
----
+| `sheet_metrics_json` | JSON (TEXT on SQLite) | Optional snapshot: quarterly lateral revenue/HC/productivity, ideal HC by WL, open-position counts, variances, RPH/CPH — written by **`ingest_wfm_master`**. |
 
 ## 4. New Table: `wfm_resource_gaps`
 Tracks **Internal Hiring Needs**. This table identifies where Taggd itself needs to hire more people to satisfy client contracts.
@@ -77,5 +76,5 @@ erDiagram
 ---
 
 ## 6. Maintenance
-- **Scripts**: Ingestion will be handled by `backend/scripts/ingest_wfm.py`.
-- **Database**: Models are defined in `backend/db/database.py` as `WFMHRBenchmark` and `WFMResourceGap`.
+- **Scripts**: **`backend/scripts/ingest_wfm.py`** — `ingest_wfm_master`: **Projected HC – FY\*** sheet selection (skips **Q4-only** tabs), **`sheet_metrics_json`**, **Open Positin List** → **`wfm_resource_gaps`**, **`POST /wfm/upload`** returns **`logs`** and counts.
+- **Database**: Models in `backend/db/database.py` as `WFMHRBenchmark` and `WFMResourceGap`; SQLite adds **`sheet_metrics_json`** via `init_db()` migration.

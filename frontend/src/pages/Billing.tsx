@@ -355,6 +355,8 @@ function BillingFormNCP({
   assignableUsers,
   tab,
   setTab,
+  /** In-sheet mount target so Radix Sheet focus scope includes the portaled dropdown. */
+  projectDropdownPortalEl,
 }: {
   draft: Draft;
   setDraft: React.Dispatch<React.SetStateAction<Draft>>;
@@ -363,6 +365,7 @@ function BillingFormNCP({
   assignableUsers: PlatformUserLite[];
   tab: number;
   setTab: (n: number) => void;
+  projectDropdownPortalEl: HTMLDivElement | null;
 }) {
   const [projDdOpen, setProjDdOpen] = useState(false);
   const [projSearch, setProjSearch] = useState("");
@@ -574,6 +577,7 @@ function BillingFormNCP({
               </button>
               {projDdOpen &&
                 projDdRect &&
+                projectDropdownPortalEl &&
                 createPortal(
                   <div
                     ref={projPortalRef}
@@ -642,7 +646,7 @@ function BillingFormNCP({
                       </div>
                     </div>
                   </div>,
-                  document.body,
+                  projectDropdownPortalEl,
                 )}
             </div>
             {pr("Update date", "update_date", { placeholder: "YYYY-MM-DD" })}
@@ -830,6 +834,8 @@ export function Billing() {
   const [baselineDraft, setBaselineDraft] = useState<Draft | null>(null);
   const [billingTab, setBillingTab] = useState(0);
   const [assignableUsers, setAssignableUsers] = useState<PlatformUserLite[]>([]);
+  /** In-sheet DOM node for BillingFormNCP project dropdown portal (Radix focus trap). */
+  const [billingSheetPortalEl, setBillingSheetPortalEl] = useState<HTMLDivElement | null>(null);
 
   /** Client-side filters for the loaded table (API still uses project + limit). */
   const [tableSearch, setTableSearch] = useState("");
@@ -1442,7 +1448,7 @@ export function Billing() {
             "bg-[#f7f6f3] shadow-xl",
           )}
         >
-          <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+          <div ref={setBillingSheetPortalEl} className="new-contract-sheet flex min-h-0 flex-1 flex-col">
             {/* ── Scrollable content ──────────────────────── */}
             <div className="ncp-scroll min-h-0 flex-1">
               <div className="ncp-page">
@@ -1486,6 +1492,7 @@ export function Billing() {
                   assignableUsers={assignableUsers}
                   tab={billingTab}
                   setTab={setBillingTab}
+                  projectDropdownPortalEl={billingSheetPortalEl}
                 />
 
                 {/* Error */}

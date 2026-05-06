@@ -3067,8 +3067,20 @@ async def upload_sla_master(
         shutil.copyfileobj(file.file, buffer)
         
     try:
-        # Run the ingestion pipeline (using the imported script logic)
-        ingest_sla(file_path, db=db)
+        ingest_result = ingest_sla(file_path, db=db)
+        if not ingest_result or not ingest_result.get("ok"):
+            err_detail = (ingest_result or {}).get("error", "SLA ingestion failed")
+            log_ingestion_event(
+                db,
+                user=user,
+                kind="sla",
+                filename=safe_name,
+                status="error",
+                label="Failed",
+                project_id=None,
+            )
+            raise HTTPException(status_code=400, detail=err_detail)
+
         log_ingestion_event(
             db,
             user=user,
@@ -3078,7 +3090,14 @@ async def upload_sla_master(
             label="Complete",
             project_id=None,
         )
-        return {"status": "success", "message": "Master SLA file processed successfully."}
+        payload = {k: v for k, v in ingest_result.items() if k != "ok"}
+        rows_n = ingest_result.get("rows_processed", 0)
+        perf_n = ingest_result.get("performance_cells_written", 0)
+        return {
+            "status": "success",
+            "message": f"SLA Base File processed — {rows_n} metric rows, {perf_n} score/status cells written.",
+            **payload,
+        }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -3182,6 +3201,7 @@ async def get_wfm_details(
             "wl2_hires": b.wl2_hires,
             "wl3_hires": b.wl3_hires,
             "wl4_hires": b.wl4_hires,
+            "sheet_metrics_json": b.sheet_metrics_json,
         })
 
     return JSONResponse(
@@ -3193,6 +3213,7 @@ async def get_wfm_details(
 async def upload_wfm_master(
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Upload and ingest the Master WFM / Headcount Projection file."""
     temp_dir = tempfile.gettempdir()
@@ -3221,11 +3242,25 @@ async def upload_wfm_master(
             adb.close()
 
     try:
-        await asyncio.to_thread(ingest_wfm_master, file_path)
+        result = ingest_wfm_master(file_path, db=db)
+        if not result.get("ok"):
+            err = result.get("error", "WFM ingestion failed")
+            _audit("error", "Failed")
+            raise HTTPException(status_code=400, detail=err)
         _audit("success", "Complete")
-        return {"status": "success", "message": "WFM Master file processed successfully."}
+        payload = {k: v for k, v in result.items() if k != "ok"}
+        bm = result.get("benchmarks_saved", 0)
+        gaps = result.get("gap_rows_written", 0)
+        return {
+            "status": "success",
+            "message": f"WFM processed — {bm} benchmark row(s), {gaps} open-position row(s).",
+            **payload,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
+
         print(traceback.format_exc())
         _audit("error", "Failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3405,8 +3440,10 @@ async def get_finance_data(
                 "wl1": 0.0,
                 "overall_hc": 0.0,
                 "taggd_joiners": 0.0,
+                "non_taggd_joiners": 0.0,
                 "target_ppc_inr": None,
                 "target_revenue_per_recruiter": None,
+                "rev_productivity_actual_inr": None,
                 "metrics_updated_at": None,
                 "metrics_updated_by_user_id": None,
             },
@@ -3414,10 +3451,13 @@ async def get_finance_data(
         m["wl1"] += float(r.actual_headcount_wl1 or 0)
         m["overall_hc"] += float(r.actual_headcount_finance or 0)
         m["taggd_joiners"] += float(r.taggd_joiners or 0)
+        m["non_taggd_joiners"] += float(r.non_taggd_joiners or 0)
         if r.target_ppc_inr is not None:
             m["target_ppc_inr"] = float(r.target_ppc_inr)
         if r.target_revenue_per_recruiter is not None:
             m["target_revenue_per_recruiter"] = float(r.target_revenue_per_recruiter)
+        if r.rev_productivity_actual_inr is not None:
+            m["rev_productivity_actual_inr"] = float(r.rev_productivity_actual_inr)
         if r.metrics_updated_at is not None:
             prev = m["metrics_updated_at"]
             if prev is None or r.metrics_updated_at >= prev:
@@ -3483,8 +3523,10 @@ async def get_finance_data(
                 "wl1": 0.0,
                 "overall_hc": 0.0,
                 "taggd_joiners": 0.0,
+                "non_taggd_joiners": 0.0,
                 "target_ppc_inr": None,
                 "target_revenue_per_recruiter": None,
+                "rev_productivity_actual_inr": None,
                 "metrics_updated_at": None,
                 "metrics_updated_by_user_id": None,
             },
@@ -3492,6 +3534,7 @@ async def get_finance_data(
         wl1_hc = float(km["wl1"] or 0.0)
         overall_hc = float(km["overall_hc"] or 0.0)
         taggd_j = float(km["taggd_joiners"] or 0.0)
+        non_taggd_j = float(km["non_taggd_joiners"] or 0.0)
         total_cost = float(cost_map.get(key, 0.0) or 0.0)
         # Taggd source productivity = Taggd joiners ÷ WL1 HC
         taggd_joiner_productivity = _safe_ratio(taggd_j, wl1_hc)
@@ -3536,6 +3579,7 @@ async def get_finance_data(
             "actual_headcount_wl1": wl1_hc,
             "actual_headcount_overall": overall_hc,
             "taggd_joiners": taggd_j,
+            "non_taggd_joiners": non_taggd_j,
             "total_cost_inr": total_cost,
             "taggd_joiner_productivity": taggd_joiner_productivity,
             "taggd_source_productivity": taggd_joiner_productivity,
@@ -3544,6 +3588,7 @@ async def get_finance_data(
             "ppc_ach_pct": ppc_ach_pct,
             "target_revenue_per_recruiter": km.get("target_revenue_per_recruiter"),
             "revenue_productivity_inr": revenue_productivity,
+            "rev_productivity_actual_inr": km.get("rev_productivity_actual_inr"),
             "rev_prod_ach_pct": rev_prod_ach_pct,
             "metrics_updated_at": mu_at.isoformat() if mu_at else None,
             "metrics_updated_by_user_id": mu_uid,

@@ -157,11 +157,13 @@ Backend endpoints:
 - `/wfm/upload`
 
 Primary DB tables touched:
-- `wfm_hr_benchmarks`
-- `wfm_resource_gaps`
+- `wfm_hr_benchmarks` (including optional **`sheet_metrics_json`** from legacy workbook ingest)
+- `wfm_resource_gaps` (legacy **`Open Positin List`** rows: **`uploaded_by = ingest_wfm_master`**)
 - `projects`
 
----
+**Upload response:** `POST /api/wfm/upload` returns **`logs`**, **`benchmarks_saved`**, **`gap_rows_written`**, **`sheet_used`**, **`reporting_date`** (and **`400`** when ingest reports failure).
+
+**Read API:** `GET /api/wfm/data` includes **`sheet_metrics_json`** per benchmark row when present.
 
 ## 8) Fiscal Performance
 

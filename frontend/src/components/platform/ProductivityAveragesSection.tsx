@@ -7,10 +7,10 @@ import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDash
 import type { FinanceRowVm } from "@/lib/view-models/finance";
 
 export const PRODUCTIVITY_AVG_INFO =
-  "Arithmetic mean of Tag prod. (Taggd joiners ÷ WL1 HC) and Rev / WL1 (revenue actual ÷ WL1 HC). Avg PPC is portfolio Σ(Rev − CM) ÷ Σ overall HC on filtered client-month rows (implied cost per HC), not mean of ledger-based PPC.";
+  "Avg Taggd source prod. = Σ Taggd joiners ÷ Σ WL1 HC on filtered rows (portfolio ratio — matches Excel totals). Avg Rev / WL1 is the arithmetic mean of per-row revenue ÷ WL1. Avg PPC = Σ(Rev − CM) ÷ Σ overall HC (implied cost per HC).";
 
 export const PRODUCTIVITY_AVG_INFO_DASHBOARD =
-  "Same metrics as Finance Command. Dashboard filters narrow client-month rows first. Avg PPC = Σ(Rev − CM) ÷ Σ overall HC over those rows.";
+  "Uses the **same fiscal year** as “Financial performance” (FY selector) plus region/account/month filters. Rows are client-months in that FY only — not prior FYs. Avg Taggd source prod. = Σ joiners ÷ Σ WL1 HC. Avg PPC = Σ(Rev − CM) ÷ Σ overall HC.";
 
 export function fmtFinRatio(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -34,6 +34,32 @@ function averageDefined(
   if (!vals.length) return { mean: null, count: 0 };
   const sum = vals.reduce((a, b) => a + b, 0);
   return { mean: sum / vals.length, count: vals.length };
+}
+
+/** Portfolio-style Avg Taggd source prod.: Σ joiners ÷ Σ WL1 HC (matches spreadsheet totals, not mean of ratios). */
+export function avgTaggdSigmaJoinersOverSigmaWl1(rows: FinanceRowVm[]): {
+  value: number | null;
+  rowCount: number;
+  sumJoiners: number;
+  sumWl1: number;
+} {
+  let sumJoiners = 0;
+  let sumWl1 = 0;
+  let rowCount = 0;
+  for (const r of rows) {
+    rowCount += 1;
+    sumJoiners += Number(r.taggd_joiners) || 0;
+    sumWl1 += Number(r.actual_headcount_wl1) || 0;
+  }
+  if (!rowCount || sumWl1 <= 0 || !Number.isFinite(sumJoiners)) {
+    return { value: null, rowCount, sumJoiners, sumWl1 };
+  }
+  return {
+    value: sumJoiners / sumWl1,
+    rowCount,
+    sumJoiners,
+    sumWl1,
+  };
 }
 
 /** Portfolio-style Avg PPC: Σ(Rev − CM) ÷ Σ overall HC on the same filtered rows (INR per HC). */
@@ -90,9 +116,16 @@ type Props = {
   rows: FinanceRowVm[];
   loading?: boolean;
   externalFilters?: boolean;
+  /** When set (exec dashboard), shown in the scope line — e.g. FY25–26 from the page FY selector. */
+  fyLabel?: string;
 };
 
-export function ProductivityAveragesSection({ rows, loading = false, externalFilters = false }: Props) {
+export function ProductivityAveragesSection({
+  rows,
+  loading = false,
+  externalFilters = false,
+  fyLabel,
+}: Props) {
   const [avgFilterClient, setAvgFilterClient] = useState<string>("all");
   const [avgFilterMonth, setAvgFilterMonth] = useState<string>("all");
 
@@ -124,10 +157,7 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
   }, [rows, externalFilters, avgFilterClient, avgFilterMonth]);
 
   const productivityAvgs = useMemo(() => {
-    const tag = averageDefined(
-      rowsForProductivityAvg,
-      (r) => r.taggd_joiner_productivity ?? r.taggd_source_productivity,
-    );
+    const tag = avgTaggdSigmaJoinersOverSigmaWl1(rowsForProductivityAvg);
     const ppc = avgPpcSigmaRevMinusCmOverSigmaHc(rowsForProductivityAvg);
     const rev = averageDefined(rowsForProductivityAvg, (r) => r.revenue_productivity_inr);
     return { tag, ppc, rev };
@@ -160,8 +190,8 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
     >
       {externalFilters ? (
         <Text className="mb-4 font-medium text-tremor-content-emphasis">
-          {rowsForProductivityAvg.length} client-month{rowsForProductivityAvg.length === 1 ? "" : "s"} match dashboard
-          filters
+          {rowsForProductivityAvg.length} client-month{rowsForProductivityAvg.length === 1 ? "" : "s"}
+          {fyLabel ? ` · ${fyLabel}` : ""} · dashboard filters
         </Text>
       ) : (
         <div className="mb-4 flex flex-wrap items-end gap-4">
@@ -222,11 +252,13 @@ export function ProductivityAveragesSection({ rows, loading = false, externalFil
           <ProductivityMetricTile
             decorationColor="teal"
             label="Avg Taggd source prod."
-            value={fmtFinRatio(productivityAvgs.tag.mean)}
+            value={fmtFinRatio(productivityAvgs.tag.value)}
             subtext={
-              productivityAvgs.tag.count
-                ? `Mean of ${productivityAvgs.tag.count} values`
-                : "No Taggd source prod. values in scope"
+              productivityAvgs.tag.value != null && productivityAvgs.tag.sumWl1 > 0
+                ? `Σ ${productivityAvgs.tag.sumJoiners.toLocaleString(undefined, { maximumFractionDigits: 2 })} joiners ÷ Σ ${productivityAvgs.tag.sumWl1.toLocaleString(undefined, { maximumFractionDigits: 2 })} WL1 (${productivityAvgs.tag.rowCount} client-months)`
+                : productivityAvgs.tag.rowCount === 0
+                  ? "No rows in scope"
+                  : "Σ WL1 HC is 0 in scope"
             }
           />
           <ProductivityMetricTile

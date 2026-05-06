@@ -2,6 +2,10 @@
 
 This document records the results of the **SLA Master Ingestion Pipeline** (executed on 2026-03-20), which processed the Portfolio-wide SLA Basefile into the newly upgraded database architecture.
 
+## Maintenance note (April 2026)
+
+Ingestion behaviour was tightened for **`Raw Data SLA Basefile.xlsx`**-style workbooks: period **`… Score`** columns are collected for **`sla_performances`**, but headers that are **catalog fields** (e.g. **“Metrics to be picked of BE Score (Measure Name as per standard Metrics)”**) are **excluded**—they must not be treated as monthly scores. The pipeline adds structured **`logs`**, **`performance_cells_written`**, and related counters; **`POST /sla/upload`** returns them and responds **400** when ingest finishes with **`ok: false`**. For commands, API behaviour, and column rules, use **`docs/DATA_INGESTION_RUNBOOK.md`** (§4 — SLA master basefile).
+
 ## 1. Executive Summary
 The ingestion script (`backend/scripts/ingest_sla.py`) was developed to perform a multi-tenant ingest of the **Raw Data SLA Basefile.xlsx**. It successfully synchronized all client metadata and historical performance snapshots.
 
@@ -28,7 +32,7 @@ Each row in the "Base File" sheet is processed as follows:
 | `Calculation Method` | `metric_definitions.logic` | Human logic for AI verification. |
 
 ### **Column-Level Mapping (Snapshots)**
-The script dynamically scans columns for **Month-Year** patterns to extract the time-series performance data.
+The script dynamically scans columns for **`… Score`** headers (paired with the **next** column for MET/RAG). Catalog columns whose titles contain **“Metrics to be picked …”** are **not** treated as score periods (see maintenance note above).
 
 - **Score Ingestion**: Extracts raw values from columns like `Apr24 Score`, `May24 Score`.
 - **RAG Normalization**: Automatically pairs the Score with its corresponding `MET/NOT_MET` status column.

@@ -15,8 +15,20 @@ import ChartDataLabels from "chartjs-plugin-datalabels";
 import { Bar } from "react-chartjs-2";
 import { Menu } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/lib/utils";
+import type { Project } from "@/lib/api";
 import { financeStatsVm, type FinanceRowVm } from "@/lib/view-models/finance";
-import { fiscalYearStart, parseMonthSort, sumUnbilledLatestMonthPerProject } from "@/lib/dashboard-aggregates";
+import {
+  DEFAULT_DASHBOARD_FILTERS,
+  filterFinanceRows,
+  fiscalYearStart,
+  parseMonthSort,
+  sumUnbilledLatestMonthPerProject,
+  type DashboardFilters,
+} from "@/lib/dashboard-aggregates";
+import {
+  avgPpcSigmaRevMinusCmOverSigmaHc,
+  avgTaggdSigmaJoinersOverSigmaWl1,
+} from "@/components/platform/ProductivityAveragesSection";
 import "@/styles/finance-exec-dashboard.css";
 
 ChartJS.register(
@@ -42,13 +54,6 @@ type FinPage =
   | "forecast_packs";
 
 const FY_MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"] as const;
-
-const Q_MONTHS: Record<"Q1" | "Q2" | "Q3" | "Q4", ReadonlySet<string>> = {
-  Q1: new Set(["Apr", "May", "Jun"]),
-  Q2: new Set(["Jul", "Aug", "Sep"]),
-  Q3: new Set(["Oct", "Nov", "Dec"]),
-  Q4: new Set(["Jan", "Feb", "Mar"]),
-};
 
 function rowFyMonthAbbr(monthRaw: string): string | null {
   const raw = (monthRaw || "").trim();
@@ -160,6 +165,8 @@ function KpiTile(props: {
 
 export type FinanceExecDashboardProps = {
   stats: ReturnType<typeof financeStatsVm> | null;
+  /** Project directory — same as Executive Overview; drives `filterFinanceRows` vertical/account/region resolution. */
+  projects: Project[];
   rows: FinanceRowVm[];
   trendData: { month: string; budget: number; actual: number; forecast: number }[];
   waterfallItems: { label: string; value: number; color: string; isTotal: boolean }[];
@@ -171,6 +178,7 @@ export type FinanceExecDashboardProps = {
 
 export function FinanceExecDashboard({
   stats,
+  projects,
   rows,
   trendData: _trendData,
   waterfallItems,
@@ -226,22 +234,33 @@ export function FinanceExecDashboard({
     }
   }, [fyYears, fyFilter]);
 
+  /** Same pipeline as Executive Overview `Dashboard.tsx`: `filterFinanceRows` → FY slice (`kpiRows`). */
+  const execScopeRows = useMemo(() => {
+    const df: DashboardFilters = {
+      ...DEFAULT_DASHBOARD_FILTERS,
+      vertical: vertical || "all",
+      account: account || "all",
+      period: quarter === "ALL" ? "all" : quarter,
+    };
+    let out = filterFinanceRows(rows, projects, df);
+    const reg = region.trim();
+    if (reg) {
+      out = out.filter(
+        (r) => (r.practice_head || "") === reg || (r.project_head || "") === reg,
+      );
+    }
+    return out;
+  }, [rows, projects, vertical, account, quarter, region]);
+
   const filteredRows = useMemo(() => {
-    return rows.filter((r) => {
+    return execScopeRows.filter((r) => {
       if (fyFilter !== "all") {
         const d = parseMonthSort(r.month_sort);
         if (!d || fiscalYearStart(d) !== fyFilter) return false;
       }
-      if (quarter !== "ALL") {
-        const m = rowFyMonthAbbr(r.month ?? "");
-        if (!m || !Q_MONTHS[quarter].has(m)) return false;
-      }
-      if (vertical && r.vertical !== vertical) return false;
-      if (account && r.account_name !== account) return false;
-      if (region && (r.practice_head || "") !== region && (r.project_head || "") !== region) return false;
       return true;
     });
-  }, [rows, fyFilter, quarter, vertical, account, region]);
+  }, [execScopeRows, fyFilter]);
 
   const verticalOptions = useMemo(() => {
     const s = new Set<string>();
@@ -329,41 +348,18 @@ export function FinanceExecDashboard({
       .slice(0, 10);
   }, [filteredRows]);
 
-  const revProdWeighted = useMemo(() => {
-    let sumW = 0;
-    let sumWV = 0;
+  /** Identical definitions to `ProductivityAveragesSection` on Executive Overview (FY + toolbar slice). */
+  const taggdProd = useMemo(() => avgTaggdSigmaJoinersOverSigmaWl1(filteredRows), [filteredRows]);
+  const ppcPortfolio = useMemo(() => avgPpcSigmaRevMinusCmOverSigmaHc(filteredRows), [filteredRows]);
+  const revProdMean = useMemo(() => {
+    const vals: number[] = [];
     for (const r of filteredRows) {
       const v = r.revenue_productivity_inr;
-      if (v == null || !Number.isFinite(v)) continue;
-      const w = r.rev_actual_inr ?? 0;
-      if (w <= 0) continue;
-      sumW += w;
-      sumWV += v * w;
+      if (v != null && Number.isFinite(v)) vals.push(v);
     }
-    return sumW > 0 ? sumWV / sumW : null;
+    if (!vals.length) return { mean: null as number | null, count: 0 };
+    return { mean: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length };
   }, [filteredRows]);
-
-  const avgPpc = useMemo(() => {
-    let sum = 0;
-    let n = 0;
-    for (const r of filteredRows) {
-      if (r.ppc_inr != null && Number.isFinite(r.ppc_inr)) {
-        sum += r.ppc_inr;
-        n++;
-      }
-    }
-    return n ? sum / n : null;
-  }, [filteredRows]);
-
-  const taggdJoinersSum = useMemo(
-    () => filteredRows.reduce((a, r) => a + (r.taggd_joiners ?? 0), 0),
-    [filteredRows]
-  );
-  const wl1Sum = useMemo(
-    () => filteredRows.reduce((a, r) => a + (r.actual_headcount_wl1 ?? 0), 0),
-    [filteredRows]
-  );
-  const tjp = wl1Sum > 0 ? taggdJoinersSum / wl1Sum : null;
 
   const barData = useMemo(() => {
     const labels = chartTrendData.map((d) => d.month);
@@ -444,31 +440,47 @@ export function FinanceExecDashboard({
               theme="t-purple"
               icon="fa-database"
               label="PPC / Person / Month"
-              value={avgPpc != null ? `₹${Math.round(avgPpc).toLocaleString("en-IN")}` : "—"}
-              targetLine="Avg from ledger rows (filtered)"
+              value={ppcPortfolio.value != null ? formatCurrency(ppcPortfolio.value) : "—"}
+              targetLine={
+                ppcPortfolio.sumHc > 0
+                  ? `Σ(Rev − CM) ÷ Σ HC · ${ppcPortfolio.rowCount} client-months`
+                  : "Σ overall HC is 0 in scope"
+              }
             />
             <KpiTile
               theme="t-teal"
               icon="fa-arrow-trend-up"
               label="Rev productivity"
-              value={
-                revProdWeighted != null ? `₹${Math.round(revProdWeighted).toLocaleString("en-IN")}` : "—"
+              value={revProdMean.mean != null ? formatCurrency(revProdMean.mean) : "—"}
+              targetLine={
+                revProdMean.count
+                  ? `Mean of ${revProdMean.count} Rev/WL1 values (Executive Overview)`
+                  : "No Rev/WL1 values in scope"
               }
-              targetLine="Revenue-weighted from filtered ledger"
             />
             <KpiTile
               theme="t-dpurple"
               icon="fa-user-plus"
               label="Taggd joiner productivity"
-              value={tjp != null ? `${tjp.toFixed(2)} J/HC` : "—"}
-              targetLine={`Taggd joiners: ${taggdJoinersSum.toFixed(0)} · WL1 Σ: ${wl1Sum.toFixed(1)}`}
+              value={taggdProd.value != null ? `${taggdProd.value.toFixed(2)} J/HC` : "—"}
+              targetLine={
+                taggdProd.value != null && taggdProd.sumWl1 > 0
+                  ? `Σ ${taggdProd.sumJoiners.toLocaleString(undefined, { maximumFractionDigits: 2 })} joiners · Σ ${taggdProd.sumWl1.toLocaleString(undefined, { maximumFractionDigits: 2 })} WL1 · ${taggdProd.rowCount} client-months`
+                  : taggdProd.rowCount === 0
+                    ? "No rows in scope"
+                    : "Σ WL1 HC is 0 in scope"
+              }
             />
             <KpiTile
               theme="t-orange"
               icon="fa-users"
               label="Headcount (WL1 Σ)"
-              value={wl1Sum > 0 ? wl1Sum.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "—"}
-              targetLine="Filtered ledger rows"
+              value={
+                taggdProd.sumWl1 > 0
+                  ? taggdProd.sumWl1.toLocaleString("en-IN", { maximumFractionDigits: 2 })
+                  : "—"
+              }
+              targetLine="Same Σ WL1 as Taggd productivity tile"
             />
             <KpiTile
               theme="t-cyan"

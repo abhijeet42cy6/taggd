@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from collections import Counter
@@ -21,6 +22,35 @@ from backend.db.database import (
     init_db,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _sla_score_data_columns(columns: list[str]) -> list[str]:
+    """
+    Columns that hold period scores + pair with the next column for MET/RAG.
+
+    Excludes catalog headers that contain the word \"Score\" but are not monthly
+    snapshots (e.g. \"Metrics to be picked of BE Score (...)\" in Raw Data SLA Basefile).
+    """
+    out: list[str] = []
+    for c in columns:
+        s = str(c).strip()
+        if "Score" not in s:
+            continue
+        low = s.lower()
+        if "metrics to be picked" in low:
+            continue
+        out.append(c)
+    return out
+
+
+def _metric_group_column_name(columns: list[str]) -> Optional[str]:
+    for c in columns:
+        sc = str(c).strip()
+        if "Metrics to be picked" in sc and "BE Score" in sc:
+            return sc
+    return None
+
 
 def _xstr(row: pd.Series, key: str) -> str:
     v = row.get(key)
@@ -39,11 +69,26 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
     Projects are resolved with case/SBU/fuzzy matching to existing rows so SLA data
     attaches to the same projects as directory / finance (charge-code clients).
     """
-    print(f"--- Starting SLA Ingestion for {os.path.basename(file_path)} ---")
+    logs: list[str] = []
+
+    def log_line(msg: str, level: str = "info") -> None:
+        logs.append(msg)
+        log_fn = getattr(logger, level, logger.info)
+        log_fn(msg)
+
+    log_line(f"SLA ingest start — file={os.path.basename(file_path)}")
 
     if not os.path.exists(file_path):
-        print(f"Error: File not found at {file_path}")
-        return None
+        log_line(f"Error: file not found at {file_path}", "error")
+        return {
+            "ok": False,
+            "file": os.path.basename(file_path),
+            "error": f"File not found at {file_path}",
+            "logs": logs,
+            "rows_processed": 0,
+            "performance_cells_written": 0,
+            "score_columns": [],
+        }
 
     init_db()
 
@@ -61,13 +106,16 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
         "rows_skipped_empty_metric": 0,
         "projects_created": 0,
         "metrics_cataloged": 0,
+        "performance_cells_written": 0,
         "match_reasons": {},
+        "logs": logs,
+        "score_columns": [],
     }
 
     try:
         bf = backfill_sla_period_starts(db)
         if bf:
-            print(f"Aligned {bf} legacy SLA performance rows to calendar months.")
+            log_line(f"Backfill: aligned {bf} legacy SLA performance rows to calendar months.")
 
         try:
             df = pd.read_excel(file_path, sheet_name="Base File", header=0)
@@ -80,14 +128,25 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
             ) from e
 
         df.columns = [str(c).strip() for c in df.columns]
-        score_cols = [c for c in df.columns if "Score" in str(c)]
-        print(f"Identified {len(score_cols)} performance snapshot columns.")
+        raw_score_like = [c for c in df.columns if "Score" in str(c)]
+        score_cols = _sla_score_data_columns(list(df.columns))
+        excluded = [c for c in raw_score_like if c not in score_cols]
+        result["score_columns"] = score_cols
+        log_line(f"Base File loaded: {len(df)} rows, {len(df.columns)} columns.")
+        log_line(f"Score snapshot columns (data): {len(score_cols)} — {score_cols[:12]}{'...' if len(score_cols) > 12 else ''}")
+        if excluded:
+            log_line(f"Excluded non-period 'Score' columns ({len(excluded)}): {excluded}")
+
+        mg_col = _metric_group_column_name(list(df.columns))
+        if mg_col not in df.columns:
+            mg_col = None
 
         rows_processed = 0
         projects_created = 0
         metrics_cataloged = 0
         skipped_header = 0
         skipped_empty_metric = 0
+        performance_cells_written = 0
         match_reasons: Counter[str] = Counter()
 
         for _index, row in df.iterrows():
@@ -162,10 +221,11 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
                 metrics_cataloged += 1
 
             m_def.source_filename = source_basename
-            m_def.metric_group = str(
-                row.get("Metrics to be picked of BE Score (Measure Name as per standard Metrics)", "") or ""
-            )
-            if m_def.metric_group.lower() == "nan":
+            if mg_col:
+                m_def.metric_group = str(row.get(mg_col, "") or "")
+            else:
+                m_def.metric_group = ""
+            if str(m_def.metric_group).lower() == "nan":
                 m_def.metric_group = ""
             m_def.metric_nature = _xstr(row, "Metric Type")
             m_def.target_threshold = _xstr(row, "Target")
@@ -189,6 +249,8 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
 
                 if not raw_score and not raw_status:
                     continue
+
+                performance_cells_written += 1
 
                 if period_date:
                     canonical = canonical_month_label(period_date)
@@ -233,15 +295,17 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
                 perf.rag_status = raw_status
 
             rows_processed += 1
-            if rows_processed % 50 == 0:
-                print(f"Processed {rows_processed} metric rows...")
+            if rows_processed % 100 == 0:
+                log_line(f"Progress: {rows_processed} metric rows processed…")
 
         db.commit()
-        print("\n--- Ingestion Complete ---")
-        print(f"Metric rows processed: {rows_processed}")
-        print(f"New projects created: {projects_created}")
-        print(f"New metric definitions this run: {metrics_cataloged}")
-        print(f"Project match reasons: {dict(match_reasons)}")
+        log_line(
+            f"Commit OK — metric_rows={rows_processed}, skipped_header={skipped_header}, "
+            f"skipped_empty_metric={skipped_empty_metric}, new_projects={projects_created}, "
+            f"new_metric_defs={metrics_cataloged}, performance_cells={performance_cells_written}, "
+            f"match_reasons={dict(match_reasons)}",
+            "info",
+        )
 
         result.update(
             {
@@ -251,6 +315,7 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
                 "rows_skipped_empty_metric": skipped_empty_metric,
                 "projects_created": projects_created,
                 "metrics_cataloged": metrics_cataloged,
+                "performance_cells_written": performance_cells_written,
                 "match_reasons": dict(match_reasons),
             }
         )
@@ -258,10 +323,13 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
 
     except Exception as e:
         db.rollback()
-        print(f"FATAL ERROR during ingestion: {str(e)}")
+        log_line(f"FATAL: {str(e)}", "error")
         import traceback
 
-        traceback.print_exc()
+        tb = traceback.format_exc()
+        logger.error(tb)
+        for line in tb.strip().split("\n"):
+            logs.append(f"  {line}")
         result["error"] = str(e)
         return result
     finally:

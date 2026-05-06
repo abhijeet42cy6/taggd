@@ -5,9 +5,8 @@
  *   • Revenue (actual / budget / forecast, YoY, QoQ quarters)
  *   • Contribution Margin % and value
  *   • Collection, Unbilled, Bad Debt, Collection efficiency
- *   • Revenue-per-hire (derived: revenue / taggd_joiners)
- *   • Revenue productivity per recruiter (revenue / WL1 HC)
- *   • PPC — cost per headcount (actual cost / overall HC)
+ *   • Revenue-per-hire & Rev/WL1 on the **Taggd_Source_Joiner workbook cohort** + calibrated blends (FY25–26 master)
+ *   • PPC — Σ actual cost ÷ Σ overall HC for the FY
  *   • WFM fill rate and pipeline headcount
  *   • SLA % green attainment
  *   • Vertical revenue mix and share
@@ -38,6 +37,10 @@ import {
   quarterlyCmForFy,
   fiscalYearStart,
   parseMonthSort,
+  effectiveHireDenominatorForRph,
+  ceoRevPerWl1Inr,
+  fyRowsTaggdJoinerSheetCohort,
+  sumNonTaggdJoiners,
 } from "@/lib/dashboard-aggregates";
 import { formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { ExecSectionTitle } from "@/components/tremor-dashboard/ExecSectionTitle";
@@ -69,7 +72,15 @@ function fmtCr(n: number): string {
 
 function fmtLakh(n: number): string {
   if (n === 0) return "—";
+  if (Math.abs(n) < 1e5) {
+    return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  }
   return `₹${(n / 1e5).toFixed(1)} L`;
+}
+
+function fmtPulseExactInr(n: number): string {
+  if (n === 0) return "—";
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtPct(n: number, decimals = 1): string {
@@ -225,29 +236,45 @@ export const CeoView = () => {
   const priorColl  = priorFin?.total_collected_inr ?? 0;
   const cmDeltaPp  = priorCmPct != null ? cmPct - priorCmPct : null;
 
-  // Productivity: sum from fyRows
+  // Productivity pulse KPIs: workbook cohort (`Project.has_taggd_joiner_sheet`) + FY25–26 blend constants.
+  const fyRowsCeoKpi = useMemo(
+    () => fyRowsTaggdJoinerSheetCohort(fyRows, projects),
+    [fyRows, projects],
+  );
+  const finKpi = useMemo(() => {
+    const a = aggregateFinanceFromRows(fyRowsCeoKpi);
+    if (a) return a;
+    return emptyFinanceAggregate();
+  }, [fyRowsCeoKpi]);
+  const revKpi = finKpi?.revenue_actual_inr ?? 0;
+
   const totalTajeJoiners = useMemo(
-    () => fyRows.reduce((s, r) => s + (r.taggd_joiners ?? 0), 0),
+    () => fyRowsCeoKpi.reduce((s, r) => s + (r.taggd_joiners ?? 0), 0),
+    [fyRowsCeoKpi],
+  );
+  const totalNonTaggdJoiners = useMemo(() => sumNonTaggdJoiners(fyRowsCeoKpi), [fyRowsCeoKpi]);
+  const effectiveHiresForRph = useMemo(() => effectiveHireDenominatorForRph(fyRowsCeoKpi), [fyRowsCeoKpi]);
+  const sumWl1CeoKpi = useMemo(
+    () => fyRowsCeoKpi.reduce((s, r) => s + (Number(r.actual_headcount_wl1) || 0), 0),
+    [fyRowsCeoKpi],
+  );
+  /** Σ WL1 FY on full filtered ledger (e.g. subtitles referencing whole FY footprint). */
+  const sumWl1Hc = useMemo(
+    () => fyRows.reduce((s, r) => s + (Number(r.actual_headcount_wl1) || 0), 0),
     [fyRows],
   );
-  const totalWl1Hc = useMemo(
-    () => fyRows.reduce((s, r) => s + (r.actual_headcount_wl1 ?? 0), 0) /
-      Math.max(fyRows.filter((r) => (r.actual_headcount_wl1 ?? 0) > 0).length, 1),
-    [fyRows],
-  );
-  const totalOverallHc = useMemo(
-    () => fyRows.reduce((s, r) => s + (r.actual_headcount_overall ?? 0), 0) /
-      Math.max(fyRows.filter((r) => (r.actual_headcount_overall ?? 0) > 0).length, 1),
+  /** Σ overall HC person-months in FY (portfolio denominator for PPC). */
+  const sumOverallHc = useMemo(
+    () => fyRows.reduce((s, r) => s + (Number(r.actual_headcount_overall) || 0), 0),
     [fyRows],
   );
   const totalCost = useMemo(() => fyRows.reduce((s, r) => s + (r.total_cost_inr ?? 0), 0), [fyRows]);
 
-  // RPH: net revenue / taggd joiners
-  const rph = totalTajeJoiners > 0 ? revA / totalTajeJoiners : 0;
-  // Productivity per WL1 recruiter (monthly average HC basis)
-  const revPerWl1 = totalWl1Hc > 0 ? revA / totalWl1Hc : 0;
-  // PPC (cost per overall HC)
-  const ppc = totalOverallHc > 0 && totalCost > 0 ? totalCost / totalOverallHc : 0;
+  // RPH & Rev/WL1: cohort revenue + joiners + productivity mass (see `dashboard-aggregates.ts`).
+  const rph = effectiveHiresForRph > 0 ? revKpi / effectiveHiresForRph : 0;
+  const revPerWl1 = useMemo(() => ceoRevPerWl1Inr(revKpi, fyRowsCeoKpi), [revKpi, fyRowsCeoKpi]);
+  // PPC — portfolio Σ cost ÷ Σ overall HC
+  const ppc = sumOverallHc > 0 && totalCost > 0 ? totalCost / sumOverallHc : 0;
   // Working capital risk: unbilled + bad debt as % of revenue
   const workCapRiskPct = revA > 0 ? ((unb + bd) / revA) * 100 : 0;
 
@@ -496,8 +523,14 @@ export const CeoView = () => {
           <OperationalPulseCard
             tone="orange"
             label="Revenue per Hire"
-            primary={rph > 0 ? fmtLakh(rph) : "—"}
-            sub={totalTajeJoiners > 0 ? `${totalTajeJoiners.toFixed(0)} Taggd joiners` : "No joiner data"}
+            primary={rph > 0 ? fmtPulseExactInr(rph) : "—"}
+            sub={
+              totalTajeJoiners > 0
+                ? totalNonTaggdJoiners > 0
+                  ? `${totalTajeJoiners.toLocaleString("en-IN", { maximumFractionDigits: 0 })} Taggd · eff. ${effectiveHiresForRph.toLocaleString("en-IN", { maximumFractionDigits: 0 })} hires`
+                  : `${totalTajeJoiners.toLocaleString("en-IN", { maximumFractionDigits: 0 })} Taggd joiners`
+                : "No joiner data"
+            }
             badge={
               rph > 0
                 ? {
@@ -510,8 +543,8 @@ export const CeoView = () => {
           <OperationalPulseCard
             tone="teal"
             label="Rev / Recruiter (WL1)"
-            primary={revPerWl1 > 0 ? fmtLakh(revPerWl1) : "—"}
-            sub={totalWl1Hc > 0 ? `Avg ${totalWl1Hc.toFixed(0)} WL1 HC` : "No WL1 data"}
+            primary={revPerWl1 > 0 ? fmtPulseExactInr(revPerWl1) : "—"}
+            sub={sumWl1CeoKpi > 0 ? `Σ ${sumWl1CeoKpi.toLocaleString("en-IN", { maximumFractionDigits: 2 })} WL1 HC (Taggd cohort)` : "No WL1 data"}
             badge={
               revPerWl1 > 0
                 ? {
@@ -655,7 +688,7 @@ export const CeoView = () => {
           <Grid numItems={1} numItemsMd={2} className="gap-4">
             <Card decoration="top" decorationColor="orange">
               <Text className="font-medium text-tremor-content-emphasis">Revenue per Hire (RPH)</Text>
-              <Metric className="mt-2 text-tremor-content-strong">{rph > 0 ? fmtLakh(rph) : "—"}</Metric>
+              <Metric className="mt-2 text-tremor-content-strong">{rph > 0 ? fmtPulseExactInr(rph) : "—"}</Metric>
               <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
                 {totalTajeJoiners > 0
                   ? `Based on ${totalTajeJoiners.toFixed(0)} Taggd joiners in ${fyShortLabel(selectedFyStart)}`
@@ -664,10 +697,10 @@ export const CeoView = () => {
             </Card>
             <Card decoration="top" decorationColor="teal">
               <Text className="font-medium text-tremor-content-emphasis">Revenue / WL1 Recruiter</Text>
-              <Metric className="mt-2 text-tremor-content-strong">{revPerWl1 > 0 ? fmtLakh(revPerWl1) : "—"}</Metric>
+              <Metric className="mt-2 text-tremor-content-strong">{revPerWl1 > 0 ? fmtPulseExactInr(revPerWl1) : "—"}</Metric>
               <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
-                {totalWl1Hc > 0
-                  ? `Avg ${totalWl1Hc.toFixed(0)} WL1 HC · target ₹1.57L`
+                {sumWl1CeoKpi > 0
+                  ? `Σ ${sumWl1CeoKpi.toLocaleString("en-IN", { maximumFractionDigits: 2 })} WL1 HC · Taggd cohort`
                   : "Requires WL1 HC from finance master"}
               </Text>
             </Card>
@@ -675,8 +708,8 @@ export const CeoView = () => {
               <Text className="font-medium text-tremor-content-emphasis">PPC (Cost / Overall HC)</Text>
               <Metric className="mt-2 text-tremor-content-strong">{ppc > 0 ? fmtLakh(ppc) : "—"}</Metric>
               <Text className="mt-2 text-tremor-default text-tremor-content-subtle">
-                {totalOverallHc > 0 && totalCost > 0
-                  ? `₹${(totalCost / 1e7).toFixed(2)} Cr total cost · ${totalOverallHc.toFixed(0)} avg HC`
+                {sumOverallHc > 0 && totalCost > 0
+                  ? `₹${(totalCost / 1e7).toFixed(2)} Cr total cost · Σ ${sumOverallHc.toLocaleString("en-IN", { maximumFractionDigits: 2 })} overall HC`
                   : "Requires cost data from finance master"}
               </Text>
             </Card>

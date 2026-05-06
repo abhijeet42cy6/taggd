@@ -109,6 +109,8 @@ export function ExecutiveMetricHeroCard({
   attainmentPct,
   meta,
   quarters,
+  onDrillIn,
+  drillAriaLabel,
 }: {
   eyebrow: string;
   decorationColor: ExecutiveHeroDecoration;
@@ -118,13 +120,16 @@ export function ExecutiveMetricHeroCard({
   attainmentPct?: number;
   meta?: { label: string; value: ReactNode; valueCls?: string }[];
   quarters: QuarterPoint[];
+  /** When set, the card is keyboard- and pointer-activated to open a drill-down (e.g. large Dialog). */
+  onDrillIn?: () => void;
+  drillAriaLabel?: string;
 }) {
   const rawPct = attainmentPct ?? 0;
   const barPct = Math.min(100, Math.max(0, rawPct));
   const { pctClass, barColor } = attainmentVisual(rawPct);
   const skin = HERO_SKIN[decorationColor];
 
-  return (
+  const card = (
     <Card
       decoration="left"
       decorationColor={decorationColor}
@@ -183,5 +188,25 @@ export function ExecutiveMetricHeroCard({
         ) : null}
       </div>
     </Card>
+  );
+
+  if (!onDrillIn) return card;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={drillAriaLabel ?? "View details"}
+      className="exec-dash-tremor__hero-card-wrap rounded-tremor-default outline-none"
+      onClick={onDrillIn}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onDrillIn();
+        }
+      }}
+    >
+      {card}
+    </div>
   );
 }

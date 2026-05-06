@@ -57,5 +57,6 @@ Output directory: `excel_upload_masters/templates/`. A `templates/_generated_at.
 | `15_vendor_resume_licenses.xlsx`        | `resume_supplier_licenses`                                                                                                                                                       |
 | `16_ingestion_audit.xlsx`               | `ingestion_events`                                                                                                                                                               |
 
+The **multi-tab corporate finance master** used in the app (**Ingestion Center → Finance ledger**, sheets such as `Revenue_Budget`, `CM Actual`, `Unbilled`) is ingested by **`backend/scripts/ingest_finance.py`** (`POST /finance/upload`). That pipeline is **not** the same layout as **`10_finance_core.xlsx`** (filled via `ingest_excel_master_filled_workbooks.py`). Sheet coverage, date handling, and skipped tabs are documented in **`docs/DATA_INGESTION_RUNBOOK.md` §6**.
 
 For relationship detail and business naming, see `DATABASE_SCHEMA.md` at the repository root. If the code model and that doc ever diverge, **trust `database.py` and regenerate these templates**.

@@ -27,6 +27,8 @@ export type FinanceRowVm = {
   actual_headcount_overall?: number;
   /** Monthly Taggd joiners (Taggd_Source_Joiner sheet). */
   taggd_joiners?: number;
+  /** Monthly non-Taggd joiners (Non Taggd_Source_Joiner sheet). */
+  non_taggd_joiners?: number;
   /** Total cost INR (Actual Cost ledger). */
   total_cost_inr?: number;
   /** Taggd joiners ÷ WL1 HC (Taggd source productivity). */
@@ -41,6 +43,8 @@ export type FinanceRowVm = {
   target_revenue_per_recruiter?: number | null;
   /** Revenue actual / WL1 HC (INR per WL1 HC). */
   revenue_productivity_inr?: number | null;
+  /** Rev_Productivity_Actual sheet (INR per WL1 HC), when ingested. */
+  rev_productivity_actual_inr?: number | null;
   /** Actual rev productivity ÷ target × 100 */
   rev_prod_ach_pct?: number | null;
   metrics_updated_at?: string | null;
@@ -112,6 +116,7 @@ export function financeRowsVm(rows: any[]): FinanceRowVm[] {
     actual_headcount_wl1: normalizePlainNumber(r.actual_headcount_wl1),
     actual_headcount_overall: normalizePlainNumber(r.actual_headcount_overall),
     taggd_joiners: normalizePlainNumber(r.taggd_joiners),
+    non_taggd_joiners: normalizePlainNumber(r.non_taggd_joiners),
     total_cost_inr: normalizePlainNumber(r.total_cost_inr),
     taggd_joiner_productivity: optionalRatio(r.taggd_joiner_productivity),
     taggd_source_productivity: optionalRatio(r.taggd_source_productivity ?? r.taggd_joiner_productivity),
@@ -120,6 +125,7 @@ export function financeRowsVm(rows: any[]): FinanceRowVm[] {
     ppc_ach_pct: optionalRatio(r.ppc_ach_pct),
     target_revenue_per_recruiter: optionalRatio(r.target_revenue_per_recruiter),
     revenue_productivity_inr: optionalRatio(r.revenue_productivity_inr),
+    rev_productivity_actual_inr: optionalRatio(r.rev_productivity_actual_inr),
     rev_prod_ach_pct: optionalRatio(r.rev_prod_ach_pct),
     metrics_updated_at: r.metrics_updated_at ?? null,
     metrics_updated_by_user_id:

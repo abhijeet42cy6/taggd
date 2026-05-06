@@ -23,7 +23,7 @@ We have introduced a core `**AuditMixin`** that is inherited by every single tab
 
 ## 2. Core Ingestion Integration
 
-The ingestion pipelines (`ingest_sla.py` and `ingest_wfm.py`) have been re-engineered to be "Audit-Aware."
+The ingestion pipelines (`ingest_sla.py` and `ingest_wfm.py`) stamp **`source_filename`**, set **`uploaded_by`** where applicable (e.g. WFM benchmark/gap rows from **`ingest_wfm_master`**), and return structured **`logs`** from WFM/SLA for API clients.
 
 1. **Extraction**: The script identifies the `basename` of the Excel file being loaded.
 2. **Stamping**: For every row processed (whether it is a Project, an SLA score, or a WFM benchmark), the script injects the filename into the `source_filename` column.
@@ -81,7 +81,7 @@ The following tables are now 100% "Audit-Aware":
 - `**records**`: Audit-trail for every candidate tracked.
 - `**metric_definitions**`: Tracks when calculation logic or targets were changed.
 - `**sla_performances**`: Accountability for monthly scores and RAG status.
-- `**wfm_hr_benchmarks**`: Traces recruiter productivity and capacity history.
-- `**wfm_resource_gaps**`: Tracks internal Taggd hiring needs.
+- `**wfm_hr_benchmarks**`: Traces recruiter productivity and capacity history; extended **Projected HC** fields in **`sheet_metrics_json`** (legacy workbook ingest).
+- `**wfm_resource_gaps**`: Internal Taggd hiring needs; legacy workbook rows from **Open Positin List** use **`uploaded_by = ingest_wfm_master`** and are replaced on each legacy re-import.
 - `**project_budgets` & `project_forecasts**`: Ensures financial projections are timestamped.
 

@@ -285,7 +285,7 @@ This ordering keeps **promises easy to implement**: **A + B** deliver most opera
 
 ### 14.1 Executive visibility
 
-**Shipped:** Executive Overview, Portfolio Intelligence, filters (incl. Indian FY), YoY/regional charts, composite health helpers, drilldowns.
+**Shipped:** Executive Overview, **CEO's View** (`/ceo-view`; Operational Pulse uses **Taggd joiner sheet cohort** — see **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §9), Portfolio Intelligence, filters (incl. Indian FY), YoY/regional charts, composite health helpers, drilldowns.
 
 ### 14.2 Client and delivery operations
 

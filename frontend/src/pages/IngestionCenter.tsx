@@ -730,6 +730,11 @@ export function IngestionCenter() {
         async () => { const r = await api.post("/sla/upload", form); return r.data; }
       );
       setSlaResult(result);
+      if (Array.isArray(result?.logs)) {
+        for (const line of result.logs as string[]) {
+          sla.appendLog(line, "info");
+        }
+      }
       sla.appendLog(`[${tsNow()}] ✓ SLA data committed`, "success");
     } catch (err: any) {
       sla.appendLog(`[${tsNow()}] ✗ ${err?.response?.data?.detail || err.message}`, "error");
@@ -747,6 +752,11 @@ export function IngestionCenter() {
         async () => { const r = await api.post("/wfm/upload", form); return r.data; }
       );
       setWfmResult(result);
+      if (Array.isArray(result?.logs)) {
+        for (const line of result.logs as string[]) {
+          wfm.appendLog(line, "info");
+        }
+      }
       wfm.appendLog(`[${tsNow()}] ✓ WFM data committed`, "success");
     } catch (err: any) {
       wfm.appendLog(`[${tsNow()}] ✗ ${err?.response?.data?.detail || err.message}`, "error");
@@ -1281,6 +1291,39 @@ function SpecializedIngestTab({
           <div style={{ fontSize: 11, color: "var(--text-subtle)" }}>
             {result.message || `Data successfully committed to database.`}
           </div>
+          {(result.rows_processed != null || result.performance_cells_written != null) && (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-subtle)", fontFamily: "var(--mono)" }}>
+              {result.rows_processed != null ? (
+                <span>
+                  Metric rows: <strong style={{ color: "var(--text)" }}>{result.rows_processed}</strong>
+                </span>
+              ) : null}
+              {result.performance_cells_written != null ? (
+                <span style={{ marginLeft: result.rows_processed != null ? 14 : 0 }}>
+                  Score cells: <strong style={{ color: "var(--text)" }}>{result.performance_cells_written}</strong>
+                </span>
+              ) : null}
+            </div>
+          )}
+          {(result.benchmarks_saved != null || result.gap_rows_written != null) && (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-subtle)", fontFamily: "var(--mono)" }}>
+              {result.benchmarks_saved != null ? (
+                <span>
+                  Benchmark rows: <strong style={{ color: "var(--text)" }}>{result.benchmarks_saved}</strong>
+                </span>
+              ) : null}
+              {result.gap_rows_written != null ? (
+                <span style={{ marginLeft: result.benchmarks_saved != null ? 14 : 0 }}>
+                  Open-position rows: <strong style={{ color: "var(--text)" }}>{result.gap_rows_written}</strong>
+                </span>
+              ) : null}
+              {result.sheet_used ? (
+                <span style={{ marginLeft: 14 }}>
+                  Sheet: <strong style={{ color: "var(--text)" }}>{String(result.sheet_used)}</strong>
+                </span>
+              ) : null}
+            </div>
+          )}
           {result.rows_written && (
             <div style={{ marginTop: 6, fontSize: 11.5 }}>
               Rows written: <strong style={{ color: "var(--green)" }}>{result.rows_written}</strong>

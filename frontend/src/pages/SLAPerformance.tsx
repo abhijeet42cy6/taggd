@@ -33,7 +33,6 @@ import {
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import {
   SlaAccountHealthRail,
-  SlaBenchmarkForecastCards,
   SlaBifurcationTiles,
   SlaExportInlineBar,
   SlaInsightsStrip,
@@ -303,6 +302,21 @@ function monthToIndianQuarter(ym: string): "Q1" | "Q2" | "Q3" | "Q4" | null {
   return null;
 }
 
+/** Calendar-year quarter (Jan–Mar = Q1 … Oct–Dec = Q4). */
+function monthToCalendarQuarter(ym: string): "Q1" | "Q2" | "Q3" | "Q4" | null {
+  if (!ym || ym.length < 7) return null;
+  const mo = parseInt(ym.slice(5, 7), 10);
+  if (Number.isNaN(mo)) return null;
+  if (mo <= 3) return "Q1";
+  if (mo <= 6) return "Q2";
+  if (mo <= 9) return "Q3";
+  return "Q4";
+}
+
+function monthToQuarterForMode(ym: string, mode: FyMode): "Q1" | "Q2" | "Q3" | "Q4" | null {
+  return mode === "calendar" ? monthToCalendarQuarter(ym) : monthToIndianQuarter(ym);
+}
+
 type SlaDashView =
   | "overview"
   | "executive"
@@ -312,10 +326,7 @@ type SlaDashView =
   | "account"
   | "region"
   | "practice"
-  | "notreported"
-  | "benchmarking"
-  | "forecasting"
-  | "manual";
+  | "notreported";
 
 const SL_NAV: { id: SlaDashView; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "fa-gauge-high" },
@@ -327,9 +338,6 @@ const SL_NAV: { id: SlaDashView; label: string; icon: string }[] = [
   { id: "region", label: "Regional Analysis", icon: "fa-map-location-dot" },
   { id: "practice", label: "Practice Head Analysis", icon: "fa-users" },
   { id: "notreported", label: "Not Reported Analysis", icon: "fa-triangle-exclamation" },
-  { id: "benchmarking", label: "Benchmarking", icon: "fa-bullseye" },
-  { id: "forecasting", label: "Forecasting", icon: "fa-chart-line" },
-  { id: "manual", label: "User Manual", icon: "fa-book-open" },
 ];
 
 const SLA_FIN_SIDEBAR_NARROW_MQ = "(max-width: 900px)";
@@ -752,7 +760,14 @@ export function SLAPerformance() {
     for (const acc of trendAccounts) {
       lookup[acc.account_name] = {};
       for (const t of acc.timeline) {
-        lookup[acc.account_name][t.month] = t.met_pct;
+        const denom = t.met + t.not_met;
+        const pct =
+          t.met_pct != null && Number.isFinite(Number(t.met_pct))
+            ? Number(t.met_pct)
+            : denom > 0
+              ? Math.round((t.met / denom) * 1000) / 10
+              : null;
+        lookup[acc.account_name][t.month] = pct;
       }
     }
     return filteredMonths.map((month): SlaSeriesPoint => {
@@ -829,9 +844,16 @@ export function SLAPerformance() {
   }, [fyAccountsForChart, timeseries, p1Months, p2Months, fyRegionFilter, accountMetaMap]);
 
   const fyRegionalChartData = useMemo(() => {
+    const regions = new Set<string>();
+    accountMetaMap.forEach((m) => {
+      const reg = (m.region || "").trim();
+      if (reg && reg !== "—") regions.add(reg);
+    });
     const roll = new Map<string, { met1: number; nm1: number; met2: number; nm2: number }>();
+    for (const reg of regions) roll.set(reg, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
     for (const acc of timeseriesKpiScoped) {
-      const region = accountMetaMap.get(acc.account_name)?.region || "Unknown";
+      const region = (accountMetaMap.get(acc.account_name)?.region || "").trim();
+      if (!region || region === "—") continue;
       if (!roll.has(region)) roll.set(region, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
       const b = roll.get(region)!;
       for (const t of acc.timeline) {
@@ -845,17 +867,18 @@ export function SLAPerformance() {
         }
       }
     }
-    return Array.from(roll.entries())
-      .map(([name, v]) => {
+    return [...regions]
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => {
+        const v = roll.get(name) ?? { met1: 0, nm1: 0, met2: 0, nm2: 0 };
         const t1 = v.met1 + v.nm1;
         const t2 = v.met2 + v.nm2;
         return {
-          name: name.length > 16 ? name.slice(0, 15) + "…" : name,
+          name,
           p1: t1 > 0 ? Math.round((v.met1 / t1) * 1000) / 10 : null,
           p2: t2 > 0 ? Math.round((v.met2 / t2) * 1000) / 10 : null,
         };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      });
   }, [timeseriesKpiScoped, p1Months, p2Months, accountMetaMap]);
 
   const fyComparisonTableRows = useMemo(() => {
@@ -883,7 +906,7 @@ export function SLAPerformance() {
   const fyPracticeChartData = useMemo(() => {
     const roll = new Map<string, { met1: number; nm1: number; met2: number; nm2: number }>();
     for (const acc of timeseriesKpiScoped) {
-      const ph = accountMetaMap.get(acc.account_name)?.practice_head || "Unknown";
+      const ph = (accountMetaMap.get(acc.account_name)?.practice_head || "").trim() || "Unknown";
       if (!roll.has(ph)) roll.set(ph, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
       const b = roll.get(ph)!;
       for (const t of acc.timeline) {
@@ -902,7 +925,7 @@ export function SLAPerformance() {
         const t1 = v.met1 + v.nm1;
         const t2 = v.met2 + v.nm2;
         return {
-          name: name.length > 18 ? `${name.slice(0, 17)}…` : name,
+          name,
           p1: t1 > 0 ? Math.round((v.met1 / t1) * 1000) / 10 : null,
           p2: t2 > 0 ? Math.round((v.met2 / t2) * 1000) / 10 : null,
         };
@@ -926,60 +949,88 @@ export function SLAPerformance() {
     });
   }, [allMonths, timeseriesKpiScoped]);
 
-  const quarterlyRollup = useMemo(() => {
+  /** Portfolio Met % limited to the Monthly view month-range picker (for the headline trend). */
+  const portfolioMetPctForFilteredMonths = useMemo(() => {
+    const allowed = new Set(filteredMonths);
+    return portfolioTrendAllMonths.filter((row) => allowed.has(String(row.month)));
+  }, [portfolioTrendAllMonths, filteredMonths]);
+
+  /** Same FY windows as YoY (p1 / p2): Met % per quarter within each FY — not a cumulative mix across years. */
+  const quarterlyFyQuarterCompare = useMemo(() => {
     const qs = ["Q1", "Q2", "Q3", "Q4"] as const;
-    const roll: Record<(typeof qs)[number], { met: number; nm: number }> = {
-      Q1: { met: 0, nm: 0 },
-      Q2: { met: 0, nm: 0 },
-      Q3: { met: 0, nm: 0 },
-      Q4: { met: 0, nm: 0 },
-    };
-    for (const acc of timeseriesKpiScoped) {
-      for (const t of acc.timeline) {
-        const q = monthToIndianQuarter(t.month);
-        if (!q) continue;
-        roll[q].met += t.met;
-        roll[q].nm += t.not_met;
-      }
-    }
     return qs.map((q) => {
-      const { met, nm } = roll[q];
-      const tot = met + nm;
+      const p1q = new Set(
+        [...p1Months].filter((m) => monthToQuarterForMode(m, fyMode) === q),
+      );
+      const p2q = new Set(
+        [...p2Months].filter((m) => monthToQuarterForMode(m, fyMode) === q),
+      );
+      let p1m = 0;
+      let p1nm = 0;
+      let p2m = 0;
+      let p2nm = 0;
+      for (const acc of timeseriesKpiScoped) {
+        for (const t of acc.timeline) {
+          if (p1q.has(t.month)) {
+            p1m += t.met;
+            p1nm += t.not_met;
+          }
+          if (p2q.has(t.month)) {
+            p2m += t.met;
+            p2nm += t.not_met;
+          }
+        }
+      }
+      const t1 = p1m + p1nm;
+      const t2 = p2m + p2nm;
       return {
         quarter: q,
-        met,
-        not_met: nm,
-        met_pct: tot > 0 ? Math.round((met / tot) * 1000) / 10 : null,
+        p1_met: p1m,
+        p1_not_met: p1nm,
+        p2_met: p2m,
+        p2_not_met: p2nm,
+        p1_pct: t1 > 0 ? Math.round((p1m / t1) * 1000) / 10 : null,
+        p2_pct: t2 > 0 ? Math.round((p2m / t2) * 1000) / 10 : null,
       };
     });
-  }, [timeseriesKpiScoped]);
+  }, [timeseriesKpiScoped, p1Months, p2Months, fyMode]);
 
-  const quarterlyChartData = useMemo(
+  const quarterlyCompareChartData = useMemo(
     () =>
-      quarterlyRollup.map((r) => ({
-        month: r.quarter,
-        "Portfolio Met %": r.met_pct,
-      })) as SlaSeriesPoint[],
-    [quarterlyRollup],
+      quarterlyFyQuarterCompare.map((r) => ({
+        name: r.quarter,
+        p1: r.p1_pct,
+        p2: r.p2_pct,
+      })),
+    [quarterlyFyQuarterCompare],
   );
 
-  const accountOverallMetPct = useMemo(() => {
-    const monthSet = new Set(allMonths);
-    return timeseriesKpiScoped
-      .map((acc: any) => {
-        const a = aggregatePeriod(acc.timeline, monthSet);
-        return { account: acc.account_name as string, met_pct: a.met_pct };
+  /** Account Met % from latest decisive metric rows (same basis as KPI cards / SLA table). */
+  const accountMetPctFromLatestRows = useMemo(() => {
+    const by = new Map<string, { met: number; nm: number }>();
+    for (const r of slaKpiScopeRows) {
+      const acc = String((r as any).account_name || "Unknown");
+      const b = statusBucket((r as any).status);
+      if (!by.has(acc)) by.set(acc, { met: 0, nm: 0 });
+      const c = by.get(acc)!;
+      if (b === "met") c.met++;
+      else if (b === "breached") c.nm++;
+    }
+    return [...by.entries()]
+      .map(([account, c]) => {
+        const t = c.met + c.nm;
+        return { account, met_pct: t > 0 ? Math.round((c.met / t) * 1000) / 10 : null as number | null };
       })
-      .filter((x) => x.met_pct != null) as { account: string; met_pct: number }[];
-  }, [timeseriesKpiScoped, allMonths]);
+      .filter((x): x is { account: string; met_pct: number } => x.met_pct != null);
+  }, [slaKpiScopeRows]);
 
   const executiveBest = useMemo(
-    () => [...accountOverallMetPct].sort((a, b) => b.met_pct - a.met_pct).slice(0, 5),
-    [accountOverallMetPct],
+    () => [...accountMetPctFromLatestRows].sort((a, b) => b.met_pct - a.met_pct).slice(0, 5),
+    [accountMetPctFromLatestRows],
   );
   const executiveWorst = useMemo(
-    () => [...accountOverallMetPct].sort((a, b) => a.met_pct - b.met_pct).slice(0, 5),
-    [accountOverallMetPct],
+    () => [...accountMetPctFromLatestRows].sort((a, b) => a.met_pct - b.met_pct).slice(0, 5),
+    [accountMetPctFromLatestRows],
   );
 
   const executiveImproved = useMemo(() => {
@@ -1018,6 +1069,8 @@ export function SLAPerformance() {
     }
     const p2Tot = p2m + p2nm;
     const p2_pct = p2Tot > 0 ? Math.round((p2m / p2Tot) * 1000) / 10 : null;
+    const p1Tot = p1m + p1nm;
+    const p1_pct = p1Tot > 0 ? Math.round((p1m / p1Tot) * 1000) / 10 : null;
     return {
       bar: [
         { period: fyLabelP1, met: p1m, notMet: p1nm },
@@ -1025,6 +1078,7 @@ export function SLAPerformance() {
       ],
       p1: { met: p1m, notMet: p1nm },
       p2: { met: p2m, notMet: p2nm },
+      p1_pct,
       p2_pct,
     };
   }, [timeseriesKpiScoped, p1Months, p2Months, fyMode, fyLabelP1, fyLabelP2]);
@@ -1908,6 +1962,7 @@ export function SLAPerformance() {
                         }}
                         title="Show metrics counted as Not met"
                       >
+                        <div className="sla-metric-card-hd">Metrics not met</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">
                             {rows.length > 0 ? formatPercent(slaKpiMetNotMet.notMetPct) : "—"}
@@ -1977,11 +2032,11 @@ export function SLAPerformance() {
                   <div className="sla-dash-card">
                     <div className="sla-dash-card-hd">
                       <div className="sla-dash-card-title">Top accounts (Met %)</div>
-                      <div className="sla-dash-card-sub">Across all months in the loaded timeseries.</div>
+                      <div className="sla-dash-card-sub">From latest decisive metric rows per account (same basis as KPI tiles).</div>
                     </div>
                     <div className="sla-dash-card-bd">
                       {executiveBest.length === 0 ? (
-                        <div className="sla-empty">No timeseries data.</div>
+                        <div className="sla-empty">No account-level outcomes in current filters.</div>
                       ) : (
                         <SlaExecutiveMetPctBar
                           data={executiveBest.map((r) => ({
@@ -1996,11 +2051,11 @@ export function SLAPerformance() {
                   <div className="sla-dash-card">
                     <div className="sla-dash-card-hd">
                       <div className="sla-dash-card-title">Bottom accounts (Met %)</div>
-                      <div className="sla-dash-card-sub">Lowest portfolio Met % (reported met + not met only).</div>
+                      <div className="sla-dash-card-sub">Lowest Met % on latest decisive rows (met + not met only).</div>
                     </div>
                     <div className="sla-dash-card-bd">
                       {executiveWorst.length === 0 ? (
-                        <div className="sla-empty">No timeseries data.</div>
+                        <div className="sla-empty">No account-level outcomes in current filters.</div>
                       ) : (
                         <SlaExecutiveMetPctBar
                           data={executiveWorst.map((r) => ({
@@ -2082,6 +2137,37 @@ export function SLAPerformance() {
               {slaView === "overview" && (
                 <>
                   <SlaExportInlineBar rows={rows as unknown as Record<string, unknown>[]} />
+                  <div className="sla-overview-fy-hero" aria-label="Current FY portfolio Met percent">
+                    <div className="sla-overview-fy-hero__tile sla-overview-fy-hero__tile--primary">
+                      <div className="sla-overview-fy-hero__eyebrow">Portfolio Met % · {fyLabelP2}</div>
+                      <div className="sla-overview-fy-hero__figure">
+                        {portfolioFySnapshots.p2_pct == null ? "—" : formatPercent(portfolioFySnapshots.p2_pct)}
+                      </div>
+                      <div className="sla-overview-fy-hero__meta">
+                        {portfolioFySnapshots.p2.met + portfolioFySnapshots.p2.notMet > 0
+                          ? `${portfolioFySnapshots.p2.met.toLocaleString()} met · ${portfolioFySnapshots.p2.notMet.toLocaleString()} not met (time-series)`
+                          : "No Met / Not met cells in this FY window"}
+                      </div>
+                    </div>
+                    <div className="sla-overview-fy-hero__tile">
+                      <div className="sla-overview-fy-hero__eyebrow">Prior FY · {fyLabelP1}</div>
+                      <div className="sla-overview-fy-hero__figure">
+                        {portfolioFySnapshots.p1_pct == null ? "—" : formatPercent(portfolioFySnapshots.p1_pct)}
+                      </div>
+                      <div className="sla-overview-fy-hero__meta">
+                        {portfolioFySnapshots.p1_pct != null && portfolioFySnapshots.p2_pct != null ? (
+                          <span>
+                            {(() => {
+                              const d = portfolioFySnapshots.p2_pct - portfolioFySnapshots.p1_pct;
+                              return `${d >= 0 ? "+" : ""}${d.toFixed(1)} pp vs prior FY`;
+                            })()}
+                          </span>
+                        ) : (
+                          "Need both FY windows in loaded data"
+                        )}
+                      </div>
+                    </div>
+                  </div>
                   <SlaInsightsStrip
                     insights={slaLlmInsights ?? slaDashboardInsights}
                     loading={slaLlmInsightsLoading}
@@ -2192,10 +2278,77 @@ export function SLAPerformance() {
       <>
       <div className="sla-dash-card">
         <div className="sla-dash-card-hd">
-          <div className="sla-dash-card-title">SLA compliance trend — % met over time</div>
-          <div className="sla-dash-card-sub">Pick clients and month range; same chart as the legacy SLA tab.</div>
+          <div className="sla-dash-card-title">Monthly SLA % — portfolio & clients</div>
+          <div className="sla-dash-card-sub">
+            Set the month range first (applies to both charts). Portfolio line is Met ÷ (Met + Not met) rolled across all accounts.
+          </div>
         </div>
         <div className="sla-dash-card-bd">
+        {/* Month range first so portfolio % respects the same window */}
+        {allMonths.length > 2 && (
+          <div
+            className="sla-period-month-range"
+            style={{ marginBottom: 14 }}
+            title="Leave a field empty to include all months on that end. The chart uses months present in your loaded time-series."
+          >
+            <div className="sla-period-month-range__lead">
+              <Calendar className="sla-period-month-range__ic" strokeWidth={2} aria-hidden />
+              <span className="sla-period-month-range__lead-label">Month range</span>
+            </div>
+            <div className="sla-period-month-range__fields">
+              <div className="sla-period-month-range__cell">
+                <label htmlFor="sla-trend-month-from">From</label>
+                <input
+                  id="sla-trend-month-from"
+                  type="month"
+                  min={allMonths[0]}
+                  max={allMonths[allMonths.length - 1]}
+                  value={monthFrom === "all" ? "" : monthFrom}
+                  onChange={onTrendChartMonthFromChange}
+                />
+              </div>
+              <div className="sla-period-month-range__cell">
+                <label htmlFor="sla-trend-month-to">To</label>
+                <input
+                  id="sla-trend-month-to"
+                  type="month"
+                  min={allMonths[0]}
+                  max={allMonths[allMonths.length - 1]}
+                  value={monthTo === "all" ? "" : monthTo}
+                  onChange={onTrendChartMonthToChange}
+                />
+              </div>
+              {(monthFrom !== "all" || monthTo !== "all") && (
+                <button
+                  type="button"
+                  className="sla-period-month-range__reset platform-chip"
+                  style={{ fontSize: 10, cursor: "pointer" }}
+                  onClick={() => {
+                    setMonthFrom("all");
+                    setMonthTo("all");
+                  }}
+                >
+                  Reset range
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>Portfolio Met %</div>
+          {portfolioMetPctForFilteredMonths.length === 0 ? (
+            <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No months in range</span>
+            </div>
+          ) : (
+            <div style={{ height: 240 }}>
+              <SlaTimeSeriesChart data={portfolioMetPctForFilteredMonths} accounts={["Portfolio"]} />
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>Selected clients</div>
         {/* Selected clients + Add / Search (no long client list) */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
           {selectedAccountsList.length === 0 && (
@@ -2262,56 +2415,6 @@ export function SLAPerformance() {
           </button>
         </div>
 
-        {/* Month range filter — native month inputs (easier than long <select> lists) */}
-        {allMonths.length > 2 && (
-          <div
-            className="sla-period-month-range"
-            title="Leave a field empty to include all months on that end. The chart uses months present in your loaded time-series."
-          >
-            <div className="sla-period-month-range__lead">
-              <Calendar className="sla-period-month-range__ic" strokeWidth={2} aria-hidden />
-              <span className="sla-period-month-range__lead-label">Month range</span>
-            </div>
-            <div className="sla-period-month-range__fields">
-              <div className="sla-period-month-range__cell">
-                <label htmlFor="sla-trend-month-from">From</label>
-                <input
-                  id="sla-trend-month-from"
-                  type="month"
-                  min={allMonths[0]}
-                  max={allMonths[allMonths.length - 1]}
-                  value={monthFrom === "all" ? "" : monthFrom}
-                  onChange={onTrendChartMonthFromChange}
-                />
-              </div>
-              <div className="sla-period-month-range__cell">
-                <label htmlFor="sla-trend-month-to">To</label>
-                <input
-                  id="sla-trend-month-to"
-                  type="month"
-                  min={allMonths[0]}
-                  max={allMonths[allMonths.length - 1]}
-                  value={monthTo === "all" ? "" : monthTo}
-                  onChange={onTrendChartMonthToChange}
-                />
-              </div>
-              {(monthFrom !== "all" || monthTo !== "all") && (
-                <button
-                  type="button"
-                  className="sla-period-month-range__reset platform-chip"
-                  style={{ fontSize: 10, cursor: "pointer" }}
-                  onClick={() => {
-                    setMonthFrom("all");
-                    setMonthTo("all");
-                  }}
-                >
-                  Reset range
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
         {trendChartData.length === 0 || chartAccountNames.length === 0 ? (
           <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
             <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -2347,37 +2450,79 @@ export function SLAPerformance() {
         <>
           <div className="sla-dash-card">
             <div className="sla-dash-card-hd">
-              <div className="sla-dash-card-title">Quarterly portfolio Met %</div>
-              <div className="sla-dash-card-sub">Indian FY quarters — all accounts rolled up (met ÷ met + not met).</div>
+              <div className="sla-dash-card-title">Quarterly Met % — FY vs FY</div>
+              <div className="sla-dash-card-sub">
+                Each quarter compares the same calendar window inside {fyLabelP1} and {fyLabelP2} (Indian FY or calendar mode
+                matches the Year-over-Year toggle). Met ÷ (Met + Not met) within that quarter only.
+              </div>
             </div>
             <div className="sla-dash-card-bd">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, alignItems: "center" }}>
+                <span style={{ fontSize: 10, color: "var(--text-subtle)", fontFamily: "'DM Mono',monospace" }}>FY basis:</span>
+                <button
+                  type="button"
+                  className={`platform-chip${fyMode === "indian" ? " active" : ""}`}
+                  style={{ fontSize: 10.5, cursor: "pointer" }}
+                  onClick={() => setFyMode("indian")}
+                >
+                  Indian FY
+                </button>
+                <button
+                  type="button"
+                  className={`platform-chip${fyMode === "calendar" ? " active" : ""}`}
+                  style={{ fontSize: 10.5, cursor: "pointer" }}
+                  onClick={() => setFyMode("calendar")}
+                >
+                  Calendar years
+                </button>
+              </div>
               <div className="platform-table-wrap" style={{ marginBottom: 14 }}>
                 <table className="platform-table" style={{ fontSize: 11 }}>
                   <thead>
                     <tr>
                       <th>Quarter</th>
-                      <th>Met</th>
-                      <th>Not met</th>
-                      <th>Met %</th>
+                      <th>{fyLabelP1} Met %</th>
+                      <th>{fyLabelP2} Met %</th>
+                      <th>Δ (pp)</th>
+                      <th>{fyLabelP1} (M / NM)</th>
+                      <th>{fyLabelP2} (M / NM)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {quarterlyRollup.map((r) => (
-                      <tr key={r.quarter}>
-                        <td>{r.quarter}</td>
-                        <td>{r.met}</td>
-                        <td>{r.not_met}</td>
-                        <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.met_pct == null ? "—" : `${r.met_pct}%`}</td>
-                      </tr>
-                    ))}
+                    {quarterlyFyQuarterCompare.map((r) => {
+                      const d =
+                        r.p1_pct != null && r.p2_pct != null
+                          ? `${(r.p2_pct - r.p1_pct) >= 0 ? "+" : ""}${(r.p2_pct - r.p1_pct).toFixed(1)}`
+                          : "—";
+                      return (
+                        <tr key={r.quarter}>
+                          <td>{r.quarter}</td>
+                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.p1_pct == null ? "—" : `${r.p1_pct}%`}</td>
+                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.p2_pct == null ? "—" : `${r.p2_pct}%`}</td>
+                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{d}</td>
+                          <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>
+                            {r.p1_met + r.p1_not_met === 0 ? "—" : `${r.p1_met} / ${r.p1_not_met}`}
+                          </td>
+                          <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>
+                            {r.p2_met + r.p2_not_met === 0 ? "—" : `${r.p2_met} / ${r.p2_not_met}`}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-              {quarterlyChartData.length === 0 ? (
-                <div className="sla-empty">No quarterly data.</div>
+              {quarterlyCompareChartData.length === 0 ||
+              !quarterlyCompareChartData.some((x) => x.p1 != null || x.p2 != null) ? (
+                <div className="sla-empty">No quarterly outcomes in the selected FY windows.</div>
               ) : (
-                <div style={{ height: 240 }}>
-                  <SlaTimeSeriesChart data={quarterlyChartData} accounts={["Portfolio Met %"]} />
+                <div style={{ height: 300 }}>
+                  <SlaFyComparisonGroupedBar
+                    data={quarterlyCompareChartData}
+                    labelP1={fyLabelP1}
+                    labelP2={fyLabelP2}
+                    height={300}
+                  />
                 </div>
               )}
             </div>
@@ -2683,51 +2828,60 @@ export function SLAPerformance() {
       )}
 
       {(slaView === "practice") && (
-        <div className="sla-dash-card">
-          <div className="sla-dash-card-hd">
-            <div className="sla-dash-card-title">Practice head analysis</div>
-            <div className="sla-dash-card-sub">Met % by practice head — FY {fyLabelP1} vs {fyLabelP2}.</div>
-          </div>
-          <div className="sla-dash-card-bd">
-            {fyPracticeChartData.length === 0 ? (
-              <div className="sla-empty">No practice-head rollup.</div>
-            ) : (
-              <SlaFyComparisonLineChart
-                data={fyPracticeChartData}
-                labelP1={fyLabelP1}
-                labelP2={fyLabelP2}
-                height={300}
-              />
-            )}
-          </div>
-        </div>
-      )}
-
-      {(slaView === "benchmarking" || slaView === "forecasting") && (
-        <div className="sla-dash-card" style={{ marginBottom: 14 }}>
-          <div className="sla-dash-card-hd">
-            <div className="sla-dash-card-title">
-              {slaView === "benchmarking" ? "Benchmarking workspace" : "Forecasting workspace"}
+        <>
+          <div className="sla-dash-card">
+            <div className="sla-dash-card-hd">
+              <div className="sla-dash-card-title">Practice head analysis</div>
+              <div className="sla-dash-card-sub">
+                Met % by practice head from time-series — {fyLabelP1} vs {fyLabelP2} (same windows as Year-over-Year).
+              </div>
             </div>
-            <div className="sla-dash-card-sub">
-              {slaView === "benchmarking"
-                ? "Industry and peer benchmarks — scaffolded from the reference SLA dashboard."
-                : "Forward-looking scenarios from portfolio time-series — scaffold for model hook-up."}
+            <div className="sla-dash-card-bd">
+              {fyPracticeChartData.length === 0 ? (
+                <div className="sla-empty">No practice-head rollup.</div>
+              ) : (
+                <>
+                  <div className="platform-table-wrap" style={{ marginBottom: 16 }}>
+                    <table className="platform-table" style={{ fontSize: 11 }}>
+                      <thead>
+                        <tr>
+                          <th>Practice head</th>
+                          <th>{fyColH1}</th>
+                          <th>{fyColH2}</th>
+                          <th>Change</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fyPracticeChartData.map((row) => (
+                          <tr key={row.name}>
+                            <td style={{ fontWeight: 600 }}>{row.name}</td>
+                            <td style={{ fontFamily: "'DM Mono',monospace" }}>{row.p1 == null ? "—" : `${row.p1.toFixed(1)}%`}</td>
+                            <td style={{ fontFamily: "'DM Mono',monospace" }}>{row.p2 == null ? "—" : `${row.p2.toFixed(1)}%`}</td>
+                            <td style={{ fontFamily: "'DM Mono',monospace" }}>{formatChange(row.p1, row.p2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <SlaFyComparisonGroupedBar
+                      data={fyPracticeChartData}
+                      labelP1={fyLabelP1}
+                      labelP2={fyLabelP2}
+                      height={320}
+                    />
+                  </div>
+                  <SlaFyComparisonLineChart
+                    data={fyPracticeChartData}
+                    labelP1={fyLabelP1}
+                    labelP2={fyLabelP2}
+                    height={300}
+                  />
+                </>
+              )}
             </div>
           </div>
-          <div className="sla-dash-card-bd">
-            <SlaBenchmarkForecastCards variant={slaView === "benchmarking" ? "bench" : "forecast"} />
-          </div>
-        </div>
-      )}
-
-      {(slaView === "manual") && (
-        <div className="sla-info-box">
-          <strong>Using this dashboard:</strong> pick a view in the left rail. Upload SLA Excel from the toolbar or use{" "}
-          <strong>Add / edit SLA metric</strong> (role-gated). Click an account in the FY table or a client name in the SLA
-          table to open drill-downs. Monthly view supports multi-client trend lines; Year-over-Year uses the Indian FY or
-          calendar toggle.
-        </div>
+        </>
       )}
 
       {slaView === "notreported" && (

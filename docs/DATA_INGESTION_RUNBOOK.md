@@ -118,17 +118,30 @@ python3 backend/scripts/run_account_mapping_sync.py path/to/Account\ Detail\ Map
 
 ### `ingest_sla.py`
 
-**Purpose:** Sheet **Base File** in **Raw Data SLA Basefile.xlsx**. Upserts `metric_definitions` and `sla_performances` per project + performance measure + month columns. Resolves **Project** column to `projects` using `backend.core.sla_project_resolve` (normalized names, SBU patterns, fuzzy match) before creating a new project.
+**Purpose:** Sheet **Base File** only (exact sheet name) in workbooks such as **`excel_files_imp/Raw Data SLA Basefile.xlsx`**. Upserts **`metric_definitions`** and **`sla_performances`** per project + performance measure + period columns. Resolves **Project** to **`projects`** using `backend.core.sla_project_resolve` (normalized names, SBU patterns, fuzzy match) before creating a new project. Other sheets in the same workbook (Region Summary, Account Summary, etc.) are **ignored** by this script.
 
 **Tables:** `projects` (only if unmatched), `metric_definitions`, `sla_performances`.
+
+**Score columns (important):** Period values are read from every column whose header contains **`Score`**, **except** catalog headers that also match **“Metrics to be picked …”** (e.g. `Metrics to be picked of BE Score (Measure Name as per standard Metrics)`). That column holds metric catalog text, not a month snapshot; including it previously produced bogus `sla_performances` rows. The **column immediately to the right** of each period **`… Score`** header is treated as the paired MET/RAG/status column.
+
+**Metric group:** The BE “metrics to be picked …” column is detected by header substring (`Metrics to be picked` + `BE Score`) and mapped to **`metric_definitions.metric_group`** when present.
+
+**Logging / observability:**
+
+- Python **`logging`** on `backend.scripts.ingest_sla` (INFO; errors include tracebacks).
+- Return payload includes **`logs`**: ordered strings (start, column counts, excluded headers, progress every 100 metric rows, commit summary with **`performance_cells_written`**).
+- **`POST /sla/upload`** returns that payload on success (plus **`status`**, **`message`**). If ingest completes with **`ok: false`**, the API responds **400** with **`detail`** set to the error message (and ingestion audit logs failure).
+
+**Useful response fields (API / CLI dict):** `rows_processed`, `rows_skipped_header`, `rows_skipped_empty_metric`, `projects_created`, `metrics_cataloged`, `performance_cells_written`, `match_reasons`, `score_columns`, `logs`.
+
+**UI:** Ingestion Center → **SLA** tab appends **`logs`** lines to the run log panel after upload and shows metric row / score-cell counts in the success card.
 
 ```bash
 python3 backend/scripts/ingest_sla.py
 python3 backend/scripts/ingest_sla.py "excel_files_imp/Raw Data SLA Basefile.xlsx"
 ```
 
-**API:** `POST /sla/upload` — uploads file to temp path then calls `ingest_sla(file_path, db=db)`.
-
+**API:** `POST /sla/upload` — uploads file to a temp path then calls `ingest_sla(file_path, db=db)` and returns the ingest summary (see above).
 ---
 
 ## 5. Revenue weekly forecast & visibility
@@ -160,9 +173,47 @@ python3 backend/scripts/ingest_revenue_trackers.py --forecast "excel_files_imp/R
 
 ### `ingest_finance.py` — `ingest_finance_master`
 
-**Purpose:** Ingests the **corporate finance** workbook: multiple sheets (ledger, cashflow, efficiency KPIs, etc.), matched to `projects` by account / project name keys. Includes dedupe pass.
+**Purpose:** Ingests the **corporate finance** workbook (Ingestion Center → **Finance ledger**): multiple sheets for monthly ledger, cash flow, and efficiency KPIs. Rows match **`projects`** using the **`Project`** column (case-insensitive `account_name`; creates a project when missing). Ends with **`dedupe_finance_tables`**.
 
-**Tables:** `finance_monthly_ledger`, `finance_cashflow`, `finance_efficiency_kpi`, `projects` (metadata updates where applicable).
+**Tables:** `finance_monthly_ledger`, `finance_cash_flow`, `finance_efficiency_kpis`, and touches **`projects`** / **`clients`** (`ensure_project_client`).
+
+**Example workbooks:** `excel_files_imp/FY24-25_Finance Data.xlsx`, `dashboard_exp/finance/source/FY25-26_Finance_Data.xlsx` (same structural family: `Revenue_Budget`, datetime month columns, etc.).
+
+### 6.1 Month columns and `reporting_month`
+
+- Typical masters use **Excel date columns** for Apr–Mar (e.g. `2025-04-01` … `2026-03-01`). Those headers are read as `datetime` values and stored **as-is** on `reporting_month` (first of month).
+- If month headers are **strings** (e.g. `Apr-25`), the script maps them with **`get_month_date(month, fy_from_row)`**. The **`FY`** cell should be present (e.g. `FY2025-26`). If **`FY` is missing**, the code falls back to **`FY2024-25`**, which would **mis-date** a FY25-26 file for those sheets only.
+
+### 6.2 Lacs → INR (heuristic)
+
+- Monetary cells: if **`0 < abs(val) < 2000`**, the value is multiplied by **`100_000`** (treated as **Lacs** → absolute INR).
+- **Caveats:** Values **≥ 2000** that are still in Lacs are **not** scaled. Very small values already in INR (**&lt; 2000**) could be **over-scaled**. Headcount-style KPI fields (`approved_headcount`, `actual_headcount_finance`, `actual_headcount_wl1`, `taggd_joiners`, `non_taggd_joiners`) **skip** this multiplier for their sheets; **`rev_productivity_actual_inr`** follows the **lac rule** like **`target_revenue_per_recruiter`**.
+
+### 6.3 Sheets the script ingests (by alias)
+
+Matching is **exact sheet name first**, then **normalized** match (underscores ↔ spaces, case-insensitive). Representative aliases:
+
+| Target | Sheet aliases (examples) | DB |
+| ------ | ------------------------ | --- |
+| Ledger — Revenue | `Revenue_Budget`, `Revenue_Actual`, `Rev_Forecast`, … | `finance_monthly_ledger` (`metric_category` Revenue; `budget_value` / `actual_value` / `forecast_value`) |
+| Ledger — Contribution Margin | `CM_Budget`, `CM_Actual`, `CM Actual`, `CM_Forecast`, … | same table (`metric_category` Contribution Margin) |
+| Ledger — Cost | `Actual Cost`, `Actual_Cost`, `Cost_Actual`, `Actual Cost Sheet` | same table (`metric_category` Cost, field `actual_cost`) |
+| Cash flow | `Unbilled`; `Target_Collection` / `Collection Target`; `Actual_Collection` / `Revenue_Collected` / …; `Bad Debt` | `finance_cash_flow` |
+| KPIs | `Target Rev Productivity`; `Headcount_Approved`; `Headcount_Overall`; `Headcount_WL1`; `Taggd_Source_Joiner`; `Non Taggd_Source_Joiner`; `Rev_Productivity_Actual` | `finance_efficiency_kpis` (+ updates **`projects.has_taggd_joiner_sheet`** from accounts on **`Taggd_Source_Joiner`**) |
+
+### 6.4 Tabs often present but **not** loaded by this script
+
+Workbooks such as **`FY25-26_Finance_Data.xlsx`** may include tabs that are **ignored** until aliases/specs are extended:
+
+- **`PPC_Actual`** — layout is valid after **`header=1`** retry (`_load_finance_sheet`), but the sheet name is **not** in the Cost alias list, so **`actual_cost`** is **not** populated from this tab.
+- **`Revenue_Adjustment`** — not mapped; **`finance_cash_flow.adjustments`** is **not** filled from this sheet.
+- **`Mapping`** — reference-only.
+
+**`FinanceEfficiencyKPI.target_ppc_inr`** is **not** set by `ingest_finance.py` (PPC may be derived in APIs from cost ÷ headcount where data exists).
+
+### 6.5 Operational notes
+
+- Per-sheet errors are caught and logged; other sheets may still commit. For a **fatal** error the script rolls back and prints a traceback but **does not re-raise**, so **`POST /finance/upload`** can still return **200** in edge cases — verify logs / DB row counts after uploads if numbers look wrong.
 
 The bundled `__main__` default path is machine-specific; **always pass the file explicitly**:
 
@@ -170,7 +221,11 @@ The bundled `__main__` default path is machine-specific; **always pass the file 
 python3 -c "from backend.scripts.ingest_finance import ingest_finance_master; ingest_finance_master('excel_files_imp/FY24-25_Finance Data.xlsx')"
 ```
 
-Or add a small wrapper; today the module’s bottom block points at a fixed path — prefer the one-liner above or:
+```bash
+python3 -c "from backend.scripts.ingest_finance import ingest_finance_master; ingest_finance_master('dashboard_exp/finance/source/FY25-26_Finance_Data.xlsx')"
+```
+
+Or:
 
 ```bash
 python3 <<'PY'
@@ -181,7 +236,13 @@ ingest_finance_master("excel_files_imp/FY24-25_Finance Data.xlsx")
 PY
 ```
 
-**API:** `POST /finance/upload`.
+**API:** `POST /finance/upload` (file saved to temp dir; **`ingest_finance_master`** runs on a **worker thread**).
+
+### 6.6 Reconciling KPIs to Executive Overview and CEO’s View
+
+**`GET /finance/data`** returns merged per–client-month KPIs from `finance_efficiency_kpis` (**WL1**, Tag / non-Tag joiners, **`rev_productivity_actual_inr`**, targets, etc.). On **Executive Overview** (`Dashboard.tsx`), **Avg Taggd source prod.** uses **Σ `taggd_joiners` ÷ Σ WL1** on **`kpiRows`** (FY-scoped), matching **“Financial performance”** for the same FY — see **`docs/DATA_AND_INFORMATION_FLOW.md`** §6 and **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §8.
+
+**CEO’s View** (`/ceo-view`) adds the **Taggd-sheet cohort** (`projects.has_taggd_joiner_sheet`) for **Operational Pulse** metrics and depends on **`Non Taggd_Source_Joiner`** + **`Rev_Productivity_Actual`** ingest — see **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §9 and **`FINANCE_METRICS_AND_UPDATES_REFERENCE.md`** §7. **Re-ingest** the corporate master after upgrading so cohort flags and new columns are populated.
 
 ---
 
@@ -189,17 +250,29 @@ PY
 
 ### `ingest_wfm.py` — `ingest_wfm_master`
 
-**Purpose:** Sheet **Projected HC - FY26** (positional column layout). Updates/creates `wfm_hr_benchmarks` rows linked to `projects` (customer / account matching in script).
+**Purpose:** Ingest **`excel_files_imp/WFM (Projected Headcount & Revenue).xlsx`** (and workbooks with the same layout).
 
-**Tables:** `wfm_hr_benchmarks`, `projects`.
+**Sheet selection**
 
-The bundled default path in `__main__` is machine-specific; **pass the path explicitly**:
+- Prefer **`Projected HC - FY26`** (exact name).
+- Else the first sheet whose name contains **`Projected HC`** (case-insensitive) and **does not** contain **`(Q4)`** — the **Q4-only** tab uses different semantics at the same column indices and must not be used by this importer.
+
+**Main grid** (sheet names like **Projected HC - FY26**, **Projected HC - FY27**, …)
+
+- **`reporting_date`**: parsed from **`FYxx`** in the top rows (Indian FY: **FY26 → 2025-04-01**); fallback **2025-04-01** if not found.
+- **Projects:** **`resolve_project_for_sla`** on **“Project as per EDB”** (fallback **Project**); creates a project only when unmatched. Stamps **`charge_code`** from **Project Code** when missing; **`vertical`** ← Industry; **`practice_head`** ← PH; **`function_head`** ← FH; **`region`** ← Region.
+- **`wfm_hr_benchmarks`:** Upsert per **`project_id + reporting_date`**. Core columns: lateral revenue / HC / productivity **YTD**, ideal HC, WL1–WL4 actuals, overall HC (same indices as before). Extended quarter-level metrics, ideal HC by WL, **open-position counts**, bench variance, and **RPH/CPH** are stored in **`sheet_metrics_json`** (JSON).
+- **`wfm_resource_gaps`:** Rows from the **Open Positin List** sheet (name contains **open** + **posit**). Prior rows with **`uploaded_by = ingest_wfm_master`** are replaced each run; then current open reqs are upserted by **`project_id + req_id`** (client resolved via **`resolve_project_for_sla`** on **Client**).
+
+**Logging / API:** Returns **`logs`**, **`benchmarks_saved`**, **`gap_rows_written`**, **`sheet_used`**, **`reporting_date`**. **`POST /wfm/upload`** returns these fields and responds **400** if **`ok`** is false.
+
+**Tables:** `wfm_hr_benchmarks`, `wfm_resource_gaps`, `projects`, `clients` (via ensure).
 
 ```bash
 python3 -c "from backend.scripts.ingest_wfm import ingest_wfm_master; ingest_wfm_master('excel_files_imp/WFM (Projected Headcount & Revenue).xlsx')"
 ```
 
-**API:** `POST /wfm/upload`.
+**API:** `POST /wfm/upload` (uses request DB session; no background thread).
 
 ---
 

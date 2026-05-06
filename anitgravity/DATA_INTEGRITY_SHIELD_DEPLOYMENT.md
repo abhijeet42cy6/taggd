@@ -20,11 +20,13 @@ This document outlines the architectural fixes deployed to solve the core logica
 
 ## 3. The "Lacs to INR" Magnitude Sieve (Global Parity)
 **Change**: Unified the unit representation across both **Live Trackers** (`processor.py`) and **Finance Master Scripts** (`ingest_finance.py`).
-- **Logic**: Any financial result (Revenue, Fee, Cost, Collection, Target) between **0.1 and 2000** is automatically treated as **Lacs** and normalized to **Absolute INR** ($Value \times 100,000$).
-- **Exceptions**: Non-financial metrics like `approved_headcount` or `actual_headcount` are explicitly **excluded** from the multiplier.
+- **Logic (`ingest_finance.py`)**: For ledger, cash-flow, and most KPI currency fields, if **`0 < |value| < 2000`**, the value is multiplied by **`100_000`** (treated as **Lacs** → absolute INR). Boundary **`2000`** is exclusive — exactly **2000** is not scaled by this branch.
+- **Caveats**: Amounts already in **INR** but with magnitude **under 2000** may be scaled incorrectly. Amounts expressed as **Lacs** but **≥ 2000** may be stored **without** scaling. See **`docs/DATA_INGESTION_RUNBOOK.md` §6.2** for full notes.
+- **Exceptions**: Headcount-style KPI fields (`approved_headcount`, `actual_headcount_finance`, `actual_headcount_wl1`, `taggd_joiners`) skip the multiplier on their sheets.
+- **Coverage**: Not every Excel tab in a finance workbook maps into ingest (e.g. **`PPC_Actual`** cost and **`Revenue_Adjustment`** are not wired unless aliases/specs are extended — runbook §6.4).
 - **System Impact**:
-    - **Global Financial Parity**: You can now compare **Budgeted Revenue** (from the Finance file) directly against **Generated Revenue** (from the Trackers) in the same query.
-    - **Dashboard Consistency**: Every month, metric, and account now speaks the same "Absolute INR" language in the `finance_monthly_ledger`.
+    - **Global Financial Parity**: You can compare **budgeted** ledger rows from the finance master against tracker-derived revenue **when both sides use comparable units** and sheets are ingested.
+    - **Dashboard Consistency**: Ingested `finance_monthly_ledger` / cash-flow / KPI rows aim for **absolute INR** after the heuristic; validate outliers against source files.
 
 ## 4. Master SLA Header Sieve
 **Change**: Strengthened the data filter in `backend/scripts/ingest_sla.py`.

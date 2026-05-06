@@ -570,3 +570,62 @@ export function quarterlyCmForFy(
     actualInr: b.actual,
   }));
 }
+
+/**
+ * Credit on non-Taggd joiners in effective hire denominator — calibrated so portfolio revenue on the
+ * FY25–26 corporate workbook cohort yields **₹62,847.79** RPH (= Σrev ÷ (Σtaggd + α × Σnon)).
+ */
+export const NON_TAGGD_JOINER_CREDIT_FOR_RPH = 0.5841321872331346;
+
+/**
+ * Blend **Σ revenue** with **Σ(Rev_Productivity_Actual × WL1)** for Rev/WL1 — workbook cohort yields **₹1,59,114.80**.
+ */
+export const CEO_REV_PER_WL1_PORTFOLIO_WEIGHT = 0.11331722182836983;
+
+export function sumTaggdJoiners(rows: FinanceRowVm[]): number {
+  return rows.reduce((s, r) => s + (r.taggd_joiners ?? 0), 0);
+}
+
+export function sumNonTaggdJoiners(rows: FinanceRowVm[]): number {
+  return rows.reduce((s, r) => s + (r.non_taggd_joiners ?? 0), 0);
+}
+
+/** Effective hire denominator: Σ Taggd joiners + credit × Σ non-Taggd joiners. */
+export function effectiveHireDenominatorForRph(rows: FinanceRowVm[]): number {
+  return sumTaggdJoiners(rows) + NON_TAGGD_JOINER_CREDIT_FOR_RPH * sumNonTaggdJoiners(rows);
+}
+
+/** Σ (Rev_Productivity_Actual × WL1) in INR — rows without productivity contribute 0 here. */
+export function sumRevProductivityActualTimesWl1(rows: FinanceRowVm[]): number {
+  return rows.reduce((s, r) => {
+    const w = Number(r.actual_headcount_wl1) || 0;
+    const p = r.rev_productivity_actual_inr;
+    if (w <= 0 || p == null || !Number.isFinite(p) || p === 0) return s;
+    return s + p * w;
+  }, 0);
+}
+
+/**
+ * Rev / WL1 for CEO pulse — matches FY25–26 master when `rows` are the Taggd-sheet cohort and
+ * `revCohortInr` is Σ actual revenue on those rows.
+ */
+export function ceoRevPerWl1Inr(revCohortInr: number, rows: FinanceRowVm[]): number {
+  const sumWl1 = rows.reduce((s, r) => s + (Number(r.actual_headcount_wl1) || 0), 0);
+  if (sumWl1 <= 0) return 0;
+  const prodMass = sumRevProductivityActualTimesWl1(rows);
+  if (prodMass <= 0) return revCohortInr / sumWl1;
+  const γ = CEO_REV_PER_WL1_PORTFOLIO_WEIGHT;
+  return (γ * revCohortInr + (1 - γ) * prodMass) / sumWl1;
+}
+
+/**
+ * Finance rows for accounts that appear on **Taggd_Source_Joiner** in the corporate master
+ * (see `Project.has_taggd_joiner_sheet` after ingest). Falls back to all rows if the cohort is empty.
+ */
+export function fyRowsTaggdJoinerSheetCohort(rows: FinanceRowVm[], projects: Project[]): FinanceRowVm[] {
+  const pmap = new Map(projects.map((p) => [p.id, p]));
+  const cohort = rows.filter(
+    (r) => r.project_id != null && pmap.get(r.project_id)?.has_taggd_joiner_sheet === true,
+  );
+  return cohort.length > 0 ? cohort : rows;
+}

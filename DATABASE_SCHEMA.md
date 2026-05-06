@@ -384,7 +384,7 @@ Optional backfill on `init_db()` when `CANDIDATE_MASTER_BACKFILL_ON_INIT` is set
 
 ### `wfm_hr_benchmarks` / `wfm_resource_gaps`
 
-**Audit mixin.** Benchmarks: `reporting_date`, lateral targets, `ideal_hc`, `actual_hc_total`, `wl1_hires`–`wl4_hires`. Gaps: `req_id`, `status`, `hiring_type`, `designation_level`, `target_date`.
+**Audit mixin.** Benchmarks: `reporting_date`, lateral targets (`lateral_revenue_target`, `lateral_hc_target`, `lateral_productivity_target`), `ideal_hc`, `actual_hc_total`, `wl1_hires`–`wl4_hires`. **`sheet_metrics_json`** (JSON, nullable): quarter-level lateral revenue/HC/productivity, ideal HC by WL, open-position counts by WL, bench variances, RPH/CPH, charge code snapshot — populated by **`ingest_wfm_master`** from sheets named like **`Projected HC - FY26`** / **`Projected HC - FY27`** (see `docs/DATA_INGESTION_RUNBOOK.md` §7). Gaps: `req_id`, `status`, `hiring_type`, `designation_level`, `target_date`. Rows loaded from the legacy WFM workbook’s **Open Positin List** sheet use **`uploaded_by = ingest_wfm_master`** (replaced each legacy ingest run).
 
 ### Budget / forecast template (no separate tables)
 

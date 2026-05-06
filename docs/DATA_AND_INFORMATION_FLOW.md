@@ -131,7 +131,7 @@ Logical groupings (physical tables in `backend/db/database.py`):
 | Delivery      | `records`, `candidates`                                                                                                                                                          | Requisitions + mandate-level candidate rows                   |
 | Talent master | `candidate_masters`, `candidate_master_links`                                                                                                                                    | Optional cross-mandate identity                               |
 | SLA           | `metric_definitions`, `sla_performances`                                                                                                                                         | Definitions + monthly scores / RAG                            |
-| WFM           | `wfm_hr_benchmarks`, `wfm_resource_gaps`                                                                                                                                         | HC benchmarks + open gaps                                     |
+| WFM           | `wfm_hr_benchmarks` (+ optional **`sheet_metrics_json`**), `wfm_resource_gaps`                                                                                                                                         | HC benchmarks + open gaps (legacy workbook also loads **Open Positin List**)                                     |
 | Finance core  | `finance_monthly_ledger`, `finance_cash_flow`, `finance_efficiency_kpis`                                                                                                         | Monthly ledger (revenue, margin, cost), cash, HC productivity |
 | Revenue ops   | `revenue_forecast_weekly`, `revenue_visibility_snapshot`, `revenue_weekly_submission`                                                                                            | Weekly forecast + visibility + governance envelope            |
 | Billing       | `taggd_revenue_billing`, `finance_billing_workflow`, `finance_billing_validation_events`, `finance_payment_receipts`, `finance_tds_certificates`, `finance_bank_statement_lines` | TAGGD row + validation + receipts + TDS + bank stub           |
@@ -195,14 +195,16 @@ flowchart LR
 | Parse workbook | `ingest_finance_master` (`backend/scripts/ingest_finance.py`) | `finance_monthly_ledger`, `finance_cash_flow`, `finance_efficiency_kpis`, touch `projects` / `clients` |
 | Dedupe         | `dedupe_finance_tables`                                       | Merges duplicate natural keys                                                                          |
 
+**Behaviour summary:** Month columns are usually **Excel dates** on each sheet; those map directly to **`reporting_month`**. **`FY`** strings like **`FY2025-26`** drive month resolution when headers are text-only; missing **`FY`** falls back to **`FY2024-25`** (see runbook). Monetary amounts use a **Lacs heuristic** (`0 < |value| < 2000` → multiply by `100_000`); see **`docs/DATA_INGESTION_RUNBOOK.md` §6** for **full sheet alias lists**, **tabs not ingested** (e.g. `PPC_Actual`, `Revenue_Adjustment`), and edge-case caveats.
+
 
 ### 5.3 SLA master (`POST /api/sla/upload`)
 
-`ingest_sla` → `metric_definitions`, `sla_performances`, `projects`, `clients`. Period canonicalization / `period_start` backfill may run in `init_db`.
+`ingest_sla` (`backend/scripts/ingest_sla.py`) reads sheet **`Base File`** only → **`metric_definitions`**, **`sla_performances`**, touch **`projects`** / **`clients`**. Period columns are paired **`… Score`** + next-column status; catalog headers containing **“Metrics to be picked …”** are excluded from score iteration so data lands in the correct tables. Period canonicalization / `period_start` backfill may run in `init_db`. The handler returns structured counts and a **`logs`** array; failures surface as **400** when ingest reports **`ok: false`**.
 
 ### 5.4 WFM master (`POST /api/wfm/upload`)
 
-`ingest_wfm_master` → `wfm_hr_benchmarks`, `projects`, `clients`.
+`ingest_wfm_master` → **`wfm_hr_benchmarks`** (core KPIs + **`sheet_metrics_json`** for quarterly splits, open-position counts, variances), **`wfm_resource_gaps`** from **Open Positin List** (auto rows tagged **`uploaded_by = ingest_wfm_master`**), **`projects`** / **`clients`**. The importer picks a **Projected HC – FY\*** sheet by name and skips **Q4-only** tabs; **`reporting_date`** is derived from **FYxx** in the sheet.
 
 ### 5.5 Budget / forecast workbook (`POST /api/upload/budget-forecast`)
 
@@ -257,6 +259,10 @@ flowchart TB
 
 **Global dashboard** (`Dashboard.tsx`): combines `globalStats`, `globalMonitor`, `projects`, `financeStats`, `financeData`, `slaStats`, `wfmStats`, `requisitionKpis`, `globalDrilldown` — each maps to `GET` handlers in `main.py` (e.g. `/api/stats/global`, `/api/finance/data`, …).
 
+**Executive Overview — finance row scoping:** `GET /finance/data` returns one merged row per **project × `reporting_month`**. `Dashboard.tsx` builds **`filteredRows`** via **`filterFinanceRows`** (`frontend/src/lib/dashboard-aggregates.ts`) using region, account, month, quarter, etc. — **without** applying the FY control. **`kpiRows`** applies the **same filters plus** the **FY selector** (`selectedFyStart`, Indian FY April → March; default start year **2025** = **FY25–26**). Hero revenue, quarterly blocks, and **`ProductivityAveragesSection`** use **`kpiRows`** so **Avg Taggd source prod.** = **Σ `taggd_joiners` ÷ Σ WL1** and **Avg PPC** use portfolio sums for that FY only (per-row API ratios remain for drill-downs). See **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §8.
+
+**CEO’s View** (`/ceo-view`, `CeoView.tsx`): uses the same `GET /finance/data` feed; **Operational Pulse** (**Revenue per hire**, **Rev / Recruiter WL1**) restricts to the **Taggd joiner sheet cohort** (`Project.has_taggd_joiner_sheet`) within the FY unless the cohort is empty — see **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §9 and **`FINANCE_METRICS_AND_UPDATES_REFERENCE.md`** §7.
+
 **Scoped lists:** Any endpoint using `apply_project_scope` automatically respects `user_project_assignments` for non-admin roles.
 
 ---
@@ -300,6 +306,7 @@ Many **legacy** high-traffic routes remain on `**main.py`** under `/api/...` (st
 | UI path               | Page component                           | Primary API / queries (see `api.ts`)                                                                                                                        |
 | --------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/`                   | `RoleHome` → `Dashboard` (non-recruiter) | `globalStats`, `globalMonitor`, `projects`, `financeStats`, `financeData`, `slaStats`, `wfmStats`, `requisitionKpis`, `globalDrilldown`                     |
+| `/ceo-view`           | `CeoView`                                | `financeData`, `projects`, and other leadership queries — pulse KPIs use finance rows + `has_taggd_joiner_sheet` cohort (`dashboard-aggregates.ts`)           |
 | `/portfolio`          | `PortfolioIntelligence`                  | `globalMonitor`, `projects`                                                                                                                                 |
 | `/clients`            | `ClientsHub`                             | `clients`, `globalMonitor`, `projects`                                                                                                                      |
 | `/clients/:clientId`  | `ClientDetail`                           | `clientDetail`, `projects`, `recordsAll`, `slaTimeseries`, `wfmData`, `contractsByProject`, logic regenerate endpoints                                      |

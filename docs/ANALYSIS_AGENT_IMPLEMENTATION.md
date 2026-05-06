@@ -68,8 +68,8 @@ All business tables inherit **`AuditMixin`**: `system_created_at`, `system_updat
 
 | Table | Role |
 |-------|------|
-| `wfm_hr_benchmarks` | `project_id`, `ideal_hc`, `actual_hc_total`, WL hires (`wl1`–`wl4`), lateral targets, `reporting_date`. |
-| `wfm_resource_gaps` | Open gap lines: `req_id`, `status`, `hiring_type`, `designation_level`, `target_date`. |
+| `wfm_hr_benchmarks` | `project_id`, `ideal_hc`, `actual_hc_total`, WL hires (`wl1`–`wl4`), lateral targets, `reporting_date`, optional **`sheet_metrics_json`** (quarterly laterals, open-position counts, variances, RPH/CPH — from legacy **Projected HC** workbook ingest). |
+| `wfm_resource_gaps` | Open gap lines: `req_id`, `status`, `hiring_type`, `designation_level`, `target_date`. Populated from the legacy workbook **Open Positin List** when using **`ingest_wfm_master`** / **`POST /wfm/upload`** (`uploaded_by = ingest_wfm_master`). |
 
 ### 2.6 Finance: `finance_monthly_ledger`, `finance_cash_flow`, `finance_efficiency_kpis`
 
@@ -78,6 +78,8 @@ All business tables inherit **`AuditMixin`**: `system_created_at`, `system_updat
 | `finance_monthly_ledger` | `project_id`, `reporting_month`, `metric_category` (e.g. Revenue, CM), `budget_value`, `forecast_value`, `actual_value`, `actual_cost`. |
 | `finance_cash_flow` | Collections/unbilled, etc. |
 | `finance_efficiency_kpis` | Recruiter productivity / HC / PPC. |
+
+**Corporate finance master ingest** (`ingest_finance_master` / `POST /finance/upload`) does not mirror every Excel tab: see **`docs/DATA_INGESTION_RUNBOOK.md` §6** for sheet aliases, datetime **`reporting_month`** behaviour, the Lacs heuristic, and tabs that are commonly skipped (e.g. **`PPC_Actual`**, **`Revenue_Adjustment`**).
 
 ---
 

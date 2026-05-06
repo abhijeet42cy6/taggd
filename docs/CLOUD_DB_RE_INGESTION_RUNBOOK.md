@@ -55,7 +55,7 @@ Paths are from **repo root**. In cloud, upload these workbooks to a known path (
 | **Revenue forecast**                                                       | `excel_files_imp/Revenue_Forecast_Template_1.xlsx` or `actual_data/Revenue_Forecast_Template_1 (1).xlsx`                                    |
 | **Revenue visibility (optional if using separate tracker)**                | `excel_files_imp/Revenue_Visibility_Tracker.xlsx`                                                                                           |
 | **WFM (filled `09` template)**                                           | `actual_data/09_workforce_management_filled (1).xlsx` — table sheets **`wfm_hr_benchmarks`**, **`wfm_resource_gaps`**; `ingest_excel_master_filled_workbooks.py --wfm` |
-| **WFM (legacy “Projected HC - FY26” layout)**                              | e.g. `excel_files_imp/WFM (Projected Headcount & Revenue).xlsx` — sheet **Projected HC - FY26**; `ingest_wfm.py` or `POST /wfm/upload` (same parser) |
+| **WFM (legacy Projected HC workbook)**                                                   | e.g. `excel_files_imp/WFM (Projected Headcount & Revenue).xlsx` — sheet **`Projected HC - FY26`** or next **Projected HC – FY\*** (excludes **(Q4)** tab); **`Open Positin List`** → gaps; `ingest_wfm.py` / `POST /wfm/upload` |
 | **Vendor / job board license tracker (Resume Supply Chain Partner)**         | e.g. `excel_files_imp/Resume Supply Chain Partner_Tracker.xlsx` — sheet **Job Board Tracker**; `ingest_resume_supply_chain_partner_tracker.py` (see `docs/VENDOR_LICENSE_TRACKER.md` §5.1) |
 | **Contracts (Project Signup / renewal)**                                    | e.g. `actual_data/Project Signup Renewal Detail (2).xlsx` or `excel_files_imp/Project Signup Renewal Detail New.xlsx` — sheet **Contract Data**; `ingest_project_contracts.py` (ingests **`project_contracts`** only; **Sign-UpRenewal** template sheet in the workbook is usually empty and does **not** populate `project_transitions` / client onboarding milestones) |
 | **MoM Tracker (meetings + action items)**                                   | e.g. `actual_data/MoM Tracker (1).xlsx` — sheet **`MoM`**; `ingest_mom_tracker_workbook.py` → **`platform_meetings`**, **`meeting_action_items`** |
@@ -182,13 +182,13 @@ python3 -m backend.scripts.ingest_revenue_trackers \
 
 **Preferred path** is **Step 3** with `--wfm` (filled 09 template). Use this step only when you need the **legacy** workbook **instead of** 09, or to document the alternate entry point.
 
-**Legacy workbook:** `backend/scripts/ingest_wfm.py` → `ingest_wfm_master` (sheet **Projected HC - FY26**, positional columns; **not** the same sheet names or column layout as the 09 `wfm_hr_benchmarks` / `wfm_resource_gaps` tables).
+**Legacy workbook:** `backend/scripts/ingest_wfm.py` → `ingest_wfm_master`: **Projected HC – FY\*** grid (positional columns; prefers **`Projected HC - FY26`**, skips **(Q4)**-only sheets), **`sheet_metrics_json`** on benchmarks, **`Open Positin List`** → **`wfm_resource_gaps`** (`uploaded_by = ingest_wfm_master`). **Not** the same sheet layout as the filled **09** template.
 
 ```bash
 python3 -c "from backend.scripts.ingest_wfm import ingest_wfm_master; ingest_wfm_master('excel_files_imp/WFM (Projected Headcount & Revenue).xlsx')"
 ```
 
-**API:** `POST /wfm/upload` uses the **same** legacy parser as `ingest_wfm_master` (not the 09 `ingest_excel_master_filled_workbooks.py` path). For cloud re-ingest of the **ORM 09** template, prefer the **CLI in Step 3** (or WFM-only command above), not this upload, unless you have wrapped the filled pipeline elsewhere.
+**API:** `POST /wfm/upload` uses the **same** legacy parser as `ingest_wfm_master` (returns **`logs`**, **`benchmarks_saved`**, **`gap_rows_written`**; **400** if **`ok`** is false). For cloud re-ingest of the **ORM 09** template, prefer the **CLI in Step 3** (or WFM-only command above), not this upload, unless you have wrapped the filled pipeline elsewhere.
 
 ### Step 6 — Project contracts (signup / renewal)
 
@@ -271,7 +271,7 @@ Use when operations ships **Raw Data SLA Basefile** and **FY24-25 / FY25-26 Fina
 2. `python3 backend/scripts/ingest_sla.py "excel_files_imp/Raw Data SLA Basefile.xlsx"`
 3. `ingest_finance_master("…/FY24-25_Finance Data (2).xlsx")` (and FY25-26 as required)—see `docs/DATA_INGESTION_RUNBOOK.md` §6 for the exact Python one-liner
 4. `ingest_revenue_trackers.py` (and governance flags as in §5)
-5. **WFM** — by default this stack uses the **legacy** `ingest_wfm.py` / **Projected HC - FY26** file (see `docs/DATA_INGESTION_RUNBOOK.md`). If the source of truth is the **filled 09** workbook instead, run `ingest_excel_master_filled_workbooks.py --wfm` (after **projects** exist), **not** the legacy and 09 pipelines together without a plan.
+5. **WFM** — by default this stack uses the **legacy** `ingest_wfm.py` / **`WFM (Projected Headcount & Revenue).xlsx`** path (**Projected HC – FY\*** sheet, **Open Positin List** for gaps; see `docs/DATA_INGESTION_RUNBOOK.md` §7). If the source of truth is the **filled 09** workbook instead, run `ingest_excel_master_filled_workbooks.py --wfm` (after **projects** exist), **not** the legacy and 09 pipelines together without a plan.
 6. `ingest_project_contracts.py` on **Project Signup Renewal Detail** (`Contract Data`) — as **§5 Step 6**; then budget/forecast API as in `docs/DATA_INGESTION_RUNBOOK.md` if needed  
 7. (Optional) **Vendor licenses** from `ingest_resume_supply_chain_partner_tracker.py` — as in **§5 Step 6b** (xlsx) **or** `seed_vendor_licenses_fy2026` if you rely on the seed shortcut instead  
 8. (Optional) **MoM Tracker** — `ingest_mom_tracker_workbook.py` (sheet **MoM**) after spine and **users** — as **§5 Step 6c**
@@ -309,7 +309,7 @@ UI note: the **governance week** and **Visibility as-of** must match the **week_
 5. [ ] `reconcile_mapping_clients.py` (dry-run then real)
 6. [ ] **Either** `ingest_excel_master_filled_workbooks.py` (10 + 08 + **`--wfm`** to `09_workforce_management_filled (1).xlsx` when WFM is in scope) **or** legacy `ingest_finance` + `ingest_sla` (see §6) — if using legacy stack, add WFM via step 8
 7. [ ] `ingest_revenue_trackers.py` (add `--apply-governance` if approved packs + synthetic visibility are required)
-8. [ ] (Only if **not** using 09 in step 6) **Legacy WFM:** `ingest_wfm.py` or `/wfm/upload` — path explicit; do **not** also assume 09 filled data unless you have a merge/cleanup plan
+8. [ ] (Only if **not** using 09 in step 6) **Legacy WFM:** `ingest_wfm_master` / `/wfm/upload` — **`WFM (Projected Headcount & Revenue).xlsx`**; confirm **`gap_rows_written`** if **Open Positin List** is populated; do **not** also assume 09 filled data unless you have a merge/cleanup plan
 9. [ ] `ingest_project_contracts.py` — e.g. `actual_data/Project Signup Renewal Detail (2).xlsx` (add **`--create-missing`** only if policy allows auto-creating projects for orphan `Customer` names)
 10. [ ] (Optional) **Vendor licenses:** `ingest_resume_supply_chain_partner_tracker.py` with `Resume Supply Chain Partner_Tracker.xlsx` (see **§5 Step 6b**); do **not** also run `seed_vendor_licenses_fy2026` unless you need the fixed demo set instead
 11. [ ] (Optional) **MoM Tracker:** `ingest_mom_tracker_workbook.py` — `actual_data/MoM Tracker (1).xlsx` (or ops bundle name), **after** spine + **users** exist (see **§5 Step 6c**)
@@ -326,6 +326,7 @@ UI note: the **governance week** and **Visibility as-of** must match the **week_
 | 2026-04-25 | **Vendor / job board licenses:** `Resume Supply Chain Partner_Tracker.xlsx` → `resume_supplier_licenses` via `ingest_resume_supply_chain_partner_tracker.py` and `POST /vendor-licenses/ingest-upload` (**Step 6b**); `VENDOR_LICENSE_TRACKER.md` cross-ref; distinguish xlsx ingest vs `seed_vendor_licenses_fy2026`; checklist + smoke + alternate §6 item 7. |
 | 2026-04-26 | **Contracts:** `Project Signup Renewal Detail` workbook — **Step 6** expanded (`Contract Data` → `project_contracts`, `resolve_project_for_sla`, `ensure_project_client`, `--create-missing` / `create_missing_projects`, one row per `project_id` upsert, Sign-UpRenewal vs onboarding note); `actual_data/…(2).xlsx` in file table; §2 order; post-ingest + checklist. |
 | 2026-04-28 | **MoM Tracker (meetings):** `actual_data/MoM Tracker (1).xlsx` (sheet `MoM`) → `ingest_mom_tracker_workbook.py` / `mom_tracker_ingest` — **Step 6c**; `platform_meetings` + `meeting_action_items`, email → `users.id` + `tagged_user_ids` in `attachments_json`, `resolve_project_for_sla` for Project/Account; §2/§3/§5/§7/§8 + alternate **§6**; CLI-only note. |
+| 2026-04-21 | **WFM (legacy workbook):** `ingest_wfm_master` — **Projected HC - FY\*** sheet pick (excludes **(Q4)** tab), **`sheet_metrics_json`** on `wfm_hr_benchmarks`, **Open Positin List** → **`wfm_resource_gaps`** (`uploaded_by = ingest_wfm_master`), **`resolve_project_for_sla`**, FY-derived **`reporting_date`**, **`POST /wfm/upload`** structured response + **400** on failure; **`GET /wfm/data`** exposes **`sheet_metrics_json`**. See **`docs/DATA_INGESTION_RUNBOOK.md`** §7. |
 
 
 When you add a new production ingest script, append a row to the checklist (§8) and link the script here.

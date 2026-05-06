@@ -107,6 +107,7 @@ Large HR form: many `platform-search` inputs (name, email, stages, CTC, dates, e
 ### 2.1 `/` — `Dashboard.tsx` + `StatsDashboard` / `DashboardFilters`
 
 - Mostly **charts + KPIs** from `queries.*`; filters may use **`DashboardFilters`** / `global-filters`.
+- **Productivity averages** (`ProductivityAveragesSection`): finance rows are scoped to the **FY selector** (`kpiRows`), consistent with **Financial performance** — see **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §8.
 - **Action:** audit `DashboardFilters.tsx` and **`lib/global-filters.tsx`** for any raw text filters → replace with selects fed by **`queries.projects()`** or DISTINCTs from stats endpoints.
 
 ### 2.2 `/clients` — `ClientsHub.tsx`

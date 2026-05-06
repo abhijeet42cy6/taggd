@@ -358,6 +358,8 @@ def ingest_finance_master(file_path):
 
         # 4. Ingest Efficiency KPIs
         print("Processing Efficiency Strategy...")
+        # Accounts listed on Taggd_Source_Joiner — CEO KPI cohort (excludes revenue-only SBUs).
+        taggd_sheet_account_keys: set[str] = set()
         kpi_specs: list[tuple[tuple[str, ...], str]] = [
             (
                 (
@@ -393,6 +395,19 @@ def ingest_finance_master(file_path):
                 ("Taggd_Source_Joiner", "Taggd Source Joiner", "Taggd_Joiner", "Taggd Joiners"),
                 "taggd_joiners",
             ),
+            (
+                (
+                    "Non Taggd_Source_Joiner",
+                    "Non Taggd Source Joiner",
+                    "NonTaggd_Source_Joiner",
+                    "Non-Taggd_Source_Joiner",
+                ),
+                "non_taggd_joiners",
+            ),
+            (
+                ("Rev_Productivity_Actual", "Rev Productivity Actual"),
+                "rev_productivity_actual_inr",
+            ),
         ]
 
         for aliases, db_field in kpi_specs:
@@ -413,6 +428,8 @@ def ingest_finance_master(file_path):
                     project = get_project(p_name)
                     if not project:
                         continue
+                    if db_field == "taggd_joiners" and p_name:
+                        taggd_sheet_account_keys.add(_normalize_account_key(p_name).lower())
 
                     for m_ref, excel_col in col_map.items():
                         if isinstance(excel_col, datetime.datetime):
@@ -433,6 +450,7 @@ def ingest_finance_master(file_path):
                             "actual_headcount_finance",
                             "actual_headcount_wl1",
                             "taggd_joiners",
+                            "non_taggd_joiners",
                         )
                         if db_field not in headcount_fields:
                             if isinstance(val, (int, float)) and 0 < abs(val) < 2000:
@@ -458,6 +476,13 @@ def ingest_finance_master(file_path):
                         kpi.source_filename = source_fn
             except Exception as e:
                 print(f"Error in KPI «{sheet}» ({aliases[0]}): {e}")
+
+        if taggd_sheet_account_keys:
+            for proj_row in db.query(Project).all():
+                ak = _normalize_account_key(proj_row.account_name or "").lower()
+                proj_row.has_taggd_joiner_sheet = bool(ak and ak in taggd_sheet_account_keys)
+        else:
+            print("  Warning: No Taggd_Source_Joiner rows — project cohort flags not updated.")
 
         dedupe_finance_tables(db)
         db.commit()

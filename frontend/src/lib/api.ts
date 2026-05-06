@@ -442,6 +442,8 @@ export type Project = {
   be_spoc?: string;
   /** Account type (e.g. RPO) */
   practice?: string;
+  /** After corporate finance master ingest: appears on Taggd_Source_Joiner sheet (CEO KPI cohort). */
+  has_taggd_joiner_sheet?: boolean | null;
   pos_id_column?: string;
   /** Legacy: flat universal map. v2: `{ version, universal, record_fields }`. */
   column_mapping?: Record<string, unknown> | Record<string, string> | null;

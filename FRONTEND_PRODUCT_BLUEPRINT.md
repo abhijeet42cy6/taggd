@@ -22,6 +22,7 @@ This blueprint assumes Honeywell data may exist across multiple project IDs due 
 - Risk and variance signals (budget, delivery quality, capacity gaps).
 - Trend direction and outlier clients.
 - Fast jump to "why" and "where to intervene."
+- **CEO's View** (`/ceo-view`): board-style pulse metrics (**Revenue per hire**, **Rev / WL1**) scoped to the **Taggd joiner sheet cohort** and formulas in **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §9 (distinct from Executive Overview’s FY-wide portfolio tiles in §8).
 
 ## Finance Head
 

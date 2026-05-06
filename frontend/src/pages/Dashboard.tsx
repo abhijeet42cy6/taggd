@@ -11,6 +11,9 @@ import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { SkeletonKpiRow } from "@/components/platform/Skeleton";
 import { DashboardFiltersTremor } from "@/components/tremor-dashboard/DashboardFiltersTremor";
 import { ExecutiveMetricHeroCard } from "@/components/tremor-dashboard/ExecutiveMetricHeroCard";
+import { ExecRevenueActualDrilldownModal } from "@/components/tremor-dashboard/ExecRevenueActualDrilldownModal";
+import { ExecContributionMarginDrilldownModal } from "@/components/tremor-dashboard/ExecContributionMarginDrilldownModal";
+import { ExecCollectionDrilldownModal } from "@/components/tremor-dashboard/ExecCollectionDrilldownModal";
 import {
   OperationalPulseCard,
   OperationalPulseGrid,
@@ -71,6 +74,9 @@ export const Dashboard = () => {
   const [drawerClient, setDrawerClient] = useState<string | null>(null);
   const [clientSheetTab, setClientSheetTab] = useState(0);
   const [heatmapFullOpen, setHeatmapFullOpen] = useState(false);
+  const [revenueActualDrillOpen, setRevenueActualDrillOpen] = useState(false);
+  const [cmDrillOpen, setCmDrillOpen] = useState(false);
+  const [collectionDrillOpen, setCollectionDrillOpen] = useState(false);
   const [filters, setFilters] = useState<DF>(DEFAULT_DASHBOARD_FILTERS);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
 
@@ -395,6 +401,8 @@ export const Dashboard = () => {
                 : []),
               ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
             ]}
+            onDrillIn={() => setRevenueActualDrillOpen(true)}
+            drillAriaLabel="Open actual revenue account breakdown and charts"
           />
 
           <ExecutiveMetricHeroCard
@@ -420,6 +428,8 @@ export const Dashboard = () => {
               { label: "Target CM%", value: "35.0%" },
               ...(cmPriorPct != null ? [{ label: `${compareFyLabel} CM%`, value: formatPercent(cmPriorPct) }] : []),
             ]}
+            onDrillIn={() => setCmDrillOpen(true)}
+            drillAriaLabel="Open contribution margin account breakdown and charts"
           />
 
           <ExecutiveMetricHeroCard
@@ -448,6 +458,8 @@ export const Dashboard = () => {
               { label: "Bad debt", value: formatLargeCurrency(bd), valueCls: bd > 0 ? "red" : undefined },
               { label: "Bad debt % coll.", value: formatPercent(bdPctColl) },
             ]}
+            onDrillIn={() => setCollectionDrillOpen(true)}
+            drillAriaLabel="Open collection and unbilled account breakdown and charts"
           />
         </Grid>
       )}
@@ -569,7 +581,12 @@ export const Dashboard = () => {
         </TremorDashboardSection>
       </div>
 
-      <ProductivityAveragesSection rows={filteredRows} loading={loadingCore} externalFilters />
+      <ProductivityAveragesSection
+        rows={kpiRows}
+        loading={loadingCore}
+        externalFilters
+        fyLabel={fyShortLabel(selectedFyStart)}
+      />
 
       <TremorDashboardSection tag="Geography" title="Revenue by region — Actual vs Budget" noPad>
         <div className="bg-white px-5 py-4">
@@ -926,6 +943,53 @@ export const Dashboard = () => {
           the composite, not treated as a failing score.
         </p>
       </PlatformDrawer>
+
+      <ExecRevenueActualDrilldownModal
+        open={revenueActualDrillOpen}
+        onOpenChange={setRevenueActualDrillOpen}
+        fyLabel={fyShortLabel(selectedFyStart)}
+        kpiRows={kpiRows}
+        projects={projects}
+        quarters={revQuarters}
+        totalActualInr={revA}
+        totalBudgetInr={revBudget}
+        attainmentPct={revAtt}
+        compareFyLabel={compareFyLabel}
+        priorActualInr={priorFinance?.revenue_actual_inr}
+      />
+
+      <ExecContributionMarginDrilldownModal
+        open={cmDrillOpen}
+        onOpenChange={setCmDrillOpen}
+        fyLabel={fyShortLabel(selectedFyStart)}
+        kpiRows={kpiRows}
+        projects={projects}
+        quarters={cmQuarters}
+        portfolioCmPct={cmPct}
+        totalCmInr={displayFinance?.total_cm_inr ?? 0}
+        totalRevInr={revA}
+        targetAttainmentPct={(cmPct / 35) * 100}
+        compareFyLabel={compareFyLabel}
+        priorPortfolioCmPct={cmPriorPct ?? undefined}
+      />
+
+      <ExecCollectionDrilldownModal
+        open={collectionDrillOpen}
+        onOpenChange={setCollectionDrillOpen}
+        fyLabel={fyShortLabel(selectedFyStart)}
+        kpiRows={kpiRows}
+        projects={projects}
+        quarters={collQuarters}
+        totalCollectedInr={coll}
+        totalCollectionTargetInr={ct}
+        collectionAttainmentPct={collAtt}
+        totalUnbilledInr={unb}
+        totalBadDebtInr={bd}
+        totalRevInr={revA}
+        portfolioUnbPctRev={unbPctRev}
+        compareFyLabel={compareFyLabel}
+        priorCollectedInr={priorFinance?.total_collected_inr}
+      />
     </div>
   );
 };

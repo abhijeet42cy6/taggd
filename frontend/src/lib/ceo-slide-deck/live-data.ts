@@ -10,6 +10,9 @@ import {
   parseMonthSort,
   filterFinanceRows,
   DEFAULT_DASHBOARD_FILTERS,
+  effectiveHireDenominatorForRph,
+  sumTaggdJoiners,
+  fyRowsTaggdJoinerSheetCohort,
 } from "@/lib/dashboard-aggregates";
 import type { CeoSlideDeckConfig } from "./types";
 
@@ -52,6 +55,11 @@ function rowsForFy(allRows: FinanceRowVm[], fyStart: number): FinanceRowVm[] {
   });
 }
 
+/** FY slice restricted to accounts on the finance master Taggd_Source_Joiner sheet (CEO KPI cohort). */
+function rowsForFyCohort(allRows: FinanceRowVm[], fyStart: number, projects: Project[]): FinanceRowVm[] {
+  return fyRowsTaggdJoinerSheetCohort(rowsForFy(allRows, fyStart), projects);
+}
+
 function maxMonthLabel(rows: FinanceRowVm[]): string | null {
   let best: Date | null = null;
   for (const r of rows) {
@@ -63,7 +71,12 @@ function maxMonthLabel(rows: FinanceRowVm[]): string | null {
   return best.toLocaleString("en-IN", { month: "short", year: "numeric" });
 }
 
-/** Average monthly headcount (non-zero months only), same spirit as CeoView KPIs. */
+/** Σ HC across all client-month rows in scope (person-months); use as denominator with Σ revenue / Σ cost for portfolio rates. */
+function sumHc(rows: FinanceRowVm[], key: "actual_headcount_overall" | "actual_headcount_wl1"): number {
+  return rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+}
+
+/** Average HC on rows with HC > 0 (legacy display helper — not used for Rev/HC portfolio ratios). */
 function avgMonthlyHc(rows: FinanceRowVm[], key: "actual_headcount_overall" | "actual_headcount_wl1"): number {
   let sum = 0;
   let n = 0;
@@ -78,7 +91,7 @@ function avgMonthlyHc(rows: FinanceRowVm[], key: "actual_headcount_overall" | "a
 }
 
 function sumJoiners(rows: FinanceRowVm[]): number {
-  return rows.reduce((s, r) => s + (r.taggd_joiners ?? 0), 0);
+  return sumTaggdJoiners(rows);
 }
 
 type VerticalShare = { vertical: string; actual: number; share: number };
@@ -97,9 +110,9 @@ function verticalMixForFy(fyRows: FinanceRowVm[], projects: Project[]): Vertical
     .sort((a, b) => b.actual - a.actual);
 }
 
-function formatRphSub(revInr: number, joiners: number): string {
-  if (joiners <= 0) return "RPH: —";
-  const rph = revInr / joiners;
+function formatRphSub(revInr: number, effectiveJoiners: number): string {
+  if (effectiveJoiners <= 0) return "RPH: —";
+  const rph = revInr / effectiveJoiners;
   if (rph >= 1e5) return `RPH: ${(rph / 1e5).toFixed(2)} L`;
   if (rph >= 1e3) return `RPH: ${Math.round(rph / 1e3)}K`;
   return `RPH: ${Math.round(rph)}`;
@@ -134,17 +147,19 @@ export function mergeLiveCeoSlideDeck(input: LiveSlideDeckInput): LiveSlideDeckR
     return { label: fyLabelRange(fy), value: Math.round(revLakh) };
   });
 
-  const anchorRows = rowsForFy(allRows, selectedFyStart);
+  const anchorRows = rowsForFyCohort(allRows, selectedFyStart, projects);
   const aggAnchor = aggregateFinanceFromRows(anchorRows);
   const compareRows = rowsForFy(allRows, effectiveCompareFy);
   const aggPrior = aggregateFinanceFromRows(compareRows);
 
   const revA = aggAnchor?.revenue_actual_inr ?? 0;
   const revPrior = aggPrior?.revenue_actual_inr ?? 0;
-  const joinAnchor = sumJoiners(anchorRows);
+  const effJoinAnchor = effectiveHireDenominatorForRph(anchorRows);
   const rphDisplay =
-    joinAnchor > 0 && revA > 0
-      ? `${(revA / joinAnchor / 1e5).toFixed(0)} L`
+    effJoinAnchor > 0 && revA > 0
+      ? revA / effJoinAnchor >= 1e5
+        ? `${(revA / effJoinAnchor / 1e5).toFixed(2)} L`
+        : `₹${Math.round(revA / effJoinAnchor).toLocaleString("en-IN")}`
       : "—";
 
   let yoyPct: number | null = null;
@@ -171,27 +186,28 @@ export function mergeLiveCeoSlideDeck(input: LiveSlideDeckInput): LiveSlideDeckR
     metricCards[2] = {
       ...metricCards[2],
       primary: rphDisplay,
-      title: "Revenue per hire (Taggd)",
+      title: "Revenue per hire (effective)",
       sub: `${fyLabelRange(selectedFyStart)} · ledger`,
     };
   }
 
   // ── Slide 2: Scale & efficiency ──
   const hiringVolume = window3.map((fy) => {
-    const fr = rowsForFy(allRows, fy);
+    const fr = rowsForFyCohort(allRows, fy, projects);
     const agg = aggregateFinanceFromRows(fr);
     const j = sumJoiners(fr);
+    const ej = effectiveHireDenominatorForRph(fr);
     return {
       year: fyLabelRange(fy),
       volume: Math.round(j),
-      rphSub: formatRphSub(agg?.revenue_actual_inr ?? 0, j),
+      rphSub: formatRphSub(agg?.revenue_actual_inr ?? 0, ej),
     };
   });
 
   const revenuePerEmployee = window3.map((fy) => {
     const fr = rowsForFy(allRows, fy);
     const agg = aggregateFinanceFromRows(fr);
-    const hc = avgMonthlyHc(fr, "actual_headcount_overall");
+    const hc = sumHc(fr, "actual_headcount_overall");
     const rev = agg?.revenue_actual_inr ?? 0;
     const prod = hc > 0 ? rev / hc : 0;
     return { year: fyLabelRange(fy), value: Math.round(prod) };
@@ -202,17 +218,17 @@ export function mergeLiveCeoSlideDeck(input: LiveSlideDeckInput): LiveSlideDeckR
   const fy26 = window3[2] != null ? window3[2] : selectedFyStart;
 
   const rph = (fy: number) => {
-    const fr = rowsForFy(allRows, fy);
+    const fr = rowsForFyCohort(allRows, fy, projects);
     const a = aggregateFinanceFromRows(fr);
-    const j = sumJoiners(fr);
-    if (!a || j <= 0) return "—";
-    return `${Math.round(a.revenue_actual_inr / j)}`;
+    const ej = effectiveHireDenominatorForRph(fr);
+    if (!a || ej <= 0) return "—";
+    return `${Math.round(a.revenue_actual_inr / ej)}`;
   };
   const headcount = (fy: number) => Math.round(avgMonthlyHc(rowsForFy(allRows, fy), "actual_headcount_overall"));
   const productivity = (fy: number) => {
     const fr = rowsForFy(allRows, fy);
     const a = aggregateFinanceFromRows(fr);
-    const hc = avgMonthlyHc(fr, "actual_headcount_overall");
+    const hc = sumHc(fr, "actual_headcount_overall");
     if (!a || hc <= 0) return "—";
     return `${(a.revenue_actual_inr / hc / 1e5).toFixed(2)}L`;
   };
@@ -226,9 +242,11 @@ export function mergeLiveCeoSlideDeck(input: LiveSlideDeckInput): LiveSlideDeckR
   const deltaScale = (() => {
     const a = aggregateFinanceFromRows(rowsForFy(allRows, fy26));
     const b = aggregateFinanceFromRows(rowsForFy(allRows, fy24));
-    if (!a || !b || !b.revenue_actual_inr || !avgMonthlyHc(rowsForFy(allRows, fy24), "actual_headcount_overall")) return "+0%";
-    const p0 = a.revenue_actual_inr / avgMonthlyHc(rowsForFy(allRows, fy26), "actual_headcount_overall");
-    const p1 = b.revenue_actual_inr / avgMonthlyHc(rowsForFy(allRows, fy24), "actual_headcount_overall");
+    const hc26 = sumHc(rowsForFy(allRows, fy26), "actual_headcount_overall");
+    const hc24 = sumHc(rowsForFy(allRows, fy24), "actual_headcount_overall");
+    if (!a || !b || !b.revenue_actual_inr || hc24 <= 0 || hc26 <= 0) return "+0%";
+    const p0 = a.revenue_actual_inr / hc26;
+    const p1 = b.revenue_actual_inr / hc24;
     if (!p1) return "—";
     return `${((p0 / p1 - 1) * 100 >= 0 ? "+" : "")}${((p0 / p1 - 1) * 100).toFixed(0)}%`;
   })();

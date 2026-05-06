@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, invalidateCache, queries } from "@/lib/api";
+import { api, invalidateCache, queries, type Project } from "@/lib/api";
 import { FinanceLedgerFormDialog } from "@/components/platform/FinanceLedgerFormDialog";
 import { FinanceExecDashboard } from "@/components/finance/FinanceExecDashboard";
 import { financeRowsVm, financeStatsVm, type FinanceRowVm } from "@/lib/view-models/finance";
@@ -20,29 +20,34 @@ export function FiscalPerformance() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [financeDialogOpen, setFinanceDialogOpen] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   const reloadFinance = useCallback(async () => {
     invalidateCache("finance/");
-    const [s, d, w] = await Promise.allSettled([
+    const [s, d, w, p] = await Promise.allSettled([
       queries.financeStats(),
       queries.financeData(),
       queries.budgetForecastWaterfall(),
+      queries.projects(),
     ]);
     if (s.status === "fulfilled") setStats(financeStatsVm(s.value));
     if (d.status === "fulfilled") setRows(financeRowsVm(d.value || []));
     if (w.status === "fulfilled") setWaterfall(w.value);
+    if (p.status === "fulfilled") setProjects(p.value || []);
   }, []);
 
   useEffect(() => {
     (async () => {
-      const [s, d, w] = await Promise.allSettled([
+      const [s, d, w, p] = await Promise.allSettled([
         queries.financeStats(),
         queries.financeData(),
         queries.budgetForecastWaterfall(),
+        queries.projects(),
       ]);
       if (s.status === "fulfilled") setStats(financeStatsVm(s.value));
       if (d.status === "fulfilled") setRows(financeRowsVm(d.value || []));
       if (w.status === "fulfilled") setWaterfall(w.value);
+      if (p.status === "fulfilled") setProjects(p.value || []);
       setLoading(false);
     })();
   }, []);
@@ -91,6 +96,7 @@ export function FiscalPerformance() {
     <>
       <FinanceExecDashboard
         stats={stats}
+        projects={projects}
         rows={rows}
         trendData={trendData}
         waterfallItems={waterfallItems}

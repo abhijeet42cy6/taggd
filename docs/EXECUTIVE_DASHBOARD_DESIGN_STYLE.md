@@ -151,6 +151,7 @@ For integration workflow and Tailwind checklist, see `**docs/TREMOR_BLOCKS_CURSO
 | Filters                 | `frontend/src/components/tremor-dashboard/DashboardFiltersTremor.tsx`  |
 | Financial heroes        | `frontend/src/components/tremor-dashboard/ExecutiveMetricHeroCard.tsx` |
 | Operational pulse       | `frontend/src/components/tremor-dashboard/OperationalPulseCards.tsx`   |
+| Productivity averages   | `frontend/src/components/platform/ProductivityAveragesSection.tsx`     |
 | Section shell           | `frontend/src/components/tremor-dashboard/TremorDashboardSection.tsx`  |
 | Tailwind + Tremor theme | `frontend/tailwind.config.cjs`                                         |
 | Global font / base      | `frontend/src/index.css`                                               |
@@ -158,4 +159,19 @@ For integration workflow and Tailwind checklist, see `**docs/TREMOR_BLOCKS_CURSO
 
 ---
 
-*Last aligned with Executive Overview Tremor migration (Path A) and `exec-dash-premium` styling.*
+## 8. Productivity averages — data scope (FY alignment)
+
+The **Productivity averages** block (`ProductivityAveragesSection`) on **Executive Overview** (`/` → `Dashboard.tsx`):
+
+- Receives **`kpiRows`**: finance rows after **`filterFinanceRows`** *and* the **same fiscal-year filter** as the hero **Financial performance** strip (`selectedFyStart` / FY selector, Indian FY via `fiscalYearStart` + `parseMonthSort` in `dashboard-aggregates.ts`). It does **not** sum across multiple FYs unless the user changes the FY control.
+- **Avg Taggd source prod.** = **Σ `taggd_joiners` ÷ Σ `actual_headcount_wl1`** on those rows (portfolio ratio), consistent with **`Taggd_Source_Joiner`** ÷ **`Headcount_WL1`** in the corporate finance master for that FY — not the arithmetic mean of per-row ratios.
+- **Avg PPC** on the same block = **Σ(Rev − CM) ÷ Σ overall HC** (portfolio), same filtered FY scope.
+- The scope line shows **client-month count · FY label · dashboard filters** so operators can reconcile to **`FY25-26_Finance Data*.xlsx`** totals.
+
+Prior behaviour (fixed): passing all FY rows inflated denominators and produced a lower headline ratio (~1.8) vs the FY25–26 workbook (~2.17).
+
+**CEO’s View** (`CeoView.tsx` — “Efficiency — People & Cost”): **Revenue / WL1** and **PPC** use the same portfolio denominators — **Σ WL1** and **Σ overall HC** over `fyRows` (not the mean HC on positive rows, which previously inflated those KPIs by ~# of client-months).
+
+---
+
+*Last aligned with Executive Overview Tremor migration (Path A), `exec-dash-premium` styling, and FY-scoped productivity averages.*

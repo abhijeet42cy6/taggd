@@ -4,6 +4,8 @@ This document analyses the leadership slides provided as reference images and ma
 
 **Scope note:** The current CEO’s View already implements **live** financial and operational KPIs from the database (revenue, CM%, collection, YoY charts, vertical mix, accounts, etc.). The reference slides add **additional narrative layouts** (composition stacks, waterfalls, hiring mix, people/cost stories) that are mostly **presentation / finance-team numbers** unless wired to APIs. The recommended approach is a **configurable “slide deck” layer** with **defaults matching the slides**, editable via UI, with optional **future API** hydration.
 
+**Operational Pulse (live, board-aligned):** **Revenue per hire** and **Rev / Recruiter (WL1)** on the main CEO shell use `GET /finance/data` rows filtered to the **Taggd joiner sheet cohort** (see `fyRowsTaggdJoinerSheetCohort` and constants in `frontend/src/lib/dashboard-aggregates.ts`). Formulas, fallback behaviour, and ingest prerequisites are documented in **`docs/EXECUTIVE_DASHBOARD_DESIGN_STYLE.md`** §9 and **`FINANCE_METRICS_AND_UPDATES_REFERENCE.md`** §7.
+
 ---
 
 ## Design system alignment

@@ -43,6 +43,25 @@ const tooltipStyle: React.CSSProperties = {
   boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
 };
 
+/** SLA finance shell: light cards + faint theme tokens can hide axis text. */
+const slaTooltipStyle: React.CSSProperties = {
+  ...tooltipStyle,
+  color: "#0f172a",
+  backgroundColor: "#ffffff",
+  border: "1px solid #e2e8f0",
+};
+const SLA_CHART_TICK = { fill: "#334155", fontSize: 9 };
+const SLA_CHART_TICK_SM = { fill: "#334155", fontSize: 8 };
+
+function formatSlaYmAxis(ym: string): string {
+  if (!ym || ym.length < 7) return String(ym);
+  const y = parseInt(ym.slice(0, 4), 10);
+  const mo = parseInt(ym.slice(5, 7), 10);
+  const labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  if (mo < 1 || mo > 12 || Number.isNaN(y)) return ym;
+  return `${labels[mo - 1]} '${String(y).slice(2)}`;
+}
+
 // ─── TREND CHART ──────────────────────────────────────────────────────────────
 type TrendPoint = { month: string; revenue: number; budget: number; sla: number; fillRate: number };
 
@@ -496,13 +515,14 @@ export function SlaTimeSeriesChart({
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
         <XAxis
           dataKey="month"
-          tick={{ fill: COLORS.text3, fontSize: 9 }}
+          tick={{ ...SLA_CHART_TICK, fontSize: 8 }}
           axisLine={false}
           tickLine={false}
           interval="preserveStartEnd"
+          tickFormatter={formatSlaYmAxis}
         />
         <YAxis
-          tick={{ fill: COLORS.text3, fontSize: 9 }}
+          tick={SLA_CHART_TICK}
           axisLine={false}
           tickLine={false}
           tickFormatter={(v) => `${v}%`}
@@ -510,14 +530,15 @@ export function SlaTimeSeriesChart({
           width={36}
         />
         <Tooltip
-          contentStyle={tooltipStyle}
-          labelStyle={{ color: "var(--text)", fontFamily: "'DM Mono',monospace", marginBottom: 4 }}
-          itemStyle={{ color: "var(--text)", fontFamily: "'DM Mono',monospace" }}
+          contentStyle={slaTooltipStyle}
+          labelStyle={{ color: "#0f172a", fontFamily: "'DM Mono',monospace", marginBottom: 4 }}
+          itemStyle={{ color: "#0f172a", fontFamily: "'DM Mono',monospace" }}
           formatter={(v: number) => [`${v}%`]}
+          labelFormatter={formatSlaYmAxis}
         />
         <Legend
           iconSize={8}
-          wrapperStyle={{ fontSize: 9, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }}
+          wrapperStyle={{ fontSize: 9, color: "#334155", fontFamily: "'DM Mono',monospace" }}
         />
         {accounts.map((acc, i) => (
           <Line
@@ -565,23 +586,23 @@ export function SlaFyComparisonLineChart({
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
         <XAxis
           dataKey="name"
-          tick={{ fill: COLORS.text3, fontSize: 8 }}
+          tick={{ ...SLA_CHART_TICK_SM }}
           interval={0}
           angle={tilt ? -32 : 0}
           textAnchor={tilt ? "end" : "middle"}
           height={tilt ? 56 : 28}
         />
         <YAxis
-          tick={{ fill: COLORS.text3, fontSize: 9 }}
+          tick={SLA_CHART_TICK}
           domain={[0, 100]}
           tickFormatter={(v) => `${v}%`}
           width={40}
         />
         <Tooltip
-          contentStyle={tooltipStyle}
+          contentStyle={slaTooltipStyle}
           formatter={(v) => (v == null || v === "" ? "—" : `${v}%`)}
         />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace" }} />
         <Line type="monotone" dataKey="p1" name={labelP1} stroke={COLORS.accent} strokeWidth={2} dot={{ r: 3 }} connectNulls />
         <Line type="monotone" dataKey="p2" name={labelP2} stroke={COLORS.accent2} strokeWidth={2} dot={{ r: 3 }} connectNulls />
       </LineChart>
@@ -598,10 +619,10 @@ export function SlaFyPortfolioMetNotMetBar({ data, height = 200 }: { data: SlaFy
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis dataKey="period" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} allowDecimals={false} width={40} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Count"]} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
+        <XAxis dataKey="period" tick={SLA_CHART_TICK} axisLine={false} tickLine={false} />
+        <YAxis tick={SLA_CHART_TICK} allowDecimals={false} width={40} />
+        <Tooltip contentStyle={slaTooltipStyle} formatter={(v: number) => [v, "Count"]} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace" }} />
         <Bar dataKey="met" name="Met" fill="color-mix(in srgb, var(--green) 72%, transparent)" radius={[2, 2, 0, 0]} />
         <Bar dataKey="notMet" name="Not met" fill="color-mix(in srgb, var(--red) 70%, transparent)" radius={[2, 2, 0, 0]} />
       </BarChart>
@@ -635,15 +656,15 @@ export function SlaFyComparisonGroupedBar({
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
         <XAxis
           dataKey="name"
-          tick={{ fill: COLORS.text3, fontSize: 8 }}
+          tick={{ ...SLA_CHART_TICK_SM }}
           interval={0}
           angle={tilt ? -32 : 0}
           textAnchor={tilt ? "end" : "middle"}
           height={tilt ? 52 : 28}
         />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={40} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v) => (v == null || v === "" ? "—" : `${v}%`)} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
+        <YAxis tick={SLA_CHART_TICK} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={40} />
+        <Tooltip contentStyle={slaTooltipStyle} formatter={(v) => (v == null || v === "" ? "—" : `${v}%`)} />
+        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace" }} />
         <Bar dataKey="p1" name={labelP1} fill="color-mix(in srgb, var(--accent) 65%, transparent)" radius={[2, 2, 0, 0]} />
         <Bar dataKey="p2" name={labelP2} fill="color-mix(in srgb, var(--accent2) 65%, transparent)" radius={[2, 2, 0, 0]} />
       </BarChart>
@@ -660,9 +681,9 @@ export function SlaExecutiveMetPctBar({ data, height = 140 }: { data: SlaRankBar
     <ResponsiveContainer width="100%" height={height}>
       <BarChart layout="vertical" data={data} style={CHART_STYLE} margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal />
-        <XAxis type="number" domain={[0, 100]} tick={{ fill: COLORS.text3, fontSize: 8 }} tickFormatter={(v) => `${v}%`} />
-        <YAxis type="category" dataKey="name" width={88} tick={{ fill: COLORS.text3, fontSize: 8 }} axisLine={false} tickLine={false} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v.toFixed(1)}%`, "Met %"]} />
+        <XAxis type="number" domain={[0, 100]} tick={{ ...SLA_CHART_TICK_SM }} tickFormatter={(v) => `${v}%`} />
+        <YAxis type="category" dataKey="name" width={88} tick={{ ...SLA_CHART_TICK_SM }} axisLine={false} tickLine={false} />
+        <Tooltip contentStyle={slaTooltipStyle} formatter={(v: number) => [`${v.toFixed(1)}%`, "Met %"]} />
         <Bar dataKey="value" name="Met %" fill="color-mix(in srgb, var(--accent) 55%, transparent)" radius={[0, 3, 3, 0]} barSize={14} />
       </BarChart>
     </ResponsiveContainer>
@@ -680,10 +701,10 @@ export function SlaExecutiveDeltaBar({ data, height = 140 }: { data: SlaDeltaBar
     <ResponsiveContainer width="100%" height={height}>
       <BarChart layout="vertical" data={data} style={CHART_STYLE} margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal />
-        <XAxis type="number" domain={domain} tick={{ fill: COLORS.text3, fontSize: 8 }} tickFormatter={(v) => `${v}%`} />
-        <YAxis type="category" dataKey="name" width={88} tick={{ fill: COLORS.text3, fontSize: 8 }} axisLine={false} tickLine={false} />
+        <XAxis type="number" domain={domain} tick={{ ...SLA_CHART_TICK_SM }} tickFormatter={(v) => `${v}%`} />
+        <YAxis type="category" dataKey="name" width={88} tick={{ ...SLA_CHART_TICK_SM }} axisLine={false} tickLine={false} />
         <ReferenceLine x={0} stroke={COLORS.border} strokeDasharray="4 3" />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v >= 0 ? "+" : ""}${v.toFixed(1)} pp`, "Δ Met %"]} />
+        <Tooltip contentStyle={slaTooltipStyle} formatter={(v: number) => [`${v >= 0 ? "+" : ""}${v.toFixed(1)} pp`, "Δ Met %"]} />
         <Bar dataKey="delta" radius={[0, 3, 3, 0]} barSize={14}>
           {data.map((e, i) => (
             <Cell key={i} fill={e.delta >= 0 ? "color-mix(in srgb, var(--green) 65%, transparent)" : "color-mix(in srgb, var(--red) 65%, transparent)"} />
