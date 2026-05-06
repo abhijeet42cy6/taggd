@@ -334,6 +334,8 @@ Many **legacy** high-traffic routes remain on `**main.py`** under `/api/...` (st
 | `/login`              | `Login`                                  | `useAuth().login` → `/api/auth/login`                                                                                                                       |
 
 
+**Revenue forecast tab (`/revenue-trackers`):** The **Quarter summary · AMJ** strip and **Revenue forecast vs MMF · AMJ** chart use **Indian FY Q1 (Apr–Jun)** for the fiscal year implied by the **governance week (Monday)**. KPIs sum weekly rows whose **month anchor** is in those months; the chart always shows **Apr / May / Jun** for that FY (zero when no rows). **Monthly roll-up** and **weekly entries** remain full-history for the loaded scope.
+
 **Unrouted page:** `BudgetForecast.tsx` exists but is **not** in `App.tsx`; `FiscalPerformance` still uses `budgetForecastWaterfall` / finance paths. Budget template upload remains `POST /api/upload/budget-forecast`.
 
 ### 8.2 Axios path convention

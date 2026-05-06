@@ -184,6 +184,23 @@ function forecastMonthKey(r: RevenueForecastWeeklyRow): string {
   return src.slice(0, 7);
 }
 
+/** Indian FY starts in April — return that FY’s starting calendar year (e.g. Mar 2027 → 2026). */
+function indianFyStartYearFromYmd(ymd: string): number {
+  const d = parseYmd(ymd);
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  return m >= 4 ? y : y - 1;
+}
+
+/** AMJ = Indian FY Q1 (Apr–Jun) for the FY that begins in `fyStart`. */
+function amjMonthKeysForIndianFyStart(fyStart: number): readonly [string, string, string] {
+  return [`${fyStart}-04`, `${fyStart}-05`, `${fyStart}-06`] as const;
+}
+
+function indianFyShortLabel(fyStart: number): string {
+  return `FY ${String(fyStart).slice(2)}–${String(fyStart + 1).slice(2)}`;
+}
+
 function statusDisplay(status: string | null | undefined): React.ReactNode {
   const s = (status || "").trim();
   if (!s) {
@@ -669,15 +686,61 @@ export function RevenueTrackers() {
     return m * 1.12;
   }, [chartVisibilityPipeline]);
 
-  const chartForecastTrend = useMemo(
-    () =>
-      forecastMonthly.map((m) => ({
-        month: m.label,
-        forecast: +m.revenueL.toFixed(2),
-        mmf: +m.mmfL.toFixed(2),
-      })),
-    [forecastMonthly],
-  );
+  const forecastAmjContext = useMemo(() => {
+    const fyStart = indianFyStartYearFromYmd(governanceWeekMon);
+    const keys = amjMonthKeysForIndianFyStart(fyStart);
+    return { fyStart, keys, fyLabel: indianFyShortLabel(fyStart) };
+  }, [governanceWeekMon]);
+
+  /** AMJ quarter totals (weekly rows whose month anchor falls in Apr–Jun of the governance week’s Indian FY). */
+  const forecastAmjAggregate = useMemo(() => {
+    const keySet = new Set<string>(forecastAmjContext.keys);
+    let rev = 0,
+      mmf = 0,
+      openReq = 0,
+      openFee = 0,
+      joiners = 0,
+      joinerFee = 0;
+    let achSum = 0,
+      achN = 0;
+    for (const r of forecast) {
+      const k = forecastMonthKey(r);
+      if (!keySet.has(k)) continue;
+      rev += r.revenue_forecast_inr || 0;
+      mmf += r.mmf_inr || 0;
+      openReq += r.open_req || 0;
+      openFee += r.open_fee_inr || 0;
+      joiners += r.joiner_count || 0;
+      joinerFee += r.joiner_fee_inr || 0;
+      if (r.achievement_pct != null) {
+        achSum += r.achievement_pct;
+        achN++;
+      }
+    }
+    return {
+      revL: rev / LAKHS,
+      mmfL: mmf / LAKHS,
+      openReq,
+      openFeeL: openFee / LAKHS,
+      joiners,
+      joinerFeeL: joinerFee / LAKHS,
+      achPct: achN ? achSum / achN : null,
+    };
+  }, [forecast, forecastAmjContext.fyStart]);
+
+  const chartForecastTrend = useMemo(() => {
+    const [k1, k2, k3] = amjMonthKeysForIndianFyStart(forecastAmjContext.fyStart);
+    const byKey = new Map(forecastMonthly.map((m) => [m.key, m] as const));
+    const pick = (k: string) => {
+      const row = byKey.get(k);
+      return {
+        month: formatMonthLabel(k),
+        forecast: row ? +row.revenueL.toFixed(2) : 0,
+        mmf: row ? +row.mmfL.toFixed(2) : 0,
+      };
+    };
+    return [pick(k1), pick(k2), pick(k3)];
+  }, [forecastMonthly, forecastAmjContext.fyStart]);
 
   const projectLabel = useCallback(
     (id: number) => {
@@ -1458,65 +1521,71 @@ export function RevenueTrackers() {
       {/* ─────────── Revenue forecast ─────────── */}
       {mainTab === "Revenue forecast" ? (
       <section>
-          {/* KPIs */}
+          <div className="rt-section-hd" style={{ marginTop: 0, marginBottom: 10 }}>
+            <div>
+              <div className="rt-section-title">Quarter summary · AMJ</div>
+              <div className="rt-section-sub">
+                Apr–Jun totals for {forecastAmjContext.fyLabel} (from weekly forecast rows by month anchor). Aligned with
+                governance week {formatWeekRangeLabel(governanceWeekMon)}.
+              </div>
+            </div>
+          </div>
+          {/* KPIs — AMJ quarter */}
           <div className="rt-kpi-grid">
             <ExecutiveKpiCard
-              title="Revenue forecast"
+              title="Total forecast (AMJ)"
               accent="orange"
-              primary={fmtLakhs(forecastTotals.revL * LAKHS)}
-              sublines={[{ label: "₹ Lakhs", value: "total" }]}
+              primary={fmtLakhs(forecastAmjAggregate.revL * LAKHS)}
+              sublines={[
+                { label: "₹ Lakhs", value: "quarter" },
+                ...(forecastAmjAggregate.achPct != null
+                  ? ([{ label: "Avg ach. %", value: formatPercent(forecastAmjAggregate.achPct, 1) }] as const)
+                  : []),
+              ]}
             />
             <ExecutiveKpiCard
-              title="Total MMF"
+              title="Total MMF (AMJ)"
               accent="teal"
-              primary={fmtLakhs(forecastTotals.mmfL * LAKHS)}
-              sublines={[{ label: "₹ Lakhs", value: "target" }]}
+              primary={fmtLakhs(forecastAmjAggregate.mmfL * LAKHS)}
+              sublines={[{ label: "₹ Lakhs", value: "quarter target" }]}
             />
             <ExecutiveKpiCard
-              title="Open reqs"
+              title="Open req + opening fee"
               accent="blue"
-              primary={String(forecastTotals.openReq)}
-              sublines={[{ label: "Open fee (L)", value: fmtLakhs(forecastTotals.openFeeL * LAKHS) }]}
+              primary={String(forecastAmjAggregate.openReq)}
+              sublines={[{ label: "Opening fee (L)", value: fmtLakhs(forecastAmjAggregate.openFeeL * LAKHS) }]}
             />
             <ExecutiveKpiCard
-              title="Total joiners"
+              title="Joiners + joining fee"
               accent="green"
-              primary={String(forecastTotals.joiners)}
-              sublines={[{ label: "Joiner fee (L)", value: fmtLakhs(forecastTotals.joinerFeeL * LAKHS) }]}
+              primary={String(forecastAmjAggregate.joiners)}
+              sublines={[{ label: "Joining fee (L)", value: fmtLakhs(forecastAmjAggregate.joinerFeeL * LAKHS) }]}
             />
-            <ExecutiveKpiCard
-              title="Avg achievement"
-              accent="amber"
-              primary={forecastTotals.achPct != null ? formatPercent(forecastTotals.achPct, 1) : "—"}
-              sublines={[{ label: "vs MMF", value: "weekly avg" }]}
-          />
         </div>
 
           {/* Chart */}
           <div className="platform-card" style={{ padding: 14, marginBottom: 24 }}>
             <div className="rt-section-hd" style={{ marginTop: 0 }}>
               <div>
-                <div className="rt-section-title">Revenue forecast vs MMF</div>
-                <div className="rt-section-sub">₹ Lakhs · monthly roll-up from weekly entries</div>
+                <div className="rt-section-title">Revenue forecast vs MMF · AMJ</div>
+                <div className="rt-section-sub">
+                  ₹ Lakhs · Apr, May, Jun for {forecastAmjContext.fyLabel} (zero if no weekly rows in that month)
+                </div>
           </div>
             </div>
             <div style={{ width: "100%", height: 240 }}>
-            {chartForecastTrend.length ? (
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chartForecastTrend} margin={{ top: 12, right: 12, left: 4, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" />
-                    <XAxis dataKey="month" tick={{ fill: "var(--text-subtle)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={40} />
+                  <XAxis dataKey="month" tick={{ fill: "var(--text-subtle)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={40} />
                   <Tooltip contentStyle={CHART_TOOLTIP} />
-                    <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
+                  <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
                   <Bar dataKey="forecast" name="Revenue forecast" fill="color-mix(in srgb, var(--accent) 45%, transparent)" radius={[4, 4, 0, 0]} />
                   <Line type="monotone" dataKey="mmf" name="MMF" stroke="var(--accent2)" strokeWidth={2} dot={{ r: 3 }} />
                 </ComposedChart>
               </ResponsiveContainer>
-            ) : (
-                <div style={{ height: 240, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11, fontFamily: "var(--mono)" }}>No monthly roll-up yet</div>
-            )}
-          </div>
+            </div>
         </div>
 
           {/* Monthly roll-up table */}

@@ -2735,7 +2735,12 @@ async def get_sla_timeseries(
     """
     from fastapi.responses import JSONResponse
 
-    from backend.core.sla_period import bucket_sla_rag, canonical_month_label, sort_key_for_month_label
+    from backend.core.sla_period import (
+        bucket_sla_rag,
+        canonical_month_label,
+        normalize_timeline_month_key,
+        sort_key_for_month_label,
+    )
 
     # Month labels that carry no real period information — skip entirely
     _GARBAGE = {
@@ -2764,11 +2769,10 @@ async def get_sla_timeseries(
     data: dict[str, dict[str, dict[str, int]]] = {}
     for account_name, period_start, reporting_month, rag_status in rows:
         account = (account_name or "Unknown").strip()
-        month_s = (
-            canonical_month_label(period_start)
-            if period_start is not None
-            else (reporting_month or "").strip()
-        )
+        if period_start is not None:
+            month_s = normalize_timeline_month_key(canonical_month_label(period_start))
+        else:
+            month_s = normalize_timeline_month_key((reporting_month or "").strip())
         if not month_s or month_s in _GARBAGE or "Metrics to be picked" in month_s:
             continue
         if account not in data:
@@ -2937,6 +2941,7 @@ async def get_sla_details(
             "project_id": m.project_id,
             "account_name": project.account_name if project else "Unknown",
             "region": project.region if project else "Unknown",
+            "sub_region": (project.sub_region or "").strip() or None if project else None,
             "practice_head": ph or None,
             "regional_head": rh or None,
             "metric_nature": mn or None,
@@ -2970,7 +2975,12 @@ async def get_sla_account_metrics_timeseries(
     """
     from fastapi.responses import JSONResponse
 
-    from backend.core.sla_period import bucket_sla_rag, canonical_month_label, sort_key_for_month_label
+    from backend.core.sla_period import (
+        bucket_sla_rag,
+        canonical_month_label,
+        normalize_timeline_month_key,
+        sort_key_for_month_label,
+    )
 
     _GARBAGE = {
         "YTD",
@@ -3008,11 +3018,10 @@ async def get_sla_account_metrics_timeseries(
     meta: dict[int, tuple[str, str | None]] = {}
 
     for def_id, metric_label, metric_nature, period_start, reporting_month, rag_status in rows:
-        month_s = (
-            canonical_month_label(period_start)
-            if period_start is not None
-            else (reporting_month or "").strip()
-        )
+        if period_start is not None:
+            month_s = normalize_timeline_month_key(canonical_month_label(period_start))
+        else:
+            month_s = normalize_timeline_month_key((reporting_month or "").strip())
         if not month_s or month_s in _GARBAGE or "Metrics to be picked" in month_s:
             continue
         if def_id not in data:
@@ -3563,6 +3572,8 @@ async def get_finance_data(
             "vertical": project.vertical if project else "N/A",
             "project_head": _project_head_label,
             "practice_head": (project.practice_head or None) if project else None,
+            "region": (project.region or None) if project else None,
+            "sub_region": (project.sub_region or None) if project else None,
             "month": row["reporting_month"].strftime("%b-%y") if row["reporting_month"] else "N/A",
             "month_sort": row["reporting_month"].isoformat() if row["reporting_month"] else "",
             "rev_budget": rb,

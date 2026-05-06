@@ -147,6 +147,7 @@ This document is a **step-by-step playbook** to implement the four pillars discu
 
 ### Step 3.2 — Revenue trackers (`RevenueTrackers.tsx`, `/revenue-trackers`)
 
+**Shipped (forecast tab):** **AMJ quarter lens** — The **Revenue forecast** tab shows a **Quarter summary · AMJ** strip: total forecast, total MMF, open requisition + opening fee, and joiners + joining fee, all **aggregated over Apr–Jun** of the Indian FY derived from the selected **governance week**. The **Revenue forecast vs MMF · AMJ** chart plots those three months (missing months show as zero). Full **monthly roll-up** and **weekly entries** tables are unchanged.
 
 | Step  | Action                                                                                                                                                     |
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |

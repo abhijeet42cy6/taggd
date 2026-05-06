@@ -164,6 +164,7 @@ Large HR form: many `platform-search` inputs (name, email, stages, CTC, dates, e
 ### 2.10 `/revenue-trackers` — `RevenueTrackers.tsx`
 
 - **`<select>`** for project filter and as-of filter (good).
+- **Governance week** (Monday) drives the **Indian FY** used for the **Revenue forecast** tab’s **AMJ (Apr–Jun)** quarter totals and the three-month **forecast vs MMF** chart.
 - **Remarks** textarea — keep.
 
 ### 2.11 `/billing` — `Billing.tsx`

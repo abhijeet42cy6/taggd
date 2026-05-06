@@ -19,6 +19,7 @@ from backend.db.database import (
     ensure_project_client,
 )
 from backend.db.finance_dedupe import dedupe_finance_tables
+from backend.core.finance_mapping_regions import apply_project_regions_from_finance_mapping_workbook
 
 
 def _norm_sheet_token(s: str) -> str:
@@ -483,6 +484,14 @@ def ingest_finance_master(file_path):
                 proj_row.has_taggd_joiner_sheet = bool(ak and ak in taggd_sheet_account_keys)
         else:
             print("  Warning: No Taggd_Source_Joiner rows — project cohort flags not updated.")
+
+        mr_stats = apply_project_regions_from_finance_mapping_workbook(db, file_path)
+        if mr_stats.sheet_name:
+            print(
+                f"  Mapping «{mr_stats.sheet_name}»: region/sub_region patched for "
+                f"{mr_stats.project_rows_updated} project row(s); "
+                f"{mr_stats.accounts_in_sheet_not_in_db} sheet account(s) had no DB match."
+            )
 
         dedupe_finance_tables(db)
         db.commit()

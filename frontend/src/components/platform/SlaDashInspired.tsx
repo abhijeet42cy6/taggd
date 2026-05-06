@@ -353,12 +353,32 @@ export function SlaBenchmarkForecastCards({ variant = "both" }: { variant?: "bot
   );
 }
 
-/** Map workspace region labels into coarse zones for the simplified map. */
-export function regionToZoneFromLabel(region: string | null | undefined): "North" | "South" | "West" | "East" | "Central" {
-  const s = (region || "").toLowerCase();
-  if (s.includes("north")) return "North";
-  if (s.includes("south")) return "South";
-  if (s.includes("west")) return "West";
-  if (s.includes("east")) return "East";
+/**
+ * Map workspace region / sub-region labels into coarse zones for the SLA map.
+ * Uses `sub_region` when the primary `region` is empty (e.g. "West 1" only on sub_region).
+ * Single-letter codes N/S/E/W/C match common scorecard encodings.
+ */
+export function regionToZoneFromLabel(
+  region: string | null | undefined,
+  subRegion?: string | null | undefined,
+): "North" | "South" | "West" | "East" | "Central" {
+  const r = (region || "").trim();
+  const sr = (subRegion || "").trim();
+  const combined = `${r} ${sr}`.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!combined) return "Central";
+
+  if (r.length === 1) {
+    const c = r.toUpperCase();
+    if (c === "N") return "North";
+    if (c === "S") return "South";
+    if (c === "E") return "East";
+    if (c === "W") return "West";
+    if (c === "C") return "Central";
+  }
+
+  if (combined.includes("north")) return "North";
+  if (combined.includes("south")) return "South";
+  if (combined.includes("west")) return "West";
+  if (combined.includes("east")) return "East";
   return "Central";
 }

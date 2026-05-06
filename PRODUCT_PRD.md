@@ -331,7 +331,7 @@ Project-attached **transition documents** with permissions (**§9**).
 | Clients            | `/clients`, `/clients/:clientId` | Account cockpit               |
 | Requisitions       | `/requisitions`                  | Req operations + intelligence |
 | Finance Command    | `/finance`                       | Money, unbilled, bad debt     |
-| Revenue trackers   | `/revenue-trackers`              | Weekly forecast & visibility  |
+| Revenue trackers   | `/revenue-trackers`              | Weekly forecast & visibility; **Revenue forecast** tab adds **AMJ (Q1) quarter** summary KPIs + Apr–May–Jun chart vs MMF (Indian FY from governance week)  |
 | SLA Performance    | `/sla-performance`               | Contract SLA                  |
 | Workforce Mgmt     | `/wfm`                           | Capacity signals              |
 | Data Operations    | `/data-operations`               | Risk & integrity              |

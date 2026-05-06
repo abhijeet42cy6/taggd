@@ -7,6 +7,9 @@ export type FinanceRowVm = {
   month_sort?: string;
   account_name: string;
   vertical: string;
+  /** From Project at merge time — regional chart uses sub_region || region when projects list is incomplete. */
+  region?: string | null;
+  sub_region?: string | null;
   project_head?: string | null;
   practice_head?: string | null;
   rev_budget_inr: number;
@@ -92,6 +95,8 @@ export function financeRowsVm(rows: any[]): FinanceRowVm[] {
     month_sort: r.month_sort,
     account_name: r.account_name,
     vertical: r.vertical,
+    region: r.region != null && String(r.region).trim() ? String(r.region).trim() : null,
+    sub_region: r.sub_region != null && String(r.sub_region).trim() ? String(r.sub_region).trim() : null,
     project_head: r.project_head ?? null,
     practice_head: r.practice_head ?? null,
     rev_budget_inr: normalizePlainNumber(r.rev_budget),

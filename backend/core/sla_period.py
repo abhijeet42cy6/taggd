@@ -60,6 +60,31 @@ _GARBAGE = frozenset(
 )
 
 
+def normalize_timeline_month_key(raw: str | None) -> str:
+    """
+    Single canonical YYYY-MM key for /sla/timeseries aggregation and FY/quarter rollups.
+
+    Legacy `reporting_month` values (e.g. Oct25, Apr24) must match `period_start`-derived
+    keys; otherwise the frontend's Indian FY sets (YYYY-MM only) never intersect timelines
+    and quarterly charts show wrong or empty series.
+    """
+    s = (raw or "").strip()
+    if not s or s in _GARBAGE or "Metrics to be picked" in s:
+        return ""
+    if len(s) >= 7 and s[4] == "-" and s[:4].isdigit():
+        mo = s[5:7]
+        if mo.isdigit() and 1 <= int(mo) <= 12:
+            return s[:7]
+    d = parse_sla_month_label(s)
+    if d is not None:
+        return canonical_month_label(d)
+    try:
+        parsed = dt.datetime.fromisoformat(s[:10]).date()
+        return canonical_month_label(parsed)
+    except ValueError:
+        return ""
+
+
 def canonical_month_label(d: dt.date | dt.datetime | str | None) -> str:
     """Stable month id for APIs and DB reporting_month (lexicographically sortable)."""
     if d is None:

@@ -139,7 +139,7 @@
 | Plan section               | Status                | Notes                                                                                                                                                 |
 | -------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **3.1 Finance Command**    | **Partial**           | Tab **“Forecast packs”** + link to `/revenue-governance`. No embedded queue; ledger unchanged.                                                        |
-| **3.2 Revenue trackers**   | **Partial**           | Pack strip + governance week link for visibility; **no** “Enter vs status” toggle; charts **not** filtered to approved-only; no client timeline link. |
+| **3.2 Revenue trackers**   | **Partial**           | Pack strip + governance week link for visibility; **Revenue forecast** tab: **AMJ (Apr–Jun)** quarter KPIs + fixed 3-month chart keyed off governance week’s Indian FY; **no** “Enter vs status” toggle; data still **not** filtered to approved-only in those roll-ups; no client timeline link. |
 | **3.3 Budget & forecast**  | **Not done**          | No UI copy or linkage from `BudgetForecast` to weekly pack; **weekly revenue budget is not part of the submission object.**                           |
 | **3.4 Client detail**      | **Not done**          | No new tab for governance timeline / pending list.                                                                                                    |
 | **3.5 Billing validation** | **Unchanged vs plan** | Still **“Finance validation”** in nav in places; plan suggested rename to avoid confusion—**not** applied in this implementation pass.                |
@@ -223,7 +223,7 @@ The execution plan and product language mix **weekly TAGGD forecast**, **monthly
 
 | Risk                                            | Current posture                                                                                                                                                                                      |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Draft vs approved mixed in dashboards           | **Open** — Revenue tracker charts still aggregate **all** forecast rows; they do **not** filter to “approved pack only”.                                                                             |
+| Draft vs approved mixed in dashboards           | **Open** — Revenue tracker **AMJ** chart and quarter KPIs still aggregate **all** loaded weekly forecast rows in scope (by month anchor); they do **not** filter to “approved pack only”.                                                                             |
 | Scope creep on KPIs                             | **Mitigated** — only forecast + optional visibility in v1.                                                                                                                                           |
 | Role confusion (billing vs forecast governance) | **Partially open** — distinct routes (`/finance-validation` vs `/revenue-governance`) help; **“Finance validation”** naming vs **“Revenue packs”** still benefits from the plan’s rename (Pillar 4). |
 

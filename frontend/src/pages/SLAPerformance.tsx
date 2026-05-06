@@ -12,6 +12,7 @@ import {
   aggregatePeriod,
   formatPeriodColumnHeaderFromData,
   formatPeriodLabelShortFromData,
+  normalizeSlaMonthToYm,
   periodMonthSetsFromData,
   type FyMode,
 } from "@/lib/sla-fy";
@@ -76,19 +77,30 @@ function regionalHeadFromRow(r: any): string {
   return s || "—";
 }
 
-function accountMetaByAccount(rows: any[]): Map<string, { region: string; practice_head: string; regional_head: string }> {
+function accountMetaByAccount(
+  rows: any[],
+): Map<string, { region: string; region_raw: string; sub_region: string; practice_head: string; regional_head: string }> {
   const by = new Map<string, any[]>();
   for (const r of rows) {
     const a = r.account_name || "Unknown";
     if (!by.has(a)) by.set(a, []);
     by.get(a)!.push(r);
   }
-  const out = new Map<string, { region: string; practice_head: string; regional_head: string }>();
+  const out = new Map<
+    string,
+    { region: string; region_raw: string; sub_region: string; practice_head: string; regional_head: string }
+  >();
   for (const [acc, list] of by) {
     const sorted = [...list].sort((a, b) => monthSortKey(b).localeCompare(monthSortKey(a)));
     const best = sorted[0];
+    const reg = (best?.region && String(best.region).trim()) || "";
+    const sub = (best?.sub_region != null && String(best.sub_region).trim()) || "";
+    /** Prefer project `region`, else `sub_region` (e.g. West 1) so regional charts match directory data. */
+    const geo = reg || sub || "—";
     out.set(acc, {
-      region: (best?.region && String(best.region).trim()) || "—",
+      region: geo,
+      region_raw: reg || "—",
+      sub_region: sub || "—",
       practice_head: (best?.practice_head && String(best.practice_head).trim()) || "—",
       regional_head: regionalHeadFromRow(best),
     });
@@ -193,13 +205,21 @@ function effectiveGlobalMonthSet(gf: SlaGlobalFilters, allMonths: string[]): Set
 }
 
 function buildAllowedAccountsForGlobalFilters(
-  dim: Map<string, { region: string; practice_head: string; regional_head: string }>,
+  dim: Map<
+    string,
+    { region: string; region_raw: string; sub_region: string; practice_head: string; regional_head: string }
+  >,
   gf: SlaGlobalFilters,
 ): Set<string> {
   const out = new Set<string>();
   for (const [acc, d] of dim) {
     if (gf.regionalHeads.length > 0 && !gf.regionalHeads.includes(d.regional_head)) continue;
-    if (gf.regions.length > 0 && !gf.regions.includes(d.region)) continue;
+    if (gf.regions.length > 0) {
+      const ok = gf.regions.some(
+        (g) => g === d.region || g === d.region_raw || g === d.sub_region,
+      );
+      if (!ok) continue;
+    }
     if (gf.practiceHeads.length > 0 && !gf.practiceHeads.includes(d.practice_head)) continue;
     if (gf.accounts.length > 0 && !gf.accounts.includes(acc)) continue;
     out.add(acc);
@@ -221,7 +241,9 @@ function globalFilterRows(rawRows: any[], gf: SlaGlobalFilters, allMonthsFromTs:
     }
     if (monthSet != null) {
       const rm = String((r as any).reporting_month ?? "").trim();
-      if (!rm || rm === "N/A" || !monthSet.has(rm)) return false;
+      if (!rm || rm === "N/A") return false;
+      const rmYm = normalizeSlaMonthToYm(rm);
+      if (!rmYm || !monthSet.has(rmYm)) return false;
     }
     return true;
   });
@@ -243,7 +265,10 @@ function globalFilterTimeseries(
       timeline:
         monthSet == null
           ? a.timeline
-          : (a.timeline as any[]).filter((t: any) => monthSet.has(t.month)),
+          : (a.timeline as any[]).filter((t: any) => {
+              const ym = normalizeSlaMonthToYm(String(t.month ?? ""));
+              return Boolean(ym && monthSet!.has(ym));
+            }),
     }));
 }
 
@@ -545,7 +570,10 @@ export function SLAPerformance() {
   const allMonths = useMemo<string[]>(() => {
     const monthSet = new Set<string>();
     rawTimeseries.forEach((acc: any) =>
-      acc.timeline.forEach((t: any) => monthSet.add(t.month)),
+      acc.timeline.forEach((t: any) => {
+        const ym = normalizeSlaMonthToYm(String(t.month ?? ""));
+        if (ym) monthSet.add(ym);
+      }),
     );
     return Array.from(monthSet).sort((a, b) => a.localeCompare(b));
   }, [rawTimeseries]);
@@ -599,6 +627,27 @@ export function SLAPerformance() {
     [rawTimeseries, slaGfApplied, rawRows, allMonths],
   );
 
+  /**
+   * Months still present after global filters on the timeseries. FY comparison windows (p1/p2) must be
+   * derived from this — not from raw `allMonths` — or Period 1/2 have no overlap with filtered timelines
+   * ("No Met / Not met cells in this FY window") while headline KPIs still show data.
+   */
+  const timeseriesScopeMonths = useMemo(() => {
+    const s = new Set<string>();
+    for (const acc of timeseries) {
+      for (const t of acc.timeline || []) {
+        const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+        if (ym) s.add(ym);
+      }
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [timeseries]);
+
+  const fyComparisonMonthBasis = useMemo(
+    () => (timeseriesScopeMonths.length > 0 ? timeseriesScopeMonths : allMonths),
+    [timeseriesScopeMonths, allMonths],
+  );
+
   /** Account health + zone “overview” filters narrow KPIs / charts / LLM payload (table still uses `filtered`). */
   const kpiViewAccountSet = useMemo(() => {
     const z = tableRegionZone;
@@ -609,7 +658,10 @@ export function SLAPerformance() {
         ? null
         : new Set(
             rows
-              .filter((r) => regionToZoneFromLabel(String((r as any).region ?? "")) === z)
+              .filter(
+                (r) =>
+                  regionToZoneFromLabel(String((r as any).region ?? ""), (r as any).sub_region) === z,
+              )
               .map((r) => String((r as any).account_name || "Unknown")),
           );
     if (h && z && zoneAccounts) return new Set([...h].filter((a) => zoneAccounts.has(a)));
@@ -640,6 +692,8 @@ export function SLAPerformance() {
     const s = new Set<string>();
     accountMetaFull.forEach((d) => {
       if (d.region && d.region !== "—") s.add(d.region);
+      if (d.region_raw && d.region_raw !== "—") s.add(d.region_raw);
+      if (d.sub_region && d.sub_region !== "—") s.add(d.sub_region);
     });
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [accountMetaFull]);
@@ -760,6 +814,8 @@ export function SLAPerformance() {
     for (const acc of trendAccounts) {
       lookup[acc.account_name] = {};
       for (const t of acc.timeline) {
+        const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+        if (!ym) continue;
         const denom = t.met + t.not_met;
         const pct =
           t.met_pct != null && Number.isFinite(Number(t.met_pct))
@@ -767,7 +823,7 @@ export function SLAPerformance() {
             : denom > 0
               ? Math.round((t.met / denom) * 1000) / 10
               : null;
-        lookup[acc.account_name][t.month] = pct;
+        lookup[acc.account_name][ym] = pct;
       }
     }
     return filteredMonths.map((month): SlaSeriesPoint => {
@@ -809,13 +865,13 @@ export function SLAPerformance() {
   const accountMetaMap = useMemo(() => accountMetaByAccount(rawRows), [rawRows]);
 
   const { p1: p1Months, p2: p2Months } = useMemo(
-    () => periodMonthSetsFromData(fyMode, allMonths),
-    [fyMode, allMonths],
+    () => periodMonthSetsFromData(fyMode, fyComparisonMonthBasis),
+    [fyMode, fyComparisonMonthBasis],
   );
-  const fyLabelP1 = useMemo(() => formatPeriodLabelShortFromData(fyMode, "p1", allMonths), [fyMode, allMonths]);
-  const fyLabelP2 = useMemo(() => formatPeriodLabelShortFromData(fyMode, "p2", allMonths), [fyMode, allMonths]);
-  const fyColH1 = useMemo(() => formatPeriodColumnHeaderFromData(fyMode, "p1", allMonths), [fyMode, allMonths]);
-  const fyColH2 = useMemo(() => formatPeriodColumnHeaderFromData(fyMode, "p2", allMonths), [fyMode, allMonths]);
+  const fyLabelP1 = useMemo(() => formatPeriodLabelShortFromData(fyMode, "p1", fyComparisonMonthBasis), [fyMode, fyComparisonMonthBasis]);
+  const fyLabelP2 = useMemo(() => formatPeriodLabelShortFromData(fyMode, "p2", fyComparisonMonthBasis), [fyMode, fyComparisonMonthBasis]);
+  const fyColH1 = useMemo(() => formatPeriodColumnHeaderFromData(fyMode, "p1", fyComparisonMonthBasis), [fyMode, fyComparisonMonthBasis]);
+  const fyColH2 = useMemo(() => formatPeriodColumnHeaderFromData(fyMode, "p2", fyComparisonMonthBasis), [fyMode, fyComparisonMonthBasis]);
 
   const fyAccountsForChart = useMemo(() => {
     const list = timeseries
@@ -857,11 +913,13 @@ export function SLAPerformance() {
       if (!roll.has(region)) roll.set(region, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
       const b = roll.get(region)!;
       for (const t of acc.timeline) {
-        if (p1Months.has(t.month)) {
+        const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+        if (!ym) continue;
+        if (p1Months.has(ym)) {
           b.met1 += t.met;
           b.nm1 += t.not_met;
         }
-        if (p2Months.has(t.month)) {
+        if (p2Months.has(ym)) {
           b.met2 += t.met;
           b.nm2 += t.not_met;
         }
@@ -910,11 +968,13 @@ export function SLAPerformance() {
       if (!roll.has(ph)) roll.set(ph, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
       const b = roll.get(ph)!;
       for (const t of acc.timeline) {
-        if (p1Months.has(t.month)) {
+        const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+        if (!ym) continue;
+        if (p1Months.has(ym)) {
           b.met1 += t.met;
           b.nm1 += t.not_met;
         }
-        if (p2Months.has(t.month)) {
+        if (p2Months.has(ym)) {
           b.met2 += t.met;
           b.nm2 += t.not_met;
         }
@@ -933,12 +993,75 @@ export function SLAPerformance() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [timeseriesKpiScoped, p1Months, p2Months, accountMetaMap]);
 
+  /**
+   * When /sla/timeseries is empty or has no Met/Not met in the FY windows, derive practice-head Met % from
+   * metric rows in `slaKpiScopeRows` (one count per metric per reporting month) so this view is not blank.
+   */
+  const fyPracticeChartDataFromRows = useMemo(() => {
+    const roll = new Map<string, { met1: number; nm1: number; met2: number; nm2: number }>();
+    const dedupe = new Set<string>();
+    for (const r of slaKpiScopeRows) {
+      const ym =
+        normalizeSlaMonthToYm(String((r as any).reporting_month ?? "")) ||
+        normalizeSlaMonthToYm(
+          typeof (r as any).period_start === "string" ? (r as any).period_start : String((r as any).period_start ?? ""),
+        );
+      if (!ym) continue;
+      const in1 = p1Months.has(ym);
+      const in2 = p2Months.has(ym);
+      if (!in1 && !in2) continue;
+      const id = Number((r as any).id);
+      const dedupeKey = `${Number.isFinite(id) ? id : `${(r as any).account_name}|${(r as any).metric_label}`}|${ym}`;
+      if (dedupe.has(dedupeKey)) continue;
+      dedupe.add(dedupeKey);
+      const acc = String((r as any).account_name || "Unknown");
+      const ph = (accountMetaMap.get(acc)?.practice_head || "").trim() || "Unknown";
+      const bkt = statusBucket((r as any).status);
+      if (bkt === "not_reported") continue;
+      if (!roll.has(ph)) roll.set(ph, { met1: 0, nm1: 0, met2: 0, nm2: 0 });
+      const b = roll.get(ph)!;
+      if (in1) {
+        if (bkt === "met") b.met1 += 1;
+        else if (bkt === "breached") b.nm1 += 1;
+      }
+      if (in2) {
+        if (bkt === "met") b.met2 += 1;
+        else if (bkt === "breached") b.nm2 += 1;
+      }
+    }
+    return Array.from(roll.entries())
+      .map(([name, v]) => {
+        const t1 = v.met1 + v.nm1;
+        const t2 = v.met2 + v.nm2;
+        return {
+          name,
+          p1: t1 > 0 ? Math.round((v.met1 / t1) * 1000) / 10 : null,
+          p2: t2 > 0 ? Math.round((v.met2 / t2) * 1000) / 10 : null,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [slaKpiScopeRows, accountMetaMap, p1Months, p2Months]);
+
+  const fyPracticeHeadAnalysis = useMemo(() => {
+    const ts = fyPracticeChartData;
+    const tsHasVals = ts.some((x) => x.p1 != null || x.p2 != null);
+    const fromRows = fyPracticeChartDataFromRows;
+    const rowsHasVals = fromRows.some((x) => x.p1 != null || x.p2 != null);
+    if (tsHasVals) return { data: ts, source: "timeseries" as const };
+    if (rowsHasVals) return { data: fromRows, source: "rows" as const };
+    if (ts.length > 0) return { data: ts, source: "timeseries" as const };
+    if (fromRows.length > 0) return { data: fromRows, source: "rows" as const };
+    return { data: ts, source: "timeseries" as const };
+  }, [fyPracticeChartData, fyPracticeChartDataFromRows]);
+
   const portfolioTrendAllMonths = useMemo((): SlaSeriesPoint[] => {
     return allMonths.map((month) => {
       let met = 0;
       let nm = 0;
       for (const acc of timeseriesKpiScoped) {
-        const t = acc.timeline.find((x: any) => x.month === month);
+        const t = acc.timeline.find(
+          (x: any) => normalizeSlaMonthToYm(String(x.month ?? "")) === month,
+        );
         if (t) {
           met += t.met;
           nm += t.not_met;
@@ -971,11 +1094,13 @@ export function SLAPerformance() {
       let p2nm = 0;
       for (const acc of timeseriesKpiScoped) {
         for (const t of acc.timeline) {
-          if (p1q.has(t.month)) {
+          const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+          if (!ym) continue;
+          if (p1q.has(ym)) {
             p1m += t.met;
             p1nm += t.not_met;
           }
-          if (p2q.has(t.month)) {
+          if (p2q.has(ym)) {
             p2m += t.met;
             p2nm += t.not_met;
           }
@@ -1057,11 +1182,13 @@ export function SLAPerformance() {
     let p2nm = 0;
     for (const acc of timeseriesKpiScoped) {
       for (const t of acc.timeline) {
-        if (p1Months.has(t.month)) {
+        const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+        if (!ym) continue;
+        if (p1Months.has(ym)) {
           p1m += t.met;
           p1nm += t.not_met;
         }
-        if (p2Months.has(t.month)) {
+        if (p2Months.has(ym)) {
           p2m += t.met;
           p2nm += t.not_met;
         }
@@ -1140,7 +1267,7 @@ export function SLAPerformance() {
     const roll = new Map<string, { met: number; notMet: number }>();
     for (const z of zones) roll.set(z, { met: 0, notMet: 0 });
     for (const r of slaKpiScopeRows) {
-      const z = regionToZoneFromLabel((r as any).region as string);
+      const z = regionToZoneFromLabel((r as any).region as string, (r as any).sub_region);
       const b = statusBucket(r.status);
       const o = roll.get(z)!;
       if (b === "met") o.met++;
@@ -1373,7 +1500,9 @@ export function SLAPerformance() {
       for (const t of acc.timeline) {
         const nr = t.not_reported ?? 0;
         if (nr <= 0) continue;
-        byMonth.set(t.month, (byMonth.get(t.month) ?? 0) + nr);
+        const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+        if (!ym) continue;
+        byMonth.set(ym, (byMonth.get(ym) ?? 0) + nr);
       }
     }
     return allMonths.map((m) => ({
@@ -1421,7 +1550,8 @@ export function SLAPerformance() {
         ? true
         : rm && rm !== "N/A" && tableFilteredMonthSet.has(rm);
     const okZone =
-      tableRegionZone === null || regionToZoneFromLabel((r as any).region as string) === tableRegionZone;
+      tableRegionZone === null ||
+      regionToZoneFromLabel((r as any).region as string, (r as any).sub_region) === tableRegionZone;
     const okHealth =
       healthAccountPick === null || healthAccountPick.has(String((r as any).account_name || "Unknown"));
     return okSearch && okStatus && okAcct && okTime && okZone && okHealth;
@@ -2833,12 +2963,23 @@ export function SLAPerformance() {
             <div className="sla-dash-card-hd">
               <div className="sla-dash-card-title">Practice head analysis</div>
               <div className="sla-dash-card-sub">
-                Met % by practice head from time-series — {fyLabelP1} vs {fyLabelP2} (same windows as Year-over-Year).
+                Met % by practice head — {fyLabelP1} vs {fyLabelP2} (same FY windows as Year-over-Year).{" "}
+                {fyPracticeHeadAnalysis.source === "rows"
+                  ? "Sourced from metric rows with a YYYY-MM reporting month in each window (time-series had no Met/Not met counts here)."
+                  : "Sourced from /sla/timeseries snapshots in each window."}
               </div>
             </div>
             <div className="sla-dash-card-bd">
-              {fyPracticeChartData.length === 0 ? (
-                <div className="sla-empty">No practice-head rollup.</div>
+              {kpiViewAccountSet && kpiViewAccountSet.size === 0 ? (
+                <div className="sla-empty">
+                  Overview zone / health filter matches no accounts. Clear those picks on Overview (chips under Advanced
+                  filters) to see practice-head rollups.
+                </div>
+              ) : fyPracticeHeadAnalysis.data.length === 0 ? (
+                <div className="sla-empty">
+                  No practice-head rollup — no time-series accounts and no metric rows with ISO reporting months in these FY
+                  windows.
+                </div>
               ) : (
                 <>
                   <div className="platform-table-wrap" style={{ marginBottom: 16 }}>
@@ -2852,7 +2993,7 @@ export function SLAPerformance() {
                         </tr>
                       </thead>
                       <tbody>
-                        {fyPracticeChartData.map((row) => (
+                        {fyPracticeHeadAnalysis.data.map((row) => (
                           <tr key={row.name}>
                             <td style={{ fontWeight: 600 }}>{row.name}</td>
                             <td style={{ fontFamily: "'DM Mono',monospace" }}>{row.p1 == null ? "—" : `${row.p1.toFixed(1)}%`}</td>
@@ -2865,14 +3006,14 @@ export function SLAPerformance() {
                   </div>
                   <div style={{ marginBottom: 16 }}>
                     <SlaFyComparisonGroupedBar
-                      data={fyPracticeChartData}
+                      data={fyPracticeHeadAnalysis.data}
                       labelP1={fyLabelP1}
                       labelP2={fyLabelP2}
                       height={320}
                     />
                   </div>
                   <SlaFyComparisonLineChart
-                    data={fyPracticeChartData}
+                    data={fyPracticeHeadAnalysis.data}
                     labelP1={fyLabelP1}
                     labelP2={fyLabelP2}
                     height={300}

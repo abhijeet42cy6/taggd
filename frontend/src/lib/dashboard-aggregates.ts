@@ -235,12 +235,30 @@ export function buildYoYRevenueSeries(
 
 export type RegionBarDatum = { region: string; actual: number; budget: number };
 
+/**
+ * Executive regional chart bucket — matches corporate «Mapping» geography: prefer **Sub Region**,
+ * then **Region** (Revenue_Budget / Mapping columns). Falls back to finance row fields when the
+ * project is missing from the client-side projects array (stale cache / edge scope).
+ */
+export function regionalRevenueBucketLabel(row: FinanceRowVm, pmap: Map<number, Project>): string {
+  const pidRaw = row.project_id;
+  const pid =
+    pidRaw != null && typeof pidRaw === "number"
+      ? pidRaw
+      : pidRaw != null
+        ? Number(pidRaw)
+        : NaN;
+  const p = Number.isFinite(pid) ? pmap.get(pid as number) : undefined;
+  const sub = (p?.sub_region || row.sub_region || "").trim();
+  const reg = (p?.region || row.region || "").trim();
+  return sub || reg || "Unknown";
+}
+
 export function buildRegionalRevenue(rows: FinanceRowVm[], projects: Project[]): RegionBarDatum[] {
   const pmap = new Map(projects.map((p) => [p.id, p]));
   const by: Record<string, { a: number; b: number }> = {};
   for (const r of rows) {
-    const p = r.project_id != null ? pmap.get(r.project_id) : undefined;
-    const reg = (p?.region || "Unknown").trim() || "Unknown";
+    const reg = regionalRevenueBucketLabel(r, pmap);
     if (!by[reg]) by[reg] = { a: 0, b: 0 };
     by[reg].a += r.rev_actual_inr;
     by[reg].b += r.rev_budget_inr;
