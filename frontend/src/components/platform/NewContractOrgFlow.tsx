@@ -24,7 +24,8 @@ export type EngagementRow = {
   tag_value: string;
   headUserId: string;
   form: Record<string, string>;
-  msa_file?: File | null;
+  /** Optional contract / MSA attachments (multiple uploads per engagement). */
+  msa_files: File[];
 };
 
 export type NewContractOrgBundle = {
@@ -45,7 +46,7 @@ export type NewContractOrgBundle = {
     hierarchy_tag_sbe?: string | null;
     project_head_user_id: number | null;
     form: Record<string, string>;
-    msa_file?: File | null;
+    msa_files?: File[];
   }>;
 };
 
@@ -129,7 +130,7 @@ export function makeEngagementRow(makeEmpty: () => Record<string, string>): Enga
     tag_value: "",
     headUserId: "",
     form: f,
-    msa_file: null,
+    msa_files: [],
   };
 }
 
@@ -190,7 +191,7 @@ export function buildOrgBundle(
         ...engTags,
         project_head_user_id: headUid,
         form,
-        msa_file: e.msa_file ?? null,
+        msa_files: [...(e.msa_files ?? [])],
       };
     }),
   };
@@ -423,54 +424,75 @@ export function UserPickerDropdown({
   );
 }
 
-// ─── FileUploadZone ────────────────────────────────────────────────────────────
+// ─── MultiFileUploadZone ───────────────────────────────────────────────────────
 
-function FileUploadZone({
-  file,
+function fileDedupeKey(f: File): string {
+  return `${f.name}\u0000${f.size}\u0000${f.lastModified}`;
+}
+
+function MultiFileUploadZone({
+  files,
   onChange,
-  label = "Upload MSA / contract document",
+  label = "Upload MSA / contract documents",
 }: {
-  file: File | null | undefined;
-  onChange: (f: File | null) => void;
+  files: File[];
+  onChange: (next: File[]) => void;
   label?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const mergeFromFileList = (list: FileList | null) => {
+    if (!list?.length) return;
+    const incoming = Array.from(list);
+    const seen = new Set(files.map(fileDedupeKey));
+    const merged = [...files];
+    for (const f of incoming) {
+      const k = fileDedupeKey(f);
+      if (!seen.has(k)) {
+        seen.add(k);
+        merged.push(f);
+      }
+    }
+    onChange(merged);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const removeAt = (idx: number) => {
+    onChange(files.filter((_, i) => i !== idx));
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
   return (
     <div>
       <input
         ref={inputRef}
         type="file"
+        multiple
         accept=".pdf,.docx,.doc,.xlsx,.xls,.png,.jpg,.jpeg"
         style={{ display: "none" }}
-        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+        onChange={(e) => mergeFromFileList(e.target.files)}
       />
-      {file ? (
-        <div className="ncp-file-selected">
-          <span>📎</span>
-          <span className="ncp-file-name">{file.name}</span>
-          <span className="ncp-file-size">({(file.size / 1024).toFixed(0)} KB)</span>
-          <button
-            type="button"
-            className="ncp-file-remove"
-            onClick={() => {
-              onChange(null);
-              if (inputRef.current) inputRef.current.value = "";
-            }}
-          >
-            ✕
-          </button>
+      {files.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+          {files.map((f, i) => (
+            <div key={`${fileDedupeKey(f)}-${i}`} className="ncp-file-selected">
+              <span>📎</span>
+              <span className="ncp-file-name">{f.name}</span>
+              <span className="ncp-file-size">({(f.size / 1024).toFixed(0)} KB)</span>
+              <button type="button" className="ncp-file-remove" onClick={() => removeAt(i)} aria-label={`Remove ${f.name}`}>
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
-      ) : (
-        <button
-          type="button"
-          className="ncp-upload-zone"
-          onClick={() => inputRef.current?.click()}
-        >
-          <span style={{ fontSize: 22, marginBottom: 4 }}>⬆</span>
-          <span>{label}</span>
-          <span className="ncp-hint" style={{ padding: 0 }}>PDF, Word, Excel, image</span>
-        </button>
-      )}
+      ) : null}
+      <button type="button" className="ncp-upload-zone" onClick={() => inputRef.current?.click()}>
+        <span style={{ fontSize: 22, marginBottom: 4 }}>⬆</span>
+        <span>{files.length ? "Add more files…" : label}</span>
+        <span className="ncp-hint" style={{ padding: 0 }}>
+          PDF, Word, Excel, image — you can select multiple files at once
+        </span>
+      </button>
     </div>
   );
 }
@@ -1087,10 +1109,10 @@ export function NewContractOrgFlow({
               <div className="ncp-micro-label" style={{ marginBottom: 8 }}>
                 MSA / Contract document
               </div>
-              <FileUploadZone
-                file={row.msa_file}
-                onChange={(f) =>
-                  setEngagements((rs) => rs.map((r) => (r.id === row.id ? { ...r, msa_file: f } : r)))
+              <MultiFileUploadZone
+                files={row.msa_files}
+                onChange={(next) =>
+                  setEngagements((rs) => rs.map((r) => (r.id === row.id ? { ...r, msa_files: next } : r)))
                 }
               />
             </div>
@@ -1209,7 +1231,13 @@ export function NewContractOrgFlow({
                           {parseFloat(e.form.signed_acv_inr.replace(/,/g, "")).toLocaleString("en-IN")}
                         </span>
                       ) : null}
-                      {e.msa_file ? <span>📎 {e.msa_file.name}</span> : null}
+                      {e.msa_files?.length ? (
+                        <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "0 8px" }}>
+                          {e.msa_files.map((f) => (
+                            <span key={fileDedupeKey(f)}>📎 {f.name}</span>
+                          ))}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 );

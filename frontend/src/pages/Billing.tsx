@@ -17,7 +17,7 @@ import { cn, formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Plus, PencilLine, Trash2, FilterX } from "lucide-react";
+import { Download, RefreshCw, Plus, PencilLine, Trash2, FilterX } from "lucide-react";
 import "@/styles/new-contract-panel.css";
 import "@/styles/billing-ds-table.css";
 
@@ -71,6 +71,98 @@ function rowMatchesBillingTableFilters(
     if (!hay.includes(q)) return false;
   }
   return true;
+}
+
+function sumNumeric(rows: RevenueBillingRow[], pick: (r: RevenueBillingRow) => number | null | undefined): number {
+  let t = 0;
+  for (const r of rows) {
+    const v = pick(r);
+    if (typeof v === "number" && Number.isFinite(v)) t += v;
+  }
+  return t;
+}
+
+function avgNumeric(rows: RevenueBillingRow[], pick: (r: RevenueBillingRow) => number | null | undefined): number | null {
+  const vals: number[] = [];
+  for (const r of rows) {
+    const v = pick(r);
+    if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+  }
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function csvCell(v: string | number | null | undefined): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+/** UTF-8 CSV with BOM — opens cleanly in Excel. */
+function downloadBillingExcel(rows: RevenueBillingRow[]) {
+  const headers = [
+    "id",
+    "project_id",
+    "account_name",
+    "update_date",
+    "fiscal_year_label",
+    "project_manager",
+    "revenue_booked_inr",
+    "mmf_inr",
+    "net_revenue_inr",
+    "total_joiners",
+    "taggd_joiner",
+    "er_ijp_other_count",
+    "other_joiner_fee_inr",
+    "rph_inr",
+    "total_joining_fee_inr",
+    "opening_req",
+    "opening_fee_inr",
+    "taggd_joiner_fee_inr",
+    "invoice_number",
+    "invoice_amount_inr",
+    "collection_received_inr",
+    "workflow_status",
+  ];
+  const lines = [headers.join(",")];
+  for (const r of rows) {
+    lines.push(
+      [
+        csvCell(r.id),
+        csvCell(r.project_id),
+        csvCell(r.account_name),
+        csvCell(r.update_date),
+        csvCell(r.fiscal_year_label),
+        csvCell(r.project_manager),
+        csvCell(r.revenue_booked_inr),
+        csvCell(r.mmf_inr),
+        csvCell(r.net_revenue_inr),
+        csvCell(r.total_joiners),
+        csvCell(r.taggd_joiner),
+        csvCell(r.er_ijp_other_count),
+        csvCell(r.er_ijp_other_fee_inr),
+        csvCell(r.rph_inr),
+        csvCell(r.total_joining_fee_inr),
+        csvCell(r.opening_req),
+        csvCell(r.opening_fee_inr),
+        csvCell(r.taggd_joiner_fee_inr),
+        csvCell(r.invoice_number),
+        csvCell(r.invoice_amount_inr),
+        csvCell(r.collection_received_inr),
+        csvCell(r.workflow?.validation_status ?? ""),
+      ].join(","),
+    );
+  }
+  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `billing-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function formatWorkflowLabel(raw: string | null | undefined): string {
@@ -984,6 +1076,21 @@ export function Billing() {
     [rows, tableSearch, tableFy, tablePm, tableInvoice]
   );
 
+  const billingSummary = useMemo(() => {
+    const list = filteredRows;
+    return {
+      rowCount: list.length,
+      netRevenue: sumNumeric(list, (r) => r.net_revenue_inr),
+      revenueBooked: sumNumeric(list, (r) => r.revenue_booked_inr),
+      totalJoiningFee: sumNumeric(list, (r) => r.total_joining_fee_inr),
+      mmf: sumNumeric(list, (r) => r.mmf_inr),
+      totalJoiners: sumNumeric(list, (r) => r.total_joiners),
+      taggdJoiner: sumNumeric(list, (r) => r.taggd_joiner),
+      otherJoiner: sumNumeric(list, (r) => r.er_ijp_other_count),
+      rphAvg: avgNumeric(list, (r) => r.rph_inr),
+    };
+  }, [filteredRows]);
+
   const tableFiltersActive =
     tableSearch.trim() !== "" || tableFy !== "all" || tablePm !== "all" || tableInvoice !== "all";
 
@@ -1240,6 +1347,16 @@ export function Billing() {
           </button>
           <button
             type="button"
+            className="billing-toolbar-btn"
+            onClick={() => downloadBillingExcel(filteredRows)}
+            disabled={loading}
+            title="Download UTF-8 CSV (opens in Microsoft Excel). Exports rows that match the table filters below."
+          >
+            <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Download Excel
+          </button>
+          <button
+            type="button"
             className="billing-toolbar-btn billing-toolbar-btn--primary"
             onClick={openCreate}
             disabled={!projects.length}
@@ -1262,6 +1379,58 @@ export function Billing() {
             {err}
           </div>
         )}
+      </PlatformSection>
+
+      <PlatformSection title="Summary">
+        <div className="billing-ds px-1 pb-1 pt-0">
+          <div className="billing-ds-section-card billing-ds-summary-wrap">
+            <p className="billing-ds-summary-hint">
+              Totals across <strong>{billingSummary.rowCount}</strong> row
+              {billingSummary.rowCount === 1 ? "" : "s"} currently shown in the table (search, fiscal year, PM, and
+              invoice filters). Project filter above still applies to the loaded set.
+            </p>
+            <div className="billing-ds-summary-grid">
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">Total net revenue</div>
+                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.netRevenue)}</div>
+              </div>
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">Revenue booked (month)</div>
+                <div className="billing-ds-summary-sub">Σ revenue_booked_inr</div>
+                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.revenueBooked)}</div>
+              </div>
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">Total</div>
+                <div className="billing-ds-summary-sub">Σ joining fees</div>
+                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.totalJoiningFee)}</div>
+              </div>
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">MMF</div>
+                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.mmf)}</div>
+              </div>
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">Total joiners</div>
+                <div className="billing-ds-summary-value">{billingSummary.totalJoiners.toLocaleString()}</div>
+              </div>
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">RPH</div>
+                <div className="billing-ds-summary-sub">Mean of row RPH (INR)</div>
+                <div className="billing-ds-summary-value">
+                  {billingSummary.rphAvg != null ? formatLargeCurrency(billingSummary.rphAvg) : "—"}
+                </div>
+              </div>
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">Taggd joiner</div>
+                <div className="billing-ds-summary-value">{billingSummary.taggdJoiner.toLocaleString()}</div>
+              </div>
+              <div className="billing-ds-summary-tile">
+                <div className="billing-ds-summary-label">Other joiner</div>
+                <div className="billing-ds-summary-sub">ER / IJP other count</div>
+                <div className="billing-ds-summary-value">{billingSummary.otherJoiner.toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </PlatformSection>
 
       <PlatformSection title="All billing rows" action="Refresh" onAction={() => void reload()}>

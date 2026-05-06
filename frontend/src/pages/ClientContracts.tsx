@@ -1569,11 +1569,13 @@ export function ClientContracts() {
         });
         const payload = formToContractPayload(eng.form);
         const contract = await queries.createContract({ project_id: proj.id, ...payload });
-        if (eng.msa_file) {
-          try {
-            await queries.uploadContractMSA(contract.id, eng.msa_file);
-          } catch {
-            console.warn("MSA upload failed for contract", contract.id);
+        if (eng.msa_files?.length) {
+          for (const f of eng.msa_files) {
+            try {
+              await queries.uploadContractMSA(contract.id, f);
+            } catch {
+              console.warn("MSA upload failed for contract", contract.id, f.name);
+            }
           }
         }
       }
