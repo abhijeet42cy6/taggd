@@ -57,6 +57,31 @@ function fmtCmPct(v: number | null | undefined): string {
   return `${Math.round(p * 100) / 100}%`;
 }
 
+/** Disk basenames from `sow_msa_reference` (newline-separated `msa:cnt…` lines). */
+function parseSowMsaFilenames(ref: string | null | undefined): string[] {
+  if (!ref || !String(ref).trim()) return [];
+  const out: string[] = [];
+  for (const line of String(ref).replace(/\r\n/g, "\n").split("\n")) {
+    const s = line.trim();
+    if (!s.toLowerCase().startsWith("msa:")) continue;
+    const fn = s.slice(4).trim();
+    if (fn) out.push(fn);
+  }
+  return out;
+}
+
+function sortMsaFilenamesNewestFirst(fns: string[]): string[] {
+  return [...fns].sort((a, b) => {
+    const ta = /^cnt\d+_(\d+)_/.exec(a)?.[1];
+    const tb = /^cnt\d+_(\d+)_/.exec(b)?.[1];
+    return (Number(tb) || 0) - (Number(ta) || 0);
+  });
+}
+
+function displayMsaStoredName(basename: string): string {
+  return basename.replace(/^cnt\d+_\d+_/, "") || basename;
+}
+
 function numOrNull(s: string): number | null {
   const t = s.trim();
   if (!t) return null;
@@ -689,7 +714,20 @@ function ContractDetailSheet({
     </div>
   );
 
-  const hasMsaFile = (row.sow_msa_reference || "").trim().toLowerCase().startsWith("msa:");
+  const msaFilenames = useMemo(() => sortMsaFilenamesNewestFirst(parseSowMsaFilenames(row.sow_msa_reference)), [row.sow_msa_reference]);
+  const msaProjectId = row.project_id;
+
+  function msaErrFromCatch(e: unknown, fallback: string): string {
+    let msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : fallback;
+    const status =
+      e && typeof e === "object" && "response" in e
+        ? (e as { response?: { status?: number } }).response?.status
+        : undefined;
+    if (status === 403 || /access denied/i.test(msg)) {
+      msg = `${msg} If this is wrong, ask an admin to assign you to project PRJ-${msaProjectId}.`;
+    }
+    return msg;
+  }
 
   async function onMsaUpload(file: File | null) {
     if (!file || !row) return;
@@ -702,22 +740,24 @@ function ContractDetailSheet({
       onMsaUploadComplete(updated);
       onField("sow_msa_reference", updated.sow_msa_reference ?? "");
     } catch (e: unknown) {
-      const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Upload failed";
-      setMsaErr(msg);
+      setMsaErr(msaErrFromCatch(e, "Upload failed"));
     } finally {
       setMsaUploading(false);
       if (msaFileRef.current) msaFileRef.current.value = "";
     }
   }
 
-  async function onDownloadMsa() {
-    if (!hasMsaFile || !row) return;
+  async function onDownloadMsa(storedBasename: string) {
+    if (!row || !storedBasename) return;
     const cid = row.id;
     setMsaErr(null);
     try {
-      const res = await api.get(`contracts/${cid}/msa-document`, { responseType: "blob" });
+      const res = await api.get(`contracts/${cid}/msa-document`, {
+        params: { f: storedBasename },
+        responseType: "blob",
+      });
       const dispo = res.headers["content-disposition"] as string | undefined;
-      let name = "contract-document";
+      let name = displayMsaStoredName(storedBasename);
       const m = dispo && /filename\*?=(?:UTF-8''|")?([^";\n]+)/i.exec(dispo);
       if (m?.[1]) name = decodeURIComponent(m[1].replace(/"/g, "").trim());
       const url = URL.createObjectURL(res.data);
@@ -727,8 +767,7 @@ function ContractDetailSheet({
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
-      const msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : "Download failed";
-      setMsaErr(msg);
+      setMsaErr(msaErrFromCatch(e, "Download failed"));
     }
   }
 
@@ -1065,8 +1104,22 @@ function ContractDetailSheet({
               Contract sheet / MSA
             </div>
             <p className="ncp-hint" style={{ margin: "0 0 8px" }}>
-              PDF, Word, Excel, or an image. Stored on the server; “SOW / MSA reference” is updated to point at the file.
+              PDF, Word, Excel, or an image. Each upload is kept; “SOW / MSA reference” lists every stored file (newest first).
             </p>
+            {msaFilenames.length > 0 && (
+              <ul className="ncp-hint" style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 13, color: "var(--ncp-text-primary)" }}>
+                {msaFilenames.map((fn) => (
+                  <li key={fn} style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                    <span style={{ flex: "1 1 140px", minWidth: 0, wordBreak: "break-all", fontFamily: "var(--ncp-mono)", fontSize: 12 }}>
+                      {displayMsaStoredName(fn)}
+                    </span>
+                    <button type="button" className="ncp-btn ncp-btn-ghost" style={{ flexShrink: 0 }} onClick={() => void onDownloadMsa(fn)}>
+                      Download
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
               <input
                 ref={msaFileRef}
@@ -1087,11 +1140,6 @@ function ContractDetailSheet({
               >
                 {msaUploading ? "Uploading…" : "Upload file…"}
               </button>
-              {hasMsaFile && (
-                <button type="button" className="ncp-btn ncp-btn-ghost" onClick={() => void onDownloadMsa()}>
-                  Download current
-                </button>
-              )}
             </div>
             {msaErr && (
               <div
@@ -1362,6 +1410,13 @@ export function ClientContracts() {
     return m;
   }, [clientGroups]);
 
+  /** Contracts included in KPI strip (and renewal radar / ACV roll-ups when a status chip is selected). */
+  const contractsForKpis = useMemo(() => {
+    if (statusFilter === "all") return contracts;
+    const want = statusFilter.toLowerCase();
+    return contracts.filter((c) => normStatus(c.contract_status) === want);
+  }, [contracts, statusFilter]);
+
   const enriched: EnrichedContract[] = useMemo(() => {
     return contracts.map((c) => {
       const pr = projectById.get(c.project_id);
@@ -1384,7 +1439,7 @@ export function ClientContracts() {
     let overdue = 0;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    for (const c of contracts) {
+    for (const c of contractsForKpis) {
       const st = normStatus(c.contract_status);
       if (st === "active") active++;
       else if (st === "renewed") renewed++;
@@ -1396,7 +1451,7 @@ export function ClientContracts() {
       if (end && end < today && st !== "renewed") overdue++;
     }
     return {
-      total: contracts.length,
+      total: contractsForKpis.length,
       active,
       renewed,
       expired,
@@ -1404,7 +1459,7 @@ export function ClientContracts() {
       expiring90,
       overdue,
     };
-  }, [contracts]);
+  }, [contractsForKpis]);
 
   const canRealiseActiveContract = useMemo(() => {
     if (!activeRow || activeRow.client_id == null) return false;
@@ -1662,27 +1717,52 @@ export function ClientContracts() {
           ))}
         </div>
       ) : (
+        <>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          <PlatformKpi label="Contracts on file" value={kpis.total} accent="blue" subtext="Scoped portfolio" />
+          <PlatformKpi
+            label="Contracts on file"
+            value={kpis.total}
+            accent="blue"
+            subtext={statusFilter === "all" ? "Scoped portfolio" : `Filtered · ${statusFilter}`}
+          />
           <PlatformKpi
             label="Active / renewed / expired"
             value={`${kpis.active} / ${kpis.renewed} / ${kpis.expired}`}
             accent="teal"
-            subtext="By row status"
+            subtext={statusFilter === "all" ? "By row status" : "Within filtered rows"}
           />
           <PlatformKpi
             label="Σ Signed ACV"
             value={kpis.totalAcv > 0 ? formatCurrency(kpis.totalAcv) : "—"}
             accent="green"
-            subtext="INR from contract rows"
+            subtext={statusFilter === "all" ? "INR from contract rows" : "INR · filtered rows"}
           />
           <PlatformKpi
             label="Renewal radar"
             value={`${kpis.expiring90} ≤90d · ${kpis.overdue} overdue`}
             accent={kpis.overdue > 0 ? "red" : "amber"}
-            subtext="End date vs today"
+            subtext={statusFilter === "all" ? "End date vs today" : "Filtered contracts only"}
           />
         </div>
+        <div
+          role="toolbar"
+          aria-label="Filter contracts by status"
+          style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 2 }}
+        >
+          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Status</span>
+          {statusOptions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={cn("platform-chip", statusFilter === s && "active")}
+              style={{ fontSize: 10.5, cursor: "pointer", fontFamily: "'DM Mono',monospace" }}
+              onClick={() => setStatusFilter(s)}
+            >
+              {s === "all" ? "All" : s[0].toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+        </>
       )}
 
       <Tabs

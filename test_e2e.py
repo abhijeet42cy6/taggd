@@ -8,6 +8,7 @@ from backend.agents.sheet_identifier import SheetIdentifierAgent
 from backend.agents.column_mapper import ColumnMapperAgent
 from backend.agents.logic_generator import LogicGeneratorAgent
 from backend.core.processor import ExcelProcessor
+from backend.core.revenue_logic_loader import load_calculate_from_source
 
 # --- 0. Setup ---
 init_db()
@@ -70,9 +71,7 @@ for filename in files_to_test:
         db.refresh(project)
 
         # --- 4. Process and Store ---
-        loc = {}
-        exec(logic_result.python_code, globals(), loc)
-        calc_func = loc['calculate']
+        calc_func = load_calculate_from_source(logic_result.python_code)
 
         processor = ExcelProcessor(db)
         # Clear existing records for this project for clean test

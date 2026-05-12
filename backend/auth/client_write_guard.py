@@ -10,6 +10,8 @@ from starlette.responses import JSONResponse
 
 from backend.auth.profile import ROLE_CLIENT_USER, effective_role
 
+from backend.core.debug_agent_log import debug_agent_log
+
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 # (path prefix for equality match, allowed HTTP methods) — only for `client_user`.
@@ -49,6 +51,19 @@ class ClientWriteGuardMiddleware(BaseHTTPMiddleware):
         if effective_role(user) == ROLE_CLIENT_USER:
             if client_user_mutation_allowed(request.url.path, request.method):
                 return await call_next(request)
+            # #region agent log
+            debug_agent_log(
+                hypothesis_id="H1",
+                location="client_write_guard.py:dispatch",
+                message="client_user_mutation_blocked_403",
+                data={
+                    "path": request.url.path,
+                    "method": request.method,
+                    "user_id": getattr(user, "id", None),
+                    "effective_role": effective_role(user),
+                },
+            )
+            # #endregion
             return JSONResponse(
                 {"detail": "Client portal accounts are read-only."},
                 status_code=403,

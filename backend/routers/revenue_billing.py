@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import datetime
 import math
+import mimetypes
+import os
 import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
-from backend.auth.deps import get_current_user
+from backend.auth.deps import get_current_user, is_platform_admin
 from backend.auth.scope import apply_project_scope, assert_project_access
 from backend.core.activity_log import log_activity
 from backend.core.finance_billing_workflow_core import workflow_allows_billing_row_edit
@@ -129,7 +132,7 @@ class RevenueBillingCreateBody(BaseModel):
     net_revenue_inr: Optional[float] = None
     rph_inr: Optional[float] = None
     pct_of_target: Optional[float] = None
-    attachment_ref: Optional[str] = Field(None, max_length=512)
+    attachment_ref: Optional[str] = Field(None, max_length=16384)
     approver_name: Optional[str] = Field(None, max_length=255)
     invoice_number: Optional[str] = Field(None, max_length=128)
     invoice_amount_inr: Optional[float] = None
@@ -161,7 +164,7 @@ class RevenueBillingPatchBody(BaseModel):
     net_revenue_inr: Optional[float] = None
     rph_inr: Optional[float] = None
     pct_of_target: Optional[float] = None
-    attachment_ref: Optional[str] = Field(None, max_length=512)
+    attachment_ref: Optional[str] = Field(None, max_length=16384)
     approver_name: Optional[str] = Field(None, max_length=255)
     invoice_number: Optional[str] = Field(None, max_length=128)
     invoice_amount_inr: Optional[float] = None
@@ -283,7 +286,11 @@ def patch_revenue_billing(
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
     assert_project_access(user, db, row.project_id)
-    if not workflow_allows_billing_row_edit(row.workflow):
+    wf = row.workflow
+    wf_status_before = wf.validation_status if wf is not None else None
+    locked = not workflow_allows_billing_row_edit(wf)
+    admin_override = locked and is_platform_admin(user)
+    if locked and not admin_override:
         raise HTTPException(
             status_code=423,
             detail="This billing row is locked for editing under the finance validation workflow.",
@@ -293,14 +300,23 @@ def patch_revenue_billing(
         setattr(row, k, v)
     db.commit()
     db.refresh(row)
+    meta: Optional[dict[str, Any]] = None
+    if admin_override:
+        meta = {
+            "admin_bypass_finance_workflow_lock": True,
+            "workflow_status_before": wf_status_before,
+            "patched_keys": sorted(attrs.keys()),
+        }
     log_activity(
         db,
         user=user,
         action="update",
         resource_type="revenue_billing",
-        summary=f"Revenue billing #{row_id} updated",
+        summary=f"Revenue billing #{row_id} updated"
+        + (" (platform admin override)" if admin_override else ""),
         project_id=row.project_id,
         resource_id=str(row_id),
+        meta=meta,
     )
     return _serialize(row)
 
@@ -320,7 +336,11 @@ def delete_revenue_billing(
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
     assert_project_access(user, db, row.project_id)
-    if not workflow_allows_billing_row_edit(row.workflow):
+    wf = row.workflow
+    wf_status_before = wf.validation_status if wf is not None else None
+    locked = not workflow_allows_billing_row_edit(wf)
+    admin_override = locked and is_platform_admin(user)
+    if locked and not admin_override:
         raise HTTPException(
             status_code=423,
             detail="Cannot delete while this billing row is in an active finance workflow state.",
@@ -328,13 +348,128 @@ def delete_revenue_billing(
     pid = row.project_id
     db.delete(row)
     db.commit()
+    meta: Optional[dict[str, Any]] = None
+    if admin_override:
+        meta = {
+            "admin_bypass_finance_workflow_lock": True,
+            "workflow_status_before": wf_status_before,
+        }
     log_activity(
         db,
         user=user,
         action="delete",
         resource_type="revenue_billing",
-        summary=f"Revenue billing #{row_id} deleted",
+        summary=f"Revenue billing #{row_id} deleted"
+        + (" (platform admin override)" if admin_override else ""),
         project_id=pid,
         resource_id=str(row_id),
+        meta=meta,
     )
     return {"status": "deleted", "id": row_id}
+
+
+@router.post("/{row_id}/upload-billing-attachment")
+async def upload_billing_attachment(
+    row_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Store an invoice / supporting file on disk; append `billing:…` to `attachment_ref`."""
+    from backend.core.billing_attachment_storage import (
+        append_billing_upload_to_ref,
+        save_billing_attachment_file,
+    )
+
+    row = (
+        db.query(TaggdRevenueBilling)
+        .options(joinedload(TaggdRevenueBilling.workflow))
+        .filter(TaggdRevenueBilling.id == row_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Row not found")
+    assert_project_access(user, db, row.project_id)
+    wf = row.workflow
+    wf_status_before = wf.validation_status if wf is not None else None
+    locked = not workflow_allows_billing_row_edit(wf)
+    admin_override = locked and is_platform_admin(user)
+    if locked and not admin_override:
+        raise HTTPException(
+            status_code=423,
+            detail="This billing row is locked for editing under the finance validation workflow.",
+        )
+
+    raw = await file.read()
+    try:
+        filename = save_billing_attachment_file(row_id, raw, file.filename or "upload")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    row.attachment_ref = append_billing_upload_to_ref(row.attachment_ref, filename) or None
+    db.commit()
+    db.refresh(row)
+    upload_meta: dict[str, Any] = {"filename": filename}
+    if admin_override:
+        upload_meta["admin_bypass_finance_workflow_lock"] = True
+        upload_meta["workflow_status_before"] = wf_status_before
+    log_activity(
+        db,
+        user=user,
+        action="upload",
+        resource_type="revenue_billing",
+        summary=f"Billing attachment uploaded for BIL-{row_id}"
+        + (" (platform admin override)" if admin_override else ""),
+        project_id=row.project_id,
+        resource_id=str(row_id),
+        meta=upload_meta,
+    )
+    return _serialize(row)
+
+
+@router.get("/{row_id}/billing-attachment")
+def serve_billing_attachment(
+    row_id: int,
+    f: Optional[str] = Query(None, description="Stored basename (recommended when multiple files exist)"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Download a stored billing attachment. Without `f`, serves the newest upload."""
+    from backend.core.billing_attachment_storage import (
+        parse_billing_file_basenames,
+        pick_latest_billing_filename,
+        resolve_billing_attachment_path,
+    )
+
+    row = (
+        db.query(TaggdRevenueBilling)
+        .options(joinedload(TaggdRevenueBilling.project))
+        .filter(TaggdRevenueBilling.id == row_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Row not found")
+    assert_project_access(user, db, row.project_id)
+
+    ref = (getattr(row, "attachment_ref", None) or "").strip()
+    filenames = parse_billing_file_basenames(ref)
+    if not filenames:
+        raise HTTPException(
+            status_code=404,
+            detail="No stored billing files — upload from the billing sheet or add billing: lines to attachment_ref.",
+        )
+
+    f_q = (f or "").strip()
+    if f_q:
+        pick = os.path.basename(f_q)
+        if pick not in filenames:
+            raise HTTPException(status_code=404, detail="Requested file is not attached to this billing row")
+    else:
+        pick = pick_latest_billing_filename(filenames)
+
+    path = resolve_billing_attachment_path(pick)
+    if not path:
+        raise HTTPException(status_code=404, detail="Attachment file not found on disk")
+
+    mt = mimetypes.guess_type(pick)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=mt, filename=os.path.basename(pick))

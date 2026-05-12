@@ -55,6 +55,12 @@ export function wfmStatsVm(raw: any) {
 }
 
 /** One row from GET /wfm/data (benchmark snapshot per client / reporting period). */
+/** Subset of `sheet_metrics_json` from WFM ingest (see `ingest_wfm.py`). */
+export type WfmSheetMetricsJson = {
+  open_positions?: { wl1?: number; wl2?: number; wl3?: number; wl4?: number; total?: number };
+  variance?: { hc_bench?: number | null; after_hiring?: number | null };
+};
+
 export type WfmBenchmarkRowVm = {
   id: number;
   project_id?: number;
@@ -74,7 +80,37 @@ export type WfmBenchmarkRowVm = {
   wl2_hires: number;
   wl3_hires: number;
   wl4_hires: number;
+  sheet_metrics_json?: WfmSheetMetricsJson | Record<string, unknown> | null;
 };
+
+export function wfmRowWlSum(r: Pick<WfmBenchmarkRowVm, "wl1_hires" | "wl2_hires" | "wl3_hires" | "wl4_hires">): number {
+  return (
+    Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0)
+  );
+}
+
+/** Open pipeline total from ingested sheet JSON (per client row). */
+export function wfmOpenPositionsFromSheet(r: WfmBenchmarkRowVm): number {
+  const j = r.sheet_metrics_json as WfmSheetMetricsJson | null | undefined;
+  const t = j?.open_positions?.total;
+  return typeof t === "number" && Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * "Additional" HC proxy: YTD lateral HC target above current roster (temp / stretch in workbook).
+ * Distinct from WL band mix (often equals actual when self-consistent).
+ */
+export function wfmRowAdditionalHcProxy(r: WfmBenchmarkRowVm): number {
+  const actual = Number(r.actual_hc_total ?? 0);
+  const target = Number(r.lateral_hc_target ?? 0);
+  return Math.max(0, target - actual);
+}
+
+/** Projected roster strength ≈ actual + (target − roster buffer) + sheet open positions; resignations not in ingest (0). */
+export function wfmRowProjectedHc(r: WfmBenchmarkRowVm): number {
+  const actual = Number(r.actual_hc_total ?? 0);
+  return actual + wfmRowAdditionalHcProxy(r) + wfmOpenPositionsFromSheet(r);
+}
 
 export function wfmRowsVm(rows: any[]): WfmBenchmarkRowVm[] {
   return (rows || []) as WfmBenchmarkRowVm[];

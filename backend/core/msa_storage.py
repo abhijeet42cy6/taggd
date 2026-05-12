@@ -56,3 +56,40 @@ def is_msa_reference(ref: str) -> bool:
 
 def extract_filename(ref: str) -> str:
     return ref[4:] if is_msa_reference(ref) else ref
+
+
+def parse_msa_reference_list(ref: str | None) -> list[str]:
+    """
+    Return stored disk basenames for MSA uploads. Supports:
+    - legacy single value: msa:cnt12_123_f.pdf
+    - multiple uploads: one msa: line per row (newlines), ignoring other lines without msa: prefix.
+    """
+    if not ref or not str(ref).strip():
+        return []
+    out: list[str] = []
+    for line in str(ref).replace("\r\n", "\n").split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        if is_msa_reference(s):
+            out.append(extract_filename(s))
+    return out
+
+
+def serialize_msa_reference_tags(filenames: list[str]) -> str:
+    """Join msa: tags for DB storage (newline-separated)."""
+    return "\n".join(msa_reference_tag(fn) for fn in filenames if fn)
+
+
+def pick_latest_msa_filename(filenames: list[str]) -> str:
+    """Prefer the newest upload by embedded unix timestamp in `cnt{id}_{ts}_...` name."""
+    if not filenames:
+        raise ValueError("empty filenames")
+    if len(filenames) == 1:
+        return filenames[0]
+
+    def ts_key(fn: str) -> int:
+        m = re.match(r"^cnt\d+_(\d+)_", os.path.basename(fn))
+        return int(m.group(1)) if m else 0
+
+    return max(filenames, key=ts_key)

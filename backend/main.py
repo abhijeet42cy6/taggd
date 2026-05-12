@@ -39,6 +39,7 @@ from .agents.column_mapper import ColumnMapperAgent
 from .agents.logic_generator import LogicGeneratorAgent
 from .agents.matchmaker import MatchmakerAgent
 from .core.processor import ExcelProcessor
+from .core.revenue_logic_loader import RevenueLogicCompileError, load_calculate_from_source
 from .core.ingestion_audit import log_ingestion_event, list_ingestion_events_for_user
 from .core.activity_log import activity_log_to_dict, list_activity_for_user, log_activity
 from .core.column_mapping_normalize import build_column_mapping_v2
@@ -78,6 +79,21 @@ def finalize_ingest_column_mapping(mapping_result, headers: list) -> dict:
         mapping_result.mapping,
     )
     return build_column_mapping_v2(mapping_result.mapping, rf)
+
+
+def _matchmaker_project_id_in_scope(
+    matched_raw: Optional[int], db_projects_list: List[Dict[str, Any]]
+) -> Optional[int]:
+    """Gemini may return a project id that exists in prod but is outside the user's scoped list.
+
+    `db_projects_list` is already filtered by `apply_project_scope`; only those ids are valid.
+    Without this check we load any row by id then `assert_project_access` → 403 for scoped users.
+    """
+    if matched_raw is None:
+        return None
+    allowed = {p["id"] for p in db_projects_list}
+    return matched_raw if matched_raw in allowed else None
+
 
 app = FastAPI(title="Agentic Revenue Generator API")
 
@@ -494,11 +510,35 @@ def get_activity_log(
 
 @app.post("/upload")
 async def upload_file(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from .auth.deps import allowed_project_ids, can_create_unmatched_project
+    from .auth.profile import stored_role_normalized, effective_role as profile_effective_role
+    from .core.debug_agent_log import debug_agent_log
+
+    aids = allowed_project_ids(user, db)
+    # #region agent log
+    debug_agent_log(
+        hypothesis_id="H1",
+        location="main.upload_file:entry",
+        message="express_upload_start",
+        data={
+            "user_id": user.id,
+            "stored_role": stored_role_normalized(user),
+            "effective_role": profile_effective_role(user),
+            "scope_unrestricted": aids is None,
+            "scope_size": len(aids) if aids is not None else None,
+            "can_create_unmatched": can_create_unmatched_project(user),
+            "ua_head": (request.headers.get("user-agent") or "")[:240],
+            "has_bearer": (request.headers.get("authorization") or "").lower().startswith("bearer "),
+            "filename_tail": (os.path.basename(file.filename or "") or "")[-120:],
+        },
+    )
+    # #endregion
     project = None
     # 1. Save file locally — unique name + basename only (avoid overwrite / path tricks)
     temp_dir = tempfile.gettempdir()
@@ -516,7 +556,12 @@ async def upload_file(
         db_projects_list = [{"id": p.id, "account_name": p.account_name, "filename": p.filename} for p in all_projects]
         
         match_result = matcher.match_clients([safe_name], db_projects_list)
-        matched_id = match_result.matches[0].matched_project_id if match_result.matches else None
+        matched_raw = match_result.matches[0].matched_project_id if match_result.matches else None
+        matched_id = _matchmaker_project_id_in_scope(matched_raw, db_projects_list)
+        if matched_raw is not None and matched_id is None:
+            print(
+                f"WARN: Matchmaker returned project_id={matched_raw} outside user {user.id} scope; ignoring."
+            )
         
         if matched_id:
             project = db.query(Project).filter(Project.id == matched_id).first()
@@ -530,6 +575,19 @@ async def upload_file(
             
         if not project:
             if not can_create_unmatched_project(user):
+                # #region agent log
+                debug_agent_log(
+                    hypothesis_id="H3",
+                    location="main.upload_file",
+                    message="forbidden_no_project_cannot_create",
+                    data={
+                        "user_id": user.id,
+                        "effective_role": profile_effective_role(user),
+                        "safe_name": safe_name,
+                        "scoped_projects_n": len(db_projects_list),
+                    },
+                )
+                # #endregion
                 raise HTTPException(status_code=403, detail="Cannot create a new project; contact an administrator.")
             # If still not found, create a new one but try to suggest an account name
             project = Project(filename=safe_name)
@@ -572,7 +630,7 @@ async def upload_file(
         mapping_result = mapper_agent.map_columns(headers, sample_rows)
         column_mapping_payload = finalize_ingest_column_mapping(mapping_result, headers)
         project.column_mapping = column_mapping_payload
-
+        
         # Identify the pos_id_column (e.g. Req ID, Job ID, etc.) for deduplication
         pos_id_col = None
         id_keywords = ['req', 'job id', 'job code', 'position id', 'id', 'sl no']
@@ -604,20 +662,18 @@ async def upload_file(
             logic_code = logic_res.python_code
             logic_explanation = logic_res.explanation
 
-        # Step 4: Process Records
-        loc = {}
+        # Step 4: Process Records (RestrictedPython — no unrestricted exec)
         try:
-            exec(logic_code, globals(), loc)
-            calc_func = loc['calculate']
-        except Exception as e:
-            raise Exception(f"Failed to execute synthesized code: {str(e)}")
+            calc_func = load_calculate_from_source(logic_code)
+        except RevenueLogicCompileError as e:
+            raise Exception(f"Failed to compile revenue logic: {e}") from e
         
         processor = ExcelProcessor(db)
         
         processor.process_file_into_db(
-            project.id,
-            file_path,
-            classification.tracker_sheet,
+            project.id, 
+            file_path, 
+            classification.tracker_sheet, 
             column_mapping_payload,
             calc_func,
         )
@@ -661,6 +717,7 @@ async def upload_file(
 
 @app.post("/upload/pro/inspect")
 async def pro_inspect_file(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -683,12 +740,42 @@ async def pro_inspect_file(
         
         # Use Matchmaker logic to identify if this file belongs to an existing account
         from .agents.matchmaker import MatchmakerAgent
+        from .auth.deps import allowed_project_ids, can_create_unmatched_project
+        from .auth.profile import stored_role_normalized, effective_role as profile_effective_role
+        from .core.debug_agent_log import debug_agent_log
+
         matcher = MatchmakerAgent()
         all_projects = apply_project_scope(db.query(Project), user, db, Project).all()
         db_projects_list = [{"id": p.id, "account_name": p.account_name, "filename": p.filename} for p in all_projects]
-        
+
+        aids = allowed_project_ids(user, db)
+        # #region agent log
+        debug_agent_log(
+            hypothesis_id="H1",
+            location="main.pro_inspect_file:scoped",
+            message="pro_inspect_match_phase",
+            data={
+                "user_id": user.id,
+                "stored_role": stored_role_normalized(user),
+                "effective_role": profile_effective_role(user),
+                "scope_unrestricted": aids is None,
+                "scope_size": len(aids) if aids is not None else None,
+                "can_create_unmatched": can_create_unmatched_project(user),
+                "ua_head": (request.headers.get("user-agent") or "")[:240],
+                "has_bearer": (request.headers.get("authorization") or "").lower().startswith("bearer "),
+                "safe_name": safe_name,
+                "scoped_projects_n": len(db_projects_list),
+            },
+        )
+        # #endregion
+
         match_result = matcher.match_clients([safe_name], db_projects_list)
-        matched_id = match_result.matches[0].matched_project_id if match_result.matches else None
+        matched_raw = match_result.matches[0].matched_project_id if match_result.matches else None
+        matched_id = _matchmaker_project_id_in_scope(matched_raw, db_projects_list)
+        if matched_raw is not None and matched_id is None:
+            print(
+                f"WARN: Matchmaker returned project_id={matched_raw} outside user {user.id} scope; ignoring."
+            )
         
         if matched_id:
             project = db.query(Project).filter(Project.id == matched_id).first()
@@ -697,6 +784,19 @@ async def pro_inspect_file(
                 assert_project_access(user, db, project.id)
         else:
             if not can_create_unmatched_project(user):
+                # #region agent log
+                debug_agent_log(
+                    hypothesis_id="H3",
+                    location="main.pro_inspect_file",
+                    message="forbidden_no_project_cannot_create",
+                    data={
+                        "user_id": user.id,
+                        "effective_role": profile_effective_role(user),
+                        "safe_name": safe_name,
+                        "scoped_projects_n": len(db_projects_list),
+                    },
+                )
+                # #endregion
                 raise HTTPException(status_code=403, detail="Cannot create a new project; contact an administrator.")
             project = Project(filename=safe_name)
             db.add(project)
@@ -796,7 +896,7 @@ async def pro_confirm_upload(
         mapping_result = mapper_agent.map_columns(all_headers, all_samples)
         column_mapping_payload = finalize_ingest_column_mapping(mapping_result, all_headers)
         project.column_mapping = column_mapping_payload
-
+        
         # Identity Keyword search for pos_id (Unified for all sheets)
         pos_id_col = None
         id_keywords = ['req', 'job id', 'job code', 'position id', 'id', 'sl no', 'reference']
@@ -829,10 +929,11 @@ async def pro_confirm_upload(
             logic_code = logic_res.python_code
             logic_explanation = logic_res.explanation
 
-        # 3. Process Records (Multi-Sheet)
-        loc = {}
-        exec(logic_code, globals(), loc)
-        calc_func = loc['calculate']
+        # 3. Process Records (Multi-Sheet) — RestrictedPython sandbox
+        try:
+            calc_func = load_calculate_from_source(logic_code)
+        except RevenueLogicCompileError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
         processor = ExcelProcessor(db)
         processor.process_file_into_db(project.id, file_path, data_sheets, column_mapping_payload, calc_func)
@@ -883,13 +984,11 @@ def recalculate_project_ledger(
     if not project or not project.revenue_logic_code:
         raise HTTPException(status_code=400, detail="Cannot recalculate: Missing logic for this project.")
 
-    # 1. Prepare Logic
-    loc = {}
+    # 1. Prepare Logic (RestrictedPython — no unrestricted exec)
     try:
-        exec(project.revenue_logic_code, globals(), loc)
-        calc_func = loc['calculate']
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Logic Execution Error: {str(e)}")
+        calc_func = load_calculate_from_source(project.revenue_logic_code)
+    except RevenueLogicCompileError as e:
+        raise HTTPException(status_code=400, detail=f"Logic compile error: {e}")
 
     # 2. Pulse: Iterate and Update
     records = db.query(Record).filter(Record.project_id == project_id).all()
@@ -935,7 +1034,7 @@ async def regenerate_project_logic(
     if not project or not project.source_filename:
         raise HTTPException(status_code=400, detail="Insufficient metadata for logic regeneration.")
 
-    file_path = project.source_filename
+    file_path = project.source_filename 
     if not os.path.exists(file_path):
         common_paths = [f"./excel_files/{os.path.basename(file_path)}", f"./vault/{os.path.basename(file_path)}"]
         found = False
@@ -950,7 +1049,7 @@ async def regenerate_project_logic(
     try:
         df_contract = pd.read_excel(file_path, sheet_name=project.contract_sheet)
         contract_text = df_contract.to_string()
-
+        
         data_sheets = project.tracker_sheet.split(",")
         df_sample = pd.read_excel(file_path, sheet_name=data_sheets[0])
         headers = df_sample.columns.tolist()
@@ -958,7 +1057,7 @@ async def regenerate_project_logic(
 
         logic_agent = LogicGeneratorAgent()
         logic_res = logic_agent.generate_logic(contract_text, headers, samples)
-
+        
         if body.dry_run:
             return {
                 "status": "preview",
@@ -970,9 +1069,9 @@ async def regenerate_project_logic(
         project.revenue_logic_code = logic_res.python_code
         project.logic_explanation = logic_res.explanation
         db.commit()
-
+        
         return {
-            "status": "success",
+            "status": "success", 
             "dry_run": False,
             "new_explanation": logic_res.explanation,
             "new_python_code": logic_res.python_code,
@@ -2280,7 +2379,7 @@ def get_global_stats(
     total_opening = 0.0
     total_closing = 0.0
     joined_count = 0
-
+    
     for rev_results, g_status in rows:
         res = rev_results or {}
         total_rev     += float(res.get('revenue')     or 0)
@@ -2288,7 +2387,7 @@ def get_global_stats(
         total_closing += float(res.get('closing_fee') or 0)
         if g_status == "CLOSED":
             joined_count += 1
-
+            
     total_records = len(rows)
     pq = db.query(func.count(Project.id))
     pq = apply_project_scope(pq, user, db, Project)
@@ -2296,10 +2395,10 @@ def get_global_stats(
 
     return JSONResponse(
         content={
-            "total_revenue": total_rev,
-            "total_opening_fees": total_opening,
-            "total_closing_fees": total_closing,
-            "total_joinees": joined_count,
+        "total_revenue": total_rev,
+        "total_opening_fees": total_opening,
+        "total_closing_fees": total_closing,
+        "total_joinees": joined_count,
             "total_records": total_records,
             "total_projects": total_projects,
         },
@@ -2315,7 +2414,7 @@ def get_global_monitoring(
     Uses SQL aggregates — no full table scan in Python.
     """
     from fastapi.responses import JSONResponse
-
+    
     def _rec(q):
         return apply_project_scope(q, user, db, Record)
 
@@ -2377,10 +2476,14 @@ def get_global_monitoring(
             continue
         total_ageing += days
         ageing_count += 1
-        if days <= 30:   ageing_buckets["0-30 days"] += 1
-        elif days <= 60: ageing_buckets["31-60 days"] += 1
-        elif days <= 90: ageing_buckets["61-90 days"] += 1
-        else:            ageing_buckets["90+ days"] += 1
+        if days <= 30:
+            ageing_buckets["0-30 days"] += 1
+        elif days <= 60:
+            ageing_buckets["31-60 days"] += 1
+        elif days <= 90:
+            ageing_buckets["61-90 days"] += 1
+        else:
+            ageing_buckets["90+ days"] += 1
 
     # ── 5–6. Per-project stats — avoid a second full scan of revenue_results ─
     # 6a. Total + per-status counts in one pass
@@ -2434,11 +2537,11 @@ def get_global_monitoring(
     return JSONResponse(
         content={
             "total_positions": total_positions,
-            "status_breakdown": status_counts,
-            "req_status_breakdown": req_counts,
-            "ageing_summary": {
-                "average_days": round(total_ageing / ageing_count, 1) if ageing_count > 0 else 0,
-                "total_open_with_date": ageing_count,
+        "status_breakdown": status_counts,
+        "req_status_breakdown": req_counts,
+        "ageing_summary": {
+            "average_days": round(total_ageing / ageing_count, 1) if ageing_count > 0 else 0,
+            "total_open_with_date": ageing_count,
                 "buckets": ageing_buckets,
             },
             "revenue_total": revenue_total,
@@ -2457,7 +2560,7 @@ def get_drilldown_stats(
 
     if field not in ["hiring_manager", "location", "department"]:
         field = "hiring_manager"
-
+        
     col = getattr(Record, field)
     # Only load the two columns we need
     rows = apply_project_scope(db.query(col, Record.revenue_results), user, db, Record).all()
@@ -2468,7 +2571,7 @@ def get_drilldown_stats(
             data[key] = {"revenue": 0.0, "count": 0}
         data[key]["revenue"] += float((rr or {}).get("revenue") or 0)
         data[key]["count"] += 1
-
+        
     chart_data = [{"name": k, "revenue": v["revenue"], "count": v["count"]} for k, v in data.items()]
     chart_data = sorted(chart_data, key=lambda x: x["revenue"], reverse=True)[:10]
 
@@ -2540,13 +2643,13 @@ def _sync_upload_budget_forecast_workbook(file_path: str, safe_name: str, user_i
 
         df_budget = pd.read_excel(file_path, sheet_name="Budget Template")
         excel_names = df_budget["Project"].dropna().unique().tolist()
-
+        
         all_projects = apply_project_scope(db.query(Project), user, db, Project).all()
         db_projects_list = [{"id": p.id, "filename": p.filename} for p in all_projects]
-
+        
         matcher = MatchmakerAgent()
         match_list = matcher.match_clients(excel_names, db_projects_list)
-
+        
         name_to_id = {m.excel_name: m.matched_project_id for m in match_list.matches if m.matched_project_id}
         scope_ids = allowed_project_ids(user, db)
         if scope_ids is not None:
@@ -2814,6 +2917,8 @@ async def get_sla_stats(
     """Portfolio-wide SLA performance statistics — pure SQL aggregates."""
     from fastapi.responses import JSONResponse
 
+    from backend.core.sla_period import bucket_sla_rag
+
     total_metrics = (
         apply_project_scope(db.query(func.count(MetricDefinition.id)), user, db, MetricDefinition).scalar() or 0
     )
@@ -2877,11 +2982,11 @@ async def get_sla_stats(
 
     return JSONResponse(
         content={
-            "total_accounts": total_accounts,
-            "total_metrics": total_metrics,
-            "portfolio_health": round((met_count / (met_count + not_met_count) * 100), 1) if (met_count + not_met_count) > 0 else 0,
-            "met_count": met_count,
-            "not_met_count": not_met_count,
+        "total_accounts": total_accounts,
+        "total_metrics": total_metrics,
+        "portfolio_health": round((met_count / (met_count + not_met_count) * 100), 1) if (met_count + not_met_count) > 0 else 0,
+        "met_count": met_count,
+        "not_met_count": not_met_count,
             "systemic_risks": [{"metric": r[0], "count": r[1]} for r in risky_metrics],
         },
         headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
@@ -3156,11 +3261,11 @@ async def get_wfm_stats(
 
     return JSONResponse(
         content={
-            "capacity_fill_rate": round((total_actual / total_ideal * 100), 1) if total_ideal > 0 else 0,
-            "total_actual_hc": total_actual,
-            "total_ideal_hc": total_ideal,
-            "hc_gap": round(total_ideal - total_actual, 1),
-            "wl_distribution": {
+        "capacity_fill_rate": round((total_actual / total_ideal * 100), 1) if total_ideal > 0 else 0,
+        "total_actual_hc": total_actual,
+        "total_ideal_hc": total_ideal,
+        "hc_gap": round(total_ideal - total_actual, 1),
+        "wl_distribution": {
                 "WL1": float(agg.wl1 or 0),
                 "WL2": float(agg.wl2 or 0),
                 "WL3": float(agg.wl3 or 0),
@@ -3228,10 +3333,10 @@ async def upload_wfm_master(
     temp_dir = tempfile.gettempdir()
     safe_name = os.path.basename(file.filename or "wfm.xlsx") or "wfm.xlsx"
     file_path = os.path.join(temp_dir, f"wfm_master_{int(time.time())}_{safe_name}")
-
+    
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-
+        
     def _audit(status: str, label: str) -> None:
         adb = SessionLocal()
         try:
@@ -3345,7 +3450,7 @@ async def get_finance_stats(
         _lst.sort(key=lambda t: t[0] or datetime.datetime.min, reverse=True)
         total_unbilled += float(_lst[0][1])
     collection_pending = total_collection_target - total_collected
-
+    
     return {
         "revenue_actual": round(total_rev_actual, 2),
         "revenue_budget": round(total_rev_budget, 2),
@@ -3628,10 +3733,10 @@ async def upload_finance_master(
     temp_dir = tempfile.gettempdir()
     safe_name = os.path.basename(file.filename or "finance.xlsx") or "finance.xlsx"
     file_path = os.path.join(temp_dir, f"finance_master_{int(time.time())}_{safe_name}")
-
+    
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-
+        
     def _audit(status: str, label: str) -> None:
         adb = SessionLocal()
         try:

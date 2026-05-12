@@ -80,7 +80,7 @@ export const Dashboard = () => {
   const [filters, setFilters] = useState<DF>(DEFAULT_DASHBOARD_FILTERS);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
 
-  useEffect(() => {
+    useEffect(() => {
     let mounted = true;
     (async () => {
       const withTimeout = <T,>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
@@ -148,7 +148,7 @@ export const Dashboard = () => {
         }
       } catch {
         if (mounted) setCoreError("Unable to load KPIs — check backend connectivity.");
-      } finally {
+            } finally {
         if (mounted) setLoadingCore(false);
       }
     })();
@@ -810,25 +810,25 @@ export const Dashboard = () => {
                         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ncp-text-primary)", padding: "6px 8px" }}>
                           {selectedClient.name}
                         </div>
-                      </div>
+                    </div>
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">Positions</div>
                         <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ncp-text-primary)", padding: "6px 8px" }}>
                           {selectedClient.positions}
-                        </div>
-                      </div>
+                </div>
+            </div>
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">Revenue</div>
                         <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>
                           {formatCurrency(selectedClient.revenue)}
-                        </div>
-                      </div>
+            </div>
+                            </div>
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">Composite score</div>
                         <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>
                           {selectedClient.composite == null ? "—" : `${selectedClient.composite} / 100`}
-                        </div>
-                      </div>
+                                            </div>
+                                        </div>
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">Risk level</div>
                         <div style={{ padding: "6px 8px" }}>
@@ -853,12 +853,12 @@ export const Dashboard = () => {
                               {selectedClient.risk}
                             </span>
                           )}
-                        </div>
-                      </div>
+                            </div>
+                            </div>
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">Weakest domain</div>
                         <div style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>{worstDomainName(selectedClient)}</div>
-                      </div>
+                                            </div>
                       <div className="ncp-prop-row ncp-prop-row--tall-value">
                         <div className="ncp-prop-label">Domain scores (0–100)</div>
                         <div style={{ fontSize: 12, lineHeight: 1.55, color: "var(--ncp-text-primary)", padding: "6px 8px" }}>
@@ -866,10 +866,10 @@ export const Dashboard = () => {
                           {selectedClient.scores.forecast ?? "—"}
                           <br />
                           SLA {selectedClient.scores.sla ?? "—"} · WFM {selectedClient.scores.wfm ?? "—"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                            </div>
+                                            </div>
+                                        </div>
+                            </div>
                 </div>
 
                 <div className={cn("ncp-panel", clientSheetTab === 1 && "ncp-panel-active")}>
@@ -893,11 +893,11 @@ export const Dashboard = () => {
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">On hold</div>
                         <div style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>{selectedClient.on_hold}</div>
-                      </div>
-                    </div>
-                  </div>
+                                </div>
+                                </div>
+                            </div>
                 </div>
-              </div>
+                </div>
             </div>
           </div>
         )}
@@ -990,6 +990,6 @@ export const Dashboard = () => {
         compareFyLabel={compareFyLabel}
         priorCollectedInr={priorFinance?.total_collected_inr}
       />
-    </div>
-  );
+        </div>
+    );
 };

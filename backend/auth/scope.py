@@ -8,6 +8,7 @@ from sqlalchemy import and_, false, func, or_
 from sqlalchemy.orm import Query, Session
 
 from backend.auth.deps import allowed_project_ids
+from backend.core.debug_agent_log import debug_agent_log
 from backend.auth.profile import ROLE_RECRUITER, effective_role
 from backend.db.database import Candidate, Client, Project, Record, User
 
@@ -29,6 +30,18 @@ def apply_project_scope(q: Query, user: User, db: Session, model: Type) -> Query
 def assert_project_access(user: User, db: Session, project_id: int) -> None:
     ids = allowed_project_ids(user, db)
     if ids is not None and project_id not in ids:
+        # #region agent log
+        debug_agent_log(
+            hypothesis_id="H2",
+            location="auth/scope.py:assert_project_access",
+            message="project_scope_denied_403",
+            data={
+                "user_id": getattr(user, "id", None),
+                "project_id": project_id,
+                "scope_size": len(ids),
+            },
+        )
+        # #endregion
         raise HTTPException(status_code=403, detail="Access denied for this project")
 
 

@@ -33,7 +33,7 @@ import {
   type WfmPerformFilter,
 } from "@/components/tremor-dashboard/WfmExpandDialog";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
-import { cn, formatNumber, formatPercent } from "@/lib/utils";
+import { cn, formatLargeCurrency, formatNumber, formatPercent } from "@/lib/utils";
 import {
   wfmFillPct,
   wfmFillColor,
@@ -41,6 +41,9 @@ import {
   wfmStatusLabel,
   wfmMatchesFilter,
   wfmRowsVm,
+  wfmOpenPositionsFromSheet,
+  wfmRowAdditionalHcProxy,
+  wfmRowProjectedHc,
   type WfmBenchmarkRowVm,
 } from "@/lib/view-models/wfm";
 
@@ -166,10 +169,10 @@ export function WorkforceManagement() {
   // WL distribution
   const wlData = useMemo(() => rows.map((r) => ({
     name: (r.account_name || `P${r.project_id}`).slice(0, 12),
-    wl1: Number(r.wl1_hires ?? 0),
-    wl2: Number(r.wl2_hires ?? 0),
-    wl3: Number(r.wl3_hires ?? 0),
-    wl4: Number(r.wl4_hires ?? 0),
+        wl1: Number(r.wl1_hires ?? 0),
+        wl2: Number(r.wl2_hires ?? 0),
+        wl3: Number(r.wl3_hires ?? 0),
+        wl4: Number(r.wl4_hires ?? 0),
   })).filter((d) => d.wl1 + d.wl2 + d.wl3 + d.wl4 > 0), [rows]);
 
   // Productivity vs fill chart
@@ -213,8 +216,78 @@ export function WorkforceManagement() {
     const totOpenPos = totVariance > 0 ? totVariance : 0;
     const totProj = totActual;
     const totFill = wfmFillPct(totActual, totIdeal);
-    return { totIdeal, totActual, totAdditional, totVariance, totOpenPos, totProj, totFill };
+    const totOpenSheet = filteredRows.reduce((s, r) => s + wfmOpenPositionsFromSheet(r), 0);
+    const totProjectedHc = filteredRows.reduce((s, r) => s + wfmRowProjectedHc(r), 0);
+    return { totIdeal, totActual, totAdditional, totVariance, totOpenPos, totProj, totFill, totOpenSheet, totProjectedHc };
   }, [filteredRows]);
+
+  const openRequisitionsTotal = Number(stats?.open_requisitions ?? 0);
+
+  /** Portfolio-level metrics from benchmark rows + sheet JSON (no new API). */
+  const portfolioWorkbook = useMemo(() => {
+    if (!rows.length) return null;
+    let sumRev = 0;
+    let sumIdealForProd = 0;
+    let sumProdWeighted = 0;
+    let sumOpenSheet = 0;
+    let sumAdditional = 0;
+    let sumActual = 0;
+    let sumIdeal = 0;
+    let maxRev = 0;
+    for (const r of rows) {
+      const rev = Number(r.lateral_revenue_target ?? 0);
+      sumRev += rev;
+      maxRev = Math.max(maxRev, Math.abs(rev));
+      const idealN = Number(r.ideal_hc ?? 0);
+      const prod = Number(r.lateral_productivity_target ?? 0);
+      sumIdeal += idealN;
+      sumActual += Number(r.actual_hc_total ?? 0);
+      if (idealN > 0 && Number.isFinite(prod)) {
+        sumIdealForProd += idealN;
+        sumProdWeighted += prod * idealN;
+      }
+      sumOpenSheet += wfmOpenPositionsFromSheet(r);
+      sumAdditional += wfmRowAdditionalHcProxy(r);
+    }
+    const wProdRaw =
+      sumIdealForProd > 0
+        ? sumProdWeighted / sumIdealForProd
+        : rows.reduce((s, r) => s + Number(r.lateral_productivity_target ?? 0), 0) / rows.length;
+    const wProd = Number.isFinite(wProdRaw) ? wProdRaw : 0;
+    const portfolioProjected = sumActual + sumAdditional + sumOpenSheet;
+    const varianceVsActual = sumIdeal - sumActual;
+    const staffGapPctActual = sumIdeal > 0 ? ((sumIdeal - sumActual) / sumIdeal) * 100 : 0;
+    const varianceVsProjected = sumIdeal - portfolioProjected;
+    const staffGapPctProjected = sumIdeal > 0 ? ((sumIdeal - portfolioProjected) / sumIdeal) * 100 : 0;
+    let overstaffed = 0;
+    let understaffed = 0;
+    let onTrack = 0;
+    for (const r of rows) {
+      const idealN = Number(r.ideal_hc ?? 0);
+      const actualN = Number(r.actual_hc_total ?? 0);
+      const proj = wfmRowProjectedHc(r);
+      if (actualN > proj) overstaffed += 1;
+      else if (proj < idealN) understaffed += 1;
+      else onTrack += 1;
+    }
+    /** Heuristic: workbook YTD revenue column is usually in Lacs; very large values treated as full INR. */
+    const revenueInr = maxRev > 500_000 ? sumRev : sumRev * 100_000;
+    return {
+      sumRev,
+      revenueInr,
+      wProd,
+      sumOpenSheet,
+      sumAdditional,
+      portfolioProjected,
+      overstaffed,
+      understaffed,
+      onTrack,
+      varianceVsActual,
+      staffGapPctActual,
+      varianceVsProjected,
+      staffGapPctProjected,
+    };
+  }, [rows]);
 
   // ── render ──────────────────────────────────────────────────────────────────
   const fillStatusBadge =
@@ -265,7 +338,7 @@ export function WorkforceManagement() {
           <Button type="button" size="xs" variant="primary" color="orange" onClick={() => setWfmDialogOpen(true)}>
             <span className="inline-flex items-center gap-1">
               <Plus size={12} strokeWidth={2.5} aria-hidden />
-              Add / edit WFM data
+            Add / edit WFM data
             </span>
           </Button>
           <Button type="button" size="xs" variant="secondary" color="slate" onClick={() => uploadInputRef.current?.click()}>
@@ -340,6 +413,141 @@ export function WorkforceManagement() {
             <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">{`${onPlanCount} on plan · ${rows.length} total`}</Text>
           </Card>
         </Grid>
+      )}
+
+      {!loading && portfolioWorkbook && (
+        <>
+          <Text className={WFM_BLOCK_TAG}>Portfolio mix (workbook)</Text>
+          <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-2 md:gap-3">
+            <Card decoration="top" decorationColor="amber" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                Forecast revenue (YTD)
+              </Text>
+              <Metric className="mt-1 text-lg tabular-nums leading-tight md:text-xl">
+                {formatLargeCurrency(portfolioWorkbook.revenueInr)}
+              </Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
+                Σ lateral revenue YTD; per-row totals below ₹5L assumed Lacs (×1e5) for ₹ display
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="indigo" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-400">
+                Target productivity
+              </Text>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatPercent(portfolioWorkbook.wProd)}</Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
+                Ideal-HC–weighted mean of lateral productivity (YTD column)
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="teal" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">Ideal HC</Text>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatNumber(idealHc)}</Metric>
+              <Text className="mt-0.5 text-[10px] text-tremor-content-subtle md:text-[11px]">Σ ideal headcount</Text>
+            </Card>
+            <Card decoration="top" decorationColor="blue" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Actual HC</Text>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatNumber(actualHc)}</Metric>
+              <Text className="mt-0.5 text-[10px] text-tremor-content-subtle md:text-[11px]">Σ on payroll</Text>
+            </Card>
+            <Card decoration="top" decorationColor="cyan" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-400">Additional HC (proxy)</Text>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatNumber(portfolioWorkbook.sumAdditional)}</Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
+                Σ max(0, lateral HC target − actual) per client — temp / stretch from workbook
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="rose" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">Total open positions</Text>
+              <Flex justifyContent="between" alignItems="start" className="mt-1 flex-wrap gap-1">
+                <Metric className="text-lg tabular-nums md:text-xl">{formatNumber(portfolioWorkbook.sumOpenSheet)}</Metric>
+                <Badge color="slate" size="xs">Sheet</Badge>
+              </Flex>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
+                Sum of open_positions.total in sheet JSON. Requisitions (gap file): {formatNumber(openRequisitionsTotal, 0)}
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="slate" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">Resignations</Text>
+              <Metric className="mt-1 text-lg tabular-nums text-tremor-content-subtle md:text-xl">—</Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
+                Not ingested on WFM path — projected HC below assumes 0
+              </Text>
+            </Card>
+            <Card decoration="top" decorationColor="violet" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-400">Projected HC</Text>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatNumber(portfolioWorkbook.portfolioProjected)}</Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
+                Actual + additional proxy + sheet open positions (no resignations)
+              </Text>
+            </Card>
+          </Grid>
+
+          <Text className={WFM_BLOCK_TAG}>Variance indicators</Text>
+          <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-2 md:gap-3">
+            <Card decoration="top" decorationColor="orange" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+                Variance vs actual HC
+              </Text>
+              <Metric
+                className={`mt-1 text-lg tabular-nums md:text-xl ${
+                  portfolioWorkbook.varianceVsActual < 0 ? "text-orange-600 dark:text-orange-400" : "text-tremor-content-strong"
+                }`}
+              >
+                {portfolioWorkbook.varianceVsActual > 0 ? "+" : ""}
+                {formatNumber(portfolioWorkbook.varianceVsActual)}
+              </Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">Ideal − actual (Σ)</Text>
+            </Card>
+            <Card decoration="top" decorationColor="fuchsia" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-fuchsia-700 dark:text-fuchsia-400">
+                Staff gap % vs actual
+              </Text>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatPercent(portfolioWorkbook.staffGapPctActual)}</Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">(Ideal − actual) ÷ ideal</Text>
+            </Card>
+            <Card decoration="top" decorationColor="orange" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+                Net variance vs projected HC
+              </Text>
+              <Metric
+                className={`mt-1 text-lg tabular-nums md:text-xl ${
+                  portfolioWorkbook.varianceVsProjected < 0 ? "text-orange-600 dark:text-orange-400" : "text-tremor-content-strong"
+                }`}
+              >
+                {portfolioWorkbook.varianceVsProjected > 0 ? "+" : ""}
+                {formatNumber(portfolioWorkbook.varianceVsProjected)}
+              </Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">Ideal − projected (Σ)</Text>
+            </Card>
+            <Card decoration="top" decorationColor="fuchsia" className="p-3">
+              <Text className="text-[10px] font-semibold uppercase tracking-wide text-fuchsia-700 dark:text-fuchsia-400">
+                Staffing gap % vs projected
+              </Text>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatPercent(portfolioWorkbook.staffGapPctProjected)}</Metric>
+              <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">(Ideal − projected) ÷ ideal</Text>
+            </Card>
+          </Grid>
+          <Card decoration="top" decorationColor="slate" className="border-l-4 border-l-slate-300 p-3 md:p-4 dark:border-l-slate-600">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Client staffing posture</Text>
+            <Flex className="mt-3 flex-wrap gap-4 md:gap-8" justifyContent="start" alignItems="start">
+              <div>
+                <Text className="text-[11px] text-tremor-content-subtle">Overstaffed</Text>
+                <Metric className="text-xl text-rose-600 dark:text-rose-400">{String(portfolioWorkbook.overstaffed)}</Metric>
+                <Text className="text-[10px] text-tremor-content-subtle">Actual greater than projected</Text>
+          </div>
+              <div>
+                <Text className="text-[11px] text-tremor-content-subtle">Understaffed</Text>
+                <Metric className="text-xl text-amber-600 dark:text-amber-400">{String(portfolioWorkbook.understaffed)}</Metric>
+                <Text className="text-[10px] text-tremor-content-subtle">Projected below ideal</Text>
+              </div>
+              <div>
+                <Text className="text-[11px] text-tremor-content-subtle">On track</Text>
+                <Metric className="text-xl text-emerald-600 dark:text-emerald-400">{String(portfolioWorkbook.onTrack)}</Metric>
+                <Text className="text-[10px] text-tremor-content-subtle">Else vs rules above</Text>
+              </div>
+            </Flex>
+          </Card>
+        </>
       )}
 
       {!loading && rows.length > 0 && (
@@ -437,7 +645,7 @@ export function WorkforceManagement() {
       >
         {loading ? (
           <div className="p-4">
-            <SkeletonTable rows={6} cols={10} />
+            <SkeletonTable rows={6} cols={12} />
           </div>
         ) : rows.length === 0 ? (
           <div className="p-4">
@@ -458,7 +666,9 @@ export function WorkforceManagement() {
                   <TableHeaderCell className="text-right">Actual HC</TableHeaderCell>
                   <TableHeaderCell className="text-right">Variance (ideal−actual)</TableHeaderCell>
                   <TableHeaderCell className="text-right">WL band sum</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Open positions</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Open (sheet)</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Open (gap)</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Projected</TableHeaderCell>
                   <TableHeaderCell className="text-right">Roster</TableHeaderCell>
                   <TableHeaderCell>Fill rate</TableHeaderCell>
                   <TableHeaderCell>Status</TableHeaderCell>
@@ -476,6 +686,8 @@ export function WorkforceManagement() {
                   const pct = wfmFillPct(actualN, idealN);
                   const gapColor = wfmFillColor(pct, idealN);
                   const statusLbl = wfmStatusLabel(pct, idealN);
+                  const openSheet = wfmOpenPositionsFromSheet(r);
+                  const projRow = wfmRowProjectedHc(r);
                   return (
                     <TableRow key={i}>
                       <TableCell className="max-w-[200px]">
@@ -498,8 +710,14 @@ export function WorkforceManagement() {
                         {formatNumber(variance)}
                       </TableCell>
                       <TableCell className="text-right text-xs tabular-nums">{formatNumber(wlBandSum)}</TableCell>
+                      <TableCell className={`text-right text-xs tabular-nums ${openSheet > 0 ? "text-sky-700 dark:text-sky-300" : "text-tremor-content-subtle"}`}>
+                        {formatNumber(openSheet)}
+                      </TableCell>
                       <TableCell className={`text-right text-xs tabular-nums ${openPos > 0 ? "text-rose-600" : "text-tremor-content-subtle"}`}>
                         {formatNumber(openPos)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums font-medium text-violet-800 dark:text-violet-300">
+                        {formatNumber(projRow)}
                       </TableCell>
                       <TableCell className="text-right text-xs tabular-nums text-sky-700 dark:text-sky-300">{formatNumber(projHc)}</TableCell>
                       <TableCell className="min-w-[120px]">
@@ -533,12 +751,18 @@ export function WorkforceManagement() {
                       {formatNumber(projectTableTotals.totVariance)}
                     </TableFooterCell>
                     <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totAdditional)}</TableFooterCell>
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-sky-800 dark:text-sky-300">
+                      {formatNumber(projectTableTotals.totOpenSheet)}
+                    </TableFooterCell>
                     <TableFooterCell
                       className={`text-right text-xs tabular-nums font-semibold ${
                         projectTableTotals.totOpenPos > 0 ? "text-rose-600" : "text-tremor-content-subtle"
                       }`}
                     >
                       {formatNumber(projectTableTotals.totOpenPos)}
+                    </TableFooterCell>
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-violet-800 dark:text-violet-300">
+                      {formatNumber(projectTableTotals.totProjectedHc)}
                     </TableFooterCell>
                     <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-sky-700 dark:text-sky-300">
                       {formatNumber(projectTableTotals.totProj)}
@@ -603,14 +827,14 @@ export function WorkforceManagement() {
                 <Text className="mt-0.5 text-xs text-tremor-content-subtle">Ideal vs actual roster strength</Text>
               </div>
               <div className="flex flex-col gap-4 px-4 py-3">
-                <GaugeRing
-                  value={fillRate}
-                  label="Capacity Fill Rate"
-                  sublabel={`${formatNumber(actualHc)} of ${formatNumber(idealHc)} positions`}
-                  color={fgColor}
-                />
+            <GaugeRing
+              value={fillRate}
+              label="Capacity Fill Rate"
+              sublabel={`${formatNumber(actualHc)} of ${formatNumber(idealHc)} positions`}
+              color={fgColor}
+            />
                 {wlData.length > 0 ? <WlDistributionBar data={wlData} /> : null}
-              </div>
+            </div>
             </Card>
           </Grid>
         </>
@@ -622,15 +846,15 @@ export function WorkforceManagement() {
             <Title className="text-base font-semibold text-tremor-content-strong">Productivity target vs fill rate (by client)</Title>
             <Text className="mt-0.5 text-xs leading-snug text-tremor-content-subtle">
               Bars: fill rate (actual ÷ ideal HC). Line: productivity target. Dashed line: 100% fill — above = over-capacity.
-              {productivityFillChartAll.length > 0 ? (
+          {productivityFillChartAll.length > 0 ? (
                 <span className="mt-1 block text-[11px]">
-                  {prodChartSelected.length === 0
+              {prodChartSelected.length === 0
                     ? `Showing all ${productivityFillChartAll.length} clients — search to narrow.`
                     : `Showing ${productivityFillChartData.length} of ${productivityFillChartAll.length} selected.`}
-                </span>
-              ) : null}
+            </span>
+          ) : null}
             </Text>
-          </div>
+        </div>
           <div className="px-4 py-3">
           {productivityFillChartAll.length > 0 ? (
             <div className="mb-3">
@@ -638,95 +862,95 @@ export function WorkforceManagement() {
                 <Flex className="flex-wrap items-center gap-1.5">
                   <TextInput
                     className="min-w-[140px] max-w-xs flex-1 text-xs"
-                    placeholder="Search clients to add…"
-                    value={prodChartSearch}
+                  placeholder="Search clients to add…"
+                  value={prodChartSearch}
                     onValueChange={setProdChartSearch}
-                    onFocus={() => setProdChartPickerOpen(true)}
-                    onClick={() => setProdChartPickerOpen(true)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") setProdChartPickerOpen(false);
-                    }}
-                    autoComplete="off"
-                  />
+                  onFocus={() => setProdChartPickerOpen(true)}
+                  onClick={() => setProdChartPickerOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setProdChartPickerOpen(false);
+                  }}
+                  autoComplete="off"
+                />
                   <Button
-                    type="button"
+                  type="button"
                     variant="secondary"
                     size="xs"
                     color="slate"
                     className="!text-[11px]"
-                    onClick={() => {
+                  onClick={() => {
                       const next = prodChartPickerCandidates[0]?.fullName;
                       if (next && !prodChartSelected.includes(next)) setProdChartSelected((s) => [...s, next]);
-                      setProdChartSearch("");
-                    }}
+                    setProdChartSearch("");
+                  }}
                     disabled={!prodChartPickerCandidates.length}
-                  >
-                    + Add first match
+                >
+                  + Add first match
                   </Button>
                   <Button
-                    type="button"
+                  type="button"
                     variant="primary"
                     size="xs"
                     color="orange"
                     className="!text-[11px]"
-                    onClick={() => {
-                      setProdChartSelected([]);
-                      setProdChartSearch("");
-                      setProdChartPickerOpen(false);
-                    }}
-                  >
+                  onClick={() => {
+                    setProdChartSelected([]);
+                    setProdChartSearch("");
+                    setProdChartPickerOpen(false);
+                  }}
+                >
                     Show all
                   </Button>
                 </Flex>
                 {prodChartPickerOpen && prodChartPickerCandidates.length > 0 ? (
-                  <div
-                    role="listbox"
+                <div
+                  role="listbox"
                     className="absolute left-0 right-0 top-full z-40 mt-1 max-h-36 overflow-y-auto rounded-tremor-default border border-tremor-border bg-white py-1 shadow-tremor-dropdown dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted"
                   >
                     <Text className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Add client</Text>
-                    {prodChartPickerCandidates.map((d) => (
-                      <button
-                        key={d.fullName}
-                        type="button"
-                        role="option"
+                  {prodChartPickerCandidates.map((d) => (
+                    <button
+                      key={d.fullName}
+                      type="button"
+                      role="option"
                         className="block w-full cursor-pointer border-0 bg-transparent px-2.5 py-1 text-left text-xs text-tremor-content-subtle hover:bg-orange-50 dark:hover:bg-dark-tremor-background-subtle"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          setProdChartSelected((s) => (s.includes(d.fullName) ? s : [...s, d.fullName]));
-                          setProdChartSearch("");
-                        }}
-                      >
-                        {d.fullName}
-                      </button>
-                    ))}
-                  </div>
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setProdChartSelected((s) => (s.includes(d.fullName) ? s : [...s, d.fullName]));
+                        setProdChartSearch("");
+                      }}
+                    >
+                      {d.fullName}
+                    </button>
+                  ))}
+                </div>
                 ) : null}
-              </div>
+            </div>
               {prodChartSelected.length > 0 ? (
                 <Flex className="mt-2 flex-wrap items-center gap-1.5">
                   <Text className="text-[10px] font-bold uppercase tracking-wide text-tremor-content-subtle">Selected</Text>
-                  {prodChartSelected.map((fn) => (
+                {prodChartSelected.map((fn) => (
                     <Button
-                      key={fn}
-                      type="button"
+                    key={fn}
+                    type="button"
                       size="xs"
                       variant="light"
                       color="orange"
                       className="!max-w-[200px] !truncate !text-[11px]"
-                      onClick={() => setProdChartSelected((s) => s.filter((x) => x !== fn))}
-                    >
-                      {fn.length > 28 ? `${fn.slice(0, 27)}…` : fn}
+                    onClick={() => setProdChartSelected((s) => s.filter((x) => x !== fn))}
+                  >
+                    {fn.length > 28 ? `${fn.slice(0, 27)}…` : fn}
                       <span className="ml-0.5 opacity-70">×</span>
                     </Button>
-                  ))}
+                ))}
                 </Flex>
               ) : null}
-            </div>
+              </div>
           ) : null}
           <div className="mt-1">
-            <WfmProductivityFillChart data={productivityFillChartData} />
-          </div>
-          </div>
+        <WfmProductivityFillChart data={productivityFillChartData} />
+        </div>
+        </div>
         </Card>
       )}
 

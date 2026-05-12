@@ -36,7 +36,7 @@ tar -czf "${TAR_PATH}" \
   --exclude='*.tar.gz' \
   backend frontend excel_files_imp scripts \
   Dockerfile.backend Dockerfile.frontend \
-  docker-compose.yml nginx.conf requirements.txt .env.example
+  docker-compose.yml docker-compose.ngrok.yml nginx.conf requirements.txt .env.example
 
 echo "==> Uploading bundle..."
 gcloud compute scp "${TAR_PATH}" "${REMOTE_USER}@${GCP_INSTANCE}:~/deploy.tar.gz" \

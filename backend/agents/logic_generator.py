@@ -45,6 +45,7 @@ class LogicGeneratorAgent:
         6. If revenue is 0.0 because the position is still open or in progress, return a status representing the current recruiting stage (e.g., 'Offer Stage', 'Interview', 'Sourcing', 'In Progress').
         7. Always return a 'status' string. If the position is on hold or canceled, return status: 'On Hold' or 'Cancelled'.
         8. If an opening fee is applicable (even if no one is hired yet), ensure opening_fee is returned so the position is marked as 'ACTIVE' in the system.
+        9. SANDBOX: Do not use import os, sys, subprocess, open(), or file I/O. If you need helpers, you may use only: import math, import re, import datetime (no other imports).
         """
         
         return self.client.chat.completions.create(

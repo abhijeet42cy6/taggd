@@ -1356,7 +1356,13 @@ export const queries = {
       .then((r) => r.data);
   },
 
-  contractMSAUrl: (contractId: number) => `/contracts/${contractId}/msa-document`,
+  contractMSAUrl: (contractId: number, storedBasename?: string) => {
+    const q =
+      storedBasename != null && storedBasename !== ""
+        ? `?f=${encodeURIComponent(storedBasename)}`
+        : "";
+    return `/contracts/${contractId}/msa-document${q}`;
+  },
 
   realiseContractClient: (id: number) =>
     api
@@ -1949,6 +1955,24 @@ export const queries = {
       invalidateCache("activity/log");
       return r.data;
     }),
+
+  uploadRevenueBillingAttachment: (rowId: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post<RevenueBillingRow>(`/revenue-billing/${rowId}/upload-billing-attachment`, fd).then((r) => {
+      invalidateCache("revenue-billing");
+      invalidateCache("activity/log");
+      return r.data;
+    });
+  },
+
+  revenueBillingAttachmentUrl: (rowId: number, storedBasename?: string) => {
+    const q =
+      storedBasename != null && storedBasename !== ""
+        ? `?f=${encodeURIComponent(storedBasename)}`
+        : "";
+    return `/revenue-billing/${rowId}/billing-attachment${q}`;
+  },
 
   deleteRevenueBilling: (id: number) =>
     api.delete<{ status: string; id: number }>(`/revenue-billing/${id}`).then((r) => {

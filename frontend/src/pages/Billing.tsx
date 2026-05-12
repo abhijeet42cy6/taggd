@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  api,
   invalidateCache,
   queries,
   type Project,
@@ -12,7 +13,12 @@ import {
   UserPickerDropdown,
   type PlatformUserLite,
 } from "@/components/platform/NewContractOrgFlow";
-import { canPracticeSubmitBilling, useAuth } from "@/lib/auth";
+import {
+  canPracticeSubmitBilling,
+  isPlatformAdminRole,
+  useAuth,
+  type AuthUser,
+} from "@/lib/auth";
 import { cn, formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -24,10 +30,22 @@ import "@/styles/billing-ds-table.css";
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
 
+/** Matches backend `workflow_allows_billing_row_edit` (draft + disputed only). */
 function billingRowLocked(r: RevenueBillingRow): boolean {
   const w = r.workflow;
   if (!w?.validation_status) return false;
-  return !["draft", "disputed"].includes(String(w.validation_status));
+  const st = String(w.validation_status).trim().toLowerCase();
+  return !["draft", "disputed"].includes(st);
+}
+
+/** Practice users are blocked when workflow is past draft; platform admins are not (backend logs overrides). */
+function billingSheetLockedForCurrentUser(r: RevenueBillingRow, user: AuthUser | null): boolean {
+  if (!billingRowLocked(r)) return false;
+  if (!user) return true;
+  const s = (user.role ?? "").trim().toLowerCase();
+  const e = (user.effectiveRole ?? "").trim().toLowerCase();
+  if (isPlatformAdminRole(s) || isPlatformAdminRole(e)) return false;
+  return true;
 }
 
 function canSubmitBilling(r: RevenueBillingRow): boolean {
@@ -169,6 +187,62 @@ function formatWorkflowLabel(raw: string | null | undefined): string {
   const s = (raw || "draft").trim();
   if (!s) return "Draft";
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function lineIsBillingStoredRef(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+  if (s.toLowerCase().startsWith("billing:")) return true;
+  const base = (s.split("/").pop() || s).trim();
+  return /^bil\d+_\d+_/.test(base);
+}
+
+function nonBillingAttachmentLines(ref: string | null | undefined): string[] {
+  if (!ref || !String(ref).trim()) return [];
+  return String(ref)
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((l) => l.trim() && !lineIsBillingStoredRef(l))
+    .map((l) => l.trimEnd());
+}
+
+function parseBillingStoredBasenames(ref: string | null | undefined): string[] {
+  if (!ref || !String(ref).trim()) return [];
+  const out: string[] = [];
+  for (const line of String(ref).replace(/\r\n/g, "\n").split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    if (s.toLowerCase().startsWith("billing:")) {
+      const fn = s.slice(8).trim();
+      if (fn) out.push(fn);
+      continue;
+    }
+    const base = (s.split("/").pop() || s).trim();
+    if (/^bil\d+_\d+_/.test(base)) out.push(base);
+  }
+  return out;
+}
+
+function sortBillingBasenamesNewestFirst(fns: string[]): string[] {
+  return [...fns].sort((a, b) => {
+    const ta = /^bil\d+_(\d+)_/.exec(a)?.[1];
+    const tb = /^bil\d+_(\d+)_/.exec(b)?.[1];
+    return (Number(tb) || 0) - (Number(ta) || 0);
+  });
+}
+
+function displayBillingStoredName(basename: string): string {
+  return basename.replace(/^bil\d+_\d+_/, "") || basename;
+}
+
+function mergeUrlTextWithBillingBasenames(urlText: string, basenames: string[]): string {
+  const urlLines = urlText
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim());
+  const tags = basenames.map((b) => `billing:${b}`);
+  return [...urlLines, ...tags].join("\n");
 }
 
 function BillingWorkflowCell({ row }: { row: RevenueBillingRow }) {
@@ -449,6 +523,11 @@ function BillingFormNCP({
   setTab,
   /** In-sheet mount target so Radix Sheet focus scope includes the portaled dropdown. */
   projectDropdownPortalEl,
+  billingRowId,
+  attachmentsLocked,
+  pendingAttachmentFiles,
+  setPendingAttachmentFiles,
+  onBillingAttachmentRefSynced,
 }: {
   draft: Draft;
   setDraft: React.Dispatch<React.SetStateAction<Draft>>;
@@ -458,6 +537,11 @@ function BillingFormNCP({
   tab: number;
   setTab: (n: number) => void;
   projectDropdownPortalEl: HTMLDivElement | null;
+  billingRowId: number | null;
+  attachmentsLocked: boolean;
+  pendingAttachmentFiles: File[];
+  setPendingAttachmentFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  onBillingAttachmentRefSynced: (attachmentRef: string | null) => void;
 }) {
   const [projDdOpen, setProjDdOpen] = useState(false);
   const [projSearch, setProjSearch] = useState("");
@@ -467,6 +551,9 @@ function BillingFormNCP({
   const projWrapRef = useRef<HTMLDivElement>(null);
   const projBtnRef = useRef<HTMLButtonElement>(null);
   const projPortalRef = useRef<HTMLDivElement>(null);
+  const billingFileRef = useRef<HTMLInputElement | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentErr, setAttachmentErr] = useState<string | null>(null);
 
   // Sync pickers with draft text (email) when assignable list loads
   useEffect(() => {
@@ -523,6 +610,83 @@ function BillingFormNCP({
   }, []);
 
   const set = (k: string, v: string) => setDraft((prev) => ({ ...prev, [k]: v }));
+
+  const billingBasenames = useMemo(
+    () => sortBillingBasenamesNewestFirst(parseBillingStoredBasenames(draft.attachment_ref)),
+    [draft.attachment_ref],
+  );
+  const urlAttachmentText = useMemo(
+    () => nonBillingAttachmentLines(draft.attachment_ref).join("\n"),
+    [draft.attachment_ref],
+  );
+  const billingAttachmentProjectId = (() => {
+    const n = parseInt(draft.project_id, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
+
+  function billingAttachmentErrFromCatch(e: unknown, fallback: string): string {
+    let msg = e && typeof e === "object" && "message" in e ? String((e as Error).message) : fallback;
+    const status =
+      e && typeof e === "object" && "response" in e
+        ? (e as { response?: { status?: number } }).response?.status
+        : undefined;
+    if (status === 403 || /access denied/i.test(msg)) {
+      msg = `${msg} If this is wrong, ask an admin to assign you to project PRJ-${billingAttachmentProjectId}.`;
+    }
+    if (status === 423 || /locked/i.test(msg)) {
+      msg = `${msg} This row may be in finance review — dispute or wait until it returns to draft.`;
+    }
+    return msg;
+  }
+
+  async function onBillingFilesPicked(files: FileList | null) {
+    if (!files?.length || attachmentsLocked) return;
+    const list = Array.from(files);
+    if (billingRowId === null) {
+      setPendingAttachmentFiles((prev) => [...prev, ...list]);
+      setAttachmentErr(null);
+      if (billingFileRef.current) billingFileRef.current.value = "";
+      return;
+    }
+    setAttachmentErr(null);
+    setAttachmentUploading(true);
+    try {
+      let lastRef: string | null = draft.attachment_ref?.trim() ? draft.attachment_ref : null;
+      for (const file of list) {
+        const row = await queries.uploadRevenueBillingAttachment(billingRowId, file);
+        lastRef = row.attachment_ref ?? null;
+      }
+      if (lastRef != null) onBillingAttachmentRefSynced(lastRef);
+    } catch (e: unknown) {
+      setAttachmentErr(billingAttachmentErrFromCatch(e, "Upload failed"));
+    } finally {
+      setAttachmentUploading(false);
+      if (billingFileRef.current) billingFileRef.current.value = "";
+    }
+  }
+
+  async function onDownloadBillingAttachment(storedBasename: string) {
+    if (!billingRowId || !storedBasename) return;
+    setAttachmentErr(null);
+    try {
+      const res = await api.get(`revenue-billing/${billingRowId}/billing-attachment`, {
+        params: { f: storedBasename },
+        responseType: "blob",
+      });
+      const dispo = res.headers["content-disposition"] as string | undefined;
+      let name = displayBillingStoredName(storedBasename);
+      const m = dispo && /filename\*?=(?:UTF-8''|")?([^";\n]+)/i.exec(dispo);
+      if (m?.[1]) name = decodeURIComponent(m[1].replace(/"/g, "").trim());
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      setAttachmentErr(billingAttachmentErrFromCatch(e, "Download failed"));
+    }
+  }
 
   const selectedProject = useMemo(() => {
     const pid = parseInt(draft.project_id, 10);
@@ -596,7 +760,10 @@ function BillingFormNCP({
           <div className="ncp-section-desc">{desc}</div>
         </div>
       </div>
-      <div className="ncp-section-body" style={{ maxHeight: 520 }}>
+      <div
+        className="ncp-section-body"
+        style={{ maxHeight: 520, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}
+      >
         {body}
       </div>
     </div>
@@ -858,7 +1025,123 @@ function BillingFormNCP({
                 />
               </div>
             </div>
-            {pr("Attachment (URL / ref)", "attachment_ref", { placeholder: "URL or file reference" })}
+            <div className="ncp-prop-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+              <div className="ncp-prop-label">Attachment (URL / ref)</div>
+              <textarea
+                className="ncp-prop-input"
+                rows={2}
+                placeholder="HTTPS link or internal reference (optional)"
+                disabled={attachmentsLocked}
+                value={urlAttachmentText}
+                onChange={(e) => {
+                  const merged = mergeUrlTextWithBillingBasenames(
+                    e.target.value,
+                    parseBillingStoredBasenames(draft.attachment_ref),
+                  );
+                  setDraft((prev) => ({ ...prev, attachment_ref: merged }));
+                }}
+              />
+            </div>
+            <div
+              style={{
+                borderTop: "1px solid var(--ncp-border)",
+                marginTop: 4,
+                paddingTop: 12,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ncp-text-secondary)", marginBottom: 6 }}>
+                Invoice &amp; supporting files
+              </div>
+              <p className="ncp-hint" style={{ margin: "0 0 8px" }}>
+                PDF, Word, Excel, or an image — same as contract MSA uploads. Multiple files are kept; URLs stay in the
+                field above.
+                {billingRowId === null ? " Queued files upload automatically after you create the row." : ""}
+              </p>
+              {billingBasenames.length > 0 && billingRowId !== null && (
+                <ul
+                  className="ncp-hint"
+                  style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 13, color: "var(--ncp-text-primary)" }}
+                >
+                  {billingBasenames.map((fn) => (
+                    <li
+                      key={fn}
+                      style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}
+                    >
+                      <span
+                        style={{
+                          flex: "1 1 140px",
+                          minWidth: 0,
+                          wordBreak: "break-all",
+                          fontFamily: "var(--ncp-mono)",
+                          fontSize: 12,
+                        }}
+                      >
+                        {displayBillingStoredName(fn)}
+                      </span>
+                      <button
+                        type="button"
+                        className="ncp-btn ncp-btn-ghost"
+                        style={{ flexShrink: 0 }}
+                        onClick={() => void onDownloadBillingAttachment(fn)}
+                      >
+                        Download
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {pendingAttachmentFiles.length > 0 && billingRowId === null && (
+                <ul
+                  className="ncp-hint"
+                  style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 13, color: "var(--ncp-text-primary)" }}
+                >
+                  {pendingAttachmentFiles.map((f, i) => (
+                    <li
+                      key={`${f.name}-${i}-${f.size}`}
+                      style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}
+                    >
+                      <span style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>{f.name}</span>
+                      <button
+                        type="button"
+                        className="ncp-btn ncp-btn-ghost"
+                        style={{ flexShrink: 0 }}
+                        onClick={() => setPendingAttachmentFiles((prev) => prev.filter((_, j) => j !== i))}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                <input
+                  ref={billingFileRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.xlsx,.xls,.png,.jpg,.jpeg"
+                  className="sr-only"
+                  disabled={attachmentUploading || attachmentsLocked}
+                  onChange={(e) => void onBillingFilesPicked(e.target.files)}
+                />
+                <button
+                  type="button"
+                  className="ncp-btn ncp-btn-secondary"
+                  disabled={attachmentUploading || attachmentsLocked}
+                  onClick={() => billingFileRef.current?.click()}
+                >
+                  {attachmentUploading ? "Uploading…" : "Upload files…"}
+                </button>
+              </div>
+              {attachmentErr && (
+                <div
+                  className="ncp-hint"
+                  style={{ marginTop: 8, color: "var(--ncp-amber, #b45309)", fontSize: 12 }}
+                  role="alert"
+                >
+                  {attachmentErr}
+                </div>
+              )}
+            </div>
           </>,
         )}
         {section(
@@ -928,6 +1211,7 @@ export function Billing() {
   const [assignableUsers, setAssignableUsers] = useState<PlatformUserLite[]>([]);
   /** In-sheet DOM node for BillingFormNCP project dropdown portal (Radix focus trap). */
   const [billingSheetPortalEl, setBillingSheetPortalEl] = useState<HTMLDivElement | null>(null);
+  const [pendingAttachmentFiles, setPendingAttachmentFiles] = useState<File[]>([]);
 
   /** Client-side filters for the loaded table (API still uses project + limit). */
   const [tableSearch, setTableSearch] = useState("");
@@ -1063,6 +1347,12 @@ export function Billing() {
   const hasEmptyFy = useMemo(() => rows.some((r) => !(r.fiscal_year_label || "").trim()), [rows]);
   const hasEmptyPm = useMemo(() => rows.some((r) => !(r.project_manager || "").trim()), [rows]);
 
+  const editingBillingRow = useMemo(
+    () => (editId != null ? rows.find((r) => r.id === editId) : null),
+    [editId, rows],
+  );
+  const attachmentsLocked = editingBillingRow ? billingSheetLockedForCurrentUser(editingBillingRow, user) : false;
+
   const filteredRows = useMemo(
     () =>
       rows.filter((r) =>
@@ -1102,19 +1392,23 @@ export function Billing() {
   }
 
   function openCreate() {
+    setErr(null);
     setEditId(null);
     setBaselineDraft(null);
     setDraft(emptyDraft(0));
     setBillingTab(0);
+    setPendingAttachmentFiles([]);
     setDialogOpen(true);
   }
 
   function openEdit(r: RevenueBillingRow) {
+    setErr(null);
     const d = rowToDraft(r);
     setEditId(r.id);
     setBaselineDraft({ ...d });
     setDraft(d);
     setBillingTab(0);
+    setPendingAttachmentFiles([]);
     setDialogOpen(true);
   }
 
@@ -1124,9 +1418,16 @@ export function Billing() {
     try {
       if (editId === null) {
         const body = draftToCreate(draft);
-        await queries.createRevenueBilling(body);
+        const created = await queries.createRevenueBilling(body);
+        for (const f of pendingAttachmentFiles) {
+          await queries.uploadRevenueBillingAttachment(created.id, f);
+        }
+        setPendingAttachmentFiles([]);
       } else {
-        if (!baselineDraft) return;
+        if (!baselineDraft) {
+          setErr("Could not load this row for editing. Close the panel and choose Edit again.");
+          return;
+        }
         const delta = draftToPatchDelta(baselineDraft, draft);
         if (Object.keys(delta).length > 0) {
           await queries.patchRevenueBilling(editId, delta);
@@ -1152,7 +1453,13 @@ export function Billing() {
     }
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(id: number, row?: RevenueBillingRow) {
+    if (row && billingSheetLockedForCurrentUser(row, user)) {
+      setErr(
+        "This billing row cannot be deleted while finance validation is in progress. Only draft or disputed rows can be removed.",
+      );
+      return;
+    }
     if (!window.confirm(`Delete billing row #${id}?`)) return;
     setErr(null);
     try {
@@ -1562,6 +1869,7 @@ export function Billing() {
                           <td className="billing-ds-actions">
                             {canSubmitBilling(r) && canPracticeSubmitBilling(user) ? (
                               <Button
+                                type="button"
                                 variant="outline"
                                 size="sm"
                                 className="h-7 px-2 text-[10px] mr-1"
@@ -1575,22 +1883,56 @@ export function Billing() {
                               </Button>
                             ) : null}
                             <Button
+                              type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2"
-                              disabled={billingRowLocked(r)}
-                              onClick={() => openEdit(r)}
-                              title={billingRowLocked(r) ? "Locked under finance workflow" : "Edit"}
+                              className={cn(
+                                "h-7 px-2",
+                                billingSheetLockedForCurrentUser(r, user) && "opacity-45",
+                              )}
+                              onClick={() => {
+                                if (billingSheetLockedForCurrentUser(r, user)) {
+                                  setErr(
+                                    "This row is locked under the finance workflow. Only draft or disputed rows can be edited — ask finance to return it to draft or mark it disputed.",
+                                  );
+                                  return;
+                                }
+                                openEdit(r);
+                              }}
+                              title={
+                                billingSheetLockedForCurrentUser(r, user)
+                                  ? "Locked under finance workflow (click for details)"
+                                  : billingRowLocked(r)
+                                    ? "Edit (platform admin — changes are logged)"
+                                    : "Edit"
+                              }
                             >
                               <PencilLine className="h-3.5 w-3.5" />
                             </Button>
                             <Button
+                              type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2 text-destructive hover:text-destructive"
-                              disabled={billingRowLocked(r)}
-                              onClick={() => void handleDelete(r.id)}
-                              title={billingRowLocked(r) ? "Locked" : "Delete"}
+                              className={cn(
+                                "h-7 px-2 text-destructive hover:text-destructive",
+                                billingSheetLockedForCurrentUser(r, user) && "opacity-45",
+                              )}
+                              onClick={() => {
+                                if (billingSheetLockedForCurrentUser(r, user)) {
+                                  setErr(
+                                    "This row cannot be deleted while finance validation is in progress. Only draft or disputed rows can be removed.",
+                                  );
+                                  return;
+                                }
+                                void handleDelete(r.id, r);
+                              }}
+                              title={
+                                billingSheetLockedForCurrentUser(r, user)
+                                  ? "Locked (click for details)"
+                                  : billingRowLocked(r)
+                                    ? "Delete (platform admin — logged)"
+                                    : "Delete"
+                              }
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -1606,7 +1948,17 @@ export function Billing() {
         )}
       </PlatformSection>
 
-      <Sheet open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Sheet
+        open={dialogOpen}
+        onOpenChange={(next) => {
+          setDialogOpen(next);
+          if (!next) {
+            setEditId(null);
+            setBaselineDraft(null);
+            setPendingAttachmentFiles([]);
+          }
+        }}
+      >
         <SheetContent
           side="right"
           showCloseButton={false}
@@ -1662,6 +2014,15 @@ export function Billing() {
                   tab={billingTab}
                   setTab={setBillingTab}
                   projectDropdownPortalEl={billingSheetPortalEl}
+                  billingRowId={editId}
+                  attachmentsLocked={attachmentsLocked}
+                  pendingAttachmentFiles={pendingAttachmentFiles}
+                  setPendingAttachmentFiles={setPendingAttachmentFiles}
+                  onBillingAttachmentRefSynced={(ref) => {
+                    const s = ref ?? "";
+                    setDraft((d) => ({ ...d, attachment_ref: s }));
+                    setBaselineDraft((b) => (b ? { ...b, attachment_ref: s } : b));
+                  }}
                 />
 
                 {/* Error */}

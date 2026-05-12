@@ -464,7 +464,7 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
                 onClick={() => setSidebarCollapsed((c) => !c)}
               >
                 {sidebarCollapsed ? <ChevronRight size={18} strokeWidth={2} /> : <ChevronLeft size={18} strokeWidth={2} />}
-              </button>
+                  </button>
             </div>
           </div>
 
@@ -531,7 +531,7 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
                             >
                               <span className="platform-nav-accordion__title-text">{g.title}</span>
                               <ChevronRight className="platform-nav-accordion__chevron" size={14} strokeWidth={2} aria-hidden />
-                            </button>
+                  </button>
                             {isOpen && (
                               <div className="platform-nav-accordion__panel" role="region" aria-label={g.title}>
                                 {g.items.map((item) => (
@@ -629,11 +629,11 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
               <button type="button" className="platform-topbar-mission-btn" onClick={onOpenMissionVision}>
                 Mission &amp; Vision
               </button>
-            </div>
-          </header>
+              </div>
+            </header>
 
           <section className="platform-content">
-            <Routes>
+                <Routes>
               <Route path="/no-access" element={<ClientPortalNoAccess />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/transitions" element={<Transitions />} />
@@ -655,20 +655,20 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
               <Route path="/finance-validation" element={<FinanceValidation />} />
               <Route path="/revenue-governance" element={<RevenueGovernance />} />
               <Route path="/vendor-licenses" element={<VendorLicenses />} />
-              <Route path="/sla-performance" element={<SLAPerformance />} />
+                  <Route path="/sla-performance" element={<SLAPerformance />} />
               <Route path="/revenue-leakage" element={<RevenueLeakage />} />
-              <Route path="/wfm" element={<WorkforceManagement />} />
+                  <Route path="/wfm" element={<WorkforceManagement />} />
               <Route path="/data-operations" element={<DataOperations />} />
               <Route path="/ingestion" element={<IngestionCenter />} />
               <Route path="/tasks" element={<Tasks />} />
               <Route path="/activity" element={<ActivityLog />} />
               <Route path="/agent" element={<Agent />} />
               <Route path="/admin/users" element={<AdminUsers />} />
-            </Routes>
+                </Routes>
           </section>
         </main>
       </div>
-    </div>
+              </div>
 
     <AlertDialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
       <AlertDialogContent size="default" className="border-border sm:max-w-md">

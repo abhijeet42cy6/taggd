@@ -5,6 +5,7 @@ from starlette.responses import JSONResponse
 
 from backend.db.database import SessionLocal, User
 from backend.auth.security import decode_token_safe
+from backend.core.debug_agent_log import debug_agent_log
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if not user:
                 return JSONResponse({"detail": "User not found"}, status_code=401)
             if not user.is_active:
+                # #region agent log
+                debug_agent_log(
+                    hypothesis_id="H5",
+                    location="auth/middleware.py:dispatch",
+                    message="user_disabled_403",
+                    data={"user_id": user_id},
+                )
+                # #endregion
                 return JSONResponse({"detail": "User disabled"}, status_code=403)
             db.expunge(user)
             request.state.user = user

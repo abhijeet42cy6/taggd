@@ -383,7 +383,11 @@ async def upload_msa_document(
     user: User = Depends(get_current_user),
 ):
     """Upload and persist an MSA / contract document file for a contract."""
-    from backend.core.msa_storage import save_msa_file, msa_reference_tag
+    from backend.core.msa_storage import (
+        parse_msa_reference_list,
+        save_msa_file,
+        serialize_msa_reference_tags,
+    )
 
     c = db.query(ProjectContract).filter(ProjectContract.id == contract_id).first()
     if not c:
@@ -396,8 +400,10 @@ async def upload_msa_document(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    ref = msa_reference_tag(filename)
-    c.sow_msa_reference = ref
+    existing = parse_msa_reference_list(c.sow_msa_reference)
+    if filename not in existing:
+        existing.append(filename)
+    c.sow_msa_reference = serialize_msa_reference_tags(existing)
     db.commit()
     db.refresh(c)
     log_activity(
@@ -408,19 +414,24 @@ async def upload_msa_document(
         summary=f"MSA document uploaded for CNT-{contract_id}",
         project_id=c.project_id,
         resource_id=str(contract_id),
-        meta={"filename": filename},
+        meta={"filename": filename, "count": len(existing)},
     )
-    return {"status": "ok", "filename": filename, "sow_msa_reference": ref}
+    return {"status": "ok", "filename": filename, "sow_msa_reference": c.sow_msa_reference}
 
 
 @router.get("/{contract_id}/msa-document")
 async def serve_msa_document(
     contract_id: int,
+    f: Optional[str] = Query(None, description="Stored basename (required when multiple uploads exist for disambiguation)"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Serve the stored MSA / contract document for download."""
-    from backend.core.msa_storage import resolve_msa_path, is_msa_reference, extract_filename
+    """Serve a stored MSA / contract document. With multiple uploads, pass `f` or the newest file is returned."""
+    from backend.core.msa_storage import (
+        parse_msa_reference_list,
+        pick_latest_msa_filename,
+        resolve_msa_path,
+    )
 
     c = db.query(ProjectContract).filter(ProjectContract.id == contract_id).first()
     if not c:
@@ -428,16 +439,27 @@ async def serve_msa_document(
     assert_project_access(user, db, c.project_id)
 
     ref = (getattr(c, "sow_msa_reference", None) or "").strip()
-    if not is_msa_reference(ref):
-        raise HTTPException(status_code=404, detail="No stored document — sow_msa_reference is a plain text ref.")
+    filenames = parse_msa_reference_list(ref)
+    if not filenames:
+        raise HTTPException(
+            status_code=404,
+            detail="No stored document — upload a file from the Legal tab or set sow_msa_reference to msa: lines.",
+        )
 
-    filename = extract_filename(ref)
-    path = resolve_msa_path(filename)
+    f_q = (f or "").strip()
+    if f_q:
+        pick = os.path.basename(f_q)
+        if pick not in filenames:
+            raise HTTPException(status_code=404, detail="Requested file is not attached to this contract")
+    else:
+        pick = pick_latest_msa_filename(filenames)
+
+    path = resolve_msa_path(pick)
     if not path:
         raise HTTPException(status_code=404, detail="Document file not found on disk")
 
-    mt = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=mt, filename=os.path.basename(filename))
+    mt = mimetypes.guess_type(pick)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=mt, filename=os.path.basename(pick))
 
 
 @router.delete("/{contract_id}")
