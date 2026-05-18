@@ -117,6 +117,31 @@ function projInitials(name: string): string {
     .toUpperCase();
 }
 
+function projectSearchTerms(p: Project): string[] {
+  const bits: (string | null | undefined)[] = [
+    String(p.id),
+    `prj-${p.id}`,
+    p.account_name,
+    p.filename,
+    p.charge_code,
+    p.engagement_name,
+    p.client_official_name,
+  ];
+  return bits
+    .filter((x): x is string => x != null && String(x).trim() !== "")
+    .map((s) => String(s).toLowerCase());
+}
+
+function projectMatchesPicker(p: Project, raw: string): boolean {
+  const q = raw.trim().toLowerCase();
+  if (!q) return true;
+  const idOnly = q.replace(/^prj-?\s*/i, "").trim();
+  const terms = projectSearchTerms(p);
+  if (terms.some((t) => t.includes(q))) return true;
+  if (/^\d+$/.test(idOnly) && String(p.id) === idOnly) return true;
+  return false;
+}
+
 function MultiProjectPicker({
   value,
   onChange,
@@ -134,14 +159,7 @@ function MultiProjectPicker({
   const portalRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter(
-      (p) =>
-        String(p.id).includes(q) ||
-        (p.account_name || "").toLowerCase().includes(q) ||
-        (p.filename || "").toLowerCase().includes(q),
-    );
+    return projects.filter((p) => projectMatchesPicker(p, search));
   }, [projects, search]);
 
   const selectedProjects = useMemo(
@@ -150,7 +168,10 @@ function MultiProjectPicker({
   );
 
   useLayoutEffect(() => {
-    if (!open) { setDdRect(null); return; }
+    if (!open) {
+      setDdRect(null);
+      return;
+    }
     const measure = () => {
       const btn = btnRef.current;
       if (!btn) return;
@@ -804,7 +825,12 @@ export function AdminUsers() {
         <div style={{ color: "var(--red)", marginBottom: 12, fontSize: 12 }}>{loadError}</div>
       ) : null}
 
-      <Sheet open={createSheetOpen} onOpenChange={(o) => { if (!o) { setCreateSheetOpen(false); resetCreateSheet(); } }}>
+      {/* modal={false}: project picker portals its dropdown to document.body; Radix focus trap would block the search input otherwise. */}
+      <Sheet
+        modal={false}
+        open={createSheetOpen}
+        onOpenChange={(o) => { if (!o) { setCreateSheetOpen(false); resetCreateSheet(); } }}
+      >
         <SheetContent
           side="right"
           showCloseButton={false}
@@ -1098,7 +1124,8 @@ export function AdminUsers() {
         ))}
       </div>
 
-      <Sheet open={!!accessModalUser} onOpenChange={(o) => { if (!o) closeAccessModal(); }}>
+      {/* Same as new-user sheet: MultiProjectPicker search lives in a body portal — non-modal Sheet so the input can take focus. */}
+      <Sheet modal={false} open={!!accessModalUser} onOpenChange={(o) => { if (!o) closeAccessModal(); }}>
         <SheetContent
           side="right"
           showCloseButton={false}
