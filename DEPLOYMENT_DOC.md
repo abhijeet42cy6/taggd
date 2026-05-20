@@ -1,6 +1,6 @@
 # Revenue Generator: Deployment & Infrastructure
 
-**Last updated:** May 12, 2026  
+**Last updated:** May 6, 2026  
 **GCP project:** `taggd-491107`  
 **Deployment status:** Production-capable stack (**Compute Engine** + **Docker Compose** origin tier). **Recommended public access:** dedicated DNS hostname → **Google Cloud HTTPS Load Balancer** → backends → containers (TLS terminated at the load balancer). Ephemeral tunnels are optional for demos only—see §8.
 
@@ -119,9 +119,10 @@ source scripts/gcp-env-tgddata-c1-prod-2.sh   # sets GCP_INSTANCE, zone, project
 2. Builds a tarball at `/tmp/tgddata-deploy-${GCP_PROJECT}.tar.gz` (excludes `node_modules`, `.git`, local `.db` files, etc.; includes `excel_files_imp`, Dockerfiles, `docker-compose.yml`, `docker-compose.ngrok.yml`, nginx, requirements).
 3. Uploads it as `~/deploy.tar.gz` on `${GCP_INSTANCE}` via `gcloud compute scp` (`**--tunnel-through-iap`**).
 4. If `./.env` exists locally, uploads it to the VM as `~/tgddata.env` and moves it to `~/tgddata_C1/.env` after extract.
-5. On the VM: removes legacy `deploy_frontend_1` / `deploy_backend_1` if present (frees host **port 80**).
-6. Extracts into `~/tgddata_C1`, then runs `docker compose up -d --build` if the Compose v2 plugin is available, else `docker-compose up -d --build`, using `docker-compose.yml` only. Typical containers: `tgddata_c1-backend-1`, `tgddata_c1-frontend-1`.
-7. **ngrok** is not started by this step. If you use `docker-compose.ngrok.yml`, SSH after deploy and run the two-file `docker compose` command from the ngrok subsection below so `tgddata_c1-ngrok_tunnel-1` is running.
+5. On the VM: removes legacy `deploy_frontend_1` / `deploy_backend_1` if present (frees host **port 80** for **host Nginx** when TLS is enabled).
+6. Extracts into `~/tgddata_C1`, then runs `docker compose up -d --build` if the Compose v2 plugin is available, else `docker-compose up -d --build`, using `docker-compose.yml` only. Typical containers: `tgddata_c1-backend-1`, `tgddata_c1-frontend-1`. The frontend publishes **`127.0.0.1:8080→80`** (not public `:80`) so the host can terminate TLS — see **§5b**.
+7. If **`TGDDATA_HOST_TLS_SETUP=1`** (default when you **`source scripts/gcp-env-tgddata-c1-prod-2.sh`**), runs **`sudo bash scripts/setup-host-nginx-certbot-taggd.sh`** on the VM after compose (host Nginx + Let’s Encrypt for **`taggd.aparatus.in`**). Other instances: leave unset or set **`TGDDATA_HOST_TLS_SETUP=0`** unless that VM serves this hostname.
+8. **ngrok** is not started by this step. If you use `docker-compose.ngrok.yml`, SSH after deploy and run the two-file `docker compose` command from the ngrok subsection below so `tgddata_c1-ngrok_tunnel-1` is running.
 
 **Overrides (optional)**
 
@@ -143,13 +144,37 @@ cd ~/tgddata_C1 && docker-compose up -d --build
 
 (Prefer `docker compose` when available; otherwise use `docker-compose`.)
 
+### 5b. Permanent domain — host Nginx + Certbot (`taggd.aparatus.in`)
+
+**DNS:** **`A`** record for **`taggd.aparatus.in`** → VM static IP (required before Certbot).
+
+**Compose:** `docker-compose.yml` maps the frontend to **`127.0.0.1:8080:80`** only. **Host** Nginx listens on **80/443**, proxies to **`http://127.0.0.1:8080`** (container `nginx.conf` still proxies **`/api/`** → backend).
+
+**Automated (recommended for `tgddata-c1-prod-2`):**
+
+```bash
+source scripts/gcp-env-tgddata-c1-prod-2.sh   # sets TGDDATA_HOST_TLS_SETUP=1 by default
+./scripts/deploy-gcp.sh
+```
+
+**Manual on the VM** (e.g. after a deploy without TLS, or to re-run):
+
+```bash
+cd ~/tgddata_C1 && sudo bash scripts/setup-host-nginx-certbot-taggd.sh
+```
+
+Optional overrides: **`TGDDATA_TLS_DOMAIN`**, **`TGDDATA_TLS_EMAIL`** (defaults: `taggd.aparatus.in`, `arjun@aocr.in`).
+
+**Local development:** open **`http://127.0.0.1:8080/`** (or **`http://localhost:8080/`**) after `docker compose up` because the published port is **8080** on the loopback interface.
+
 ### After every update — quick verification
 
 **On the VM (SSH):**
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/
-curl -s http://127.0.0.1/api/
+curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/
+curl -s http://127.0.0.1:8080/api/
+curl -sI https://taggd.aparatus.in/ | head -5
 docker ps
 ```
 

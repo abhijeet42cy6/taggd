@@ -38,6 +38,13 @@ export function formatPercent(value: number | string | null | undefined, digits 
   return `${num.toFixed(digits)}%`;
 }
 
+/** WFM lateral productivity target — workbook column is in lacs, not a percentage. */
+export function formatLacs(value: number | string | null | undefined, digits = 1): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return `${(0).toFixed(digits)} lacs`;
+  return `${num.toFixed(digits)} lacs`;
+}
+
 export function formatNumber(value: number | string | null | undefined, digits = 1): string {
   const num = Number(value);
   if (!Number.isFinite(num)) return (0).toFixed(digits);

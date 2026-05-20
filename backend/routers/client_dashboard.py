@@ -1,7 +1,8 @@
-"""Curated client portal dashboard — scoped aggregates + per-client layout config."""
+"""Curated client portal dashboard — scoped aggregates + per-client layout config (v2)."""
 from __future__ import annotations
 
 import copy
+import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,15 +39,60 @@ router = APIRouter(
     dependencies=[Depends(require_vertical("client_dashboard"))],
 )
 
-DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
-    "version": 1,
-    "widgets": {
-        "kpi_row": True,
-        "sla_summary": True,
-        "sla_metrics_table": True,
-        "finance_summary": True,
-        "projects_table": True,
+# ─── Block catalog ─────────────────────────────────────────────────────────────
+
+BLOCK_CATALOG: list[dict[str, str]] = [
+    {
+        "type": "sla_kpi_strip",
+        "label": "SLA KPI strip",
+        "desc": "Hero metrics: SLA met %, total tracked, portfolio health",
+        "category": "SLA",
     },
+    {
+        "type": "sla_summary_cards",
+        "label": "SLA summary cards",
+        "desc": "Cards showing met / not-met / not-reported counts",
+        "category": "SLA",
+    },
+    {
+        "type": "sla_table",
+        "label": "SLA KPI table",
+        "desc": "Detailed contractual KPI rows with score, target, status",
+        "category": "SLA",
+    },
+    {
+        "type": "req_kpi",
+        "label": "Requisitions KPI",
+        "desc": "Total requisition count for allocated projects",
+        "category": "Requisitions",
+    },
+    {
+        "type": "engagements_table",
+        "label": "Engagements table",
+        "desc": "Roster of allocated project engagements",
+        "category": "Engagements",
+    },
+    {
+        "type": "finance_strip",
+        "label": "Finance snapshot",
+        "desc": "Revenue, collections, unbilled tiles (visibility controlled per flag)",
+        "category": "Finance",
+    },
+]
+
+ALLOWED_BLOCK_TYPES = {b["type"] for b in BLOCK_CATALOG}
+
+DEFAULT_LAYOUT: list[dict[str, Any]] = [
+    {"id": "sla_kpi_strip", "type": "sla_kpi_strip", "variant": "card", "order": 0},
+    {"id": "sla_summary_cards", "type": "sla_summary_cards", "variant": "card", "order": 1},
+    {"id": "sla_table", "type": "sla_table", "variant": "card", "order": 2},
+    {"id": "req_kpi", "type": "req_kpi", "variant": "dense", "order": 3},
+    {"id": "engagements_table", "type": "engagements_table", "variant": "card", "order": 4},
+]
+
+DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
+    "version": 2,
+    "layout": DEFAULT_LAYOUT,
     "sla_show_internal_kpis": False,
     "finance_show_revenue": True,
     "finance_show_collections": True,
@@ -57,16 +103,80 @@ DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
 }
 
 
+# ─── Config helpers ─────────────────────────────────────────────────────────────
+
+def _widgets_to_layout(widgets: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert v1 widget flags to v2 layout array."""
+    mapping = [
+        ("kpi_row", "sla_kpi_strip"),
+        ("sla_summary", "sla_summary_cards"),
+        ("sla_metrics_table", "sla_table"),
+        ("projects_table", "engagements_table"),
+        ("finance_summary", "finance_strip"),
+    ]
+    layout = []
+    order = 0
+    for old_key, new_type in mapping:
+        if widgets.get(old_key, True):
+            layout.append({"id": new_type, "type": new_type, "variant": "card", "order": order})
+            order += 1
+    # Inject req_kpi if not represented
+    if not any(b["type"] == "req_kpi" for b in layout):
+        layout.append({"id": "req_kpi", "type": "req_kpi", "variant": "dense", "order": order})
+    return layout
+
+
+def _validate_layout(layout: list[Any]) -> list[dict[str, Any]]:
+    """Strip unknown block types and ensure required fields."""
+    out = []
+    for b in layout:
+        if not isinstance(b, dict):
+            continue
+        bt = b.get("type")
+        if bt not in ALLOWED_BLOCK_TYPES:
+            continue
+        out.append({
+            "id": str(b.get("id") or bt),
+            "type": bt,
+            "variant": b.get("variant", "card") if b.get("variant") in ("card", "dense") else "card",
+            "order": int(b.get("order", 0)),
+            "label": str(b["label"])[:80] if b.get("label") else None,
+        })
+    return out
+
+
 def _deep_merge_config(stored: Optional[dict[str, Any]]) -> dict[str, Any]:
     base = copy.deepcopy(DEFAULT_CLIENT_DASHBOARD_CONFIG)
     if not stored or not isinstance(stored, dict):
         return base
-    out = {**base, **{k: v for k, v in stored.items() if k != "widgets"}}
-    bw = base.get("widgets") if isinstance(base.get("widgets"), dict) else {}
-    sw = stored.get("widgets") if isinstance(stored.get("widgets"), dict) else {}
-    out["widgets"] = {**bw, **sw}
+
+    out = dict(base)
+
+    # layout: v2 stored layout wins; v1 widgets converted; else default
+    if "layout" in stored and isinstance(stored["layout"], list):
+        validated = _validate_layout(stored["layout"])
+        out["layout"] = validated if validated else copy.deepcopy(DEFAULT_LAYOUT)
+    elif "widgets" in stored and isinstance(stored.get("widgets"), dict):
+        out["layout"] = _widgets_to_layout(stored["widgets"])
+
+    # scalar pass-through fields
+    for k in (
+        "sla_show_internal_kpis",
+        "finance_show_revenue",
+        "finance_show_collections",
+        "finance_show_unbilled",
+        "finance_show_cm",
+        "project_vertical_filter",
+        "project_region_filter",
+    ):
+        if k in stored:
+            out[k] = stored[k]
+
+    out["version"] = 2
     return out
 
+
+# ─── Auth helpers ───────────────────────────────────────────────────────────────
 
 def _editor_roles_ok(user: User, db: Session) -> bool:
     er = effective_role(user)
@@ -79,6 +189,8 @@ def _editor_roles_ok(user: User, db: Session) -> bool:
         return True
     return False
 
+
+# ─── Data helpers ───────────────────────────────────────────────────────────────
 
 def _scoped_projects(db: Session, user: User, client_id: Optional[int]) -> list[Project]:
     q = apply_project_scope(
@@ -106,21 +218,35 @@ def _filter_projects_with_config(projects: list[Project], merged: dict[str, Any]
     return out
 
 
+def _bu_tabs(projects: list[Project]) -> list[dict[str, Any]]:
+    """Group projects by BU/SBU hierarchy tag for horizontal tab navigation.
+
+    Returns [] when no project has a hierarchy tag (no tabs rendered).
+    The first entry is always "All" covering every project.
+    """
+    bu_map: dict[str, list[int]] = {}
+    for p in projects:
+        tag = (p.hierarchy_tag_bu or p.hierarchy_tag_sbu or "").strip()
+        if tag:
+            bu_map.setdefault(tag, []).append(p.id)
+    if not bu_map:
+        return []
+    all_ids = [p.id for p in projects]
+    tabs: list[dict[str, Any]] = [{"key": "all", "label": "All", "project_ids": all_ids}]
+    for tag in sorted(bu_map.keys()):
+        tabs.append({"key": tag, "label": tag, "project_ids": bu_map[tag]})
+    return tabs
+
+
 def _finance_snapshot(db: Session, project_ids: list[int]) -> dict[str, Any]:
     import datetime
 
     if not project_ids:
         return {
-            "revenue_actual": 0.0,
-            "revenue_budget": 0.0,
-            "rev_attainment": 0.0,
-            "total_cm": 0.0,
-            "total_unbilled": 0.0,
-            "total_collected": 0.0,
-            "total_bad_debt": 0.0,
-            "total_collection_target": 0.0,
-            "collection_pending": 0.0,
-            "collection_efficiency": 0.0,
+            "revenue_actual": 0.0, "revenue_budget": 0.0, "rev_attainment": 0.0,
+            "total_cm": 0.0, "total_unbilled": 0.0, "total_collected": 0.0,
+            "total_bad_debt": 0.0, "total_collection_target": 0.0,
+            "collection_pending": 0.0, "collection_efficiency": 0.0,
         }
 
     pid_set = project_ids
@@ -166,10 +292,7 @@ def _finance_snapshot(db: Session, project_ids: list[int]) -> dict[str, Any]:
     for _r in db.query(FinanceCashFlow).filter(FinanceCashFlow.project_id.in_(pid_set)).all():
         _k = (_r.project_id, _r.reporting_month)
         _u = float(_r.unbilled_amount or 0.0)
-        if _k not in _cash_u:
-            _cash_u[_k] = _u
-        else:
-            _cash_u[_k] = max(_cash_u[_k], _u)
+        _cash_u[_k] = max(_cash_u.get(_k, 0.0), _u)
     _by_p: dict = {}
     for (_pid, _m), _u in _cash_u.items():
         _by_p.setdefault(_pid, []).append((_m, _u))
@@ -190,51 +313,7 @@ def _finance_snapshot(db: Session, project_ids: list[int]) -> dict[str, Any]:
         "total_collection_target": round(float(total_collection_target), 2),
         "collection_pending": round(float(collection_pending), 2),
         "collection_efficiency": round((total_collected / (total_collected + total_unbilled) * 100), 1)
-        if (total_collected + total_unbilled) > 0
-        else 0.0,
-    }
-
-
-def _sla_snapshot(db: Session, project_ids: list[int]) -> dict[str, Any]:
-    if not project_ids:
-        return {
-            "portfolio_health": 0.0,
-            "met_count": 0,
-            "not_met_count": 0,
-            "not_reported_count": 0,
-            "total_metrics": 0,
-        }
-
-    pid_set = project_ids
-    total_metrics = db.query(func.count(MetricDefinition.id)).filter(MetricDefinition.project_id.in_(pid_set)).scalar() or 0
-
-    rag_rows = (
-        db.query(SLAPerformance.rag_status, func.count(SLAPerformance.id))
-        .join(MetricDefinition, MetricDefinition.id == SLAPerformance.definition_id)
-        .filter(MetricDefinition.project_id.in_(pid_set))
-        .group_by(SLAPerformance.rag_status)
-        .all()
-    )
-    met_count = 0
-    not_met_count = 0
-    not_reported_count = 0
-    for rag, cnt in rag_rows:
-        s = (rag or "").strip().lower()
-        if s == "met":
-            met_count += cnt
-        elif "not met" in s or s == "not met":
-            not_met_count += cnt
-        else:
-            not_reported_count += cnt
-    denom = met_count + not_met_count
-    portfolio_health = round((met_count / denom * 100), 1) if denom > 0 else 0.0
-
-    return {
-        "portfolio_health": portfolio_health,
-        "met_count": met_count,
-        "not_met_count": not_met_count,
-        "not_reported_count": not_reported_count,
-        "total_metrics": int(total_metrics or 0),
+        if (total_collected + total_unbilled) > 0 else 0.0,
     }
 
 
@@ -247,24 +326,21 @@ def _sla_metric_rows(db: Session, user: User, project_ids: list[int]) -> list[di
             db.query(MetricDefinition)
             .options(joinedload(MetricDefinition.project))
             .filter(MetricDefinition.project_id.in_(project_ids)),
-            user,
-            db,
-            MetricDefinition,
+            user, db, MetricDefinition,
         ).all()
     )
     def_ids = [m.id for m in metrics]
     all_perfs = (
-        db.query(SLAPerformance).filter(SLAPerformance.definition_id.in_(def_ids)).all() if def_ids else []
+        db.query(SLAPerformance).filter(SLAPerformance.definition_id.in_(def_ids)).all()
+        if def_ids else []
     )
     perf_map: dict[int, SLAPerformance] = {}
     for p in all_perfs:
         cur = perf_map.get(p.definition_id)
         if cur is None:
             perf_map[p.definition_id] = p
-            continue
-        if p.period_start is not None and cur.period_start is not None:
-            if p.period_start > cur.period_start:
-                perf_map[p.definition_id] = p
+        elif p.period_start is not None and cur.period_start is not None and p.period_start > cur.period_start:
+            perf_map[p.definition_id] = p
         elif p.period_start is not None and cur.period_start is None:
             perf_map[p.definition_id] = p
         elif p.period_start is None and cur.period_start is None and p.id > cur.id:
@@ -274,26 +350,30 @@ def _sla_metric_rows(db: Session, user: User, project_ids: list[int]) -> list[di
     for m in metrics:
         latest = perf_map.get(m.id)
         project = m.project
-        ph = (project.practice_head or "").strip() if project else ""
-        mn = (m.metric_nature or "").strip() if m.metric_nature else ""
-        rows.append(
-            {
-                "id": m.id,
-                "project_id": m.project_id,
-                "account_name": project.account_name if project else "Unknown",
-                "region": project.region if project else "Unknown",
-                "practice_head": ph or None,
-                "metric_nature": mn or None,
-                "metric_label": m.metric_label,
-                "metric_group": m.metric_group,
-                "target": m.target_threshold,
-                "latest_score": latest.score if latest else "N/A",
-                "status": latest.rag_status if latest else "N/A",
-                "reporting_month": str(latest.reporting_month) if latest and latest.reporting_month else "N/A",
-            }
-        )
+        rows.append({
+            "id": m.id,
+            "project_id": m.project_id,
+            "account_name": project.account_name if project else "Unknown",
+            "region": project.region if project else "Unknown",
+            "practice_head": (project.practice_head or "").strip() or None if project else None,
+            "metric_nature": (m.metric_nature or "").strip() or None,
+            "metric_label": m.metric_label,
+            "metric_group": m.metric_group,
+            "target": m.target_threshold,
+            "latest_score": latest.score if latest else "N/A",
+            "status": latest.rag_status if latest else "N/A",
+            "reporting_month": str(latest.reporting_month) if latest and latest.reporting_month else "N/A",
+        })
     rows.sort(key=lambda r: (r["account_name"], r["metric_label"]))
     return rows
+
+
+# ─── Routes ────────────────────────────────────────────────────────────────────
+
+@router.get("/blocks")
+async def get_block_catalog(_user: User = Depends(get_current_user)):
+    """Block catalog for the layout builder — returns all allowed block types."""
+    return {"blocks": BLOCK_CATALOG}
 
 
 @router.get("/summary")
@@ -302,9 +382,10 @@ async def client_dashboard_summary(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Aggregated SLA + finance + project roster for scoped engagements."""
+    """Aggregated SLA + finance + project roster with v2 layout config."""
     projects_all = _scoped_projects(db, user, client_id)
 
+    # Collect distinct clients visible to this user
     client_rows: list[dict[str, Any]] = []
     seen_c: set[int] = set()
     for p in projects_all:
@@ -313,16 +394,23 @@ async def client_dashboard_summary(
             continue
         seen_c.add(cid)
         c = p.client
-        name = c.official_name if c else "Unknown client"
-        client_rows.append({"id": cid, "official_name": name})
+        client_rows.append({"id": cid, "official_name": c.official_name if c else "Unknown client"})
     client_rows.sort(key=lambda x: x["official_name"])
 
+    # ── Phase A fix: always resolve a single client_id for config loading ──
+    # For client_users with exactly 1 client, or any request with 1 scoped client,
+    # load their config reliably regardless of whether client_id was passed in the URL.
+    resolved_client_id: Optional[int] = client_id
+    if resolved_client_id is None and len(client_rows) == 1:
+        resolved_client_id = client_rows[0]["id"]
+
     cfg_row: Optional[ClientDashboardConfig] = None
-    if client_id is not None:
-        cfg_row = db.query(ClientDashboardConfig).filter(ClientDashboardConfig.client_id == client_id).first()
-    elif len(client_rows) == 1:
-        only_id = client_rows[0]["id"]
-        cfg_row = db.query(ClientDashboardConfig).filter(ClientDashboardConfig.client_id == only_id).first()
+    if resolved_client_id is not None:
+        cfg_row = (
+            db.query(ClientDashboardConfig)
+            .filter(ClientDashboardConfig.client_id == resolved_client_id)
+            .first()
+        )
 
     merged = _deep_merge_config(cfg_row.config_json if cfg_row else None)
 
@@ -341,37 +429,21 @@ async def client_dashboard_summary(
     profile = resolve_user_profile(user, db)
     is_client_user = profile.is_client_user
 
-    sla = _sla_snapshot(db, project_ids)
     finance_full = _finance_snapshot(db, project_ids)
 
     sla_metrics = _sla_metric_rows(db, user, project_ids)
     if not merged.get("sla_show_internal_kpis"):
         def _is_contractual(row: dict[str, Any]) -> bool:
-            n = (row.get("metric_nature") or "").lower()
-            return "contract" in n
-
+            return "contract" in (row.get("metric_nature") or "").lower()
         sla_metrics = [r for r in sla_metrics if _is_contractual(r) or not (r.get("metric_nature") or "").strip()]
 
+    # Finance field gating (security — not display)
     finance_out = dict(finance_full)
     if is_client_user or not merged.get("finance_show_cm"):
         finance_out.pop("total_cm", None)
         finance_out.pop("total_bad_debt", None)
     if is_client_user:
         finance_out.pop("collection_efficiency", None)
-
-    widgets = merged.get("widgets") if isinstance(merged.get("widgets"), dict) else {}
-    if not widgets.get("sla_metrics_table", True):
-        sla_metrics = []
-    if not widgets.get("sla_summary", True):
-        sla = {
-            "portfolio_health": None,
-            "met_count": None,
-            "not_met_count": None,
-            "not_reported_count": None,
-            "total_metrics": None,
-        }
-    if not widgets.get("finance_summary", True):
-        finance_out = {}
 
     fin_flags = merged if not is_client_user else {**merged, "finance_show_cm": False}
     if not fin_flags.get("finance_show_revenue"):
@@ -385,11 +457,19 @@ async def client_dashboard_summary(
     if not fin_flags.get("finance_show_unbilled"):
         finance_out.pop("total_unbilled", None)
 
-    requisitions_total = 0
+    # Requisitions per project (for tab-level aggregation on the frontend)
+    req_by_project: dict[str, int] = {}
     if project_ids:
-        requisitions_total = (
-            db.query(func.count(Record.id)).filter(Record.project_id.in_(project_ids)).scalar() or 0
+        rq_rows = (
+            db.query(Record.project_id, func.count(Record.id))
+            .filter(Record.project_id.in_(project_ids))
+            .group_by(Record.project_id)
+            .all()
         )
+        req_by_project = {str(pid): int(cnt) for pid, cnt in rq_rows}
+
+    # BU/SBU tabs
+    bu_tabs = _bu_tabs(projects)
 
     project_payload = [
         {
@@ -400,25 +480,23 @@ async def client_dashboard_summary(
             "region": p.region or "—",
             "practice_head": (p.practice_head or "").strip() or "—",
             "vertical": p.vertical or "—",
+            "bu": (p.hierarchy_tag_bu or "").strip() or None,
+            "sbu": (p.hierarchy_tag_sbu or "").strip() or None,
         }
         for p in projects
     ]
 
-    selected_client_id = client_id
-    if selected_client_id is None and len(client_rows) == 1:
-        selected_client_id = client_rows[0]["id"]
-
     out = {
         "clients": client_rows,
-        "selected_client_id": selected_client_id,
-        "projects": project_payload if widgets.get("projects_table", True) else [],
+        "selected_client_id": resolved_client_id,
+        "projects": project_payload,
         "vertical_options": vertical_options,
         "region_options": region_options,
         "config": merged,
-        "sla": sla,
         "sla_metrics": sla_metrics,
         "finance": finance_out,
-        "requisitions_total": int(requisitions_total),
+        "req_by_project": req_by_project,
+        "bu_tabs": bu_tabs,
         "is_client_user": is_client_user,
         "can_edit_config": _editor_roles_ok(user, db) and not is_client_user,
     }

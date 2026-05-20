@@ -54,6 +54,7 @@ else
   echo "==> No local .env found — ensure ~/tgddata_C1/.env exists on the VM or upload secrets separately."
 fi
 
+TLS_FLAG="${TGDDATA_HOST_TLS_SETUP:-0}"
 echo "==> Extracting and restarting containers on VM..."
 gcloud compute ssh "${REMOTE_USER}@${GCP_INSTANCE}" \
   --zone="${GCP_ZONE}" \
@@ -61,7 +62,7 @@ gcloud compute ssh "${REMOTE_USER}@${GCP_INSTANCE}" \
   --tunnel-through-iap \
   --command="
 set -e
-# Legacy stack from older deploys binds host :80; remove so the new frontend can start.
+# Legacy stack from older deploys binds host :80; remove so host Nginx (TLS) or the new stack can use it.
 docker rm -f deploy_frontend_1 deploy_backend_1 2>/dev/null || true
 rm -rf ~/${REMOTE_DIR}
 mkdir -p ~/${REMOTE_DIR}
@@ -75,6 +76,10 @@ elif command -v docker-compose >/dev/null 2>&1; then
 else
   echo 'ERROR: Install Docker on the VM first: GCP_INSTANCE=... ./scripts/bootstrap-gcp-docker.sh then re-login (or reboot).' >&2
   exit 1
+fi
+if [ \"${TLS_FLAG}\" = \"1\" ]; then
+  echo '==> TGDDATA_HOST_TLS_SETUP: host Nginx + Certbot'
+  sudo bash scripts/setup-host-nginx-certbot-taggd.sh
 fi
 echo 'Done.'
 "

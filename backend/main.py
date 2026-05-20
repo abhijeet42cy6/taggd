@@ -45,6 +45,7 @@ from .core.activity_log import activity_log_to_dict, list_activity_for_user, log
 from .core.column_mapping_normalize import build_column_mapping_v2
 from .core.record_field_synonyms import merge_llm_and_heuristic_record_fields
 from .core.project_head_resolution import assigned_project_heads_by_project, resolve_project_head_label
+from .core.json_fields import as_json_dict
 from .core.budget_forecast_ledger import (
     ingest_budget_forecast_workbook,
     update_budget_quarters,
@@ -95,27 +96,53 @@ def _matchmaker_project_id_in_scope(
     return matched_raw if matched_raw in allowed else None
 
 
-app = FastAPI(title="Agentic Revenue Generator API")
+def _cors_allow_origins() -> list[str]:
+    raw = (os.getenv("CORS_ALLOW_ORIGINS") or "*").strip()
+    if raw == "*":
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
 
-# Add CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def _validate_production_config() -> None:
+    if (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower() in (
+        "production",
+        "prod",
+    ):
+        from backend.db.engine import is_sqlite_url
+
+        if is_sqlite_url():
+            raise RuntimeError(
+                "SQLite DATABASE_URL is not allowed when APP_ENV=production. Use PostgreSQL.",
+            )
+
+
+_validate_production_config()
+
+app = FastAPI(title="Agentic Revenue Generator API")
 
 from .auth.middleware import AuthMiddleware
 from .auth.client_write_guard import ClientWriteGuardMiddleware
 from .auth.client_vertical_read_guard import ClientVerticalReadGuardMiddleware
+from .core.api_prefix_middleware import ApiPrefixStripMiddleware
 from .auth.routes import router as auth_router
 from .admin.routes import router as admin_router
 
-# Stack (last added runs first on request): Auth → CORS → ClientWriteGuard → ClientVerticalReadGuard → routes.
+# Stack (last added runs first on request): CORS → Auth → guards → routes.
+# CORS must be outermost so 401s from AuthMiddleware still include Access-Control-* headers.
 app.add_middleware(ClientVerticalReadGuardMiddleware)
 app.add_middleware(ClientWriteGuardMiddleware)
 app.add_middleware(AuthMiddleware)
+# Runs before Auth on request: /api/stats/global → /stats/global (same as VM nginx strip).
+app.add_middleware(ApiPrefixStripMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_allow_origins(),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(auth_router)
+# VM nginx strips /api; Cloud Run has no proxy — support /api/auth/* for split UI deploys.
+app.include_router(auth_router, prefix="/api")
 app.include_router(admin_router)
 
 from .routers.sla_metrics import router as sla_metrics_write_router
@@ -469,6 +496,27 @@ class ProConfirmRequest(BaseModel):
 @app.get("/")
 def read_root():
     return {"message": "Agentic Revenue Generator API is running"}
+
+
+@app.get("/health")
+def health():
+    """Liveness probe for Cloud Run, ALB, and load balancers."""
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready(db: Session = Depends(get_db)):
+    """Readiness probe — verifies database connectivity."""
+    from sqlalchemy import text
+
+    db.execute(text("SELECT 1"))
+    return {
+        "status": "ready",
+        "database": "ok",
+        "projects": int(db.query(func.count(Project.id)).scalar() or 0),
+        "records": int(db.query(func.count(Record.id)).scalar() or 0),
+        "users": int(db.query(func.count(User.id)).scalar() or 0),
+    }
 
 
 @app.get("/ingestion/events")
@@ -2381,7 +2429,7 @@ def get_global_stats(
     joined_count = 0
     
     for rev_results, g_status in rows:
-        res = rev_results or {}
+        res = as_json_dict(rev_results)
         total_rev     += float(res.get('revenue')     or 0)
         total_opening += float(res.get('opening_fee') or 0)
         total_closing += float(res.get('closing_fee') or 0)
@@ -2504,7 +2552,7 @@ def get_global_monitoring(
     proj_rev_rows = _rec(db.query(Record.project_id, Record.revenue_results)).all()
     proj_rev: dict = {}
     for pid, rr in proj_rev_rows:
-        proj_rev[pid] = proj_rev.get(pid, 0.0) + float((rr or {}).get("revenue") or 0)
+        proj_rev[pid] = proj_rev.get(pid, 0.0) + float(as_json_dict(rr).get("revenue") or 0)
     revenue_total = round(sum(proj_rev.values()), 2)
 
     projects = apply_project_scope(
@@ -2569,7 +2617,7 @@ def get_drilldown_stats(
         key = key_val or "Unknown"
         if key not in data:
             data[key] = {"revenue": 0.0, "count": 0}
-        data[key]["revenue"] += float((rr or {}).get("revenue") or 0)
+        data[key]["revenue"] += float(as_json_dict(rr).get("revenue") or 0)
         data[key]["count"] += 1
         
     chart_data = [{"name": k, "revenue": v["revenue"], "count": v["count"]} for k, v in data.items()]
@@ -3293,17 +3341,32 @@ async def get_wfm_details(
             WFMHRBenchmark,
         ).all()
     )
+    gap_counts_rows = (
+        apply_project_scope(
+            db.query(WFMResourceGap.project_id, func.count(WFMResourceGap.id)),
+            user,
+            db,
+            WFMResourceGap,
+        )
+        .group_by(WFMResourceGap.project_id)
+        .all()
+    )
+    gap_count_by_project = {int(pid): int(cnt or 0) for pid, cnt in gap_counts_rows}
+
     res = []
     for b in benchmarks:
         project = b.project
+        pid = b.project_id
         res.append({
             "id": b.id,
-            "project_id": b.project_id,
+            "project_id": pid,
             "account_name": project.account_name if project else "Unknown",
             "region": project.region if project else "Unknown",
             "vertical": project.vertical if project else "N/A",
             "practice": project.practice if project else "N/A",
             "practice_head": (project.practice_head or "").strip() if project else "",
+            "regional_head": (project.regional_head or "").strip() if project else "",
+            "resource_gap_row_count": gap_count_by_project.get(pid, 0) if pid is not None else 0,
             "reporting_date": b.reporting_date.isoformat() if b.reporting_date else None,
             "ideal_hc": b.ideal_hc,
             "actual_hc_total": b.actual_hc_total,

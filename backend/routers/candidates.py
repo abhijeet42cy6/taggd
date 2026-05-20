@@ -90,18 +90,9 @@ def _abs_cv_path(storage_key: str) -> Optional[str]:
 def _delete_cv_file_if_any(storage_key: Optional[str]) -> None:
     if not storage_key:
         return
-    p = _abs_cv_path(storage_key)
-    if p:
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-        try:
-            parent = os.path.dirname(p)
-            if parent and os.path.isdir(parent) and not os.listdir(parent):
-                os.rmdir(parent)
-        except OSError:
-            pass
+    from backend.core import blob_storage
+
+    blob_storage.delete_at_key("candidate_cvs", storage_key)
 
 
 def _sanitize_cv_basename(name: str) -> str:
@@ -437,15 +428,19 @@ def download_candidate_cv(
     _assert_candidate_view(db, user, c)
     if not c.cv_storage_key:
         raise HTTPException(status_code=404, detail="No CV on file for this candidate")
-    path = _abs_cv_path(c.cv_storage_key)
-    if not path:
-        raise HTTPException(status_code=404, detail="CV file missing on server")
-    media, _ = mimetypes.guess_type(c.cv_original_filename or path)
-    return FileResponse(
-        path,
+    from backend.core.http_file_response import stored_file_response
+
+    media, _ = mimetypes.guess_type(c.cv_original_filename or c.cv_storage_key)
+    resp = stored_file_response(
+        "candidate_cvs",
+        os.path.basename(c.cv_storage_key),
+        download_name=c.cv_original_filename or os.path.basename(c.cv_storage_key),
         media_type=media or "application/octet-stream",
-        filename=c.cv_original_filename or os.path.basename(path),
+        storage_key=c.cv_storage_key,
     )
+    if resp is None:
+        raise HTTPException(status_code=404, detail="CV file missing on server")
+    return resp
 
 
 @router.post("/{candidate_id}/cv")
@@ -468,35 +463,30 @@ async def upload_candidate_cv(
             detail=f"Unsupported file type {ext!r}; allowed: {', '.join(sorted(_CV_ALLOWED_EXT))}",
         )
 
-    root = _cv_root_dir()
-    os.makedirs(root, exist_ok=True)
-    sub = os.path.join(root, str(c.id))
-    os.makedirs(sub, exist_ok=True)
+    from backend.core import blob_storage
+
     new_name = f"{uuid.uuid4().hex}{ext}"
-    dest = os.path.join(sub, new_name)
     rel_key = f"{c.id}/{new_name}".replace("\\", "/")
 
     old_key = c.cv_storage_key
     size = 0
+    chunks: list[bytes] = []
     try:
-        with open(dest, "wb") as out:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > _MAX_CV_BYTES:
-                    try:
-                        os.remove(dest)
-                    except OSError:
-                        pass
-                    raise HTTPException(status_code=413, detail=f"CV exceeds {_MAX_CV_BYTES // (1024 * 1024)} MiB limit")
-                out.write(chunk)
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > _MAX_CV_BYTES:
+                raise HTTPException(status_code=413, detail=f"CV exceeds {_MAX_CV_BYTES // (1024 * 1024)} MiB limit")
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+        blob_storage.put_bytes_at_key("candidate_cvs", rel_key, raw)
     except HTTPException:
         raise
     except Exception as e:
         try:
-            os.remove(dest)
+            blob_storage.delete_at_key("candidate_cvs", rel_key)
         except OSError:
             pass
         raise HTTPException(status_code=500, detail=f"Could not save CV: {e}") from e

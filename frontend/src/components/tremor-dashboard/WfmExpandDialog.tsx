@@ -14,7 +14,7 @@ import {
   Text,
   Title,
 } from "@tremor/react";
-import { cn, formatNumber, formatPercent } from "@/lib/utils";
+import { cn, formatLacs, formatNumber, formatPercent } from "@/lib/utils";
 import {
   wfmFillBand,
   wfmFillColor,
@@ -235,7 +235,7 @@ export function WfmExpandDialog({
                     <TableHeaderCell>Client</TableHeaderCell>
                     <TableHeaderCell>Practice head</TableHeaderCell>
                     <TableHeaderCell className="text-right">Lateral tgt</TableHeaderCell>
-                    <TableHeaderCell className="text-right">Productivity</TableHeaderCell>
+                    <TableHeaderCell className="text-right">Productivity (lacs)</TableHeaderCell>
                     <TableHeaderCell className="text-right">Ideal HC</TableHeaderCell>
                     <TableHeaderCell className="text-right">Actual HC</TableHeaderCell>
                     <TableHeaderCell className="text-right">HC Gap</TableHeaderCell>
@@ -266,7 +266,7 @@ export function WfmExpandDialog({
                           {r.lateral_hc_target != null ? formatNumber(r.lateral_hc_target) : "—"}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}
+                          {r.lateral_productivity_target != null ? formatLacs(r.lateral_productivity_target) : "—"}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{formatNumber(idealN)}</TableCell>
                         <TableCell className="text-right tabular-nums" style={{ color: gapColor }}>

@@ -2,8 +2,11 @@ import axios from "axios";
 
 const AUTH_TOKEN_KEY = "tgddata_access_token";
 
+/** Cloud Run / CDN split: set VITE_API_BASE_URL at build time (e.g. https://api.example.com/api). */
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || "/api";
+
 export const api = axios.create({
-  baseURL: "/api",
+  baseURL: API_BASE,
   /** Large portfolios + SQLite can exceed short UI races; avoid indefinite hangs. */
   timeout: 120_000,
 });
@@ -30,7 +33,15 @@ api.interceptors.response.use(
     ) {
       localStorage.removeItem(AUTH_TOKEN_KEY);
       delete api.defaults.headers.common.Authorization;
-      window.location.assign("/login");
+      if (
+        import.meta.env.VITE_STATIC_HOSTING === "1" ||
+        window.location.hostname === "storage.googleapis.com"
+      ) {
+        window.location.hash = "#/login";
+      } else {
+        const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+        window.location.assign(`${base}/login`);
+      }
     }
     const d = err.response?.data?.detail;
     if (typeof d === "string" && d.length) {
@@ -1139,9 +1150,40 @@ export function clearApiCache() {
 
 // ─── QUERY FUNCTIONS ──────────────────────────────────────────────────────────
 
-/** Curated client portal dashboard (`GET /client-dashboard/summary`). */
+/** Layout block types available in the block catalog. */
+export type BlockType =
+  | "sla_kpi_strip"
+  | "sla_summary_cards"
+  | "sla_table"
+  | "req_kpi"
+  | "engagements_table"
+  | "finance_strip";
+
+/** A single block in the v2 layout array. */
+export type LayoutBlock = {
+  id: string;
+  type: BlockType;
+  /** "card" = full-width section card; "dense" = compact metric strip */
+  variant: "card" | "dense";
+  order: number;
+  /** Optional custom label override shown in the block header. */
+  label?: string | null;
+};
+
+/** Block catalog entry returned by GET /client-dashboard/blocks */
+export type BlockCatalogEntry = {
+  type: BlockType;
+  label: string;
+  desc: string;
+  category: string;
+};
+
+/** Curated client portal dashboard config (v2 layout-driven). */
 export type ClientDashboardConfig = {
   version?: number;
+  /** v2: ordered array of blocks to render */
+  layout?: LayoutBlock[];
+  /** v1 legacy widget map — used as fallback on old configs */
   widgets?: {
     kpi_row?: boolean;
     sla_summary?: boolean;
@@ -1169,17 +1211,14 @@ export type ClientDashboardSummary = {
     region: string;
     practice_head: string;
     vertical: string;
+    bu: string | null;
+    sbu: string | null;
   }>;
   vertical_options: string[];
   region_options: string[];
   config: ClientDashboardConfig;
-  sla: {
-    portfolio_health: number | null;
-    met_count: number | null;
-    not_met_count: number | null;
-    not_reported_count: number | null;
-    total_metrics: number | null;
-  };
+  /** BU/SBU horizontal tabs. Empty array → no tabs rendered. */
+  bu_tabs: Array<{ key: string; label: string; project_ids: number[] }>;
   sla_metrics: Array<{
     id: number;
     project_id: number;
@@ -1195,7 +1234,8 @@ export type ClientDashboardSummary = {
     reporting_month: string;
   }>;
   finance: Record<string, number>;
-  requisitions_total: number;
+  /** Requisition count per project_id (string key for JSON compat). */
+  req_by_project: Record<string, number>;
   is_client_user: boolean;
   can_edit_config: boolean;
 };
@@ -2172,6 +2212,12 @@ export const queries = {
         api
           .get("/client-dashboard/config", { params: { client_id: clientId } })
           .then((r) => r.data)
+    ),
+
+  clientDashboardBlocks: () =>
+    cachedGet<{ blocks: BlockCatalogEntry[] }>(
+      "client-dashboard/blocks",
+      () => api.get("/client-dashboard/blocks").then((r) => r.data)
     ),
 
   wfmStats: () =>

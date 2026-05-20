@@ -21,7 +21,7 @@ import {
   Title,
 } from "@tremor/react";
 import { api, invalidateCache, queries } from "@/lib/api";
-import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
+import { SkeletonTable } from "@/components/platform/Skeleton";
 import { GaugeRing, HcIdealActualGroupedChart, WlDistributionBar, WfmProductivityFillChart } from "@/components/platform/Charts";
 import { WfmBenchmarkFormDialog } from "@/components/platform/WfmBenchmarkFormDialog";
 import {
@@ -33,7 +33,7 @@ import {
   type WfmPerformFilter,
 } from "@/components/tremor-dashboard/WfmExpandDialog";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
-import { cn, formatLargeCurrency, formatNumber, formatPercent } from "@/lib/utils";
+import { cn, formatLargeCurrency, formatLacs, formatNumber, formatPercent } from "@/lib/utils";
 import {
   wfmFillPct,
   wfmFillColor,
@@ -44,8 +44,17 @@ import {
   wfmOpenPositionsFromSheet,
   wfmRowAdditionalHcProxy,
   wfmRowProjectedHc,
+  wfmRowNetVarianceVsProjected,
   type WfmBenchmarkRowVm,
 } from "@/lib/view-models/wfm";
+
+/** Same INR heuristic as portfolio workbook card (values ≤ ₹5L treated as lacs × 1e5). */
+function formatWfmRowRevenueTarget(raw: number | null | undefined): string {
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v === 0) return "—";
+  const inr = Math.abs(v) > 500_000 ? v : v * 100_000;
+  return formatLargeCurrency(inr);
+}
 
 function fillBarTremorColor(pct: number, ideal: number): "emerald" | "amber" | "rose" {
   const b = wfmFillBand(pct, ideal);
@@ -118,7 +127,6 @@ export function WorkforceManagement() {
   const idealHc = Number(stats?.total_ideal_hc ?? 0);
   const actualHc = Number(stats?.total_actual_hc ?? 0);
   const fillRate = idealHc > 0 ? (actualHc / idealHc) * 100 : 0;
-  const hcGap = idealHc - actualHc;
 
   // WL1–WL4 in the ingested 09 (excel_upload_masters) template are a **band split of actual_hc_total**
   // (sum(WL) = actual per project). They are *not* incremental pipeline on top of actual. Using
@@ -129,11 +137,9 @@ export function WorkforceManagement() {
   const totalAdditional = totalWl1 + totalWl2 + totalWl3; // for WL mix; equals total actual when data is self-consistent
   const projectedHc = actualHc; // roster strength = total actual HC (WL = mix, not added again)
   const varActual = Math.max(0, projectedHc - actualHc); // 0 in self-consistent template; ≥0 if we ever add pipeline
-  const openPositions = hcGap > 0 ? hcGap : 0;
   /** Same as `idealHc - actualHc` (negative = over ideal / over-capacity). */
   const netRosterGapToIdeal = idealHc - actualHc;
 
-  const fillBand = idealHc > 0 ? wfmFillBand(fillRate, idealHc) : "risk";
   const fgColor = idealHc > 0 ? wfmFillColor(fillRate, idealHc) : "var(--accent)";
 
   // Bullet items for all clients
@@ -156,15 +162,6 @@ export function WorkforceManagement() {
       return wfmMatchesFilter(pct, ideal, tableFilter);
     }),
   [rows, tableFilter]);
-
-  // At-risk clients count
-  const atRiskCount = useMemo(() =>
-    allBulletItems.filter((b) => wfmFillBand(b.pct, b.ideal) === "risk").length,
-  [allBulletItems]);
-
-  const onPlanCount = useMemo(() =>
-    allBulletItems.filter((b) => wfmFillBand(b.pct, b.ideal) === "strong").length,
-  [allBulletItems]);
 
   // WL distribution
   const wlData = useMemo(() => rows.map((r) => ({
@@ -208,17 +205,46 @@ export function WorkforceManagement() {
     if (filteredRows.length <= 1) return null;
     const totIdeal = filteredRows.reduce((s, r) => s + Number(r.ideal_hc ?? 0), 0);
     const totActual = filteredRows.reduce((s, r) => s + Number(r.actual_hc_total ?? 0), 0);
-    const totAdditional = filteredRows.reduce(
-      (s, r) => s + Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0),
-      0,
-    );
     const totVariance = totIdeal - totActual;
-    const totOpenPos = totVariance > 0 ? totVariance : 0;
-    const totProj = totActual;
-    const totFill = wfmFillPct(totActual, totIdeal);
+    const totAdditionalHc = filteredRows.reduce((s, r) => s + wfmRowAdditionalHcProxy(r), 0);
     const totOpenSheet = filteredRows.reduce((s, r) => s + wfmOpenPositionsFromSheet(r), 0);
+    const totGapRows = filteredRows.reduce((s, r) => s + Number(r.resource_gap_row_count ?? 0), 0);
     const totProjectedHc = filteredRows.reduce((s, r) => s + wfmRowProjectedHc(r), 0);
-    return { totIdeal, totActual, totAdditional, totVariance, totOpenPos, totProj, totFill, totOpenSheet, totProjectedHc };
+    const totNetVar = totIdeal - totProjectedHc;
+    const totFill = wfmFillPct(totActual, totIdeal);
+    let sumRev = 0;
+    let maxRev = 0;
+    let sumIdealForProd = 0;
+    let sumProdWeighted = 0;
+    for (const r of filteredRows) {
+      const rev = Number(r.lateral_revenue_target ?? 0);
+      sumRev += rev;
+      maxRev = Math.max(maxRev, Math.abs(rev));
+      const idealN = Number(r.ideal_hc ?? 0);
+      const prod = Number(r.lateral_productivity_target ?? 0);
+      if (idealN > 0 && Number.isFinite(prod)) {
+        sumIdealForProd += idealN;
+        sumProdWeighted += prod * idealN;
+      }
+    }
+    const revenueInrSum = maxRev > 500_000 ? sumRev : sumRev * 100_000;
+    const wProdFoot =
+      sumIdealForProd > 0
+        ? sumProdWeighted / sumIdealForProd
+        : filteredRows.reduce((s, r) => s + Number(r.lateral_productivity_target ?? 0), 0) / filteredRows.length;
+    return {
+      totIdeal,
+      totActual,
+      totVariance,
+      totAdditionalHc,
+      totOpenSheet,
+      totGapRows,
+      totProjectedHc,
+      totNetVar,
+      totFill,
+      footerRevenueDisplay: formatLargeCurrency(revenueInrSum),
+      footerProductivityLacs: Number.isFinite(wProdFoot) ? wProdFoot : 0,
+    };
   }, [filteredRows]);
 
   const openRequisitionsTotal = Number(stats?.open_requisitions ?? 0);
@@ -290,25 +316,6 @@ export function WorkforceManagement() {
   }, [rows]);
 
   // ── render ──────────────────────────────────────────────────────────────────
-  const fillStatusBadge =
-    fillBand === "strong" ? (
-      <Badge color="emerald" size="xs">On Plan</Badge>
-    ) : fillBand === "watch" ? (
-      <Badge color="amber" size="xs">Watch</Badge>
-    ) : (
-      <Badge color="rose" size="xs">At Risk</Badge>
-    );
-
-  const gapChipLabel = `${hcGap >= 0 ? "−" : "+"}${formatNumber(Math.abs(hcGap))} gap`;
-  const hcGapBadge =
-    hcGap > 0 ? (
-      <Badge color="rose" size="xs">{gapChipLabel}</Badge>
-    ) : hcGap < 0 ? (
-      <Badge color="amber" size="xs">{gapChipLabel}</Badge>
-    ) : (
-      <Badge color="emerald" size="xs">Balanced</Badge>
-    );
-
   return (
     <div className="wfm-tremor space-y-3 pb-8 md:space-y-4">
       <input
@@ -331,7 +338,7 @@ export function WorkforceManagement() {
             Workforce Management
           </Title>
           <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
-            Fill rate vs ideal HC · Productivity targets · WL mix
+            Portfolio workbook · benchmarks · WL mix
           </Text>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -349,71 +356,6 @@ export function WorkforceManagement() {
           </Button>
         </div>
       </Flex>
-
-      {loading ? (
-        <SkeletonKpiRow count={5} />
-      ) : (
-        <Grid numItems={1} numItemsSm={2} numItemsLg={3} className="gap-2 md:gap-3">
-          <Card decoration="top" decorationColor="teal" className="p-3">
-            <Text className="text-[10px] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">Ideal headcount</Text>
-            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{formatNumber(idealHc)}</Metric>
-            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Target strength</Text>
-          </Card>
-          <Card decoration="top" decorationColor="blue" className="p-3">
-            <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Actual headcount</Text>
-            <Flex justifyContent="between" alignItems="center" className="mt-1 gap-2">
-              <Metric className="text-xl tabular-nums md:text-2xl">{formatNumber(actualHc)}</Metric>
-              {hcGapBadge}
-            </Flex>
-            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">On rolls today</Text>
-          </Card>
-          <Card
-            decoration="top"
-            decorationColor={fillBand === "strong" ? "emerald" : fillBand === "watch" ? "amber" : "rose"}
-            className="p-3"
-          >
-            <Text
-              className={`text-[10px] font-semibold uppercase tracking-wide ${
-                fillBand === "strong"
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : fillBand === "watch"
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-rose-600 dark:text-rose-400"
-              }`}
-            >
-              Fill rate
-            </Text>
-            <Flex justifyContent="between" alignItems="center" className="mt-1 flex-wrap gap-2">
-              <Metric className="text-xl tabular-nums md:text-2xl">{idealHc > 0 ? formatPercent(fillRate) : "—"}</Metric>
-              {fillStatusBadge}
-            </Flex>
-            <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">≤100% on plan; &gt;100% over-capacity</Text>
-            {idealHc > 0 ? (
-              <ProgressBar value={Math.min(100, fillRate)} color={fillBarTremorColor(fillRate, idealHc)} className="mt-2 [&>div]:min-w-[2px]" />
-            ) : null}
-          </Card>
-          <Card decoration="top" decorationColor="rose" className="p-3">
-            <Text className="text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">Open positions</Text>
-            <Flex justifyContent="between" alignItems="center" className="mt-1 flex-wrap gap-2">
-              <Metric className="text-xl tabular-nums md:text-2xl">{formatNumber(openPositions)}</Metric>
-              <Badge color={openPositions > 0 ? "rose" : "emerald"} size="xs">
-                {openPositions > 0 ? "Unfilled" : "Fully staffed"}
-              </Badge>
-            </Flex>
-            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Active openings (gap)</Text>
-          </Card>
-          <Card decoration="top" decorationColor="orange" className="p-3">
-            <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">Clients at risk</Text>
-            <Flex justifyContent="between" alignItems="center" className="mt-1 flex-wrap gap-2">
-              <Metric className="text-xl tabular-nums md:text-2xl">{String(atRiskCount)}</Metric>
-              <Badge color={atRiskCount > 0 ? "rose" : "emerald"} size="xs">
-                {atRiskCount > 0 ? `${atRiskCount} need attention` : "All on plan"}
-              </Badge>
-            </Flex>
-            <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">{`${onPlanCount} on plan · ${rows.length} total`}</Text>
-          </Card>
-        </Grid>
-      )}
 
       {!loading && portfolioWorkbook && (
         <>
@@ -434,9 +376,9 @@ export function WorkforceManagement() {
               <Text className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-400">
                 Target productivity
               </Text>
-              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatPercent(portfolioWorkbook.wProd)}</Metric>
+              <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatLacs(portfolioWorkbook.wProd)}</Metric>
               <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
-                Ideal-HC–weighted mean of lateral productivity (YTD column)
+                Ideal-HC–weighted mean of lateral productivity (YTD column), lacs
               </Text>
             </Card>
             <Card decoration="top" decorationColor="teal" className="p-3">
@@ -463,14 +405,16 @@ export function WorkforceManagement() {
                 <Badge color="slate" size="xs">Sheet</Badge>
               </Flex>
               <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
-                Sum of open_positions.total in sheet JSON. Requisitions (gap file): {formatNumber(openRequisitionsTotal, 0)}
+                Σ open_positions.total from workbook JSON per client (feeds projected HC). Gap upload lists{" "}
+                <span className="font-medium text-tremor-content-emphasis">{formatNumber(openRequisitionsTotal, 0)}</span> open gap{" "}
+                records — a separate pipeline count, not included in the sheet total above.
               </Text>
             </Card>
             <Card decoration="top" decorationColor="slate" className="p-3">
               <Text className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">Resignations</Text>
-              <Metric className="mt-1 text-lg tabular-nums text-tremor-content-subtle md:text-xl">—</Metric>
+              <Metric className="mt-1 text-lg tabular-nums text-tremor-content-subtle md:text-xl">Not tracked</Metric>
               <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
-                Not ingested on WFM path — projected HC below assumes 0
+                Not ingested on the WFM workbook path — projected HC below assumes 0 resignations.
               </Text>
             </Card>
             <Card decoration="top" decorationColor="violet" className="p-3">
@@ -620,7 +564,7 @@ export function WorkforceManagement() {
         className={flatCard}
         compact
         tag="Client headcount detail"
-        title="Fill rate & resource gap by client"
+        title="Targets, pipeline & fill by client"
         toolbar={(
           <Flex justifyContent="between" alignItems="center" className="flex-wrap gap-2">
             <WfmFilterChipRow value={tableFilter} onChange={setTableFilter} />
@@ -645,7 +589,7 @@ export function WorkforceManagement() {
       >
         {loading ? (
           <div className="p-4">
-            <SkeletonTable rows={6} cols={12} />
+            <SkeletonTable rows={6} cols={13} />
           </div>
         ) : rows.length === 0 ? (
           <div className="p-4">
@@ -657,21 +601,83 @@ export function WorkforceManagement() {
           </div>
         ) : (
           <div className="overflow-x-auto bg-gradient-to-b from-orange-50/30 to-white px-2 pb-3 pt-1 dark:from-orange-950/20 dark:to-dark-tremor-background-default sm:px-3">
-            <Table className="text-tremor-default [&_tbody_td]:px-2 [&_tbody_td]:py-1.5 [&_tbody_td]:text-xs [&_tfoot_td]:px-2 [&_tfoot_td]:py-1.5 [&_tfoot_td]:text-xs [&_thead_th]:px-2 [&_thead_th]:py-2 [&_thead_th]:text-[11px] [&_thead_th]:font-semibold [&_thead_th]:uppercase [&_thead_th]:tracking-wide">
+            <Table className="text-tremor-default [&_tbody_td]:px-2 [&_tbody_td]:py-1.5 [&_tbody_td]:text-xs [&_tfoot_td]:px-2 [&_tfoot_td]:py-1.5 [&_tfoot_td]:text-xs [&_thead_th]:px-2 [&_thead_th]:py-2 [&_thead_th]:text-[11px] [&_thead_th]:font-semibold [&_thead_th]:normal-case [&_thead_th]:tracking-normal [&_thead_th]:text-tremor-content-emphasis dark:[&_thead_th]:text-dark-tremor-content-emphasis [&_thead_th]:border-b [&_thead_th]:border-tremor-border dark:[&_thead_th]:border-dark-tremor-border">
               <TableHead>
                 <TableRow>
-                  <TableHeaderCell>Department / client</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Target productivity</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Ideal HC</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Actual HC</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Variance (ideal−actual)</TableHeaderCell>
-                  <TableHeaderCell className="text-right">WL band sum</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Open (sheet)</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Open (gap)</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Projected</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Roster</TableHeaderCell>
-                  <TableHeaderCell>Fill rate</TableHeaderCell>
-                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell className="min-w-[148px]">
+                    <Text className="block text-[11px] font-semibold leading-tight text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                      Client / region
+                    </Text>
+                    <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                      Regional head
+                    </Text>
+                  </TableHeaderCell>
+                  <TableHeaderCell className="min-w-[96px] text-right">
+                    <Text className="block text-[11px] font-semibold leading-tight text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                      Target revenue
+                    </Text>
+                    <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                      Workbook YTD
+                    </Text>
+                  </TableHeaderCell>
+                  <TableHeaderCell className="text-right text-[11px] font-semibold text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                    Prod. (lacs)
+                  </TableHeaderCell>
+                  <TableHeaderCell className="text-right text-[11px] font-semibold text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                    Ideal HC
+                  </TableHeaderCell>
+                  <TableHeaderCell className="text-right text-[11px] font-semibold text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                    Actual HC
+                  </TableHeaderCell>
+                  <TableHeaderCell className="min-w-[88px] text-right">
+                    <Text className="block text-[11px] font-semibold leading-tight text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                      Variance
+                    </Text>
+                    <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                      Ideal − actual
+                    </Text>
+                  </TableHeaderCell>
+                  <TableHeaderCell className="min-w-[88px] text-right">
+                    <Text className="block text-[11px] font-semibold leading-tight text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                      Addl HC
+                    </Text>
+                    <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                      Workbook proxy
+                    </Text>
+                  </TableHeaderCell>
+                  <TableHeaderCell className="min-w-[92px] text-right">
+                    <Text className="block text-[11px] font-semibold leading-tight text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                      Open positions
+                    </Text>
+                    <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                      Sheet / gap reqs
+                    </Text>
+                  </TableHeaderCell>
+                  <TableHeaderCell className="text-right text-[11px] font-semibold text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                    Resignations
+                  </TableHeaderCell>
+                  <TableHeaderCell className="min-w-[88px] text-right">
+                    <Text className="block text-[11px] font-semibold leading-tight text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                      Projected HC
+                    </Text>
+                    <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                      Actual + addl + open
+                    </Text>
+                  </TableHeaderCell>
+                  <TableHeaderCell className="min-w-[88px] text-right">
+                    <Text className="block text-[11px] font-semibold leading-tight text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                      Net variance
+                    </Text>
+                    <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                      Ideal − projected
+                    </Text>
+                  </TableHeaderCell>
+                  <TableHeaderCell className="text-[11px] font-semibold text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                    Fill rate
+                  </TableHeaderCell>
+                  <TableHeaderCell className="text-[11px] font-semibold text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis">
+                    Status
+                  </TableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -679,25 +685,30 @@ export function WorkforceManagement() {
                   const idealN = Number(r.ideal_hc ?? 0);
                   const actualN = Number(r.actual_hc_total ?? 0);
                   const variance = idealN - actualN;
-                  const wlBandSum =
-                    Number(r.wl1_hires ?? 0) + Number(r.wl2_hires ?? 0) + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0);
-                  const openPos = variance > 0 ? variance : 0;
-                  const projHc = actualN;
+                  const additionalHc = wfmRowAdditionalHcProxy(r);
                   const pct = wfmFillPct(actualN, idealN);
                   const gapColor = wfmFillColor(pct, idealN);
                   const statusLbl = wfmStatusLabel(pct, idealN);
                   const openSheet = wfmOpenPositionsFromSheet(r);
+                  const gapReqRows = Number(r.resource_gap_row_count ?? 0);
                   const projRow = wfmRowProjectedHc(r);
+                  const netVar = wfmRowNetVarianceVsProjected(r);
+                  const regionLbl = (r.region || "").trim();
+                  const headLbl = ((r.regional_head || "").trim() || (r.practice_head || "").trim()) || null;
                   return (
                     <TableRow key={i}>
                       <TableCell className="max-w-[200px]">
                         <Text className="text-xs font-semibold text-tremor-content-strong">{r.account_name || `Project ${r.project_id}`}</Text>
-                        {r.practice_head ? (
-                          <Text className="block text-[11px] text-tremor-content-subtle">{r.practice_head}</Text>
+                        {regionLbl && regionLbl !== "Unknown" ? (
+                          <Text className="block text-[11px] text-tremor-content-subtle">{regionLbl}</Text>
                         ) : null}
+                        {headLbl ? <Text className="block text-[10px] text-tremor-content-subtle">{headLbl}</Text> : null}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-strong">
+                        {formatWfmRowRevenueTarget(r.lateral_revenue_target)}
                       </TableCell>
                       <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">
-                        {r.lateral_productivity_target != null ? formatPercent(r.lateral_productivity_target) : "—"}
+                        {r.lateral_productivity_target != null ? formatLacs(r.lateral_productivity_target) : "—"}
                       </TableCell>
                       <TableCell className="text-right text-xs tabular-nums text-tremor-content-strong">{formatNumber(idealN)}</TableCell>
                       <TableCell className="text-right text-xs tabular-nums text-tremor-content-strong">{formatNumber(actualN)}</TableCell>
@@ -709,17 +720,29 @@ export function WorkforceManagement() {
                         {variance > 0 ? "+" : ""}
                         {formatNumber(variance)}
                       </TableCell>
-                      <TableCell className="text-right text-xs tabular-nums">{formatNumber(wlBandSum)}</TableCell>
-                      <TableCell className={`text-right text-xs tabular-nums ${openSheet > 0 ? "text-sky-700 dark:text-sky-300" : "text-tremor-content-subtle"}`}>
-                        {formatNumber(openSheet)}
+                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">{formatNumber(additionalHc)}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        <Text className={`tabular-nums ${openSheet > 0 ? "text-sky-800 dark:text-sky-300" : "text-tremor-content-subtle"}`}>
+                          {formatNumber(openSheet)}
+                        </Text>
+                        <Text
+                          className={`block text-[10px] tabular-nums ${gapReqRows > 0 ? "text-tremor-content-emphasis" : "text-tremor-content-subtle"}`}
+                        >
+                          {formatNumber(gapReqRows, 0)} reqs
+                        </Text>
                       </TableCell>
-                      <TableCell className={`text-right text-xs tabular-nums ${openPos > 0 ? "text-rose-600" : "text-tremor-content-subtle"}`}>
-                        {formatNumber(openPos)}
-                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">—</TableCell>
                       <TableCell className="text-right text-xs tabular-nums font-medium text-violet-800 dark:text-violet-300">
                         {formatNumber(projRow)}
                       </TableCell>
-                      <TableCell className="text-right text-xs tabular-nums text-sky-700 dark:text-sky-300">{formatNumber(projHc)}</TableCell>
+                      <TableCell
+                        className={`text-right text-xs tabular-nums font-semibold ${
+                          netVar > 0 ? "text-rose-600" : netVar < 0 ? "text-amber-600" : "text-emerald-600"
+                        }`}
+                      >
+                        {netVar > 0 ? "+" : ""}
+                        {formatNumber(netVar)}
+                      </TableCell>
                       <TableCell className="min-w-[120px]">
                         <Flex justifyContent="start" alignItems="center" className="gap-1.5">
                           <ProgressBar value={Math.min(100, pct)} color={fillBarTremorColor(pct, idealN)} className="min-w-[52px] flex-1 !h-1.5" />
@@ -738,34 +761,43 @@ export function WorkforceManagement() {
               {projectTableTotals ? (
                 <TableFoot>
                   <TableRow className="border-t border-orange-200/80 bg-orange-50/50 dark:border-orange-900/50 dark:bg-orange-950/25">
-                    <TableFooterCell className="text-xs font-bold uppercase tracking-wide text-orange-800 dark:text-orange-200">Total</TableFooterCell>
-                    <TableFooterCell className="text-right text-xs">—</TableFooterCell>
+                    <TableFooterCell className="text-xs font-semibold tracking-normal text-orange-800 dark:text-orange-200">
+                      Σ / blended
+                    </TableFooterCell>
+                    <TableFooterCell className="text-right text-[11px] tabular-nums font-semibold text-tremor-content-strong">
+                      {projectTableTotals.footerRevenueDisplay}
+                    </TableFooterCell>
+                    <TableFooterCell className="text-right text-[11px] tabular-nums font-semibold">
+                      {formatLacs(projectTableTotals.footerProductivityLacs)}
+                    </TableFooterCell>
                     <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totIdeal)}</TableFooterCell>
                     <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totActual)}</TableFooterCell>
                     <TableFooterCell
                       className={`text-right text-xs tabular-nums font-semibold ${
-                        projectTableTotals.totVariance > 0 ? "text-rose-600" : "text-emerald-600"
+                        projectTableTotals.totVariance > 0 ? "text-rose-600" : projectTableTotals.totVariance < 0 ? "text-amber-600" : "text-emerald-600"
                       }`}
                     >
                       {projectTableTotals.totVariance > 0 ? "+" : ""}
                       {formatNumber(projectTableTotals.totVariance)}
                     </TableFooterCell>
-                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totAdditional)}</TableFooterCell>
-                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-sky-800 dark:text-sky-300">
-                      {formatNumber(projectTableTotals.totOpenSheet)}
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold">{formatNumber(projectTableTotals.totAdditionalHc)}</TableFooterCell>
+                    <TableFooterCell className="text-right text-[11px] tabular-nums font-semibold">
+                      <span className="text-sky-800 dark:text-sky-300">{formatNumber(projectTableTotals.totOpenSheet)}</span>
+                      <span className="mt-0.5 block text-[10px] font-normal text-tremor-content-subtle">
+                        {formatNumber(projectTableTotals.totGapRows, 0)} reqs
+                      </span>
                     </TableFooterCell>
-                    <TableFooterCell
-                      className={`text-right text-xs tabular-nums font-semibold ${
-                        projectTableTotals.totOpenPos > 0 ? "text-rose-600" : "text-tremor-content-subtle"
-                      }`}
-                    >
-                      {formatNumber(projectTableTotals.totOpenPos)}
-                    </TableFooterCell>
+                    <TableFooterCell className="text-right text-xs text-tremor-content-subtle">—</TableFooterCell>
                     <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-violet-800 dark:text-violet-300">
                       {formatNumber(projectTableTotals.totProjectedHc)}
                     </TableFooterCell>
-                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-sky-700 dark:text-sky-300">
-                      {formatNumber(projectTableTotals.totProj)}
+                    <TableFooterCell
+                      className={`text-right text-xs tabular-nums font-semibold ${
+                        projectTableTotals.totNetVar > 0 ? "text-rose-600" : projectTableTotals.totNetVar < 0 ? "text-amber-600" : "text-emerald-600"
+                      }`}
+                    >
+                      {projectTableTotals.totNetVar > 0 ? "+" : ""}
+                      {formatNumber(projectTableTotals.totNetVar)}
                     </TableFooterCell>
                     <TableFooterCell>
                       <Flex justifyContent="start" alignItems="center" className="gap-1.5">
@@ -789,63 +821,11 @@ export function WorkforceManagement() {
       </TremorDashboardSection>
 
       {!loading && rows.length > 0 && (
-        <>
-          <Text className={WFM_BLOCK_TAG}>Client HC — ideal vs actual</Text>
-          <Grid numItems={1} numItemsLg={2} className="gap-3">
-            <Card className={flatCard}>
-              <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
-                <Flex justifyContent="between" alignItems="center" className="gap-2">
-                  <Title className="text-base font-semibold text-tremor-content-strong">HC comparison</Title>
-                  <Button
-                    type="button"
-                    variant="light"
-                    color="orange"
-                    size="xs"
-                    onClick={() => {
-                      setExpandMode("hc");
-                      setExpandFilter("all");
-                    }}
-                  >
-                    <span className="inline-flex items-center gap-1 text-[11px] font-medium">
-                      <Expand size={12} aria-hidden />
-                      Full list
-                    </span>
-                  </Button>
-                </Flex>
-              </div>
-              <div className="px-4 py-3">
-                {allBulletItems.length === 0 ? (
-                  <Text className="text-xs text-tremor-content-subtle">No data</Text>
-                ) : (
-                  <HcIdealActualGroupedChart items={allBulletItems.slice(0, 8)} />
-                )}
-              </div>
-            </Card>
-            <Card className={flatCard}>
-              <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
-                <Title className="text-base font-semibold text-tremor-content-strong">Capacity fill gauge</Title>
-                <Text className="mt-0.5 text-xs text-tremor-content-subtle">Ideal vs actual roster strength</Text>
-              </div>
-              <div className="flex flex-col gap-4 px-4 py-3">
-            <GaugeRing
-              value={fillRate}
-              label="Capacity Fill Rate"
-              sublabel={`${formatNumber(actualHc)} of ${formatNumber(idealHc)} positions`}
-              color={fgColor}
-            />
-                {wlData.length > 0 ? <WlDistributionBar data={wlData} /> : null}
-            </div>
-            </Card>
-          </Grid>
-        </>
-      )}
-
-      {!loading && rows.length > 0 && (
         <Card className={cn(flatCard, "border-t-4 border-t-orange-400 dark:border-t-orange-500")}>
           <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
             <Title className="text-base font-semibold text-tremor-content-strong">Productivity target vs fill rate (by client)</Title>
             <Text className="mt-0.5 text-xs leading-snug text-tremor-content-subtle">
-              Bars: fill rate (actual ÷ ideal HC). Line: productivity target. Dashed line: 100% fill — above = over-capacity.
+              Bars: fill rate (actual ÷ ideal HC). Line: productivity target (lacs). Dashed line: 100% fill — above = over-capacity.
           {productivityFillChartAll.length > 0 ? (
                 <span className="mt-1 block text-[11px]">
               {prodChartSelected.length === 0
@@ -952,6 +932,58 @@ export function WorkforceManagement() {
         </div>
         </div>
         </Card>
+      )}
+
+      {!loading && rows.length > 0 && (
+        <>
+          <Text className={WFM_BLOCK_TAG}>Client HC — ideal vs actual</Text>
+          <Grid numItems={1} numItemsLg={2} className="gap-3">
+            <Card className={flatCard}>
+              <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+                <Flex justifyContent="between" alignItems="center" className="gap-2">
+                  <Title className="text-base font-semibold text-tremor-content-strong">HC comparison</Title>
+                  <Button
+                    type="button"
+                    variant="light"
+                    color="orange"
+                    size="xs"
+                    onClick={() => {
+                      setExpandMode("hc");
+                      setExpandFilter("all");
+                    }}
+                  >
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                      <Expand size={12} aria-hidden />
+                      Full list
+                    </span>
+                  </Button>
+                </Flex>
+              </div>
+              <div className="px-4 py-3">
+                {allBulletItems.length === 0 ? (
+                  <Text className="text-xs text-tremor-content-subtle">No data</Text>
+                ) : (
+                  <HcIdealActualGroupedChart items={allBulletItems.slice(0, 8)} />
+                )}
+              </div>
+            </Card>
+            <Card className={flatCard}>
+              <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+                <Title className="text-base font-semibold text-tremor-content-strong">Capacity fill gauge</Title>
+                <Text className="mt-0.5 text-xs text-tremor-content-subtle">Ideal vs actual roster strength</Text>
+              </div>
+              <div className="flex flex-col gap-4 px-4 py-3">
+                <GaugeRing
+                  value={fillRate}
+                  label="Capacity Fill Rate"
+                  sublabel={`${formatNumber(actualHc)} of ${formatNumber(idealHc)} positions`}
+                  color={fgColor}
+                />
+                {wlData.length > 0 ? <WlDistributionBar data={wlData} /> : null}
+              </div>
+            </Card>
+          </Grid>
+        </>
       )}
 
       <WfmExpandDialog

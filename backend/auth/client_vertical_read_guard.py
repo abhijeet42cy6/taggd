@@ -38,6 +38,7 @@ _PREFIX_VERTICAL: tuple[tuple[str, str], ...] = (
     ("/projects", "clients"),
     ("/records", "requisitions"),
     ("/stats", "portfolio"),
+    ("/ceo-deck", "ceo_view"),
 )
 
 

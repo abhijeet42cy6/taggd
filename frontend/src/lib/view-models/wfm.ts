@@ -69,6 +69,10 @@ export type WfmBenchmarkRowVm = {
   vertical?: string;
   practice?: string;
   practice_head?: string;
+  /** Account regional lead from `projects.regional_head`. */
+  regional_head?: string;
+  /** Count of `wfm_resource_gaps` rows for this project (gap upload). */
+  resource_gap_row_count?: number;
   reporting_date: string | null;
   ideal_hc: number;
   actual_hc_total: number;
@@ -110,6 +114,12 @@ export function wfmRowAdditionalHcProxy(r: WfmBenchmarkRowVm): number {
 export function wfmRowProjectedHc(r: WfmBenchmarkRowVm): number {
   const actual = Number(r.actual_hc_total ?? 0);
   return actual + wfmRowAdditionalHcProxy(r) + wfmOpenPositionsFromSheet(r);
+}
+
+/** Ideal − projected HC (whether pipeline closes the gap vs ideal). */
+export function wfmRowNetVarianceVsProjected(r: WfmBenchmarkRowVm): number {
+  const ideal = Number(r.ideal_hc ?? 0);
+  return ideal - wfmRowProjectedHc(r);
 }
 
 export function wfmRowsVm(rows: any[]): WfmBenchmarkRowVm[] {

@@ -17,40 +17,66 @@ import {
   Title,
 } from "@tremor/react";
 import {
+  ArrowDown,
+  ArrowUp,
+  GripVertical,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Trash2,
+} from "lucide-react";
+import {
   api,
   invalidateCache,
   queries,
+  type BlockCatalogEntry,
+  type BlockType,
   type ClientDashboardConfig,
   type ClientDashboardSummary,
+  type LayoutBlock,
 } from "@/lib/api";
 import { cn, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
-import { Search } from "lucide-react";
 import "@/styles/client-dashboard.css";
 
-const flatCard =
-  "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
+// ─── Constants ──────────────────────────────────────────────────────────────────
 
-function statusTagFromRaw(rawStatus: unknown): string {
-  const s = String(rawStatus ?? "").trim();
-  const lower = s.toLowerCase();
-  if (lower === "met") return "Met";
-  if (lower.includes("not met")) return "Breached";
-  if (
-    lower === "not reported" ||
-    lower.includes("not reported") ||
-    lower === "n/a" ||
-    lower === "na" ||
-    lower === "-" ||
-    lower === ""
-  ) {
-    return "Not Reported";
-  }
+const BLOCK_CATALOG_LABELS: Record<BlockType, string> = {
+  sla_kpi_strip: "SLA KPI strip",
+  sla_summary_cards: "SLA summary cards",
+  sla_table: "SLA KPI table",
+  req_kpi: "Requisitions KPI",
+  engagements_table: "Engagements table",
+  finance_strip: "Finance snapshot",
+};
+
+const DEFAULT_LAYOUT: LayoutBlock[] = [
+  { id: "sla_kpi_strip", type: "sla_kpi_strip", variant: "card", order: 0 },
+  { id: "sla_summary_cards", type: "sla_summary_cards", variant: "card", order: 1 },
+  { id: "sla_table", type: "sla_table", variant: "card", order: 2 },
+  { id: "req_kpi", type: "req_kpi", variant: "dense", order: 3 },
+  { id: "engagements_table", type: "engagements_table", variant: "card", order: 4 },
+];
+
+// ─── Utilities ──────────────────────────────────────────────────────────────────
+
+type SlaRow = ClientDashboardSummary["sla_metrics"][number];
+
+function slaStatusLabel(raw: unknown): string {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (s === "met") return "Met";
+  if (s.includes("not met")) return "Breached";
   return "Not Reported";
 }
 
-function kpiTypeLabel(raw: string | null | undefined): string {
+function slaBadgeColor(label: string): "emerald" | "rose" | "slate" {
+  if (label === "Met") return "emerald";
+  if (label === "Breached") return "rose";
+  return "slate";
+}
+
+function kpiNatureLabel(raw: string | null | undefined): string {
   if (!raw) return "—";
   const s = raw.toLowerCase();
   if (s.includes("contract")) return "Contractual";
@@ -58,29 +84,377 @@ function kpiTypeLabel(raw: string | null | undefined): string {
   return raw;
 }
 
-function clientSlaStatusLabel(raw: unknown): string {
-  return statusTagFromRaw(raw);
+type TabKpis = {
+  met_count: number;
+  not_met_count: number;
+  not_reported_count: number;
+  total_metrics: number;
+  portfolio_health: number | null;
+};
+
+function computeTabKpis(metrics: SlaRow[]): TabKpis {
+  let met = 0, notMet = 0, nr = 0;
+  for (const m of metrics) {
+    const label = slaStatusLabel(m.status);
+    if (label === "Met") met++;
+    else if (label === "Breached") notMet++;
+    else nr++;
+  }
+  const denom = met + notMet;
+  return {
+    met_count: met,
+    not_met_count: notMet,
+    not_reported_count: nr,
+    total_metrics: metrics.length,
+    portfolio_health: denom > 0 ? Math.round((met / denom) * 1000) / 10 : null,
+  };
 }
 
-function clientSlaBadgeColor(label: string): "emerald" | "rose" | "slate" {
-  if (label === "Met") return "emerald";
-  if (label === "Breached") return "rose";
-  return "slate";
+function deepCloneLayout(layout: LayoutBlock[]): LayoutBlock[] {
+  return JSON.parse(JSON.stringify(layout)) as LayoutBlock[];
 }
 
-function deepCloneCfg(c: ClientDashboardConfig): ClientDashboardConfig {
-  return JSON.parse(JSON.stringify(c)) as ClientDashboardConfig;
+// ─── Block sub-components ───────────────────────────────────────────────────────
+
+function SlaKpiStrip({ kpis, variant }: { kpis: TabKpis; variant: LayoutBlock["variant"] }) {
+  const health = kpis.portfolio_health;
+  const label = `${kpis.met_count} met · ${kpis.not_met_count} not met`;
+  if (variant === "dense") {
+    return (
+      <div className="flex flex-wrap gap-4 rounded-tremor-default border border-tremor-border bg-white px-4 py-3">
+        <div>
+          <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">SLA met %</Text>
+          <Text className="mt-0.5 text-lg font-bold tabular-nums text-tremor-content-strong">
+            {health == null ? "—" : formatPercent(health)}
+          </Text>
+        </div>
+        <div>
+          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Breakdown</Text>
+          <Text className="mt-0.5 text-sm tabular-nums text-tremor-content-emphasis">{label}</Text>
+        </div>
+        <div>
+          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Tracked</Text>
+          <Text className="mt-0.5 text-lg font-bold tabular-nums text-tremor-content-strong">{kpis.total_metrics}</Text>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Grid numItems={2} numItemsSm={3} className="gap-2 md:gap-3">
+      <Card decoration="top" decorationColor="emerald" className="p-3">
+        <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">SLA met %</Text>
+        <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
+          {health == null ? "—" : formatPercent(health)}
+        </Metric>
+        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">{label}</Text>
+      </Card>
+      <Card decoration="top" decorationColor="blue" className="p-3">
+        <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Not reported</Text>
+        <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.not_reported_count}</Metric>
+        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">KPIs with no score</Text>
+      </Card>
+      <Card decoration="top" decorationColor="amber" className="p-3">
+        <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">KPIs tracked</Text>
+        <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.total_metrics}</Metric>
+        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">Latest reported period</Text>
+      </Card>
+    </Grid>
+  );
 }
+
+function SlaSummaryCards({ kpis }: { kpis: TabKpis }) {
+  return (
+    <TremorDashboardSection tag="SLA" title="SLA summary">
+      <Grid numItems={1} numItemsSm={3} className="gap-3">
+        <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4">
+          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Portfolio health</Text>
+          <Metric className="mt-1 text-lg tabular-nums md:text-xl">
+            {kpis.portfolio_health == null ? "—" : formatPercent(kpis.portfolio_health)}
+          </Metric>
+          <Text className="mt-0.5 text-[10px] text-tremor-content-subtle">Met / (Met + Breached)</Text>
+        </Card>
+        <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4">
+          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Met / Breached</Text>
+          <Metric className="mt-1 text-base tabular-nums md:text-lg">
+            <span className="text-emerald-600">{kpis.met_count}</span>
+            <span className="mx-1 text-tremor-content-subtle">·</span>
+            <span className="text-rose-600">{kpis.not_met_count}</span>
+          </Metric>
+        </Card>
+        <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4">
+          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Not reported</Text>
+          <Metric className="mt-1 text-base tabular-nums md:text-lg">{kpis.not_reported_count}</Metric>
+        </Card>
+      </Grid>
+    </TremorDashboardSection>
+  );
+}
+
+function SlaTable({ metrics }: { metrics: SlaRow[] }) {
+  if (metrics.length === 0) {
+    return (
+      <TremorDashboardSection tag="Operations" title="SLA KPIs">
+        <Text className="p-4 text-sm text-tremor-content-subtle">No SLA KPI rows in scope.</Text>
+      </TremorDashboardSection>
+    );
+  }
+  return (
+    <TremorDashboardSection tag="Operations" title="SLA KPIs (latest reported)" noPad>
+      <div className="overflow-x-auto px-2 pb-3 pt-1 md:px-4">
+        <Table className="min-w-[720px]">
+          <TableHead>
+            <TableRow>
+              <TableHeaderCell className="text-xs">Account</TableHeaderCell>
+              <TableHeaderCell className="text-xs">KPI</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Type</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Target</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Score</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Reported</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Status</TableHeaderCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {metrics.map((row) => {
+              const label = slaStatusLabel(row.status);
+              return (
+                <TableRow key={row.id}>
+                  <TableCell className="whitespace-nowrap text-xs font-medium text-orange-600">{row.account_name}</TableCell>
+                  <TableCell className="text-xs text-tremor-content-emphasis">{row.metric_label}</TableCell>
+                  <TableCell className="text-[10px] text-tremor-content-subtle">{kpiNatureLabel(row.metric_nature)}</TableCell>
+                  <TableCell className="text-xs tabular-nums">{row.target ?? "—"}</TableCell>
+                  <TableCell className="text-xs tabular-nums">{row.latest_score ?? "—"}</TableCell>
+                  <TableCell className="text-[10px] tabular-nums text-tremor-content-subtle">
+                    {row.reporting_month && row.reporting_month !== "N/A" ? String(row.reporting_month).slice(0, 10) : "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge color={slaBadgeColor(label)} size="xs">{label}</Badge>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </TremorDashboardSection>
+  );
+}
+
+function ReqKpi({ total, variant }: { total: number; variant: LayoutBlock["variant"] }) {
+  if (variant === "dense") {
+    return (
+      <div className="flex items-center gap-4 rounded-tremor-default border border-tremor-border bg-white px-4 py-3">
+        <div>
+          <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">Requisitions</Text>
+          <Text className="mt-0.5 text-lg font-bold tabular-nums text-tremor-content-strong">{total}</Text>
+        </div>
+        <Text className="text-xs text-tremor-content-subtle">Records in scope</Text>
+      </div>
+    );
+  }
+  return (
+    <TremorDashboardSection tag="Requisitions" title="Requisitions in scope">
+      <Card decoration="top" decorationColor="amber" className="p-4">
+        <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">Total requisitions</Text>
+        <Metric className="mt-1 text-2xl tabular-nums">{total}</Metric>
+        <Text className="mt-0.5 text-xs text-tremor-content-subtle">Records across allocated projects</Text>
+      </Card>
+    </TremorDashboardSection>
+  );
+}
+
+function EngagementsTable({ projects }: { projects: ClientDashboardSummary["projects"] }) {
+  return (
+    <TremorDashboardSection tag="Engagements" title="Your engagements" noPad>
+      <div className="overflow-x-auto px-2 pb-3 pt-1 md:px-4">
+        <Table className="min-w-[640px]">
+          <TableHead>
+            <TableRow>
+              <TableHeaderCell className="text-xs">Account</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Engagement</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Region</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Vertical</TableHeaderCell>
+              <TableHeaderCell className="text-xs">Practice head</TableHeaderCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {projects.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell className="text-xs font-medium text-tremor-content-strong">{p.account_name}</TableCell>
+                <TableCell className="text-xs text-tremor-content-emphasis">{p.engagement_name}</TableCell>
+                <TableCell className="text-xs text-tremor-content-emphasis">{p.region}</TableCell>
+                <TableCell className="text-xs text-tremor-content-emphasis">{p.vertical}</TableCell>
+                <TableCell className="text-xs text-tremor-content-emphasis">{p.practice_head}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </TremorDashboardSection>
+  );
+}
+
+function FinanceStrip({ finance, isClientUser }: { finance: Record<string, number>; isClientUser: boolean }) {
+  if (Object.keys(finance).length === 0) return null;
+  const tiles: Array<{ key: string; label: string }> = [
+    { key: "revenue_actual", label: "Revenue (actual)" },
+    { key: "revenue_budget", label: "Revenue (budget)" },
+    { key: "rev_attainment", label: "Budget attainment" },
+    { key: "total_cm", label: "Contribution margin" },
+    { key: "total_collected", label: "Collected" },
+    { key: "collection_pending", label: "Collection pending" },
+    { key: "total_unbilled", label: "Unbilled" },
+  ];
+  const active = tiles.filter((t) => finance[t.key] !== undefined);
+  if (active.length === 0) return null;
+  return (
+    <TremorDashboardSection tag="Finance" title="Financial snapshot">
+      <Grid numItems={1} numItemsSm={2} numItemsLg={3} className="gap-3">
+        {active.map((t) => (
+          <Card key={t.key} className="border border-tremor-border bg-tremor-background-muted/35 p-4">
+            <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">{t.label}</Text>
+            <Metric className="mt-1 text-lg tabular-nums md:text-xl">
+              {t.key === "rev_attainment"
+                ? formatPercent(finance[t.key])
+                : formatLargeCurrency(finance[t.key])}
+            </Metric>
+          </Card>
+        ))}
+      </Grid>
+      {isClientUser ? (
+        <Text className="mt-4 text-[11px] leading-relaxed text-tremor-content-subtle">
+          Figures reflect ledger and cash-flow data for your allocated projects. Internal-only finance lines are not shown.
+        </Text>
+      ) : null}
+    </TremorDashboardSection>
+  );
+}
+
+// ─── Block renderer ─────────────────────────────────────────────────────────────
+
+function BlockRenderer({
+  block,
+  tabKpis,
+  tabMetrics,
+  tabProjects,
+  tabReqTotal,
+  finance,
+  isClientUser,
+}: {
+  block: LayoutBlock;
+  tabKpis: TabKpis;
+  tabMetrics: SlaRow[];
+  tabProjects: ClientDashboardSummary["projects"];
+  tabReqTotal: number;
+  finance: Record<string, number>;
+  isClientUser: boolean;
+}) {
+  switch (block.type) {
+    case "sla_kpi_strip":
+      return <SlaKpiStrip kpis={tabKpis} variant={block.variant} />;
+    case "sla_summary_cards":
+      return <SlaSummaryCards kpis={tabKpis} />;
+    case "sla_table":
+      return <SlaTable metrics={tabMetrics} />;
+    case "req_kpi":
+      return <ReqKpi total={tabReqTotal} variant={block.variant} />;
+    case "engagements_table":
+      return <EngagementsTable projects={tabProjects} />;
+    case "finance_strip":
+      return <FinanceStrip finance={finance} isClientUser={isClientUser} />;
+    default:
+      return null;
+  }
+}
+
+// ─── Builder drawer internals ───────────────────────────────────────────────────
+
+function BuilderBlockRow({
+  block,
+  index,
+  total,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+  onToggleVariant,
+}: {
+  block: LayoutBlock;
+  index: number;
+  total: number;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+  onToggleVariant: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-tremor-border bg-white px-3 py-2.5 shadow-sm">
+      <GripVertical size={14} className="shrink-0 text-tremor-content-subtle" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Text className="truncate text-xs font-medium text-tremor-content-strong">
+          {BLOCK_CATALOG_LABELS[block.type]}
+        </Text>
+      </div>
+      <button
+        type="button"
+        onClick={onToggleVariant}
+        title="Toggle variant"
+        className={cn(
+          "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+          block.variant === "card"
+            ? "bg-orange-50 text-orange-600 hover:bg-orange-100"
+            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+        )}
+      >
+        {block.variant}
+      </button>
+      <div className="flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          onClick={onMoveUp}
+          disabled={index === 0}
+          title="Move up"
+          className="rounded p-1 text-tremor-content-subtle hover:bg-tremor-background-muted disabled:opacity-30"
+        >
+          <ArrowUp size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={onMoveDown}
+          disabled={index === total - 1}
+          title="Move down"
+          className="rounded p-1 text-tremor-content-subtle hover:bg-tremor-background-muted disabled:opacity-30"
+        >
+          <ArrowDown size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          title="Remove block"
+          className="rounded p-1 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ─────────────────────────────────────────────────────────────
 
 export function ClientDashboard() {
   const [data, setData] = useState<ClientDashboardSummary | null>(null);
+  const [catalog, setCatalog] = useState<BlockCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scopeClientId, setScopeClientId] = useState<number | "all">("all");
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [draftConfig, setDraftConfig] = useState<ClientDashboardConfig | null>(null);
+  const [activeTabKey, setActiveTabKey] = useState<string>("all");
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [draftLayout, setDraftLayout] = useState<LayoutBlock[] | null>(null);
+  const [draftSlaInternal, setDraftSlaInternal] = useState(false);
+  const [draftVerticals, setDraftVerticals] = useState<string[]>([]);
+  const [draftRegions, setDraftRegions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
+  // ── Load summary ──────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -90,21 +464,26 @@ export function ClientDashboard() {
           ? await queries.clientDashboardSummary()
           : await queries.clientDashboardSummary({ client_id: scopeClientId });
       setData(res);
+      // Reset to "all" tab whenever data reloads
+      setActiveTabKey("all");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to load dashboard";
-      setError(msg);
+      setError(e instanceof Error ? e.message : "Failed to load dashboard");
       setData(null);
     } finally {
       setLoading(false);
     }
   }, [scopeClientId]);
 
+  useEffect(() => { void load(); }, [load]);
+
+  // Load block catalog once
   useEffect(() => {
-    load();
-  }, [load]);
+    queries.clientDashboardBlocks()
+      .then((r) => setCatalog(r.blocks))
+      .catch(() => { /* catalog is optional; defaults fill in */ });
+  }, []);
 
-  const widgets = data?.config?.widgets ?? {};
-
+  // ── Derived: save target client ───────────────────────────────────────────────
   const saveClientId = useMemo(() => {
     if (scopeClientId !== "all") return scopeClientId;
     if (data?.selected_client_id != null) return data.selected_client_id;
@@ -112,110 +491,213 @@ export function ClientDashboard() {
     return null;
   }, [scopeClientId, data]);
 
-  const openEditor = () => {
+  // ── Derived: active BU tab ────────────────────────────────────────────────────
+  const buTabs = data?.bu_tabs ?? [];
+  const activeBuTab = buTabs.find((t) => t.key === activeTabKey) ?? null;
+  const tabPidSet = useMemo<Set<number>>(() => {
+    if (activeBuTab) return new Set(activeBuTab.project_ids);
+    return new Set((data?.projects ?? []).map((p) => p.id));
+  }, [activeBuTab, data]);
+
+  // ── Derived: tab-scoped data ──────────────────────────────────────────────────
+  const tabMetrics = useMemo(
+    () => (data?.sla_metrics ?? []).filter((m) => tabPidSet.has(m.project_id)),
+    [data, tabPidSet],
+  );
+  const tabProjects = useMemo(
+    () => (data?.projects ?? []).filter((p) => tabPidSet.has(p.id)),
+    [data, tabPidSet],
+  );
+  const tabKpis = useMemo(() => computeTabKpis(tabMetrics), [tabMetrics]);
+  const tabReqTotal = useMemo(() => {
+    let total = 0;
+    const rq = data?.req_by_project ?? {};
+    for (const pid of tabPidSet) {
+      total += rq[String(pid)] ?? 0;
+    }
+    return total;
+  }, [data, tabPidSet]);
+
+  // ── Layout (from config or default) ──────────────────────────────────────────
+  const layout = useMemo<LayoutBlock[]>(() => {
+    const l = data?.config?.layout;
+    return Array.isArray(l) && l.length > 0 ? l : DEFAULT_LAYOUT;
+  }, [data]);
+
+  const sortedLayout = useMemo(
+    () => [...layout].sort((a, b) => a.order - b.order),
+    [layout],
+  );
+
+  // ── Builder open ──────────────────────────────────────────────────────────────
+  const openBuilder = () => {
     if (!data) return;
     if (saveClientId == null) {
-      setError("Select a single organisation in the filter above to customize this dashboard.");
+      setError("Select a single organisation above to customise this dashboard.");
       return;
     }
     setError(null);
-    setDraftConfig(deepCloneCfg(data.config));
-    setEditorOpen(true);
+    setDraftLayout(deepCloneLayout(layout));
+    setDraftSlaInternal(Boolean(data.config?.sla_show_internal_kpis));
+    setDraftVerticals(data.config?.project_vertical_filter ?? []);
+    setDraftRegions(data.config?.project_region_filter ?? []);
+    setBuilderOpen(true);
   };
 
+  // ── Builder: layout mutations ─────────────────────────────────────────────────
+  const moveBlock = (idx: number, dir: -1 | 1) => {
+    setDraftLayout((prev) => {
+      if (!prev) return prev;
+      const next = deepCloneLayout(prev);
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next.map((b, i) => ({ ...b, order: i }));
+    });
+  };
+
+  const removeBlock = (idx: number) => {
+    setDraftLayout((prev) => {
+      if (!prev) return prev;
+      return prev.filter((_, i) => i !== idx).map((b, i) => ({ ...b, order: i }));
+    });
+  };
+
+  const toggleVariant = (idx: number) => {
+    setDraftLayout((prev) => {
+      if (!prev) return prev;
+      return prev.map((b, i) =>
+        i === idx ? { ...b, variant: b.variant === "card" ? "dense" : "card" } : b,
+      );
+    });
+  };
+
+  const addBlock = (type: BlockType) => {
+    setDraftLayout((prev) => {
+      const base = prev ?? [];
+      const newBlock: LayoutBlock = {
+        id: `${type}_${Date.now()}`,
+        type,
+        variant: "card",
+        order: base.length,
+      };
+      return [...base, newBlock];
+    });
+  };
+
+  const toggleDraftFilter = (
+    field: "verticals" | "regions",
+    value: string,
+  ) => {
+    const setter = field === "verticals" ? setDraftVerticals : setDraftRegions;
+    setter((prev) => {
+      const i = prev.indexOf(value);
+      if (i >= 0) return prev.filter((v) => v !== value);
+      return [...prev, value];
+    });
+  };
+
+  // ── Save layout ───────────────────────────────────────────────────────────────
   const saveLayout = async () => {
-    if (draftConfig == null || saveClientId == null) return;
+    if (!draftLayout || saveClientId == null) return;
     setSaving(true);
     setError(null);
     try {
-      await api.put("/client-dashboard/config", {
-        client_id: saveClientId,
-        config: draftConfig,
-      });
+      const config: ClientDashboardConfig = {
+        version: 2,
+        layout: draftLayout.map((b, i) => ({ ...b, order: i })),
+        sla_show_internal_kpis: draftSlaInternal,
+        project_vertical_filter: draftVerticals,
+        project_region_filter: draftRegions,
+        // Carry forward finance flags from current config
+        finance_show_revenue: data?.config?.finance_show_revenue ?? true,
+        finance_show_collections: data?.config?.finance_show_collections ?? true,
+        finance_show_unbilled: data?.config?.finance_show_unbilled ?? true,
+        finance_show_cm: data?.config?.finance_show_cm ?? false,
+      };
+      await api.put("/client-dashboard/config", { client_id: saveClientId, config });
       invalidateCache("client-dashboard");
-      setEditorOpen(false);
+      setBuilderOpen(false);
       await load();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Save failed";
-      setError(msg);
+      setError(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
     }
   };
 
-  const toggleWidget = (key: keyof NonNullable<ClientDashboardConfig["widgets"]>) => {
-    setDraftConfig((prev) => {
-      const base = prev ?? {};
-      const w = { ...(base.widgets ?? {}) };
-      const visible = w[key] !== false;
-      w[key] = visible ? false : true;
-      return { ...base, widgets: w };
-    });
-  };
+  // ── Computed: active client context ───────────────────────────────────────────
+  const activeClientId = useMemo(() => {
+    if (scopeClientId !== "all") return scopeClientId;
+    if (data?.selected_client_id != null) return data.selected_client_id;
+    if ((data?.clients?.length ?? 0) === 1) return data!.clients[0].id;
+    return null;
+  }, [scopeClientId, data]);
 
-  const toggleDraftFlag = (
-    key:
-      | "sla_show_internal_kpis"
-      | "finance_show_revenue"
-      | "finance_show_collections"
-      | "finance_show_unbilled"
-      | "finance_show_cm",
-  ) => {
-    setDraftConfig((prev) => {
-      const base = prev ?? {};
-      if (key === "sla_show_internal_kpis") {
-        return { ...base, [key]: !Boolean(base[key]) };
-      }
-      const on = base[key] !== false;
-      return { ...base, [key]: !on };
-    });
-  };
+  const activeClientName = useMemo(() => {
+    if (activeClientId == null || !data) return null;
+    return data.clients.find((c) => c.id === activeClientId)?.official_name ?? null;
+  }, [activeClientId, data]);
 
-  const toggleListFilter = (field: "project_vertical_filter" | "project_region_filter", value: string) => {
-    setDraftConfig((prev) => {
-      const base = prev ?? {};
-      const cur = [...(base[field] ?? [])];
-      const i = cur.indexOf(value);
-      if (i >= 0) cur.splice(i, 1);
-      else cur.push(value);
-      return { ...base, [field]: cur };
-    });
-  };
+  const layoutTypeCounts = useMemo(() => {
+    const counts: Partial<Record<BlockType, number>> = {};
+    for (const b of draftLayout ?? []) {
+      counts[b.type] = (counts[b.type] ?? 0) + 1;
+    }
+    return counts;
+  }, [draftLayout]);
 
-  const slaHealth = data?.sla?.portfolio_health;
-  const showKpiRow = widgets.kpi_row !== false;
+  const catalogEntries = useMemo(
+    () =>
+      catalog.length > 0
+        ? catalog
+        : Object.entries(BLOCK_CATALOG_LABELS).map(([type, label]) => ({
+            type,
+            label,
+            desc: "",
+            category: "",
+          })),
+    [catalog],
+  );
 
+  const hasData = !loading && data && data.projects.length > 0;
+
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="client-dash-tremor space-y-4 pb-10 md:space-y-5">
+
+      {/* Hero */}
       <div className="client-dash-tremor__hero">
-        <span className="inline-flex max-w-full items-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+        <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide text-orange-600">
           Client portal · Portfolio
         </span>
         <Title className="client-dash-tremor__title mt-0.5 text-2xl font-bold tracking-tight md:text-3xl">
-          Client dashboard
+          {activeClientName ?? "Client dashboard"}
         </Title>
-        <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm md:leading-snug">
-          SLA and financial visibility for your allocated engagements — curated for clarity.
+        {activeClientName && !data?.is_client_user ? (
+          <div className="client-dash-tremor__scope-chip">
+            <span className="client-dash-tremor__scope-chip-label">Viewing</span>
+            <span className="client-dash-tremor__scope-chip-name">{activeClientName}</span>
+            {scopeClientId === "all" && (data?.clients?.length ?? 0) > 1 ? (
+              <span className="client-dash-tremor__scope-chip-hint">Single-client scope</span>
+            ) : null}
+          </div>
+        ) : null}
+        <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm">
+          SLA and requisition visibility for your allocated engagements — curated for clarity.
         </Text>
       </div>
 
+      {/* Toolbar */}
       <div className="client-dash-tremor__toolbar">
         <div className="flex flex-wrap items-end justify-start gap-3">
-          {(data?.clients?.length ?? 0) > 1 ? (
+          {/* Org picker — only for non-client users with multiple clients */}
+          {!data?.is_client_user && (data?.clients?.length ?? 0) > 1 ? (
             <div className="min-w-[12rem] max-w-full flex-1 sm:max-w-xs">
-              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                Organisation
-              </Text>
+              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Organisation</Text>
               <SearchSelect
-                icon={Search}
                 value={scopeClientId === "all" ? "all" : String(scopeClientId)}
-                onValueChange={(v) => {
-                  if (!v) {
-                    setScopeClientId("all");
-                    return;
-                  }
-                  setScopeClientId(v === "all" ? "all" : Number(v));
-                }}
+                onValueChange={(v) => setScopeClientId(!v || v === "all" ? "all" : Number(v))}
                 placeholder="Type to filter…"
                 enableClear={false}
               >
@@ -226,326 +708,129 @@ export function ClientDashboard() {
                   </SearchSelectItem>
                 ))}
               </SearchSelect>
-              <Text className="mt-1 max-w-xs text-[10px] leading-snug text-tremor-content-subtle">
-                Click the field, then type to filter by organisation name.
+              <Text className="mt-1 text-[10px] text-tremor-content-subtle">
+                Click the field, then type to filter.
               </Text>
             </div>
           ) : null}
+
           <Button type="button" size="xs" variant="secondary" onClick={() => void load()}>
-            Refresh
+            <RefreshCw size={12} className="mr-1" /> Refresh
           </Button>
+
           {data?.can_edit_config ? (
             <Button
               type="button"
               size="xs"
               variant="secondary"
               color="orange"
-              onClick={openEditor}
-              title={
-                saveClientId == null
-                  ? "Pick one organisation to edit layout"
-                  : "Customize KPIs, widgets, and filters"
-              }
+              onClick={openBuilder}
+              title={saveClientId == null ? "Select an organisation to customise" : "Customise layout for this client"}
             >
-              Customize layout
+              <Settings2 size={12} className="mr-1" /> Customize layout
             </Button>
           ) : null}
-          <Text className="ml-auto shrink-0 text-[10px] font-medium tabular-nums uppercase tracking-wide text-tremor-content-subtle">
+
+          <Text className="ml-auto text-[10px] font-medium uppercase tracking-wide text-tremor-content-subtle">
             {loading ? "Loading…" : data ? "Ready" : ""}
           </Text>
         </div>
       </div>
 
+      {/* Error */}
       {error ? (
-        <Card
-          decoration="left"
-          decorationColor="rose"
-          className="border-0 p-3 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring"
-        >
-          <Text className="text-sm text-rose-700 dark:text-rose-300">{error}</Text>
+        <Card decoration="left" decorationColor="rose" className="border-0 p-3 ring-1 ring-tremor-ring">
+          <Text className="text-sm text-rose-700">{error}</Text>
         </Card>
       ) : null}
 
+      {/* Loading skeleton */}
       {loading && !data ? (
-        <Card className={cn(flatCard, "p-8 text-center")}>
+        <Card className="overflow-hidden border-0 p-8 text-center ring-1 ring-tremor-ring">
           <Text className="text-sm text-tremor-content-subtle">Loading dashboard…</Text>
         </Card>
       ) : null}
 
+      {/* Empty state */}
       {!loading && data && data.projects.length === 0 ? (
-        <Card className="border border-dashed border-tremor-border bg-tremor-background-muted/40 p-8 text-center dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/30">
+        <Card className="border border-dashed border-tremor-border p-8 text-center">
           <Text className="text-sm text-tremor-content-subtle">
-            No engagements match the current filters or assignments. Ask your programme owner to confirm project
-            allocation.
+            No engagements match the current filters or assignments. Ask your programme owner to confirm project allocation.
           </Text>
         </Card>
       ) : null}
 
-      {data && data.projects.length > 0 ? (
-        <>
-          {showKpiRow ? (
-            <Grid numItems={2} numItemsLg={4} className="gap-2 md:gap-3">
-              <Card decoration="top" decorationColor="emerald" className="p-3">
-                <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                  SLA met %
-                </Text>
-                <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
-                  {slaHealth == null ? "—" : formatPercent(slaHealth)}
-                </Metric>
-                <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">
-                  {data.sla.met_count != null && data.sla.not_met_count != null
-                    ? `${data.sla.met_count} met · ${data.sla.not_met_count} not met`
-                    : "—"}
-                </Text>
-              </Card>
-              <Card decoration="top" decorationColor="blue" className="p-3">
-                <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
-                  SLA metrics tracked
-                </Text>
-                <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{data.sla.total_metrics ?? "—"}</Metric>
-                <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Across allocated projects</Text>
-              </Card>
-              <Card decoration="top" decorationColor="amber" className="p-3">
-                <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                  Requisitions
-                </Text>
-                <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{data.requisitions_total}</Metric>
-                <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">Records in scope</Text>
-              </Card>
-              <Card decoration="top" decorationColor="blue" className="p-3">
-                <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
-                  Revenue recognised
-                </Text>
-                <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
-                  {data.finance.revenue_actual != undefined ? formatLargeCurrency(data.finance.revenue_actual) : "—"}
-                </Metric>
-                <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">
-                  {data.finance.rev_attainment != undefined && widgets.finance_summary !== false
-                    ? `${formatPercent(data.finance.rev_attainment)} vs budget`
-                    : "—"}
-                </Text>
-              </Card>
-            </Grid>
-          ) : null}
-
-          {widgets.sla_summary !== false ? (
-            <TremorDashboardSection tag="SLA" title="SLA summary">
-              <Grid numItems={1} numItemsSm={2} className="gap-3">
-                <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                  <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                    Portfolio health
-                  </Text>
-                  <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                    {slaHealth == null ? "—" : formatPercent(slaHealth)}
-                  </Metric>
-                </Card>
-                <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                  <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                    Met / Not met / Not reported
-                  </Text>
-                  <Metric className="mt-1 text-base tabular-nums md:text-lg">
-                    {data.sla.met_count ?? "—"} · {data.sla.not_met_count ?? "—"} · {data.sla.not_reported_count ?? "—"}
-                  </Metric>
-                </Card>
-              </Grid>
-            </TremorDashboardSection>
-          ) : null}
-
-          {widgets.finance_summary !== false && Object.keys(data.finance).length > 0 ? (
-            <TremorDashboardSection tag="Finance" title="Financial snapshot">
-              <Grid numItems={1} numItemsSm={2} numItemsLg={3} className="gap-3">
-                {data.finance.revenue_actual != undefined ? (
-                  <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                    <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                      Revenue (actual)
-                    </Text>
-                    <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                      {formatLargeCurrency(data.finance.revenue_actual)}
-                    </Metric>
-                  </Card>
-                ) : null}
-                {data.finance.revenue_budget != undefined ? (
-                  <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                    <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                      Revenue (budget)
-                    </Text>
-                    <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                      {formatLargeCurrency(data.finance.revenue_budget)}
-                    </Metric>
-                  </Card>
-                ) : null}
-                {data.finance.rev_attainment != undefined ? (
-                  <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                    <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                      Budget attainment
-                    </Text>
-                    <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                      {formatPercent(data.finance.rev_attainment)}
-                    </Metric>
-                  </Card>
-                ) : null}
-                {data.finance.total_cm != undefined ? (
-                  <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                    <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                      Contribution margin
-                    </Text>
-                    <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                      {formatLargeCurrency(data.finance.total_cm)}
-                    </Metric>
-                  </Card>
-                ) : null}
-                {data.finance.total_collected != undefined ? (
-                  <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                    <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                      Collected
-                    </Text>
-                    <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                      {formatLargeCurrency(data.finance.total_collected)}
-                    </Metric>
-                  </Card>
-                ) : null}
-                {data.finance.collection_pending != undefined ? (
-                  <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                    <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                      Collection pending
-                    </Text>
-                    <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                      {formatLargeCurrency(data.finance.collection_pending)}
-                    </Metric>
-                  </Card>
-                ) : null}
-                {data.finance.total_unbilled != undefined ? (
-                  <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4 dark:border-dark-tremor-border dark:bg-dark-tremor-background-muted/25">
-                    <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
-                      Unbilled
-                    </Text>
-                    <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-                      {formatLargeCurrency(data.finance.total_unbilled)}
-                    </Metric>
-                  </Card>
-                ) : null}
-              </Grid>
-              {data.is_client_user ? (
-                <Text className="mt-4 text-[11px] leading-relaxed text-tremor-content-subtle">
-                  Figures reflect ledger and cash-flow data available for your allocated projects. Internal-only finance
-                  lines are never shown in the client view.
-                </Text>
-              ) : null}
-            </TremorDashboardSection>
-          ) : null}
-
-          {widgets.sla_metrics_table !== false && data.sla_metrics.length > 0 ? (
-            <TremorDashboardSection tag="Operations" title="SLA KPIs (latest reported)" noPad>
-              <div className="overflow-x-auto px-2 pb-3 pt-1 md:px-4">
-                <Table className="min-w-[720px]">
-                  <TableHead>
-                    <TableRow>
-                      <TableHeaderCell className="text-xs">Account</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">KPI</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Type</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Target</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Score</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Reported</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Status</TableHeaderCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data.sla_metrics.map((row) => {
-                      const statusLabel = clientSlaStatusLabel(row.status);
-                      return (
-                        <TableRow key={row.id}>
-                          <TableCell className="whitespace-nowrap text-xs font-medium text-orange-600 dark:text-orange-400">
-                            {row.account_name}
-                          </TableCell>
-                          <TableCell className="text-xs text-tremor-content-emphasis md:text-sm">{row.metric_label}</TableCell>
-                          <TableCell className="text-[10px] text-tremor-content-subtle md:text-xs">
-                            {kpiTypeLabel(row.metric_nature)}
-                          </TableCell>
-                          <TableCell className="text-xs tabular-nums">{row.target ?? "—"}</TableCell>
-                          <TableCell className="text-xs tabular-nums">{row.latest_score ?? "—"}</TableCell>
-                          <TableCell className="text-[10px] tabular-nums text-tremor-content-subtle md:text-xs">
-                            {row.reporting_month && row.reporting_month !== "N/A"
-                              ? String(row.reporting_month).slice(0, 10)
-                              : "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge color={clientSlaBadgeColor(statusLabel)} size="xs">
-                              {statusLabel}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </TremorDashboardSection>
-          ) : null}
-
-          {widgets.projects_table !== false ? (
-            <TremorDashboardSection tag="Engagements" title="Your engagements" noPad>
-              <div className="overflow-x-auto px-2 pb-3 pt-1 md:px-4">
-                <Table className="min-w-[640px]">
-                  <TableHead>
-                    <TableRow>
-                      <TableHeaderCell className="text-xs">Account</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Engagement</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Region</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Vertical</TableHeaderCell>
-                      <TableHeaderCell className="text-xs">Practice head</TableHeaderCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data.projects.map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="text-xs text-tremor-content-strong md:text-sm">{p.account_name}</TableCell>
-                        <TableCell className="text-xs text-tremor-content-emphasis md:text-sm">{p.engagement_name}</TableCell>
-                        <TableCell className="text-xs text-tremor-content-emphasis md:text-sm">{p.region}</TableCell>
-                        <TableCell className="text-xs text-tremor-content-emphasis md:text-sm">{p.vertical}</TableCell>
-                        <TableCell className="text-xs text-tremor-content-emphasis md:text-sm">{p.practice_head}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </TremorDashboardSection>
-          ) : null}
-        </>
+      {/* BU / SBU tabs */}
+      {hasData && buTabs.length > 0 ? (
+        <div className="cd-bu-tabs">
+          {buTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTabKey(tab.key)}
+              className={cn(
+                "cd-bu-tab",
+                activeTabKey === tab.key ? "cd-bu-tab--active" : "cd-bu-tab--idle",
+              )}
+            >
+              {tab.label}
+              <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[9px] font-bold tabular-nums leading-none"
+                style={activeTabKey === tab.key
+                  ? { background: "rgb(234 88 12 / 0.12)", color: "rgb(194 65 12)" }
+                  : { background: "rgb(0 0 0 / 0.06)", color: "rgb(100 100 100)" }}
+              >
+                {tab.project_ids.length}
+              </span>
+            </button>
+          ))}
+        </div>
       ) : null}
 
+      {/* Layout blocks */}
+      {hasData ? (
+        <div className="space-y-4 md:space-y-5">
+          {sortedLayout.map((block) => (
+            <BlockRenderer
+              key={block.id}
+              block={block}
+              tabKpis={tabKpis}
+              tabMetrics={tabMetrics}
+              tabProjects={tabProjects}
+              tabReqTotal={tabReqTotal}
+              finance={data!.finance}
+              isClientUser={data!.is_client_user}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {/* ── Builder drawer ─────────────────────────────────────────────────────── */}
       <PlatformDrawer
-        open={editorOpen}
+        open={builderOpen}
         title="Customize client dashboard"
         subtitle={
-          saveClientId != null
-            ? `Configuration applies to organisation ID ${saveClientId}`
+          activeClientName != null
+            ? (
+              <span className="cd-builder-client-badge">
+                Changes apply to <strong>{activeClientName}</strong>
+              </span>
+            )
             : "Select one organisation to enable saving"
         }
-        onClose={() => {
-          setEditorOpen(false);
-          setDraftConfig(null);
-        }}
-        width={460}
+        onClose={() => { setBuilderOpen(false); setDraftLayout(null); }}
+        className="platform-drawer--client-builder"
+        width="min(920px, 96vw)"
         footer={
           <div className="flex flex-wrap justify-end gap-2">
             <Button
-              type="button"
-              size="xs"
-              variant="secondary"
-              disabled={saving}
-              onClick={() => {
-                setEditorOpen(false);
-                setDraftConfig(null);
-              }}
+              type="button" size="xs" variant="secondary" disabled={saving}
+              onClick={() => { setBuilderOpen(false); setDraftLayout(null); }}
             >
               Cancel
             </Button>
             <Button
-              type="button"
-              size="xs"
-              variant="primary"
-              color="orange"
-              disabled={saving || saveClientId == null}
+              type="button" size="xs" variant="primary" color="orange"
+              disabled={saving || saveClientId == null || !draftLayout}
               onClick={() => void saveLayout()}
             >
               {saving ? "Saving…" : "Save layout"}
@@ -553,128 +838,151 @@ export function ClientDashboard() {
           </div>
         }
       >
-        {draftConfig ? (
-          <div className="space-y-5">
+        {draftLayout ? (
+          <div className="cd-builder-shell space-y-5">
             <Text className="text-xs leading-relaxed text-tremor-content-emphasis">
-              Choose what your client sees on this dashboard. Empty vertical / region filters mean{" "}
-              <span className="font-semibold text-tremor-content-strong">all</span> values are shown.
+              Build what your client sees. Reorder blocks, switch card vs dense, and add duplicates if needed.
             </Text>
 
-            <div className="cd-editor-section">
-              <Text className="mb-2 text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                Widgets
-              </Text>
-              <div className="flex flex-wrap gap-2">
-                {(
-                  [
-                    ["kpi_row", "KPI strip"],
-                    ["sla_summary", "SLA summary"],
-                    ["sla_metrics_table", "SLA KPI table"],
-                    ["finance_summary", "Finance snapshot"],
-                    ["projects_table", "Engagements table"],
-                  ] as const
-                ).map(([key, label]) => {
-                  const on = draftConfig.widgets?.[key] !== false;
-                  return (
-                    <Button key={key} type="button" size="xs" variant={on ? "primary" : "secondary"} color={on ? "orange" : undefined} onClick={() => toggleWidget(key)}>
-                      {label}
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="cd-editor-section">
-              <Text className="mb-2 text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                SLA detail
-              </Text>
-              <Button
-                type="button"
-                size="xs"
-                variant={Boolean(draftConfig.sla_show_internal_kpis) ? "primary" : "secondary"}
-                color={Boolean(draftConfig.sla_show_internal_kpis) ? "orange" : undefined}
-                onClick={() => toggleDraftFlag("sla_show_internal_kpis")}
-              >
-                Show internal KPIs (not only contractual)
-              </Button>
-            </div>
-
-            <div className="cd-editor-section">
-              <Text className="mb-2 text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                Finance tiles
-              </Text>
-              <div className="flex flex-wrap gap-2">
-                {(
-                  [
-                    ["finance_show_revenue", "Revenue & attainment"],
-                    ["finance_show_collections", "Collections"],
-                    ["finance_show_unbilled", "Unbilled"],
-                    ["finance_show_cm", "Contribution margin"],
-                  ] as const
-                ).map(([key, label]) => {
-                  const on = draftConfig[key] !== false;
-                  return (
-                    <Button key={key} type="button" size="xs" variant={on ? "primary" : "secondary"} color={on ? "orange" : undefined} onClick={() => toggleDraftFlag(key)}>
-                      {label}
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="cd-editor-section">
-              <Text className="mb-2 text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                Filter — verticals (whitelist)
-              </Text>
-              <div className="flex flex-wrap gap-2">
-                {(data?.vertical_options ?? []).length === 0 ? (
-                  <Text className="text-xs text-tremor-content-subtle">No vertical labels on scoped projects.</Text>
+            <div className="cd-builder-main">
+              {/* ── Current layout blocks ── */}
+              <div className="cd-editor-section cd-builder-panel">
+                <Text className="cd-builder-label">Layout blocks ({draftLayout.length})</Text>
+                {draftLayout.length === 0 ? (
+                  <Text className="text-xs text-tremor-content-subtle">No blocks yet — add from the catalog.</Text>
                 ) : (
-                  data!.vertical_options.map((v) => {
-                    const on = (draftConfig.project_vertical_filter ?? []).includes(v);
+                  <div className="space-y-2">
+                    {draftLayout.map((block, idx) => (
+                      <BuilderBlockRow
+                        key={block.id}
+                        block={block}
+                        index={idx}
+                        total={draftLayout.length}
+                        onMoveUp={() => moveBlock(idx, -1)}
+                        onMoveDown={() => moveBlock(idx, 1)}
+                        onRemove={() => removeBlock(idx)}
+                        onToggleVariant={() => toggleVariant(idx)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Add blocks from catalog ── */}
+              <div className="cd-editor-section cd-builder-panel">
+                <Text className="cd-builder-label">Add block</Text>
+                <Text className="mb-2 text-[10px] leading-relaxed text-tremor-content-subtle">
+                  Click + to add. Blocks already in the layout stay clickable — you can add the same block more than once.
+                </Text>
+                <div className="cd-builder-catalog">
+                  {catalogEntries.map((entry) => {
+                    const type = entry.type as BlockType;
+                    const inLayoutCount = layoutTypeCounts[type] ?? 0;
                     return (
-                      <Button
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => addBlock(type)}
+                        className="cd-builder-catalog-item"
+                        title={`Add ${entry.label}`}
+                      >
+                        <div className="min-w-0 flex-1 text-left">
+                          <div className="flex items-center gap-2">
+                            <Text className="text-xs font-medium text-tremor-content-strong">{entry.label}</Text>
+                            {inLayoutCount > 0 ? (
+                              <span className="cd-builder-catalog-badge">×{inLayoutCount}</span>
+                            ) : null}
+                          </div>
+                          {entry.desc ? (
+                            <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle">{entry.desc}</Text>
+                          ) : null}
+                        </div>
+                        <span className="cd-builder-catalog-add" aria-hidden>
+                          <Plus size={14} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* ── SLA detail toggle ── */}
+            <div className="cd-editor-section">
+              <Text className="cd-builder-label">SLA detail</Text>
+              <button
+                type="button"
+                onClick={() => setDraftSlaInternal((v) => !v)}
+                className={cn(
+                  "rounded-tremor-default border px-3 py-1.5 text-xs font-medium transition-colors",
+                  draftSlaInternal
+                    ? "border-orange-400 bg-orange-50 text-orange-700"
+                    : "border-tremor-border bg-white text-tremor-content hover:border-orange-300",
+                )}
+              >
+                {draftSlaInternal ? "✓ " : ""}Show internal KPIs (not only contractual)
+              </button>
+            </div>
+
+            {/* ── Vertical filter ── */}
+            {(data?.vertical_options ?? []).length > 0 ? (
+              <div className="cd-editor-section">
+                <Text className="cd-builder-label">Filter — verticals (whitelist)</Text>
+                <Text className="mb-2 text-[10px] text-tremor-content-subtle">
+                  Empty = all verticals shown.
+                </Text>
+                <div className="flex flex-wrap gap-2">
+                  {data!.vertical_options.map((v) => {
+                    const on = draftVerticals.includes(v);
+                    return (
+                      <button
                         key={v}
                         type="button"
-                        size="xs"
-                        variant={on ? "primary" : "secondary"}
-                        color={on ? "orange" : undefined}
-                        onClick={() => toggleListFilter("project_vertical_filter", v)}
+                        onClick={() => toggleDraftFilter("verticals", v)}
+                        className={cn(
+                          "rounded-tremor-default border px-2.5 py-1 text-xs font-medium transition-colors",
+                          on
+                            ? "border-orange-400 bg-orange-50 text-orange-700"
+                            : "border-tremor-border bg-white text-tremor-content hover:border-orange-300",
+                        )}
                       >
-                        {v}
-                      </Button>
+                        {on ? "✓ " : ""}{v}
+                      </button>
                     );
-                  })
-                )}
+                  })}
+                </div>
               </div>
-            </div>
+            ) : null}
 
-            <div className="cd-editor-section">
-              <Text className="mb-2 text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                Filter — regions (whitelist)
-              </Text>
-              <div className="flex flex-wrap gap-2">
-                {(data?.region_options ?? []).length === 0 ? (
-                  <Text className="text-xs text-tremor-content-subtle">No region labels on scoped projects.</Text>
-                ) : (
-                  data!.region_options.map((r) => {
-                    const on = (draftConfig.project_region_filter ?? []).includes(r);
+            {/* ── Region filter ── */}
+            {(data?.region_options ?? []).length > 0 ? (
+              <div className="cd-editor-section">
+                <Text className="cd-builder-label">Filter — regions (whitelist)</Text>
+                <Text className="mb-2 text-[10px] text-tremor-content-subtle">
+                  Empty = all regions shown.
+                </Text>
+                <div className="flex flex-wrap gap-2">
+                  {data!.region_options.map((r) => {
+                    const on = draftRegions.includes(r);
                     return (
-                      <Button
+                      <button
                         key={r}
                         type="button"
-                        size="xs"
-                        variant={on ? "primary" : "secondary"}
-                        color={on ? "orange" : undefined}
-                        onClick={() => toggleListFilter("project_region_filter", r)}
+                        onClick={() => toggleDraftFilter("regions", r)}
+                        className={cn(
+                          "rounded-tremor-default border px-2.5 py-1 text-xs font-medium transition-colors",
+                          on
+                            ? "border-orange-400 bg-orange-50 text-orange-700"
+                            : "border-tremor-border bg-white text-tremor-content hover:border-orange-300",
+                        )}
                       >
-                        {r}
-                      </Button>
+                        {on ? "✓ " : ""}{r}
+                      </button>
                     );
-                  })
-                )}
+                  })}
+                </div>
               </div>
-            </div>
+            ) : null}
           </div>
         ) : null}
       </PlatformDrawer>

@@ -37,12 +37,13 @@ import {
   SlaBifurcationTiles,
   SlaExportInlineBar,
   SlaInsightsStrip,
-  SlaRegionZonesMap,
-  regionToZoneFromLabel,
+  SlaWorkspaceRegionsMap,
+  SLA_WORKSPACE_REGION_UNASSIGNED,
+  workspaceRegionLabel,
   type SlaBifurcationSlice,
   type SlaHealthBucket,
   type SlaInsight,
-  type SlaZoneStat,
+  type SlaWorkspaceRegionStat,
 } from "@/components/platform/SlaDashInspired";
 import { SlaMetricFormDialog } from "@/components/platform/SlaMetricFormDialog";
 import { slaRowsVm } from "@/lib/view-models/sla";
@@ -423,8 +424,8 @@ export function SLAPerformance() {
   const [kpiDrillOpen, setKpiDrillOpen] = useState(false);
   const [kpiDrillKind, setKpiDrillKind] = useState<"met" | "breached" | "not_reported" | "all">("all");
   const [bifurDrillKey, setBifurDrillKey] = useState<string | null>(null);
-  /** Optional: filter SLA table rows by coarse map zone (North / South / …). */
-  const [tableRegionZone, setTableRegionZone] = useState<string | null>(null);
+  /** Optional: filter SLA rows by workspace region label (`region` / `sub_region`, else Unassigned). */
+  const [tableWorkspaceRegion, setTableWorkspaceRegion] = useState<string | null>(null);
   /** Filter table to accounts in a health tier (red / amber / green). */
   const [healthAccountPick, setHealthAccountPick] = useState<Set<string> | null>(null);
   /** Label for health chip in Advanced filters (set together with `healthAccountPick`). */
@@ -648,26 +649,26 @@ export function SLAPerformance() {
     [timeseriesScopeMonths, allMonths],
   );
 
-  /** Account health + zone “overview” filters narrow KPIs / charts / LLM payload (table still uses `filtered`). */
+  /** Account health + workspace-region overview filters narrow KPIs / charts / LLM payload (table still uses `filtered`). */
   const kpiViewAccountSet = useMemo(() => {
-    const z = tableRegionZone;
+    const z = tableWorkspaceRegion;
     const h = healthAccountPick && healthAccountPick.size > 0 ? healthAccountPick : null;
     if (!z && !h) return null;
-    const zoneAccounts =
+    const regionAccounts =
       z == null
         ? null
         : new Set(
             rows
               .filter(
                 (r) =>
-                  regionToZoneFromLabel(String((r as any).region ?? ""), (r as any).sub_region) === z,
+                  workspaceRegionLabel(String((r as any).region ?? ""), (r as any).sub_region) === z,
               )
               .map((r) => String((r as any).account_name || "Unknown")),
           );
-    if (h && z && zoneAccounts) return new Set([...h].filter((a) => zoneAccounts.has(a)));
+    if (h && z && regionAccounts) return new Set([...h].filter((a) => regionAccounts.has(a)));
     if (h) return h;
-    return zoneAccounts as Set<string>;
-  }, [rows, tableRegionZone, healthAccountPick]);
+    return regionAccounts as Set<string>;
+  }, [rows, tableWorkspaceRegion, healthAccountPick]);
 
   const slaKpiScopeRows = useMemo(() => {
     if (!kpiViewAccountSet) return rows;
@@ -1210,6 +1211,16 @@ export function SLAPerformance() {
     };
   }, [timeseriesKpiScoped, p1Months, p2Months, fyMode, fyLabelP1, fyLabelP2]);
 
+  /** Current FY vs prior FY Met % (percentage points, not relative % change). */
+  const portfolioFyYoY = useMemo(() => {
+    const currentPct = portfolioFySnapshots.p2_pct;
+    const priorPct = portfolioFySnapshots.p1_pct;
+    if (currentPct == null || priorPct == null) return null;
+    const deltaPp = Math.round((currentPct - priorPct) * 10) / 10;
+    const tone = deltaPp > 0.05 ? "positive" : deltaPp < -0.05 ? "negative" : "neutral";
+    return { currentPct, priorPct, deltaPp, tone };
+  }, [portfolioFySnapshots]);
+
   const slaBifurcationSlices = useMemo((): SlaBifurcationSlice[] => {
     const agg = (pred: (r: any) => boolean) => {
       let met = 0;
@@ -1262,22 +1273,27 @@ export function SLAPerformance() {
     ];
   }, [slaKpiScopeRows]);
 
-  const slaZoneStats = useMemo((): SlaZoneStat[] => {
-    const zones = ["North", "South", "West", "East", "Central"] as const;
+  const slaWorkspaceRegionStats = useMemo((): SlaWorkspaceRegionStat[] => {
     const roll = new Map<string, { met: number; notMet: number }>();
-    for (const z of zones) roll.set(z, { met: 0, notMet: 0 });
     for (const r of slaKpiScopeRows) {
-      const z = regionToZoneFromLabel((r as any).region as string, (r as any).sub_region);
+      const label = workspaceRegionLabel((r as any).region as string, (r as any).sub_region);
+      if (!roll.has(label)) roll.set(label, { met: 0, notMet: 0 });
+      const o = roll.get(label)!;
       const b = statusBucket(r.status);
-      const o = roll.get(z)!;
       if (b === "met") o.met++;
       else if (b === "breached") o.notMet++;
     }
-    return zones.map((zone) => {
-      const { met, notMet } = roll.get(zone)!;
+    const labels = [...roll.keys()].sort((a, b) => {
+      const ua = a === SLA_WORKSPACE_REGION_UNASSIGNED;
+      const ub = b === SLA_WORKSPACE_REGION_UNASSIGNED;
+      if (ua !== ub) return ua ? 1 : -1;
+      return a.localeCompare(b);
+    });
+    return labels.map((label) => {
+      const { met, notMet } = roll.get(label)!;
       const t = met + notMet;
       return {
-        zone,
+        label,
         met,
         notMet,
         metPct: t > 0 ? Math.round((met / t) * 1000) / 10 : null,
@@ -1376,7 +1392,7 @@ export function SLAPerformance() {
           ? null
           : {
               health_tier: healthFilterTier,
-              zone: tableRegionZone,
+              workspace_region: tableWorkspaceRegion,
               matched_accounts: healthAccountPick?.size ?? null,
             },
     }),
@@ -1390,7 +1406,7 @@ export function SLAPerformance() {
       scopedAccountCount,
       kpiViewAccountSet,
       healthFilterTier,
-      tableRegionZone,
+      tableWorkspaceRegion,
       healthAccountPick,
     ],
   );
@@ -1549,13 +1565,13 @@ export function SLAPerformance() {
       tableFilteredMonthSet === null
         ? true
         : rm && rm !== "N/A" && tableFilteredMonthSet.has(rm);
-    const okZone =
-      tableRegionZone === null ||
-      regionToZoneFromLabel((r as any).region as string, (r as any).sub_region) === tableRegionZone;
+    const okWorkspaceRegion =
+      tableWorkspaceRegion === null ||
+      workspaceRegionLabel((r as any).region as string, (r as any).sub_region) === tableWorkspaceRegion;
     const okHealth =
       healthAccountPick === null || healthAccountPick.has(String((r as any).account_name || "Unknown"));
-    return okSearch && okStatus && okAcct && okTime && okZone && okHealth;
-  }), [rows, search, statusFilter, acctFilter, tableFilteredMonthSet, tableRegionZone, healthAccountPick]);
+    return okSearch && okStatus && okAcct && okTime && okWorkspaceRegion && okHealth;
+  }), [rows, search, statusFilter, acctFilter, tableFilteredMonthSet, tableWorkspaceRegion, healthAccountPick]);
 
   const kpiDrillRows = useMemo(() => {
     if (kpiDrillKind === "all") return slaKpiScopeRows;
@@ -1788,7 +1804,7 @@ export function SLAPerformance() {
                       aria-hidden
                     />
                   </button>
-                  {((healthAccountPick && healthAccountPick.size > 0) || tableRegionZone) && (
+                  {((healthAccountPick && healthAccountPick.size > 0) || tableWorkspaceRegion) && (
                     <div className="sla-adv-filters__kpi-view-strip" aria-label="Active KPI view filters">
                       <span className="sla-adv-filters__kpi-view-strip-lbl">From overview</span>
                       {healthAccountPick && healthAccountPick.size > 0 ? (
@@ -1816,17 +1832,17 @@ export function SLAPerformance() {
                           <span className="sr-only">Remove account health filter</span>
                         </button>
                       ) : null}
-                      {tableRegionZone ? (
+                      {tableWorkspaceRegion ? (
                         <button
                           type="button"
                           className="sla-adv-filters__kpi-chip sla-adv-filters__kpi-chip--zone"
-                          onClick={() => setTableRegionZone(null)}
+                          onClick={() => setTableWorkspaceRegion(null)}
                         >
                           <MapPin className="sla-adv-filters__kpi-chip-pin" strokeWidth={2} aria-hidden />
-                          <span className="sla-adv-filters__kpi-chip-main">Zone</span>
-                          <span className="sla-adv-filters__kpi-chip-meta">{tableRegionZone}</span>
+                          <span className="sla-adv-filters__kpi-chip-main">Region</span>
+                          <span className="sla-adv-filters__kpi-chip-meta">{tableWorkspaceRegion}</span>
                           <X className="sla-adv-filters__kpi-chip-x" strokeWidth={2.5} aria-hidden />
-                          <span className="sr-only">Remove zone filter</span>
+                          <span className="sr-only">Remove region filter</span>
                         </button>
                       ) : null}
                     </div>
@@ -1989,7 +2005,7 @@ export function SLAPerformance() {
                           onClick={() => {
                             setSlaGfDraft(SLA_GF_INITIAL);
                             setSlaGfApplied(SLA_GF_INITIAL);
-                            setTableRegionZone(null);
+                            setTableWorkspaceRegion(null);
                             setHealthAccountPick(null);
                             setHealthFilterTier(null);
                           }}
@@ -2123,6 +2139,7 @@ export function SLAPerformance() {
                         }}
                         title="Show metrics with no decisive outcome"
                       >
+                        <div className="sla-metric-card-hd">Not reported</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length > 0 ? formatPercent(notReportedPct) : "—"}</div>
                           <div className="sla-metric-sub">{rows.length > 0 ? `${notReportedCount} metrics` : "—"}</div>
@@ -2145,6 +2162,7 @@ export function SLAPerformance() {
                         }}
                         title="Show all metrics in current filters"
                       >
+                        <div className="sla-metric-card-hd">Metrics in scope</div>
                         <div className="sla-metric-card-body">
                           <div className="sla-metric-val">{rows.length || "—"}</div>
                           <div className="sla-metric-sub">
@@ -2267,33 +2285,69 @@ export function SLAPerformance() {
               {slaView === "overview" && (
                 <>
                   <SlaExportInlineBar rows={rows as unknown as Record<string, unknown>[]} />
-                  <div className="sla-overview-fy-hero" aria-label="Current FY portfolio Met percent">
+                  <div className="sla-overview-fy-hero" aria-label="Current year vs last year portfolio Met percent">
                     <div className="sla-overview-fy-hero__tile sla-overview-fy-hero__tile--primary">
-                      <div className="sla-overview-fy-hero__eyebrow">Portfolio Met % · {fyLabelP2}</div>
+                      <div className="sla-overview-fy-hero__eyebrow">Current year · {fyLabelP2}</div>
                       <div className="sla-overview-fy-hero__figure">
                         {portfolioFySnapshots.p2_pct == null ? "—" : formatPercent(portfolioFySnapshots.p2_pct)}
                       </div>
                       <div className="sla-overview-fy-hero__meta">
-                        {portfolioFySnapshots.p2.met + portfolioFySnapshots.p2.notMet > 0
-                          ? `${portfolioFySnapshots.p2.met.toLocaleString()} met · ${portfolioFySnapshots.p2.notMet.toLocaleString()} not met (time-series)`
-                          : "No Met / Not met cells in this FY window"}
+                        {portfolioFySnapshots.p2.met + portfolioFySnapshots.p2.notMet > 0 ? (
+                          <>
+                            <span className="sla-overview-fy-hero__counts">
+                              <strong>{portfolioFySnapshots.p2.met.toLocaleString()}</strong> met ·{" "}
+                              <strong>{portfolioFySnapshots.p2.notMet.toLocaleString()}</strong> not met
+                            </span>
+                            <span className="sla-overview-fy-hero__meta-note">Portfolio Met % from time-series (Met ÷ Met+Not met)</span>
+                          </>
+                        ) : (
+                          <span className="sla-overview-fy-hero__meta-muted">
+                            No Met / Not met cells in this FY window
+                          </span>
+                        )}
+                        {portfolioFyYoY ? (
+                          <span
+                            className={cn(
+                              "sla-overview-fy-hero__delta",
+                              portfolioFyYoY.tone === "positive" && "sla-overview-fy-hero__delta--positive",
+                              portfolioFyYoY.tone === "negative" && "sla-overview-fy-hero__delta--negative",
+                              portfolioFyYoY.tone === "neutral" && "sla-overview-fy-hero__delta--neutral",
+                            )}
+                          >
+                            <span className="sla-overview-fy-hero__delta-label">
+                              YoY vs last year ({fyLabelP1})
+                            </span>
+                            <span className="sla-overview-fy-hero__delta-value">
+                              {portfolioFyYoY.deltaPp >= 0 ? "+" : ""}
+                              {portfolioFyYoY.deltaPp.toFixed(1)} pp
+                            </span>
+                            <span className="sla-overview-fy-hero__delta-hint">
+                              {formatPercent(portfolioFyYoY.currentPct)} this year vs {formatPercent(portfolioFyYoY.priorPct)} last year
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="sla-overview-fy-hero__meta-muted">
+                            Need both FY windows in loaded data for YoY
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="sla-overview-fy-hero__tile">
-                      <div className="sla-overview-fy-hero__eyebrow">Prior FY · {fyLabelP1}</div>
+                    <div className="sla-overview-fy-hero__tile sla-overview-fy-hero__tile--compare">
+                      <div className="sla-overview-fy-hero__eyebrow">Last year · {fyLabelP1}</div>
                       <div className="sla-overview-fy-hero__figure">
                         {portfolioFySnapshots.p1_pct == null ? "—" : formatPercent(portfolioFySnapshots.p1_pct)}
                       </div>
                       <div className="sla-overview-fy-hero__meta">
-                        {portfolioFySnapshots.p1_pct != null && portfolioFySnapshots.p2_pct != null ? (
-                          <span>
-                            {(() => {
-                              const d = portfolioFySnapshots.p2_pct - portfolioFySnapshots.p1_pct;
-                              return `${d >= 0 ? "+" : ""}${d.toFixed(1)} pp vs prior FY`;
-                            })()}
-                          </span>
+                        {portfolioFySnapshots.p1.met + portfolioFySnapshots.p1.notMet > 0 ? (
+                          <>
+                            <span className="sla-overview-fy-hero__counts">
+                              <strong>{portfolioFySnapshots.p1.met.toLocaleString()}</strong> met ·{" "}
+                              <strong>{portfolioFySnapshots.p1.notMet.toLocaleString()}</strong> not met
+                            </span>
+                            <span className="sla-overview-fy-hero__meta-note">Prior-year baseline for YoY on the left</span>
+                          </>
                         ) : (
-                          "Need both FY windows in loaded data"
+                          <span className="sla-overview-fy-hero__meta-muted">No Met / Not met cells in prior FY window</span>
                         )}
                       </div>
                     </div>
@@ -2325,10 +2379,10 @@ export function SLAPerformance() {
                         }
                       }}
                     />
-                    <SlaRegionZonesMap
-                      zones={slaZoneStats}
-                      activeZone={tableRegionZone}
-                      onSelectZone={(z) => setTableRegionZone(z)}
+                    <SlaWorkspaceRegionsMap
+                      regions={slaWorkspaceRegionStats}
+                      activeLabel={tableWorkspaceRegion}
+                      onSelectLabel={(lbl) => setTableWorkspaceRegion(lbl)}
                     />
                   </div>
                 </>
@@ -2972,7 +3026,7 @@ export function SLAPerformance() {
             <div className="sla-dash-card-bd">
               {kpiViewAccountSet && kpiViewAccountSet.size === 0 ? (
                 <div className="sla-empty">
-                  Overview zone / health filter matches no accounts. Clear those picks on Overview (chips under Advanced
+                  Overview region / health filter matches no accounts. Clear those picks on Overview (chips under Advanced
                   filters) to see practice-head rollups.
                 </div>
               ) : fyPracticeHeadAnalysis.data.length === 0 ? (
@@ -3251,7 +3305,7 @@ export function SLAPerformance() {
       >
         <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
           {kpiDrillRows.length} row{kpiDrillRows.length === 1 ? "" : "s"} (KPI portfolio slice: Advanced filters + overview
-          health / zone picks; the table may narrow further with search / status / month). Use{" "}
+          health / region picks; the table may narrow further with search / status / month). Use{" "}
           <strong>Export → CSV</strong> for a full extract.
         </p>
         <div className="platform-table-wrap" style={{ maxHeight: "min(480px, 65vh)", overflow: "auto" }}>

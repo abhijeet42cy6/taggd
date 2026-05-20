@@ -1,4 +1,4 @@
-"""Disk storage for TAGGD revenue billing row attachments (invoice PDFs, etc.)."""
+"""Revenue billing attachments (local / GCS / S3)."""
 from __future__ import annotations
 
 import os
@@ -6,18 +6,15 @@ import re
 import time
 from typing import Optional
 
-_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+from backend.core import blob_storage
+
+_NS = "billing_documents"
+_MAX_BYTES = 50 * 1024 * 1024
 _ALLOW_EXT = frozenset({".pdf", ".docx", ".doc", ".xlsx", ".xls", ".png", ".jpg", ".jpeg"})
 
 
 def billing_documents_dir() -> str:
-    return os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "billing_documents")
-    )
-
-
-def _ensure_dir() -> None:
-    os.makedirs(billing_documents_dir(), exist_ok=True)
+    return os.path.join(blob_storage._local_root(), _NS)
 
 
 def save_billing_attachment_file(row_id: int, raw: bytes, original_filename: str) -> str:
@@ -26,12 +23,9 @@ def save_billing_attachment_file(row_id: int, raw: bytes, original_filename: str
     ext = os.path.splitext(original_filename)[1].lower()
     if ext not in _ALLOW_EXT:
         raise ValueError(f"Unsupported file type: {ext!r}. Allowed: PDF, Word, Excel, image.")
-    _ensure_dir()
     safe_orig = re.sub(r"[^a-zA-Z0-9._-]", "_", original_filename)[:80]
     filename = f"bil{row_id}_{int(time.time())}_{safe_orig}"
-    path = os.path.join(billing_documents_dir(), filename)
-    with open(path, "wb") as f:
-        f.write(raw)
+    blob_storage.put_bytes(_NS, filename, raw)
     return filename
 
 
@@ -39,8 +33,7 @@ def resolve_billing_attachment_path(filename: str) -> Optional[str]:
     base = os.path.basename(filename)
     if base != filename.replace("\\", "/").rsplit("/", 1)[-1]:
         return None
-    full = os.path.join(billing_documents_dir(), base)
-    return full if os.path.isfile(full) else None
+    return blob_storage.resolve_local_path(_NS, base)
 
 
 def billing_reference_tag(filename: str) -> str:
@@ -53,9 +46,13 @@ def is_billing_disk_ref_line(s: str) -> bool:
 
 def extract_billing_basename(line: str) -> str:
     s = (line or "").strip()
-    if not s.lower().startswith("billing:"):
+    if not is_billing_disk_ref_line(s):
         return ""
-    return s[8:].strip()
+    return os.path.basename(s[8:].strip())
+
+
+def extract_billing_filename(ref: str) -> str:
+    return ref[8:] if is_billing_disk_ref_line(ref) else ref
 
 
 def parse_billing_file_basenames(ref: str | None) -> list[str]:
@@ -73,7 +70,6 @@ def parse_billing_file_basenames(ref: str | None) -> list[str]:
 
 
 def extract_basename_from_tag_line(s: str) -> str:
-    """Accept `billing:file` (preferred) or legacy `bil{id}_` filenames on their own line."""
     if is_billing_disk_ref_line(s):
         return extract_billing_basename(s)
     base = os.path.basename(s.strip())
@@ -83,7 +79,6 @@ def extract_basename_from_tag_line(s: str) -> str:
 
 
 def non_billing_lines(ref: str | None) -> list[str]:
-    """Lines that are not stored disk tags (URLs, free text). Preserves non-empty lines only."""
     if not ref or not str(ref).strip():
         return []
     out: list[str] = []

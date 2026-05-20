@@ -467,9 +467,15 @@ def serve_billing_attachment(
     else:
         pick = pick_latest_billing_filename(filenames)
 
-    path = resolve_billing_attachment_path(pick)
-    if not path:
-        raise HTTPException(status_code=404, detail="Attachment file not found on disk")
+    from backend.core.http_file_response import stored_file_response
 
     mt = mimetypes.guess_type(pick)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=mt, filename=os.path.basename(pick))
+    resp = stored_file_response(
+        "billing_documents",
+        pick,
+        download_name=os.path.basename(pick),
+        media_type=mt,
+    )
+    if resp is None:
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+    return resp

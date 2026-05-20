@@ -50,16 +50,16 @@ The **Overview** main column (`fin-dash-content`) adds UX and representations in
 | **`SlaInsightsStrip`** | Short **insight cards** (FY snapshot mix, FY trajectory vs P1, latest decisive-row posture, reporting gaps). | Driven by `portfolioFySnapshots`, `slaKpiMetNotMet`, `notReportedCount`, FY labels. |
 | **`SlaBifurcationTiles`** | Four tiles: **contractual**, **internal**, **penalty**, **non-penalty** (met / not-met counts and met % within each slice). | **Double-click** a tile opens a **drawer** listing metrics in that slice (`metric_nature` / penalty heuristics). |
 | **`SlaAccountHealthRail`** | **Red / Amber / Green** buckets by **account** (latest-row met % thresholds: &lt; 50%, 50–74%, ≥ 75%). | **Click** a tier filters the **main table** to accounts in that tier; clear via chip in overview. |
-| **`SlaRegionZonesMap`** | Schematic **N / S / E / W / Central** grid; met % per zone from free-text **`region`** via `regionToZoneFromLabel`. | **Click** toggles **zone filter** on the table (not a geographic map). |
+| **`SlaWorkspaceRegionsMap`** | One tile per distinct **`workspaceRegionLabel`** (project `region` → else `sub_region` → else **Unassigned**); Met % per label from KPI-scope rows. | **Click** toggles **same-region filter** on the table and KPI slice (mirrored under Advanced filters). |
 | **KPI cards** (Met / Not met / Not reported / Total) | **`role="button"`** with keyboard support. | **Click** opens a **drawer** with up to **200** rows for that KPI bucket (`met` / `breached` / `not_reported` / `all`). |
 | **`SlaBenchmarkForecastCards`** | Placeholder **cards** for copy and layout. | Used from sidebar views **Benchmarking** and **Forecasting** (`variant`: `bench` / `forecast`). |
 
-**Explicit non-goals (vs full SLA Dash):** voice / audio / guided tours; PDF or Word export; real **India** geo map (only zone grid); **industry-type** lens (no industry field on these rows); live forecasting or external benchmark series (scaffold only).
+**Explicit non-goals (vs full SLA Dash):** voice / audio / guided tours; PDF or Word export; India geographic choropleth (workspace strings only); **industry-type** lens (no industry field on these rows); live forecasting or external benchmark series (scaffold only).
 
 ## `SLAPerformance.tsx` — view-level behaviour
 
 - **Overview**  
-  - KPI **cards** (with drill drawers), **export**, **insights**, **bifurcation**, **account health** + **zone map**, then existing **FY portfolio Met vs Not met** chart and compliance content (filters apply consistently where wired).  
+  - KPI **cards** (with drill drawers), **export**, **insights**, **bifurcation**, **account health** + **workspace region map**, then existing **FY portfolio Met vs Not met** chart and compliance content (filters apply consistently where wired).  
   - Portfolio **Met % by month** (unchanged conceptually).  
   - **FY Met vs Not met counts** with **Indian FY / Calendar** toggle (shared `fyMode` with Year-over-Year).
 - **Executive**  
@@ -80,7 +80,7 @@ The **Overview** main column (`fin-dash-content`) adds UX and representations in
 
 ## Styling (`sla-dash-ui.css`)
 
-Scoped under `**.sla-dash-scope`** so SLA-specific layout (sidebar, topbar, cards, metric grid, rank grid) does not leak globally. Theme follows platform tokens used elsewhere. Additional rules cover the **export bar**, **insights strip**, **bifurcation tiles**, **health rail**, **zone map**, and **clickable KPI** treatment (`sla-metric-card--drill`).
+Scoped under `**.sla-dash-scope`** so SLA-specific layout (sidebar, topbar, cards, metric grid, rank grid) does not leak globally. Theme follows platform tokens used elsewhere. Additional rules cover the **export bar**, **insights strip**, **bifurcation tiles**, **health rail**, **workspace region grid**, legacy compass zone styles retained for reference blocks only, and **clickable KPI** treatment (`sla-metric-card--drill`).
 
 ## FY period logic (updated April 2026)
 

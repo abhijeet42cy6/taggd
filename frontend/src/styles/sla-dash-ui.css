@@ -537,6 +537,213 @@
   color: #c85f30;
 }
 
+/* Workspace region tiles (distinct Project.region / sub_region strings; replaces compass zone map) */
+.finance-exec-scope.sla-kpi-fin-bridge .sla-workspace-region-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-height: min(320px, 42vh);
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-ws-region-tile {
+  border-radius: 12px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface-muted);
+  padding: 10px 10px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  color: var(--text);
+  text-align: left;
+  min-height: 72px;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-ws-region-tile:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-ws-region-tile--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-raised));
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-ws-region-tile__nm {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  word-break: break-word;
+  width: 100%;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-ws-region-tile__pct {
+  font-size: 13px;
+  font-weight: 800;
+  font-family: var(--font-mono, "DM Mono", monospace);
+  color: var(--accent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-ws-region-tile__hint {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.72;
+  line-height: 1.3;
+}
+
+/* Overview FY hero — dual KPI tiles (current vs prior FY) */
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+@media (min-width: 720px) {
+  .finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero {
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: stretch;
+  }
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border, rgba(55, 53, 47, 0.12)) 85%, transparent);
+  background: var(--surface-raised, #fff);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 18px rgba(0, 0, 0, 0.06);
+  min-height: 168px;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__tile--primary {
+  border-color: color-mix(in srgb, var(--accent, #e16f3d) 42%, transparent);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 6px 22px color-mix(in srgb, var(--accent, #e16f3d) 14%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__tile--compare {
+  border-style: solid;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text, #191817) 52%, transparent);
+  line-height: 1.35;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__figure {
+  font-size: clamp(2.125rem, 4.8vw, 2.875rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, "DM Mono", ui-monospace, monospace);
+  color: var(--text, #191817);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__counts {
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--text, #191817) 78%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__counts strong {
+  font-weight: 700;
+  color: var(--text, #191817);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__meta-note {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--text, #191817) 48%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__meta-muted {
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--text, #191817) 55%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border, rgba(55, 53, 47, 0.12)) 90%, transparent);
+  background: color-mix(in srgb, var(--surface-muted, #f7f6f3) 100%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text, #191817) 48%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta-value {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, "DM Mono", ui-monospace, monospace);
+  letter-spacing: -0.02em;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta-hint {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text, #191817) 58%, transparent);
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta--positive .sla-overview-fy-hero__delta-value {
+  color: #15803d;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta--positive {
+  border-color: color-mix(in srgb, #15803d 28%, transparent);
+  background: color-mix(in srgb, #15803d 9%, var(--surface-raised, #fff));
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta--negative .sla-overview-fy-hero__delta-value {
+  color: #c2410c;
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta--negative {
+  border-color: color-mix(in srgb, #c2410c 30%, transparent);
+  background: color-mix(in srgb, #ea580c 10%, var(--surface-raised, #fff));
+}
+
+.finance-exec-scope.sla-kpi-fin-bridge .sla-overview-fy-hero__delta--neutral .sla-overview-fy-hero__delta-value {
+  color: color-mix(in srgb, var(--text, #191817) 72%, transparent);
+}
+
 @media (max-width: 900px) {
   .finance-exec-scope.sla-kpi-fin-bridge .sla-rank-grid--pair {
     grid-template-columns: 1fr;

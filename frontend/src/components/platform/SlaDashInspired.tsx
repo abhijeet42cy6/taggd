@@ -243,69 +243,88 @@ export function SlaAccountHealthRail({
   );
 }
 
-export type SlaZoneStat = {
-  zone: string;
+/** Canonical label when `projects.region` and `sub_region` are both empty on an SLA row. */
+export const SLA_WORKSPACE_REGION_UNASSIGNED = "Unassigned";
+
+/**
+ * Workspace geography key for SLA–KPI grouping (matches `/sla/data` `region` then `sub_region`).
+ * Use this instead of compass rollups so UI labels match the SLA Base File / directory.
+ */
+export function workspaceRegionLabel(
+  region: string | null | undefined,
+  subRegion?: string | null | undefined,
+): string {
+  const r = (region || "").trim();
+  if (r) return r;
+  const sr = (subRegion || "").trim();
+  if (sr) return sr;
+  return SLA_WORKSPACE_REGION_UNASSIGNED;
+}
+
+export type SlaWorkspaceRegionStat = {
+  label: string;
   metPct: number | null;
   met: number;
   notMet: number;
 };
 
-export function SlaRegionZonesMap({
-  zones,
-  activeZone,
-  onSelectZone,
+export function SlaWorkspaceRegionsMap({
+  regions,
+  activeLabel,
+  onSelectLabel,
 }: {
-  zones: SlaZoneStat[];
-  activeZone: string | null;
-  onSelectZone: (zone: string | null) => void;
+  regions: SlaWorkspaceRegionStat[];
+  activeLabel: string | null;
+  onSelectLabel: (label: string | null) => void;
 }) {
-  const layout: { zone: string; abbr: string; style: React.CSSProperties }[] = [
-    { zone: "North", abbr: "N", style: { gridColumn: "2", gridRow: "1" } },
-    { zone: "West", abbr: "W", style: { gridColumn: "1", gridRow: "2" } },
-    { zone: "Central", abbr: "C", style: { gridColumn: "2", gridRow: "2" } },
-    { zone: "East", abbr: "E", style: { gridColumn: "3", gridRow: "2" } },
-    { zone: "South", abbr: "S", style: { gridColumn: "2", gridRow: "3" } },
-  ];
-  const byZone = new Map(zones.map((z) => [z.zone, z]));
   return (
     <div className="sla-dash-card sla-region-dash-card">
       <div className="sla-dash-card-hd">
         <div className="sla-dash-card-title">
           <MapPinned className="inline-block mr-1.5 h-4 w-4 align-text-bottom opacity-80" strokeWidth={2} aria-hidden />
-          Regional snapshot (rolled)
+          Regional snapshot (workspace)
         </div>
         <div className="sla-dash-card-sub">
-          Zones group your workspace <code className="text-[10px]">region</code> strings (North, South, West, East,
-          Central). Click a zone to filter the SLA table; the active zone appears under{" "}
-          <strong>Advanced filters</strong>. You can clear here or from that bar.
+          Each tile is a distinct project <code className="text-[10px]">region</code> or{" "}
+          <code className="text-[10px]">sub_region</code> from your loaded SLA metrics (same strings as Advanced filters
+          → Region). Rows with no geography roll into <strong>{SLA_WORKSPACE_REGION_UNASSIGNED}</strong>. Click a tile to
+          filter the SLA table; the selection appears under <strong>Advanced filters</strong>.
         </div>
       </div>
       <div className="sla-dash-card-bd sla-region-dash-card__bd">
-        <div className="sla-zone-map" role="list">
-          {layout.map(({ zone, abbr, style }) => {
-            const z = byZone.get(zone);
-            const pct = z && z.met + z.notMet > 0 ? z.metPct : null;
-            const active = activeZone === zone;
-            return (
-              <button
-                key={zone}
-                type="button"
-                className={cn("sla-zone-cell", active && "sla-zone-cell--active")}
-                style={style}
-                onClick={() => onSelectZone(active ? null : zone)}
-                title={`${zone}: ${pct != null ? `${pct}% Met` : "No outcomes"}`}
-              >
-                <span className="sla-zone-cell__abbr">{abbr}</span>
-                <span className="sla-zone-cell__nm">{zone}</span>
-                <span className="sla-zone-cell__pct">{pct != null ? `${pct}%` : "—"}</span>
-              </button>
-            );
-          })}
-        </div>
-        {activeZone ? (
+        {regions.length === 0 ? (
+          <div className="sla-empty">No SLA metric rows in the current KPI scope.</div>
+        ) : (
+          <div className="sla-workspace-region-grid" role="list">
+            {regions.map((item) => {
+              const pct = item.met + item.notMet > 0 ? item.metPct : null;
+              const active = activeLabel === item.label;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  className={cn("sla-ws-region-tile", active && "sla-ws-region-tile--active")}
+                  onClick={() => onSelectLabel(active ? null : item.label)}
+                  title={`${item.label}: ${pct != null ? `${pct}% Met` : "No outcomes"}`}
+                >
+                  <span className="sla-ws-region-tile__nm">{item.label}</span>
+                  <span className="sla-ws-region-tile__pct">{pct != null ? `${pct}%` : "—"}</span>
+                  {item.met + item.notMet > 0 ? (
+                    <span className="sla-ws-region-tile__hint">
+                      Met {item.met} · Not met {item.notMet}
+                    </span>
+                  ) : (
+                    <span className="sla-ws-region-tile__hint">No outcomes</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {activeLabel ? (
           <div className="sla-zone-map-actions">
-            <button type="button" className="sla-zone-clear-btn" onClick={() => onSelectZone(null)}>
-              Clear zone filter
+            <button type="button" className="sla-zone-clear-btn" onClick={() => onSelectLabel(null)}>
+              Clear region filter
             </button>
           </div>
         ) : null}
@@ -351,34 +370,4 @@ export function SlaBenchmarkForecastCards({ variant = "both" }: { variant?: "bot
       ) : null}
     </div>
   );
-}
-
-/**
- * Map workspace region / sub-region labels into coarse zones for the SLA map.
- * Uses `sub_region` when the primary `region` is empty (e.g. "West 1" only on sub_region).
- * Single-letter codes N/S/E/W/C match common scorecard encodings.
- */
-export function regionToZoneFromLabel(
-  region: string | null | undefined,
-  subRegion?: string | null | undefined,
-): "North" | "South" | "West" | "East" | "Central" {
-  const r = (region || "").trim();
-  const sr = (subRegion || "").trim();
-  const combined = `${r} ${sr}`.toLowerCase().replace(/\s+/g, " ").trim();
-  if (!combined) return "Central";
-
-  if (r.length === 1) {
-    const c = r.toUpperCase();
-    if (c === "N") return "North";
-    if (c === "S") return "South";
-    if (c === "E") return "East";
-    if (c === "W") return "West";
-    if (c === "C") return "Central";
-  }
-
-  if (combined.includes("north")) return "North";
-  if (combined.includes("south")) return "South";
-  if (combined.includes("west")) return "West";
-  if (combined.includes("east")) return "East";
-  return "Central";
 }

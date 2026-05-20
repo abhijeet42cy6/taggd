@@ -224,7 +224,7 @@ export function WfmProductivityFillChart({ data }: { data: WfmProdFillPoint[] })
           height={72}
         />
         <YAxis yAxisId="fill" tick={{ fill: COLORS.text3, fontSize: 9 }} tickFormatter={(v) => `${v}%`} domain={[0, "auto"]} width={44} />
-        <YAxis yAxisId="prod" orientation="right" tick={{ fill: COLORS.text3, fontSize: 9 }} tickFormatter={(v) => `${v}%`} width={44} />
+        <YAxis yAxisId="prod" orientation="right" tick={{ fill: COLORS.text3, fontSize: 9 }} tickFormatter={(v) => `${Number(v).toFixed(1)}`} width={44} />
         <ReferenceLine yAxisId="fill" y={100} stroke={COLORS.red} strokeDasharray="4 4" strokeOpacity={0.85} label={{ value: "100%", fill: COLORS.text3, fontSize: 9 }} />
         <Tooltip
           contentStyle={tooltipStyle}
@@ -232,11 +232,15 @@ export function WfmProductivityFillChart({ data }: { data: WfmProdFillPoint[] })
             const p = payload?.[0]?.payload as WfmProdFillPoint | undefined;
             return p?.fullName ?? String(label ?? "");
           }}
-          formatter={(value: number | string, name: string) => [`${typeof value === "number" ? value.toFixed(1) : value}%`, name]}
+          formatter={(value: number | string, name: string) => {
+            const raw = typeof value === "number" ? value.toFixed(1) : String(value);
+            const withPct = String(name).includes("Fill rate");
+            return [withPct ? `${raw}%` : `${raw} lacs`, name];
+          }}
         />
         <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
         <Bar yAxisId="fill" dataKey="fillPct" name="Fill rate %" fill="color-mix(in srgb, var(--accent) 65%, transparent)" radius={[2, 2, 0, 0]} />
-        <Line yAxisId="prod" type="monotone" dataKey="productivity" name="Productivity target %" stroke={COLORS.accent2} strokeWidth={2} dot={{ r: 2 }} />
+        <Line yAxisId="prod" type="monotone" dataKey="productivity" name="Productivity target (lacs)" stroke={COLORS.accent2} strokeWidth={2} dot={{ r: 2 }} />
       </ComposedChart>
     </ResponsiveContainer>
   );

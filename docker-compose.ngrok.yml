@@ -1,0 +1,24 @@
+# Optional public HTTPS tunnel via ngrok (alongside any existing Cloudflare quick tunnel).
+# Requires NGROK_AUTHTOKEN in `.env` (see `.env.example`).
+#
+# Start app + ngrok together:
+#   docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d --build
+#
+# Add ngrok to an already-running stack:
+#   docker compose -f docker-compose.yml -f docker-compose.ngrok.yml up -d
+#
+# Public URL appears in: docker compose -f docker-compose.yml -f docker-compose.ngrok.yml logs ngrok_tunnel
+# Or use ngrok’s local API (see https://ngrok.com/docs ) if you publish port 4040 below.
+
+services:
+  ngrok_tunnel:
+    image: ngrok/ngrok:latest
+    depends_on:
+      - frontend
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    command:
+      - http
+      - --log=stdout
+      - http://frontend:80
+    restart: unless-stopped

@@ -15,7 +15,7 @@ import {
   TableRow,
   Text,
 } from "@tremor/react";
-import { formatNumber, formatPercent } from "@/lib/utils";
+import { formatLacs, formatNumber, formatPercent } from "@/lib/utils";
 import { wfmFillBand, wfmStatusLabel, type WfmHcBulletCore } from "@/lib/view-models/wfm";
 
 function barTone(pct: number, ideal: number): "emerald" | "amber" | "rose" {
@@ -134,17 +134,17 @@ export function WfmCapacityTremorBlock({
 
 export type WfmProdScatterPoint = { fullName: string; shortLabel: string; fillPct: number; productivity: number };
 
-/** Fill % vs productivity target — scatter avoids dual-axis scale clash and extreme bar outliers. */
+/** Fill % vs productivity target (lacs) — scatter avoids dual-axis scale clash and extreme bar outliers. */
 export function WfmFillProductivityScatterTremor({ points }: { points: WfmProdScatterPoint[] }) {
   const chartRows = useMemo(() => {
     return points.map((p) => {
-      const prod = p.productivity;
-      const prodPct = prod > 1 ? prod : prod * 100;
+      const prod = Number(p.productivity);
+      const prodLacs = Number.isFinite(prod) ? Math.round(prod * 100) / 100 : 0;
       return {
         client: p.shortLabel || p.fullName.slice(0, 14),
         fullName: p.fullName,
         fill: Math.round(p.fillPct * 10) / 10,
-        prodPct: Math.round(prodPct * 100) / 100,
+        prodLacs,
         size: 28,
       };
     });
@@ -162,7 +162,7 @@ export function WfmFillProductivityScatterTremor({ points }: { points: WfmProdSc
 
   const maxFill = chartRows.reduce((m, r) => Math.max(m, r.fill), 100);
   const maxXValue = Math.min(450, Math.max(115, Math.ceil(maxFill / 10) * 10 + 15));
-  const maxProd = chartRows.reduce((m, r) => Math.max(m, r.prodPct), 8);
+  const maxProd = chartRows.reduce((m, r) => Math.max(m, r.prodLacs), 8);
 
   return (
     <div className="w-full space-y-2">
@@ -171,28 +171,28 @@ export function WfmFillProductivityScatterTremor({ points }: { points: WfmProdSc
         data={chartRows}
         category="client"
         x="fill"
-        y="prodPct"
+        y="prodLacs"
         size="size"
         minXValue={0}
         maxXValue={maxXValue}
         minYValue={0}
         maxYValue={Math.max(8, Math.ceil(maxProd) + 1)}
         xAxisLabel="Fill rate %"
-        yAxisLabel="Productivity target %"
+        yAxisLabel="Productivity target (lacs)"
         showLegend={false}
         showOpacity
         yAxisWidth={44}
         valueFormatter={{
           x: (v) => `${Number(v).toFixed(1)}%`,
-          y: (v) => `${Number(v).toFixed(1)}%`,
+          y: (v) => formatLacs(Number(v)),
           size: () => "",
         }}
         colors={["orange", "amber", "teal", "cyan", "blue", "violet", "rose", "emerald"]}
       />
       <Text className="text-[11px] leading-relaxed text-tremor-content-subtle">
-        Each point is a client: horizontal distance from 0% is fill (100% = at ideal HC). Vertical axis is the
-        lateral productivity target. Dense clusters near 100% × low target are easier to read than dual-axis bars
-        when one client has a very large fill %.
+        Each point is a client: horizontal distance from 0% is fill (100% = at ideal HC). Vertical axis is lateral
+        productivity target (lacs). Dense clusters near 100% fill × low lacs are easier to read than dual-axis bars when
+        one client has a very large fill %.
       </Text>
     </div>
   );

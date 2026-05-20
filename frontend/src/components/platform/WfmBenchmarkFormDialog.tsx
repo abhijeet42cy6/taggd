@@ -558,7 +558,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                       [
                         ["lateralRevenue", "Lateral revenue target (INR)"] as const,
                         ["lateralHcTarget", "Lateral HC target"] as const,
-                        ["lateralProductivity", "Lateral productivity target"] as const,
+                        ["lateralProductivity", "Lateral productivity target (lacs)"] as const,
                         ["idealHc", "Ideal HC"] as const,
                         ["actualHcTotal", "Actual HC (total)"] as const,
                       ] as const

@@ -5,7 +5,7 @@ import taggdLogo from "@/assets/taggd-logo.png";
 import "@/styles/platform.css";
 
 /** `Group 14004.png` in repo root, copied to `public/group-14004.png` (served as static asset). */
-const loginBg = "/group-14004.png";
+const loginBg = `${import.meta.env.BASE_URL}group-14004.png`;
 
 const loginShellStyle: React.CSSProperties = {
   minHeight: "100vh",

@@ -63,3 +63,195 @@
 .cd-editor-section:last-child {
   margin-bottom: 0;
 }
+
+/* ── BU/SBU tab strip ─────────────────────────────────────────────────────── */
+
+.cd-bu-tabs {
+  display: flex;
+  overflow-x: auto;
+  gap: 0;
+  border-bottom: 1.5px solid rgb(0 0 0 / 0.07);
+  padding-bottom: 0;
+  /* hide scrollbar on tabs strip */
+  scrollbar-width: none;
+}
+
+.cd-bu-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.cd-bu-tab {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 0.45rem 1rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1.5px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  background: transparent;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+}
+
+.cd-bu-tab--active {
+  border-bottom-color: rgb(234 88 12);
+  color: rgb(194 65 12);
+}
+
+.cd-bu-tab--idle {
+  color: rgb(100 100 100);
+  border-bottom-color: transparent;
+}
+
+.cd-bu-tab--idle:hover {
+  color: rgb(30 30 30);
+  border-bottom-color: rgb(200 200 200);
+}
+
+/* ── Builder labels ───────────────────────────────────────────────────────── */
+
+.cd-builder-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgb(234 88 12);
+}
+
+/* ── Active client scope chip (hero) ──────────────────────────────────────── */
+
+.client-dash-tremor__scope-chip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(254 215 170);
+  background: rgb(255 247 237 / 0.95);
+}
+
+.client-dash-tremor__scope-chip-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(194 65 12 / 0.75);
+}
+
+.client-dash-tremor__scope-chip-name {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: rgb(124 45 18);
+}
+
+.client-dash-tremor__scope-chip-hint {
+  font-size: 0.625rem;
+  color: rgb(120 113 108);
+}
+
+/* ── Builder drawer (wide, two-column) ────────────────────────────────────── */
+
+.platform-drawer--client-builder .platform-drawer-body {
+  padding-bottom: 0.5rem;
+}
+
+.cd-builder-client-badge strong {
+  color: rgb(194 65 12);
+  font-weight: 700;
+}
+
+.cd-builder-main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 720px) {
+  .cd-builder-main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+}
+
+.cd-builder-panel {
+  min-width: 0;
+  padding: 0.85rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgb(0 0 0 / 0.06);
+  background: rgb(255 255 255 / 0.85);
+}
+
+.cd-builder-catalog {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+@media (min-width: 520px) {
+  .cd-builder-catalog {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.cd-builder-catalog-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(0 0 0 / 0.08);
+  background: rgb(255 255 255);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.cd-builder-catalog-item:hover {
+  border-color: rgb(251 146 60);
+  background: rgb(255 247 237 / 0.65);
+  box-shadow: 0 2px 8px -4px rgb(234 88 12 / 0.35);
+}
+
+.cd-builder-catalog-item:focus-visible {
+  outline: 2px solid rgb(249 115 22);
+  outline-offset: 2px;
+}
+
+.cd-builder-catalog-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.35rem;
+  border-radius: 9999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: rgb(194 65 12);
+  background: rgb(254 215 170 / 0.45);
+}
+
+.cd-builder-catalog-add {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.375rem;
+  color: rgb(234 88 12);
+  background: rgb(255 237 213 / 0.6);
+}
+
+.cd-builder-catalog-item:hover .cd-builder-catalog-add {
+  background: rgb(254 215 170);
+}

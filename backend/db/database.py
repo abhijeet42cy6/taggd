@@ -1,16 +1,14 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, JSON, DateTime, Date, ForeignKey, Text, Boolean, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, JSON, DateTime, Date, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker, relationship, backref
 import datetime
 
 import os
 
-DB_PATH = os.getenv("DATABASE_URL", "sqlite:///./revenue_generator.db")
-SQLALCHEMY_DATABASE_URL = DB_PATH
+from backend.db.engine import create_app_engine, get_database_url, is_sqlite_url
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
+SQLALCHEMY_DATABASE_URL = get_database_url()
+engine = create_app_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -1849,16 +1847,8 @@ def get_db():
         db.close()
 
 
-def init_db():
-    Base.metadata.create_all(bind=engine)
-    try:
-        from backend.core.budget_forecast_ledger import migrate_legacy_project_budget_forecast_tables
-
-        migrate_legacy_project_budget_forecast_tables(engine)
-    except Exception as e:
-        import logging
-
-        logging.warning("legacy project_budgets/project_forecasts migration: %s", e)
+def _run_sqlite_legacy_migrations() -> None:
+    """Incremental PRAGMA/ALTER helpers for old SQLite files only."""
     _ensure_clients_and_project_client_columns()
     _ensure_client_lifecycle_and_project_hierarchy_columns()
     _ensure_client_project_hierarchy_tag_columns()
@@ -1878,6 +1868,32 @@ def init_db():
     _ensure_finance_efficiency_non_taggd_joiners_column()
     _ensure_finance_efficiency_rev_productivity_actual_column()
     _ensure_wfm_benchmark_sheet_metrics_json()
+
+
+def init_db():
+    """Create schema and run dialect-specific bootstrap (SQLite legacy patches or Postgres via Alembic)."""
+    import logging
+
+    if is_sqlite_url():
+        Base.metadata.create_all(bind=engine)
+        try:
+            from backend.core.budget_forecast_ledger import migrate_legacy_project_budget_forecast_tables
+
+            migrate_legacy_project_budget_forecast_tables(engine)
+        except Exception as e:
+            logging.warning("legacy project_budgets/project_forecasts migration: %s", e)
+        _run_sqlite_legacy_migrations()
+    else:
+        # PostgreSQL: schema from Alembic (deploy / migrate script). create_all as safety net for dev.
+        if os.getenv("DB_CREATE_ALL_ON_INIT", "").strip().lower() in ("1", "true", "yes"):
+            Base.metadata.create_all(bind=engine)
+        try:
+            from backend.core.budget_forecast_ledger import migrate_legacy_project_budget_forecast_tables
+
+            migrate_legacy_project_budget_forecast_tables(engine)
+        except Exception as e:
+            logging.warning("legacy project_budgets/project_forecasts migration: %s", e)
+
     db = SessionLocal()
     try:
         from .finance_dedupe import dedupe_finance_tables
@@ -1909,9 +1925,10 @@ def init_db():
         logging.warning("finance dedupe / sla backfill on init: %s", e)
     finally:
         db.close()
-    _ensure_finance_unique_indexes()
-    _ensure_revenue_tracker_indexes()
-    _ensure_revenue_weekly_submission_schema()
+    if is_sqlite_url():
+        _ensure_finance_unique_indexes()
+        _ensure_revenue_tracker_indexes()
+        _ensure_revenue_weekly_submission_schema()
     try:
         from backend.auth.bootstrap import bootstrap_default_admin, normalize_platform_admin_emails
 

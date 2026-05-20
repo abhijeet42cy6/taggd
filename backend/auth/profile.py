@@ -40,6 +40,7 @@ CANONICAL_ROLES = frozenset(
 VERTICAL_KEYS = frozenset(
     {
         "executive_dashboard",
+        "ceo_view",
         "finance",
         "finance_validation",
         "sla",

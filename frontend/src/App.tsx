@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  BrowserRouter as Router,
+  BrowserRouter,
+  HashRouter,
   NavLink,
   Navigate,
   Route,
@@ -693,9 +694,20 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
   );
 }
 
+function useHashRouterForHost(): boolean {
+  if (import.meta.env.VITE_STATIC_HOSTING === "1") return true;
+  if (typeof window === "undefined") return false;
+  return window.location.hostname === "storage.googleapis.com";
+}
+
+const useHashRouter = useHashRouterForHost();
+const browserBasename = (import.meta.env.BASE_URL || "/").replace(/\/$/, "") || undefined;
+const AppRouter = useHashRouter ? HashRouter : BrowserRouter;
+const routerProps = useHashRouter ? {} : { basename: browserBasename };
+
 const App = () => (
   <AuthProvider>
-    <Router>
+    <AppRouter {...routerProps}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route
@@ -707,7 +719,7 @@ const App = () => (
           }
         />
       </Routes>
-    </Router>
+    </AppRouter>
   </AuthProvider>
 );
 

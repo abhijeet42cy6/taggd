@@ -454,12 +454,18 @@ async def serve_msa_document(
     else:
         pick = pick_latest_msa_filename(filenames)
 
-    path = resolve_msa_path(pick)
-    if not path:
-        raise HTTPException(status_code=404, detail="Document file not found on disk")
+    from backend.core.http_file_response import stored_file_response
 
     mt = mimetypes.guess_type(pick)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=mt, filename=os.path.basename(pick))
+    resp = stored_file_response(
+        "msa_documents",
+        pick,
+        download_name=os.path.basename(pick),
+        media_type=mt,
+    )
+    if resp is None:
+        raise HTTPException(status_code=404, detail="Document file not found")
+    return resp
 
 
 @router.delete("/{contract_id}")

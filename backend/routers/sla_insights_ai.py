@@ -106,7 +106,7 @@ Return ONLY a JSON array (no markdown fences) of 3 to 5 objects. Each object mus
 - "description": 1–2 sentences referencing specific numbers from the input where possible
 - "tone": one of "info", "success", "warn" (use "warn" for risks or reporting gaps, "success" for clear wins)
 
-Themes may include: FY window mix, trajectory vs prior FY, decisive-row met posture, not-reported gaps, effect of any active overview filter (health tier / zone) on the slice.
+Themes may include: FY window mix, trajectory vs prior FY, decisive-row met posture, not-reported gaps, effect of any active overview filter (health tier / workspace region) on the slice.
 Do not mention internal code names or APIs."""
 
     try:

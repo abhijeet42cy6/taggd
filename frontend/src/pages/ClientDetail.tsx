@@ -10,7 +10,7 @@ import {
   type ProjectContractRow,
 } from "@/lib/api";
 import { clientsVm, type ClientVm } from "@/lib/view-models/clients";
-import { cn, formatCurrency, formatNumber, formatPercent } from "@/lib/utils";
+import { cn, formatCurrency, formatLacs, formatNumber, formatPercent } from "@/lib/utils";
 import {
   PlatformKpi, PlatformSection, PageHeader, Tabs, StatusTag, KvRow,
 } from "@/components/platform/PlatformBlocks";
@@ -1160,9 +1160,9 @@ export function ClientDetail() {
               />
               <PlatformKpi
                 label="Productivity target"
-                value={wfmSnapshot != null && wfmSnapshot.prodAvg > 0 ? `${wfmSnapshot.prodAvg}` : "—"}
+                value={wfmSnapshot != null && wfmSnapshot.prodAvg > 0 ? formatLacs(wfmSnapshot.prodAvg) : "—"}
                 accent="amber"
-                subtext="Ideal-weighted lateral productivity target (WFM)"
+                subtext="Ideal-weighted lateral productivity target (WFM), lacs"
                 delta={wfmSnapshot?.reportingDate ? `As of ${wfmSnapshot.reportingDate.slice(0, 10)}` : undefined}
               />
               <PlatformKpi

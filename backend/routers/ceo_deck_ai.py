@@ -12,9 +12,14 @@ from google.generativeai.types import GenerationConfig
 from pydantic import BaseModel, Field
 
 from backend.auth.deps import get_current_user
+from backend.auth.verticals import require_vertical
 from backend.db.database import User
 
-router = APIRouter(prefix="/ceo-deck", tags=["ceo-deck"])
+router = APIRouter(
+    prefix="/ceo-deck",
+    tags=["ceo-deck"],
+    dependencies=[Depends(require_vertical("ceo_view"))],
+)
 
 
 class CeoDeckAiEditBody(BaseModel):

@@ -307,16 +307,22 @@ def download_transition_resource(
     if safe != filename.replace("\\", "/").rsplit("/", 1)[-1] or safe not in allowed:
         raise HTTPException(status_code=404, detail="File not found for this transition")
 
-    path = resolve_transition_path(safe)
-    if not path:
-        raise HTTPException(status_code=404, detail="File missing on server")
+    from backend.core.http_file_response import stored_file_response
 
     mt = mimetypes.guess_type(safe)[0] or "application/octet-stream"
     orig = next(
         (str(x.get("original_name") or safe) for x in att if isinstance(x, dict) and _attachment_filename(x) == safe),
         safe,
     )
-    return FileResponse(path, media_type=mt, filename=os.path.basename(orig))
+    resp = stored_file_response(
+        "transition_documents",
+        safe,
+        download_name=os.path.basename(orig),
+        media_type=mt,
+    )
+    if resp is None:
+        raise HTTPException(status_code=404, detail="File missing on server")
+    return resp
 
 
 @router.patch("/by-project/{project_id}")

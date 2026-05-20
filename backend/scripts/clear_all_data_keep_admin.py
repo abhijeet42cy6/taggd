@@ -22,8 +22,10 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, ROOT)
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+from backend.db.engine import create_app_engine, get_database_url
 
 # Table names in dependency-safe order (children before parents when FKs on).
 # With SQLite PRAGMA foreign_keys=OFF, order does not matter; kept explicit for clarity.
@@ -79,8 +81,7 @@ def main() -> int:
         print("Refusing to run without --yes (this deletes almost all data).", file=sys.stderr)
         return 1
 
-    url = os.environ.get("DATABASE_URL", "sqlite:///./revenue_generator.db")
-    engine = create_engine(url)
+    engine = create_app_engine(get_database_url())
     is_sql = _is_sqlite(engine)
 
     with engine.connect() as raw:

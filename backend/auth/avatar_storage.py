@@ -1,4 +1,4 @@
-"""Disk storage for user profile avatars (per-user file under `user_avatars/`)."""
+"""Profile avatar storage (local / GCS / S3 via blob_storage)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ import os
 import re
 from typing import Optional
 
+from backend.core import blob_storage
+
+_NS = "user_avatars"
 _MAX_BYTES = 2 * 1024 * 1024
 _ALLOWED_CT: dict[str, str] = {
     "image/jpeg": ".jpg",
@@ -16,26 +19,12 @@ _ALLOWED_CT: dict[str, str] = {
 
 
 def user_avatars_dir() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "user_avatars"))
-
-
-def _ensure_dir() -> None:
-    os.makedirs(user_avatars_dir(), exist_ok=True)
+    """Legacy path for local dev; prefer blob_storage."""
+    return os.path.join(blob_storage._local_root(), _NS)
 
 
 def delete_stored_avatar(user_id: int) -> None:
-    d = user_avatars_dir()
-    if not os.path.isdir(d):
-        return
-    for name in os.listdir(d):
-        if not name.startswith(f"{user_id}."):
-            continue
-        p = os.path.join(d, name)
-        if os.path.isfile(p):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
+    blob_storage.delete_avatar_glob(user_id, _NS)
 
 
 def save_avatar_bytes(user_id: int, raw: bytes, content_type: Optional[str]) -> str:
@@ -46,11 +35,8 @@ def save_avatar_bytes(user_id: int, raw: bytes, content_type: Optional[str]) -> 
         raise ValueError("Image too large (max 2MB)")
     ext = _ALLOWED_CT[ct]
     delete_stored_avatar(user_id)
-    _ensure_dir()
     filename = f"{user_id}{ext}"
-    path = os.path.join(user_avatars_dir(), filename)
-    with open(path, "wb") as f:
-        f.write(raw)
+    blob_storage.put_bytes(_NS, filename, raw, content_type=ct)
     return filename
 
 
@@ -60,8 +46,7 @@ def resolve_avatar_path(user_id: int, avatar_filename: Optional[str]) -> Optiona
     base = os.path.basename(avatar_filename)
     if not re.match(rf"^{user_id}\.(jpg|jpeg|png|webp)$", base, re.IGNORECASE):
         return None
-    full = os.path.join(user_avatars_dir(), base)
-    return full if os.path.isfile(full) else None
+    return blob_storage.resolve_local_path(_NS, base)
 
 
 def media_type_for_filename(filename: str) -> str:

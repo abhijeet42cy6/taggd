@@ -17,7 +17,10 @@ PUBLIC_PREFIXES = (
 PUBLIC_PATHS = frozenset(
     {
         "/",
+        "/health",
+        "/ready",
         "/auth/login",
+        "/api/auth/login",
         "/favicon.ico",
         # Composio OAuth return URL opens in a popup without Bearer token.
         "/integrations/composio/callback",

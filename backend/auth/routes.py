@@ -173,8 +173,17 @@ def get_me_avatar(user: User = Depends(get_current_user), db: Session = Depends(
     u = db.query(User).filter(User.id == user.id).first()
     if not u:
         raise HTTPException(status_code=401, detail="User not found")
-    path = resolve_avatar_path(u.id, getattr(u, "avatar_filename", None))
-    if not path:
-        raise HTTPException(status_code=404, detail="No avatar")
     fn = u.avatar_filename or ""
-    return FileResponse(path, media_type=media_type_for_filename(fn), filename=os.path.basename(path))
+    if not fn:
+        raise HTTPException(status_code=404, detail="No avatar")
+    from backend.core.http_file_response import stored_file_response
+
+    resp = stored_file_response(
+        "user_avatars",
+        fn,
+        download_name=os.path.basename(fn),
+        media_type=media_type_for_filename(fn),
+    )
+    if resp is None:
+        raise HTTPException(status_code=404, detail="No avatar")
+    return resp
