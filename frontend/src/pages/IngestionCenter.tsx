@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, invalidateCache, queries, columnMappingEntryCount, type IngestionEventRow } from "@/lib/api";
+import { api, invalidateCache, queries, columnMappingEntryCount, type IngestionEventRow, type Project } from "@/lib/api";
 import { isPlatformAdminRole, isRecruiterUser, useAuth } from "@/lib/auth";
 import { PlatformSection, Tabs } from "@/components/platform/PlatformBlocks";
 import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
@@ -48,6 +48,13 @@ const FINANCE_STEPS: string[] = [
   "Parsing finance ledger",
   "Validating Lacs values",
   "Committing to DB",
+];
+
+const CANDIDATES_STEPS: string[] = [
+  "Saving file",
+  "Detecting Candidate Tracker sheet",
+  "Mapping columns & upserting rows",
+  "Linking mandates & master records",
 ];
 
 const REVENUE_TRACKERS_STEPS: string[] = [
@@ -458,6 +465,7 @@ const KIND_LABEL: Record<string, string> = {
   wfm: "WFM",
   finance: "Finance",
   revenue_trackers: "Revenue trackers",
+  candidates: "Candidates",
 };
 
 const INGESTION_TABS = [
@@ -466,6 +474,7 @@ const INGESTION_TABS = [
   "SLA",
   "WFM",
   "Finance",
+  "Candidates",
   "Run Log",
 ] as const;
 type IngestionTab = (typeof INGESTION_TABS)[number];
@@ -493,7 +502,7 @@ function IngestionActivitySection({
         <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Loading activity…</div>
       ) : events.length === 0 ? (
         <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "16px 12px", textAlign: "center", borderRadius: 10, border: "1px dashed var(--border)", background: "var(--surface-muted)" }}>
-          No recorded runs yet. Uploads from Express, Pro, SLA, WFM, and Finance appear here.
+          No recorded runs yet. Uploads from Express, Pro, SLA, WFM, Finance, and Candidates appear here.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -585,6 +594,16 @@ export function IngestionCenter() {
     void refreshIngestionEvents();
   }, [refreshIngestionEvents]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void queries.projects().then((rows) => {
+      if (!cancelled) setProjectOptions(rows ?? []);
+    }).catch(() => {
+      if (!cancelled) setProjectOptions([]);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   // ── express ──
   const express = useIngestionRun(EXPRESS_STEPS);
   const [expressResult, setExpressResult] = useState<Record<string, any> | null>(null);
@@ -606,6 +625,12 @@ export function IngestionCenter() {
   // ── finance ──
   const finance = useIngestionRun(FINANCE_STEPS);
   const [financeResult, setFinanceResult] = useState<Record<string, any> | null>(null);
+
+  // ── candidates ──
+  const candidates = useIngestionRun(CANDIDATES_STEPS);
+  const [candidatesResult, setCandidatesResult] = useState<Record<string, any> | null>(null);
+  const [candidateProjectId, setCandidateProjectId] = useState<number | "">("");
+  const [projectOptions, setProjectOptions] = useState<Project[]>([]);
 
   // ── revenue forecast + visibility (Express tab) ──
   const revenueTrackers = useIngestionRun(REVENUE_TRACKERS_STEPS);
@@ -777,6 +802,40 @@ export function IngestionCenter() {
       finance.appendLog(`[${tsNow()}] ✓ Finance ledger committed`, "success");
     } catch (err: any) {
       finance.appendLog(`[${tsNow()}] ✗ ${err?.response?.data?.detail || err.message}`, "error");
+    } finally {
+      void refreshIngestionEvents();
+    }
+  }
+
+  async function handleCandidates(file: File) {
+    candidates.appendLog(`[${tsNow()}] Starting candidate tracker ingest: ${file.name}`);
+    if (candidateProjectId !== "") {
+      candidates.appendLog(`[${tsNow()}] Target project: PRJ-${candidateProjectId}`);
+    } else {
+      candidates.appendLog(`[${tsNow()}] No project selected — matching from filename`);
+    }
+    setCandidatesResult(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      if (candidateProjectId !== "") form.append("project_id", String(candidateProjectId));
+      const result = await simulateSteps(
+        candidates, CANDIDATES_STEPS, 2,
+        async () => { const r = await api.post("/candidates/ingest", form); return r.data; },
+      );
+      setCandidatesResult(result);
+      if (Array.isArray(result?.logs)) {
+        for (const line of result.logs as string[]) {
+          candidates.appendLog(line, "info");
+        }
+      }
+      candidates.appendLog(
+        `[${tsNow()}] ✓ ${result.message || "Candidate rows committed"}`,
+        "success",
+      );
+      invalidateCache("candidates");
+    } catch (err: any) {
+      candidates.appendLog(`[${tsNow()}] ✗ ${err?.response?.data?.detail || err.message}`, "error");
     } finally {
       void refreshIngestionEvents();
     }
@@ -1187,6 +1246,27 @@ export function IngestionCenter() {
         />
       )}
 
+      {/* ── CANDIDATES TAB ──────────────────────────────────────────────────────── */}
+      {tab === "Candidates" && (
+        <CandidateIngestTab
+          title="Candidate tracker"
+          subtitle="Upload client candidate tracker workbooks (sheet: Candidate Tracker). Maps headers heuristically, upserts into Candidates, and creates mandate stubs when Req No is present."
+          icon="👤"
+          accent="#7c3aed"
+          hint="Files: Ud Trucks.xlsx · Bridgestone Position Tracker*.xlsx"
+          steps={candidates.steps}
+          percent={candidates.percent}
+          job={candidates.job}
+          log={candidates.log}
+          result={candidatesResult}
+          projectOptions={projectOptions}
+          projectId={candidateProjectId}
+          onProjectChange={setCandidateProjectId}
+          onFile={handleCandidates}
+          onReset={() => { candidates.reset(); setCandidatesResult(null); }}
+        />
+      )}
+
       {/* ── RUN LOG TAB ──────────────────────────────────────────────────────── */}
       {tab === "Run Log" && (
         <PlatformSection title="Run log">
@@ -1201,6 +1281,7 @@ export function IngestionCenter() {
             { label: "SLA", log: sla.log },
             { label: "WFM", log: wfm.log },
             { label: "Finance", log: finance.log },
+            { label: "Candidates", log: candidates.log },
           ].map(({ label, log }) => log.length > 0 && (
             <div key={label} style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 9, textTransform: "uppercase", color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginBottom: 6, letterSpacing: ".1em" }}>{label}</div>
@@ -1214,10 +1295,10 @@ export function IngestionCenter() {
               </div>
             </div>
           ))}
-          {[express.log, revenueTrackers.log, proInspect.log, proRun.log, sla.log, wfm.log, finance.log].every((l) => !l.length) && (
+          {[express.log, revenueTrackers.log, proInspect.log, proRun.log, sla.log, wfm.log, finance.log, candidates.log].every((l) => !l.length) && (
             <div style={{ textAlign: "center", color: "var(--text-muted)", padding: 24 }}>
-              No run events yet — start an upload from Express (trackers or revenue templates), Pro, SLA, WFM, or Finance
-              tabs to see logs here.
+              No run events yet — start an upload from Express (trackers or revenue templates), Pro, SLA, WFM, Finance,
+              or Candidates tabs to see logs here.
             </div>
           )}
         </PlatformSection>
@@ -1229,6 +1310,118 @@ export function IngestionCenter() {
 }
 
 // ─── SPECIALIZED TAB ──────────────────────────────────────────────────────────
+
+function CandidateIngestTab({
+  title, subtitle, icon, accent, hint,
+  steps, percent, job, log, result,
+  projectOptions, projectId, onProjectChange,
+  onFile, onReset,
+}: {
+  title: string; subtitle: string; icon: string; accent: string; hint: string;
+  steps: Step[]; percent: number; job: JobStatus; log: LogEntry[];
+  result: Record<string, any> | null;
+  projectOptions: Project[];
+  projectId: number | "";
+  onProjectChange: (id: number | "") => void;
+  onFile: (f: File) => void;
+  onReset: () => void;
+}) {
+  return (
+    <PlatformSection title={title}>
+      <p className="ingestion-center__tabIntro">{subtitle}</p>
+      <div
+        style={{
+          padding: "8px 14px",
+          background: `color-mix(in srgb, ${accent} 10%, var(--surface-muted))`,
+          border: `1px solid color-mix(in srgb, ${accent} 28%, var(--border))`,
+          borderRadius: "var(--radius-base)",
+          fontSize: "11px",
+          color: accent,
+          fontFamily: "var(--mono)",
+          marginBottom: 16,
+        }}
+      >
+        {hint}
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)", fontFamily: "var(--mono)", marginBottom: 6, letterSpacing: ".08em" }}>
+          Target project (recommended)
+        </label>
+        <select
+          value={projectId === "" ? "" : String(projectId)}
+          onChange={(e) => onProjectChange(e.target.value ? Number(e.target.value) : "")}
+          disabled={job === "running"}
+          style={{
+            width: "100%",
+            maxWidth: 420,
+            padding: "8px 10px",
+            borderRadius: "var(--radius-base)",
+            border: "1px solid var(--border)",
+            background: "var(--surface-raised, #fff)",
+            fontSize: 12,
+          }}
+        >
+          <option value="">Auto-match from filename</option>
+          {projectOptions.map((p) => (
+            <option key={p.id} value={p.id}>
+              PRJ-{p.id} — {p.account_name || p.engagement_name || p.filename || "Project"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="ingestion-center__grid2" style={{ gap: 14 }}>
+        <DropZone
+          title={title}
+          subtitle={hint}
+          icon={icon}
+          accent={accent}
+          onFile={onFile}
+          disabled={job === "running"}
+        />
+        <div>
+          <div style={{ fontSize: 9, textTransform: "uppercase", color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginBottom: 10, letterSpacing: ".1em" }}>
+            Pipeline Steps
+          </div>
+          <StepTracker steps={steps} percent={percent} />
+        </div>
+      </div>
+
+      <LogPanel log={log} />
+
+      {job === "done" && result && (
+        <div className="platform-card" style={{ marginTop: 14, border: "1px solid rgba(0,229,160,0.25)", background: "rgba(0,229,160,0.05)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontWeight: 600, color: "var(--green)" }}>✓ Ingestion Complete</span>
+            <button onClick={onReset} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>Upload Another →</button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+            {result.message || "Candidate rows committed."}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-subtle)", fontFamily: "var(--mono)", lineHeight: 1.7 }}>
+            {result.project_id != null ? <div>Project: PRJ-{result.project_id}</div> : null}
+            {result.sheet ? <div>Sheet: {String(result.sheet)}</div> : null}
+            {result.inserted != null ? <div>Inserted: {result.inserted}</div> : null}
+            {result.updated != null ? <div>Updated: {result.updated}</div> : null}
+            {result.skipped != null ? <div>Skipped: {result.skipped}</div> : null}
+            {result.stubs_created != null ? <div>Mandate stubs: {result.stubs_created}</div> : null}
+            {result.masters_linked != null ? <div>Master links: {result.masters_linked}</div> : null}
+          </div>
+        </div>
+      )}
+
+      {job === "error" && (
+        <div style={{ marginTop: 14 }}>
+          <div className="alert-banner red">Ingestion failed — check the run log for details</div>
+          <button onClick={onReset} style={{ marginTop: 8, background: "none", border: "1px solid var(--red)", color: "var(--red)", padding: "5px 14px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}>
+            ← Try Again
+          </button>
+        </div>
+      )}
+    </PlatformSection>
+  );
+}
 
 function SpecializedIngestTab({
   title, subtitle, icon, accent, hint,

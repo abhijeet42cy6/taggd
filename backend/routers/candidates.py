@@ -5,10 +5,13 @@ import datetime
 import math
 import os
 import re
+import shutil
+import tempfile
+import time
 import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import or_
 from backend.auth.verticals import require_vertical
 from pydantic import BaseModel, Field
@@ -19,6 +22,8 @@ from backend.auth.deps import get_current_user
 from backend.auth.scope import apply_project_scope, apply_recruiter_candidate_scope, assert_project_access
 from backend.core.activity_log import log_activity
 from backend.core.candidate_master_mgmt import ensure_master_link_for_candidate
+from backend.core.candidate_tracker_ingest import ingest_candidate_tracker
+from backend.core.ingestion_audit import log_ingestion_event
 from backend.db.database import Candidate, CandidateMasterLink, Record, User, get_db
 
 router = APIRouter(
@@ -412,6 +417,69 @@ async def parse_resume_preview(
         raise HTTPException(status_code=400, detail=f"Could not read file: {e}") from e
     fields = parse_resume_text(text)
     return {"ok": True, "fields": fields}
+
+
+@router.post("/ingest")
+async def ingest_candidate_tracker_upload(
+    file: UploadFile = File(...),
+    project_id: Optional[int] = Form(None),
+    use_llm: bool = Form(False),
+    dry_run: bool = Form(False),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload a candidate tracker workbook and upsert rows into `candidates`."""
+    if project_id is not None:
+        assert_project_access(user, db, project_id)
+
+    safe_name = os.path.basename(file.filename or "candidates.xlsx") or "candidates.xlsx"
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in (".xlsx", ".xls", ".xlsm"):
+        raise HTTPException(status_code=400, detail="Expected an Excel workbook (.xlsx, .xls, .xlsm)")
+
+    temp_dir = tempfile.gettempdir()
+    file_path = os.path.join(temp_dir, f"candidate_tracker_{int(time.time())}_{safe_name}")
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        result = ingest_candidate_tracker(
+            file_path,
+            db,
+            project_id=project_id,
+            use_llm=use_llm,
+            dry_run=dry_run,
+        )
+        if not result.get("ok"):
+            log_ingestion_event(
+                db,
+                user=user,
+                kind="candidates",
+                filename=safe_name,
+                status="error",
+                label="Failed",
+                project_id=result.get("project_id"),
+            )
+            raise HTTPException(status_code=400, detail=result.get("error") or result.get("message") or "Ingest failed")
+
+        if not dry_run:
+            log_ingestion_event(
+                db,
+                user=user,
+                kind="candidates",
+                filename=safe_name,
+                status="success",
+                label="Complete",
+                project_id=result.get("project_id"),
+            )
+
+        payload = {k: v for k, v in result.items() if k != "ok"}
+        return {"status": "success", **payload}
+    finally:
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
 
 
 @router.get("/{candidate_id}/cv")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.auth.scope import apply_project_scope, apply_recruiter_candidate_scope
@@ -51,6 +52,7 @@ def _find_master_by_identity(
     *,
     email_n: Optional[str],
     phone_n: Optional[str],
+    global_fp: Optional[str] = None,
 ) -> Optional[CandidateMaster]:
     if email_n:
         m = db.query(CandidateMaster).filter(CandidateMaster.email_normalized == email_n).order_by(CandidateMaster.id).first()
@@ -58,6 +60,15 @@ def _find_master_by_identity(
             return m
     if phone_n:
         m = db.query(CandidateMaster).filter(CandidateMaster.phone_normalized == phone_n).order_by(CandidateMaster.id).first()
+        if m:
+            return m
+    if global_fp:
+        m = (
+            db.query(CandidateMaster)
+            .filter(CandidateMaster.global_fingerprint == global_fp)
+            .order_by(CandidateMaster.id)
+            .first()
+        )
         if m:
             return m
     return None
@@ -82,13 +93,15 @@ def ensure_master_link_for_candidate(
     display = (getattr(candidate, "full_name", None) or "").strip() or (candidate.client_candidate_id or "").strip() or "Unknown"
     fp = compose_global_fingerprint(email_n, phone_n, display)
 
-    master = _find_master_by_identity(db, email_n=email_n, phone_n=phone_n)
+    master = _find_master_by_identity(db, email_n=email_n, phone_n=phone_n, global_fp=fp)
     confidence = 0.55
     if master:
         if email_n and master.email_normalized == email_n:
             confidence = 0.92
         elif phone_n and master.phone_normalized == phone_n:
             confidence = 0.78
+        elif fp and master.global_fingerprint == fp:
+            confidence = 0.62
     else:
         master = CandidateMaster(
             display_name=display[:512],
@@ -98,8 +111,15 @@ def ensure_master_link_for_candidate(
             migration_batch_tag=migration_batch_tag,
         )
         db.add(master)
-        db.flush()
-        confidence = 0.99
+        try:
+            db.flush()
+            confidence = 0.99
+        except IntegrityError:
+            db.expire_all()
+            master = _find_master_by_identity(db, email_n=email_n, phone_n=phone_n, global_fp=fp)
+            if master is None:
+                raise
+            confidence = 0.62 if fp and master.global_fingerprint == fp else 0.55
 
     link = CandidateMasterLink(
         master_id=master.id,
@@ -143,7 +163,7 @@ def backfill_candidate_masters(
         display = (getattr(c, "full_name", None) or "").strip() or (c.client_candidate_id or "").strip() or "Unknown"
         fp = compose_global_fingerprint(email_n, phone_n, display)
 
-        master = _find_master_by_identity(db, email_n=email_n, phone_n=phone_n)
+        master = _find_master_by_identity(db, email_n=email_n, phone_n=phone_n, global_fp=fp)
         if master:
             reused_masters += 1
             conf = 0.92 if (email_n and master.email_normalized == email_n) else 0.78
