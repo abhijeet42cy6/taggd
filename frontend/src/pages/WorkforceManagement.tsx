@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Expand, Plus, Upload } from "lucide-react";
+import { Expand, Pencil, Plus, Upload, UserPlus } from "lucide-react";
 import {
   Badge,
   Button,
@@ -32,6 +32,7 @@ import {
   type WfmExpandMode,
   type WfmPerformFilter,
 } from "@/components/tremor-dashboard/WfmExpandDialog";
+import { WfmRegionalHeadAssignDialog } from "@/components/tremor-dashboard/WfmRegionalHeadAssignDialog";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
 import { cn, formatLargeCurrency, formatLacs, formatNumber, formatPercent } from "@/lib/utils";
 import {
@@ -45,8 +46,13 @@ import {
   wfmRowAdditionalHcProxy,
   wfmRowProjectedHc,
   wfmRowNetVarianceVsProjected,
+  wfmDedupeLatestByProject,
+  wfmAggregateByRegionalHead,
+  wfmAggregateByPracticeHead,
+  wfmSummaryTotals,
   type WfmBenchmarkRowVm,
 } from "@/lib/view-models/wfm";
+import { WfmSummaryTable } from "@/components/tremor-dashboard/WfmSummaryTable";
 
 /** Same INR heuristic as portfolio workbook card (values ≤ ₹5L treated as lacs × 1e5). */
 function formatWfmRowRevenueTarget(raw: number | null | undefined): string {
@@ -68,6 +74,14 @@ const flatCard =
 
 const WFM_BLOCK_TAG = "mt-3 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle md:mt-4";
 
+type WfmSummaryTab = "client" | "regional" | "practice";
+
+const WFM_SUMMARY_TABS: { id: WfmSummaryTab; label: string }[] = [
+  { id: "client", label: "By client" },
+  { id: "regional", label: "Regional head" },
+  { id: "practice", label: "Practice head" },
+];
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export function WorkforceManagement() {
   const [stats, setStats] = useState<any>(null);
@@ -83,8 +97,11 @@ export function WorkforceManagement() {
   }, []);
 
   const [tableFilter, setTableFilter] = useState<WfmPerformFilter>("all");
+  const [summaryTab, setSummaryTab] = useState<WfmSummaryTab>("client");
+  const [regionalHeadFilter, setRegionalHeadFilter] = useState<string>("all");
   const [expandMode, setExpandMode] = useState<WfmExpandMode>(null);
   const [expandFilter, setExpandFilter] = useState<WfmPerformFilter>("all");
+  const [regionalHeadAssignRow, setRegionalHeadAssignRow] = useState<WfmBenchmarkRowVm | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   // Productivity chart client picker
@@ -135,10 +152,6 @@ export function WorkforceManagement() {
   const totalWl2 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl2_hires ?? 0), 0), [rows]);
   const totalWl3 = useMemo(() => rows.reduce((s, r) => s + Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0), 0), [rows]);
   const totalAdditional = totalWl1 + totalWl2 + totalWl3; // for WL mix; equals total actual when data is self-consistent
-  const projectedHc = actualHc; // roster strength = total actual HC (WL = mix, not added again)
-  const varActual = Math.max(0, projectedHc - actualHc); // 0 in self-consistent template; ≥0 if we ever add pipeline
-  /** Same as `idealHc - actualHc` (negative = over ideal / over-capacity). */
-  const netRosterGapToIdeal = idealHc - actualHc;
 
   const fgColor = idealHc > 0 ? wfmFillColor(fillRate, idealHc) : "var(--accent)";
 
@@ -153,15 +166,44 @@ export function WorkforceManagement() {
     }),
   [rows]);
 
-  // Filtered table rows
-  const filteredRows = useMemo(() =>
-    rows.filter((r) => {
-      const ideal = Number(r.ideal_hc ?? 0);
-      const actual = Number(r.actual_hc_total ?? 0);
-      const pct = wfmFillPct(actual, ideal);
-      return wfmMatchesFilter(pct, ideal, tableFilter);
-    }),
-  [rows, tableFilter]);
+  // Dedupe to latest snapshot per project before filters / rollups
+  const dedupedRows = useMemo(() => wfmDedupeLatestByProject(rows), [rows]);
+
+  const regionalHeadOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of dedupedRows) {
+      const h = (r.regional_head || "").trim();
+      if (h) set.add(h);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [dedupedRows]);
+
+  const rowsMatchingFilters = useMemo(
+    () =>
+      dedupedRows.filter((r) => {
+        const ideal = Number(r.ideal_hc ?? 0);
+        const actual = Number(r.actual_hc_total ?? 0);
+        const pct = wfmFillPct(actual, ideal);
+        if (!wfmMatchesFilter(pct, ideal, tableFilter)) return false;
+        if (regionalHeadFilter === "all") return true;
+        if (regionalHeadFilter === "unassigned") return !(r.regional_head || "").trim();
+        return (r.regional_head || "").trim() === regionalHeadFilter;
+      }),
+    [dedupedRows, tableFilter, regionalHeadFilter],
+  );
+
+  // Filtered table rows (client tab)
+  const filteredRows = rowsMatchingFilters;
+
+  const missingRegionalHeadCount = useMemo(
+    () => dedupedRows.filter((r) => !(r.regional_head || "").trim()).length,
+    [dedupedRows],
+  );
+
+  const regionalSummaryRows = useMemo(() => wfmAggregateByRegionalHead(rowsMatchingFilters), [rowsMatchingFilters]);
+  const practiceSummaryRows = useMemo(() => wfmAggregateByPracticeHead(rowsMatchingFilters), [rowsMatchingFilters]);
+  const regionalSummaryTotals = useMemo(() => wfmSummaryTotals(regionalSummaryRows), [regionalSummaryRows]);
+  const practiceSummaryTotals = useMemo(() => wfmSummaryTotals(practiceSummaryRows), [practiceSummaryRows]);
 
   // WL distribution
   const wlData = useMemo(() => rows.map((r) => ({
@@ -496,44 +538,6 @@ export function WorkforceManagement() {
 
       {!loading && rows.length > 0 && (
         <>
-          <Text className={WFM_BLOCK_TAG}>Roster vs target</Text>
-          <Grid numItems={1} numItemsSm={2} numItemsLg={3} className="gap-2 md:gap-3">
-            <Card decoration="top" decorationColor="teal" className="p-3">
-              <Text className="text-[10px] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">Roster (actual HC)</Text>
-              <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{formatNumber(projectedHc)}</Metric>
-              <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">
-                On rolls; WL1–4 are band mix (not double-counted)
-              </Text>
-            </Card>
-            <Card decoration="top" decorationColor="emerald" className="p-3">
-              <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Net new vs roster</Text>
-              <Metric
-                className={`mt-1 text-xl tabular-nums md:text-2xl ${varActual > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-tremor-content-strong"}`}
-              >
-                {varActual > 0 ? `+${formatNumber(varActual)}` : "0"}
-              </Metric>
-              <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">
-                Pipeline beyond actual (0 when WL = headcount mix)
-              </Text>
-            </Card>
-            <Card decoration="top" decorationColor="orange" className="p-3">
-              <Text className="text-[10px] font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">Gap to ideal target</Text>
-              <Metric
-                className={`mt-1 text-xl tabular-nums md:text-2xl ${
-                  netRosterGapToIdeal < 0 ? "text-orange-500 dark:text-orange-400" : netRosterGapToIdeal > 0 ? "text-rose-600 dark:text-rose-400" : "text-tremor-content-strong"
-                }`}
-              >
-                {netRosterGapToIdeal >= 0 ? "−" : "+"}
-                {formatNumber(Math.abs(netRosterGapToIdeal))}
-              </Metric>
-              <Text className="mt-0.5 text-[11px] leading-snug text-tremor-content-subtle md:text-xs">Ideal − actual (same as ideal HC gap above)</Text>
-            </Card>
-          </Grid>
-        </>
-      )}
-
-      {!loading && rows.length > 0 && (
-        <>
           <Text className={WFM_BLOCK_TAG}>WL hire mix (additional support)</Text>
           <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-2 md:gap-3">
             {(
@@ -566,24 +570,88 @@ export function WorkforceManagement() {
         tag="Client headcount detail"
         title="Targets, pipeline & fill by client"
         toolbar={(
-          <Flex justifyContent="between" alignItems="center" className="flex-wrap gap-2">
-            <WfmFilterChipRow value={tableFilter} onChange={setTableFilter} />
-            <Button
-              type="button"
-              variant="light"
-              color="orange"
-              size="xs"
-              onClick={() => {
-                setExpandMode("benchmark");
-                setExpandFilter(tableFilter);
-              }}
-            >
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium">
-                <Expand size={12} aria-hidden />
-                Expand all
-              </span>
-            </Button>
-          </Flex>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div
+                className="inline-flex max-w-full rounded-lg border border-tremor-border bg-orange-50/40 p-0.5 dark:border-dark-tremor-border dark:bg-orange-950/20"
+                role="tablist"
+                aria-label="Table view"
+              >
+                {WFM_SUMMARY_TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={summaryTab === t.id}
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-[11px] font-medium whitespace-nowrap transition-colors",
+                      summaryTab === t.id
+                        ? "bg-white text-orange-700 shadow-sm ring-1 ring-orange-200/80 dark:bg-dark-tremor-background-default dark:text-orange-300 dark:ring-orange-900/60"
+                        : "text-tremor-content-subtle hover:text-tremor-content-emphasis dark:hover:text-dark-tremor-content-emphasis",
+                    )}
+                    onClick={() => setSummaryTab(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              {summaryTab === "client" ? (
+                <Button
+                  type="button"
+                  variant="light"
+                  color="orange"
+                  size="xs"
+                  className="shrink-0"
+                  onClick={() => {
+                    setExpandMode("benchmark");
+                    setExpandFilter(tableFilter);
+                  }}
+                >
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium">
+                    <Expand size={12} aria-hidden />
+                    Expand all
+                  </span>
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
+              <div className="min-w-0">
+                <Text className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                  Fill rate
+                </Text>
+                <WfmFilterChipRow value={tableFilter} onChange={setTableFilter} />
+              </div>
+
+              <div className="hidden sm:block sm:h-9 sm:w-px sm:self-end sm:bg-tremor-border dark:sm:bg-dark-tremor-border" aria-hidden />
+
+              <div className="sm:min-w-[11rem]">
+                <Text className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                  Regional head
+                </Text>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    className="dashboard-filter-select w-full min-w-[9.5rem] max-w-[16rem] text-[11px]"
+                    value={regionalHeadFilter}
+                    onChange={(e) => setRegionalHeadFilter(e.target.value)}
+                  >
+                    <option value="all">All</option>
+                    <option value="unassigned">Unassigned</option>
+                    {regionalHeadOptions.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                  {missingRegionalHeadCount > 0 ? (
+                    <Text className="text-[10px] leading-snug text-amber-700 dark:text-amber-300">
+                      {missingRegionalHeadCount} client{missingRegionalHeadCount === 1 ? "" : "s"} missing regional head
+                    </Text>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
         noPad
       >
@@ -595,9 +663,27 @@ export function WorkforceManagement() {
           <div className="p-4">
             <Text className="text-sm text-tremor-content-subtle">Upload WFM data to populate this table</Text>
           </div>
-        ) : filteredRows.length === 0 ? (
+        ) : rowsMatchingFilters.length === 0 ? (
           <div className="p-4">
-            <Text className="text-sm text-tremor-content-subtle">No clients match this filter</Text>
+            <Text className="text-sm text-tremor-content-subtle">No rows match the current filters</Text>
+          </div>
+        ) : summaryTab === "regional" ? (
+          <div className="overflow-x-auto bg-gradient-to-b from-orange-50/30 to-white px-2 pb-3 pt-1 dark:from-orange-950/20 dark:to-dark-tremor-background-default sm:px-3">
+            <WfmSummaryTable
+              rows={regionalSummaryRows}
+              labelTitle="Region"
+              labelSubtitle="Region leader"
+              totals={regionalSummaryTotals}
+            />
+          </div>
+        ) : summaryTab === "practice" ? (
+          <div className="overflow-x-auto bg-gradient-to-b from-orange-50/30 to-white px-2 pb-3 pt-1 dark:from-orange-950/20 dark:to-dark-tremor-background-default sm:px-3">
+            <WfmSummaryTable
+              rows={practiceSummaryRows}
+              labelTitle="Practice head"
+              labelSubtitle="Region"
+              totals={practiceSummaryTotals}
+            />
           </div>
         ) : (
           <div className="overflow-x-auto bg-gradient-to-b from-orange-50/30 to-white px-2 pb-3 pt-1 dark:from-orange-950/20 dark:to-dark-tremor-background-default sm:px-3">
@@ -694,15 +780,34 @@ export function WorkforceManagement() {
                   const projRow = wfmRowProjectedHc(r);
                   const netVar = wfmRowNetVarianceVsProjected(r);
                   const regionLbl = (r.region || "").trim();
-                  const headLbl = ((r.regional_head || "").trim() || (r.practice_head || "").trim()) || null;
+                  const regionalHead = (r.regional_head || "").trim();
                   return (
-                    <TableRow key={i}>
+                    <TableRow key={r.project_id ?? r.id ?? i}>
                       <TableCell className="max-w-[200px]">
                         <Text className="text-xs font-semibold text-tremor-content-strong">{r.account_name || `Project ${r.project_id}`}</Text>
                         {regionLbl && regionLbl !== "Unknown" ? (
                           <Text className="block text-[11px] text-tremor-content-subtle">{regionLbl}</Text>
                         ) : null}
-                        {headLbl ? <Text className="block text-[10px] text-tremor-content-subtle">{headLbl}</Text> : null}
+                        {regionalHead ? (
+                          <button
+                            type="button"
+                            className="group mt-0.5 inline-flex max-w-full items-center gap-1 text-left text-[10px] text-tremor-content-subtle hover:text-orange-700 dark:hover:text-orange-300"
+                            title="Edit regional head"
+                            onClick={() => setRegionalHeadAssignRow(r)}
+                          >
+                            <span className="truncate">{regionalHead}</span>
+                            <Pencil className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-orange-700 hover:text-orange-800 dark:text-orange-300 dark:hover:text-orange-200"
+                            onClick={() => setRegionalHeadAssignRow(r)}
+                          >
+                            <UserPlus className="h-3 w-3 shrink-0" aria-hidden />
+                            Assign regional head
+                          </button>
+                        )}
                       </TableCell>
                       <TableCell className="text-right text-xs tabular-nums text-tremor-content-strong">
                         {formatWfmRowRevenueTarget(r.lateral_revenue_target)}
@@ -999,6 +1104,12 @@ export function WorkforceManagement() {
         open={wfmDialogOpen}
         onOpenChange={setWfmDialogOpen}
         wfmRows={rows}
+        onSaved={reloadWfm}
+      />
+
+      <WfmRegionalHeadAssignDialog
+        row={regionalHeadAssignRow}
+        onClose={() => setRegionalHeadAssignRow(null)}
         onSaved={reloadWfm}
       />
     </div>

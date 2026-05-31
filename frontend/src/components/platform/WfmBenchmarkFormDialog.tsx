@@ -2,8 +2,16 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { queries, wfmBenchmarkApi, type Project } from "@/lib/api";
+import { adminApi, queries, wfmBenchmarkApi, type Project } from "@/lib/api";
 import type { WfmBenchmarkRowVm } from "@/lib/view-models/wfm";
+import {
+  emptyWfmOrgMetadataDraft,
+  wfmOrgDraftFromSources,
+  wfmOrgMetadataPatchBody,
+  type RegionalHeadCandidate,
+  type WfmOrgMetadataDraft,
+} from "@/lib/wfm-org-metadata";
+import { WfmProjectOrgFields } from "@/components/platform/WfmProjectOrgFields";
 import "@/styles/new-contract-panel.css";
 
 type Props = {
@@ -84,6 +92,9 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
   const [projectId, setProjectId] = useState<number | "">("");
   const [reportingMonth, setReportingMonth] = useState(defaultMonth());
   const [form, setForm] = useState(emptyForm);
+  const [org, setOrg] = useState<WfmOrgMetadataDraft>(emptyWfmOrgMetadataDraft);
+  const [orgUsers, setOrgUsers] = useState<RegionalHeadCandidate[]>([]);
+  const [loadingOrgUsers, setLoadingOrgUsers] = useState(false);
 
   const [projDdOpen, setProjDdOpen] = useState(false);
   const [projSearch, setProjSearch] = useState("");
@@ -150,21 +161,43 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
     return out.sort((a, b) => b.localeCompare(a));
   }, [mode, projectId, wfmRows, projects]);
 
-  const applyRow = useCallback((r: WfmBenchmarkRowVm) => {
-    setProjectId(r.project_id ?? "");
-    setReportingMonth(monthFromReportingDate(r.reporting_date));
-    setForm({
-      lateralRevenue: String(r.lateral_revenue_target ?? 0),
-      lateralHcTarget: String(r.lateral_hc_target ?? 0),
-      lateralProductivity: String(r.lateral_productivity_target ?? 0),
-      idealHc: String(r.ideal_hc ?? 0),
-      actualHcTotal: String(r.actual_hc_total ?? 0),
-      wl1: String(r.wl1_hires ?? 0),
-      wl2: String(r.wl2_hires ?? 0),
-      wl3: String(r.wl3_hires ?? 0),
-      wl4: String(r.wl4_hires ?? 0),
-    });
-  }, []);
+  const applyRow = useCallback(
+    (r: WfmBenchmarkRowVm) => {
+      setProjectId(r.project_id ?? "");
+      setReportingMonth(monthFromReportingDate(r.reporting_date));
+      setForm({
+        lateralRevenue: String(r.lateral_revenue_target ?? 0),
+        lateralHcTarget: String(r.lateral_hc_target ?? 0),
+        lateralProductivity: String(r.lateral_productivity_target ?? 0),
+        idealHc: String(r.ideal_hc ?? 0),
+        actualHcTotal: String(r.actual_hc_total ?? 0),
+        wl1: String(r.wl1_hires ?? 0),
+        wl2: String(r.wl2_hires ?? 0),
+        wl3: String(r.wl3_hires ?? 0),
+        wl4: String(r.wl4_hires ?? 0),
+      });
+      const p = r.project_id != null ? projects.find((x) => x.id === r.project_id) : undefined;
+      setOrg(
+        wfmOrgDraftFromSources(
+          {
+            region: r.region ?? p?.region,
+            practice_head: r.practice_head ?? p?.practice_head,
+            function_head: p?.function_head,
+            regional_head: r.regional_head ?? p?.regional_head,
+          },
+          orgUsers,
+        ),
+      );
+    },
+    [projects, orgUsers],
+  );
+
+  const hydrateOrgFromProject = useCallback(
+    (p: Project) => {
+      setOrg(wfmOrgDraftFromSources(p, orgUsers));
+    },
+    [orgUsers],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -174,15 +207,38 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
     setProjectId("");
     setReportingMonth(defaultMonth());
     setForm(emptyForm);
+    setOrg(emptyWfmOrgMetadataDraft());
     setProjDdOpen(false);
     setProjSearch("");
     setLoadingProjects(true);
-    queries
-      .projects()
-      .then(setProjects)
-      .catch(() => setProjects([]))
-      .finally(() => setLoadingProjects(false));
+    setLoadingOrgUsers(true);
+    Promise.all([
+      queries.projects(),
+      queries.taskAssignableUsers().catch(() => []),
+      adminApi.listUsers().catch(() => []),
+    ])
+      .then(([projList, scopedUsers, adminUsers]) => {
+        setProjects(projList);
+        const map = new Map<number, RegionalHeadCandidate>();
+        const add = (u: RegionalHeadCandidate) => map.set(u.id, u);
+        scopedUsers.forEach((u) => add(u as RegionalHeadCandidate));
+        adminUsers.forEach((u) => add({ id: u.id, email: u.email, role: u.role }));
+        setOrgUsers([...map.values()]);
+      })
+      .catch(() => {
+        setProjects([]);
+        setOrgUsers([]);
+      })
+      .finally(() => {
+        setLoadingProjects(false);
+        setLoadingOrgUsers(false);
+      });
   }, [open]);
+
+  useEffect(() => {
+    if (!open || loadingOrgUsers || !selectedProject) return;
+    hydrateOrgFromProject(selectedProject);
+  }, [open, loadingOrgUsers, selectedProject?.id, hydrateOrgFromProject]);
 
   useLayoutEffect(() => {
     if (!projDdOpen) {
@@ -276,6 +332,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
     }
     setSaving(true);
     try {
+      await queries.patchProjectMetadata(pid, wfmOrgMetadataPatchBody(org, orgUsers));
       await wfmBenchmarkApi.upsert({
         project_id: pid,
         reporting_month: reportingMonth.slice(0, 7),
@@ -364,6 +421,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                   placeholder="Search projects…"
                   value={projSearch}
                   onChange={(e) => setProjSearch(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
                   autoFocus
                 />
               </div>
@@ -381,6 +439,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                       setProjectId(p.id);
                       setProjDdOpen(false);
                       setProjSearch("");
+                      hydrateOrgFromProject(p);
                       if (mode === "edit") {
                         setForm(emptyForm);
                       }
@@ -415,7 +474,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
   );
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet modal={false} open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         showCloseButton={false}
@@ -462,6 +521,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                     setProjectId("");
                     setReportingMonth(defaultMonth());
                     setForm(emptyForm);
+                    setOrg(emptyWfmOrgMetadataDraft());
                     setTab(0);
                   }}
                 >
@@ -475,6 +535,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                     setProjectId("");
                     setReportingMonth("");
                     setForm(emptyForm);
+                    setOrg(emptyWfmOrgMetadataDraft());
                     setTab(0);
                   }}
                   disabled={wfmRows.length === 0}
@@ -544,6 +605,25 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                       Stored as the first day of the month. Update mode locks the month to existing snapshots for the project.
                     </p>
                   </>,
+                )}
+                {selectedProject ? (
+                  wfmSection(
+                    "👤",
+                    "ncp-teal",
+                    "Account leadership",
+                    "Region and heads saved on the project record — used for regional / practice rollups on the WFM dashboard.",
+                    <WfmProjectOrgFields
+                      draft={org}
+                      onChange={(patch) => setOrg((prev) => ({ ...prev, ...patch }))}
+                      users={orgUsers}
+                      loadingUsers={loadingOrgUsers}
+                      disabled={saving}
+                    />,
+                  )
+                ) : (
+                  <p className="ncp-hint" style={{ marginTop: 4 }}>
+                    Select a project to edit region, regional head, practice head, and function head.
+                  </p>
                 )}
               </div>
 

@@ -122,6 +122,211 @@ export function wfmRowNetVarianceVsProjected(r: WfmBenchmarkRowVm): number {
   return ideal - wfmRowProjectedHc(r);
 }
 
+/** Actual − projected HC (workbook summary rollups). */
+export function wfmRowNetVarianceActualVsProjected(r: WfmBenchmarkRowVm): number {
+  const actual = Number(r.actual_hc_total ?? 0);
+  return actual - wfmRowProjectedHc(r);
+}
+
+export type WfmSummaryRowVm = {
+  key: string;
+  labelPrimary: string;
+  labelSecondary: string;
+  lateral_revenue_target: number;
+  lateral_productivity_target: number;
+  ideal_hc: number;
+  actual_hc_total: number;
+  variance_ideal_actual: number;
+  additional_hc: number;
+  open_positions: number;
+  resignations: number;
+  projected_hc: number;
+  net_variance_actual_projected: number;
+  fill_pct: number;
+  client_count: number;
+};
+
+/** Keep latest benchmark snapshot per project when multiple reporting dates exist. */
+export function wfmDedupeLatestByProject(rows: WfmBenchmarkRowVm[]): WfmBenchmarkRowVm[] {
+  const byProject = new Map<number, WfmBenchmarkRowVm>();
+  const orphans: WfmBenchmarkRowVm[] = [];
+  for (const r of rows) {
+    const pid = r.project_id;
+    if (pid == null || pid <= 0) {
+      orphans.push(r);
+      continue;
+    }
+    const prev = byProject.get(pid);
+    const d = String(r.reporting_date ?? "");
+    const prevD = String(prev?.reporting_date ?? "");
+    if (!prev || d.localeCompare(prevD) > 0) {
+      byProject.set(pid, r);
+    }
+  }
+  return [...byProject.values(), ...orphans];
+}
+
+function wfmAggregateRows(
+  rows: WfmBenchmarkRowVm[],
+  keyFn: (r: WfmBenchmarkRowVm) => string,
+  labelFn: (r: WfmBenchmarkRowVm) => { primary: string; secondary: string },
+): WfmSummaryRowVm[] {
+  type Acc = {
+    key: string;
+    labelPrimary: string;
+    labelSecondary: string;
+    sumRev: number;
+    maxRev: number;
+    sumIdeal: number;
+    sumActual: number;
+    sumAdditional: number;
+    sumOpen: number;
+    sumProjected: number;
+    sumProdWeighted: number;
+    sumIdealForProd: number;
+    clientCount: number;
+  };
+  const map = new Map<string, Acc>();
+  for (const r of rows) {
+    const key = keyFn(r);
+    const { primary, secondary } = labelFn(r);
+    let acc = map.get(key);
+    if (!acc) {
+      acc = {
+        key,
+        labelPrimary: primary,
+        labelSecondary: secondary,
+        sumRev: 0,
+        maxRev: 0,
+        sumIdeal: 0,
+        sumActual: 0,
+        sumAdditional: 0,
+        sumOpen: 0,
+        sumProjected: 0,
+        sumProdWeighted: 0,
+        sumIdealForProd: 0,
+        clientCount: 0,
+      };
+      map.set(key, acc);
+    }
+    const rev = Number(r.lateral_revenue_target ?? 0);
+    const ideal = Number(r.ideal_hc ?? 0);
+    const actual = Number(r.actual_hc_total ?? 0);
+    const prod = Number(r.lateral_productivity_target ?? 0);
+    acc.sumRev += rev;
+    acc.maxRev = Math.max(acc.maxRev, Math.abs(rev));
+    acc.sumIdeal += ideal;
+    acc.sumActual += actual;
+    acc.sumAdditional += wfmRowAdditionalHcProxy(r);
+    acc.sumOpen += wfmOpenPositionsFromSheet(r);
+    acc.sumProjected += wfmRowProjectedHc(r);
+    acc.clientCount += 1;
+    if (ideal > 0 && Number.isFinite(prod)) {
+      acc.sumIdealForProd += ideal;
+      acc.sumProdWeighted += prod * ideal;
+    }
+  }
+  return [...map.values()]
+    .map((a) => {
+      const wProd =
+        a.sumIdealForProd > 0 ? a.sumProdWeighted / a.sumIdealForProd : 0;
+      return {
+        key: a.key,
+        labelPrimary: a.labelPrimary,
+        labelSecondary: a.labelSecondary,
+        lateral_revenue_target: a.sumRev,
+        lateral_productivity_target: wProd,
+        ideal_hc: a.sumIdeal,
+        actual_hc_total: a.sumActual,
+        variance_ideal_actual: a.sumIdeal - a.sumActual,
+        additional_hc: a.sumAdditional,
+        open_positions: a.sumOpen,
+        resignations: 0,
+        projected_hc: a.sumProjected,
+        net_variance_actual_projected: a.sumActual - a.sumProjected,
+        fill_pct: wfmFillPct(a.sumActual, a.sumIdeal),
+        client_count: a.clientCount,
+      };
+    })
+    .sort((x, y) => x.labelPrimary.localeCompare(y.labelPrimary) || x.labelSecondary.localeCompare(y.labelSecondary));
+}
+
+export function wfmAggregateByRegionalHead(rows: WfmBenchmarkRowVm[]): WfmSummaryRowVm[] {
+  return wfmAggregateRows(
+    rows,
+    (r) => {
+      const region = (r.region || "").trim() || "Unknown";
+      const head = (r.regional_head || "").trim() || "Unassigned";
+      return `${region}\0${head}`;
+    },
+    (r) => ({
+      primary: (r.region || "").trim() || "Unknown",
+      secondary: (r.regional_head || "").trim() || "Unassigned",
+    }),
+  );
+}
+
+export function wfmAggregateByPracticeHead(rows: WfmBenchmarkRowVm[]): WfmSummaryRowVm[] {
+  return wfmAggregateRows(
+    rows,
+    (r) => {
+      const ph = (r.practice_head || "").trim() || "Unassigned";
+      const region = (r.region || "").trim() || "Unknown";
+      return `${ph}\0${region}`;
+    },
+    (r) => ({
+      primary: (r.practice_head || "").trim() || "Unassigned",
+      secondary: (r.region || "").trim() || "Unknown",
+    }),
+  );
+}
+
+export function wfmSummaryTotals(rows: WfmSummaryRowVm[]): WfmSummaryRowVm | null {
+  if (rows.length <= 1) return null;
+  let sumRev = 0;
+  let maxRev = 0;
+  let sumIdeal = 0;
+  let sumActual = 0;
+  let sumAdditional = 0;
+  let sumOpen = 0;
+  let sumProjected = 0;
+  let sumProdWeighted = 0;
+  let sumIdealForProd = 0;
+  let clients = 0;
+  for (const r of rows) {
+    sumRev += r.lateral_revenue_target;
+    maxRev = Math.max(maxRev, Math.abs(r.lateral_revenue_target));
+    sumIdeal += r.ideal_hc;
+    sumActual += r.actual_hc_total;
+    sumAdditional += r.additional_hc;
+    sumOpen += r.open_positions;
+    sumProjected += r.projected_hc;
+    clients += r.client_count;
+    if (r.ideal_hc > 0 && Number.isFinite(r.lateral_productivity_target)) {
+      sumIdealForProd += r.ideal_hc;
+      sumProdWeighted += r.lateral_productivity_target * r.ideal_hc;
+    }
+  }
+  const wProd = sumIdealForProd > 0 ? sumProdWeighted / sumIdealForProd : 0;
+  return {
+    key: "__totals__",
+    labelPrimary: "Σ / blended",
+    labelSecondary: `${clients} clients`,
+    lateral_revenue_target: sumRev,
+    lateral_productivity_target: wProd,
+    ideal_hc: sumIdeal,
+    actual_hc_total: sumActual,
+    variance_ideal_actual: sumIdeal - sumActual,
+    additional_hc: sumAdditional,
+    open_positions: sumOpen,
+    resignations: 0,
+    projected_hc: sumProjected,
+    net_variance_actual_projected: sumActual - sumProjected,
+    fill_pct: wfmFillPct(sumActual, sumIdeal),
+    client_count: clients,
+  };
+}
+
 export function wfmRowsVm(rows: any[]): WfmBenchmarkRowVm[] {
   return (rows || []) as WfmBenchmarkRowVm[];
 }
