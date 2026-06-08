@@ -4,18 +4,19 @@ import { homePathAfterAuth, useAuth } from "@/lib/auth";
 import taggdLogo from "@/assets/taggd-logo.png";
 import "@/styles/platform.css";
 
-/** `Group 14004.png` in repo root, copied to `public/group-14004.png` (served as static asset). */
-const loginBg = `${import.meta.env.BASE_URL}group-14004.png`;
+/** RevOps login artwork — `public/revops-login-bg.png` (467KB compressed). */
+const loginBg = `${import.meta.env.BASE_URL}revops-login-bg.png`;
 
 const loginShellStyle: React.CSSProperties = {
   minHeight: "100vh",
   display: "grid",
   placeItems: "center",
   padding: 24,
-  backgroundColor: "#e8e8ea",
-  backgroundImage: `linear-gradient(180deg, rgba(250,250,252,0.42) 0%, rgba(245,245,248,0.25) 100%), url(${loginBg})`,
+  backgroundColor: "#f7f7f8",
+  backgroundImage: `url(${loginBg})`,
   backgroundSize: "cover",
-  backgroundPosition: "center",
+  // Artwork leaves a login-safe zone slightly right of center (between hero copy and tagger pills).
+  backgroundPosition: "52% center",
   backgroundRepeat: "no-repeat",
 };
 
