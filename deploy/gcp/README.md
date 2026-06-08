@@ -1,6 +1,6 @@
 # GCP deployment (Cloud Run + Cloud SQL + GCS)
 
-Optimal production layout for tgddata on Google Cloud.
+**Primary production path** for tgddata on Google Cloud. Overview and legacy VM notes: [`DEPLOYMENT_DOC.md`](../DEPLOYMENT_DOC.md).
 
 ## Architecture
 
@@ -58,14 +58,24 @@ Generated files (gitignored): `deploy/gcp/.generated/`
 
 Generated copies: `deploy/gcp/.generated/api-url.txt`, `web-url.txt`
 
-## Custom domain
+## Custom domain (`trops.taggd.in` — single hostname)
 
-Point `taggd.aparatus.in` to:
+**Client DNS only:**
 
-- **API:** Cloud Run domain mapping → `tgddata-api`
-- **UI:** Cloud CDN → `gs://taggd-tgddata-prod-web` (recommended over raw storage URL)
+| Type | Host | Value |
+|------|------|--------|
+| A | `trops` | `8.232.241.48` |
 
-Set `CORS_ALLOW_ORIGINS=https://taggd.aparatus.in` in `config.defaults.env`.
+No `api.taggd.in`. Same host serves UI (GCS) and API (Cloud Run) via path rules on the load balancer.
+
+| Script | Purpose |
+|--------|---------|
+| `08-setup-trops-lb.sh` | HTTPS LB + CDN backend bucket + Cloud Run NEG + managed SSL |
+| `trops-url-map.yaml` | Path routing (API prefixes → Cloud Run; default → GCS) |
+
+Full guide: [`../../docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md`](../../docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md)
+
+After DNS + cert: `VITE_API_BASE_URL=https://trops.taggd.in`, `GCS_WEB_BASE=/`, `VITE_STATIC_HOSTING=0`, redeploy `06` + `07`.
 
 ## SQLite data migration (via GCE VM — recommended)
 

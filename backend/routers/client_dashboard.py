@@ -5,7 +5,7 @@ import copy
 import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -20,6 +20,7 @@ from backend.auth.profile import (
 )
 from backend.auth.scope import apply_project_scope, assert_client_access
 from backend.auth.verticals import require_vertical
+from backend.core.sla_period import bucket_sla_rag
 from backend.db.database import (
     Client,
     ClientDashboardConfig,
@@ -100,6 +101,8 @@ DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
     "finance_show_cm": False,
     "project_vertical_filter": [],
     "project_region_filter": [],
+    "sla_reporting_month_from": None,
+    "sla_reporting_month_to": None,
 }
 
 
@@ -168,6 +171,8 @@ def _deep_merge_config(stored: Optional[dict[str, Any]]) -> dict[str, Any]:
         "finance_show_cm",
         "project_vertical_filter",
         "project_region_filter",
+        "sla_reporting_month_from",
+        "sla_reporting_month_to",
     ):
         if k in stored:
             out[k] = stored[k]
@@ -317,7 +322,90 @@ def _finance_snapshot(db: Session, project_ids: list[int]) -> dict[str, Any]:
     }
 
 
-def _sla_metric_rows(db: Session, user: User, project_ids: list[int]) -> list[dict[str, Any]]:
+def _normalize_month_key(raw: Optional[str]) -> Optional[str]:
+    """Normalize to YYYY-MM for range comparisons."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s.upper() == "N/A":
+        return None
+    if len(s) >= 7 and s[4] == "-":
+        return s[:7]
+    return None
+
+
+def _perf_month_key(p: SLAPerformance) -> Optional[str]:
+    if p.period_start is not None:
+        return p.period_start.strftime("%Y-%m")
+    return _normalize_month_key(p.reporting_month)
+
+
+def _perf_in_month_range(
+    p: SLAPerformance,
+    month_from: Optional[str],
+    month_to: Optional[str],
+) -> bool:
+    key = _perf_month_key(p)
+    if key is None:
+        return month_from is None and month_to is None
+    mf = _normalize_month_key(month_from)
+    mt = _normalize_month_key(month_to)
+    if mf and key < mf:
+        return False
+    if mt and key > mt:
+        return False
+    return True
+
+
+def _pick_latest_performance(
+    perfs: list[SLAPerformance],
+    month_from: Optional[str] = None,
+    month_to: Optional[str] = None,
+) -> Optional[SLAPerformance]:
+    candidates = [p for p in perfs if _perf_in_month_range(p, month_from, month_to)]
+    if not candidates:
+        return None
+    best: Optional[SLAPerformance] = None
+    for p in candidates:
+        if best is None:
+            best = p
+            continue
+        if p.period_start is not None and best.period_start is not None and p.period_start > best.period_start:
+            best = p
+        elif p.period_start is not None and best.period_start is None:
+            best = p
+        elif p.period_start is None and best.period_start is None and p.id > best.id:
+            best = p
+    return best
+
+
+def _sla_reporting_month_options(db: Session, def_ids: list[int]) -> list[str]:
+    if not def_ids:
+        return []
+    months: set[str] = set()
+    rows = (
+        db.query(SLAPerformance.period_start, SLAPerformance.reporting_month)
+        .filter(SLAPerformance.definition_id.in_(def_ids))
+        .all()
+    )
+    for period_start, reporting_month in rows:
+        if period_start is not None:
+            months.add(period_start.strftime("%Y-%m"))
+            continue
+        mk = _normalize_month_key(reporting_month)
+        if mk:
+            months.add(mk)
+    return sorted(months, reverse=True)
+
+
+def _sla_metric_rows(
+    db: Session,
+    user: User,
+    project_ids: list[int],
+    *,
+    reporting_month_from: Optional[str] = None,
+    reporting_month_to: Optional[str] = None,
+) -> list[dict[str, Any]]:
     if not project_ids:
         return []
 
@@ -334,22 +422,19 @@ def _sla_metric_rows(db: Session, user: User, project_ids: list[int]) -> list[di
         db.query(SLAPerformance).filter(SLAPerformance.definition_id.in_(def_ids)).all()
         if def_ids else []
     )
-    perf_map: dict[int, SLAPerformance] = {}
+    perfs_by_def: dict[int, list[SLAPerformance]] = {}
     for p in all_perfs:
-        cur = perf_map.get(p.definition_id)
-        if cur is None:
-            perf_map[p.definition_id] = p
-        elif p.period_start is not None and cur.period_start is not None and p.period_start > cur.period_start:
-            perf_map[p.definition_id] = p
-        elif p.period_start is not None and cur.period_start is None:
-            perf_map[p.definition_id] = p
-        elif p.period_start is None and cur.period_start is None and p.id > cur.id:
-            perf_map[p.definition_id] = p
+        perfs_by_def.setdefault(p.definition_id, []).append(p)
 
     rows = []
     for m in metrics:
-        latest = perf_map.get(m.id)
+        latest = _pick_latest_performance(
+            perfs_by_def.get(m.id, []),
+            reporting_month_from,
+            reporting_month_to,
+        )
         project = m.project
+        rag = latest.rag_status if latest else None
         rows.append({
             "id": m.id,
             "project_id": m.project_id,
@@ -361,7 +446,8 @@ def _sla_metric_rows(db: Session, user: User, project_ids: list[int]) -> list[di
             "metric_group": m.metric_group,
             "target": m.target_threshold,
             "latest_score": latest.score if latest else "N/A",
-            "status": latest.rag_status if latest else "N/A",
+            "status": rag if latest else "N/A",
+            "status_bucket": bucket_sla_rag(rag),
             "reporting_month": str(latest.reporting_month) if latest and latest.reporting_month else "N/A",
         })
     rows.sort(key=lambda r: (r["account_name"], r["metric_label"]))
@@ -379,6 +465,8 @@ async def get_block_catalog(_user: User = Depends(get_current_user)):
 @router.get("/summary")
 async def client_dashboard_summary(
     client_id: Optional[int] = None,
+    reporting_month_from: Optional[str] = Query(None, description="SLA reporting month from (YYYY-MM)"),
+    reporting_month_to: Optional[str] = Query(None, description="SLA reporting month to (YYYY-MM)"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -431,11 +519,39 @@ async def client_dashboard_summary(
 
     finance_full = _finance_snapshot(db, project_ids)
 
-    sla_metrics = _sla_metric_rows(db, user, project_ids)
+    month_from = (
+        _normalize_month_key(reporting_month_from)
+        if reporting_month_from and str(reporting_month_from).strip()
+        else _normalize_month_key(merged.get("sla_reporting_month_from"))
+    )
+    month_to = (
+        _normalize_month_key(reporting_month_to)
+        if reporting_month_to and str(reporting_month_to).strip()
+        else _normalize_month_key(merged.get("sla_reporting_month_to"))
+    )
+
+    sla_metrics = _sla_metric_rows(
+        db,
+        user,
+        project_ids,
+        reporting_month_from=month_from,
+        reporting_month_to=month_to,
+    )
     if not merged.get("sla_show_internal_kpis"):
         def _is_contractual(row: dict[str, Any]) -> bool:
             return "contract" in (row.get("metric_nature") or "").lower()
         sla_metrics = [r for r in sla_metrics if _is_contractual(r) or not (r.get("metric_nature") or "").strip()]
+
+    def_ids_for_months = [
+        r[0]
+        for r in apply_project_scope(
+            db.query(MetricDefinition.id).filter(MetricDefinition.project_id.in_(project_ids)),
+            user,
+            db,
+            MetricDefinition,
+        ).all()
+    ]
+    reporting_month_options = _sla_reporting_month_options(db, def_ids_for_months)
 
     # Finance field gating (security — not display)
     finance_out = dict(finance_full)
@@ -497,6 +613,9 @@ async def client_dashboard_summary(
         "finance": finance_out,
         "req_by_project": req_by_project,
         "bu_tabs": bu_tabs,
+        "reporting_month_options": reporting_month_options,
+        "active_reporting_month_from": month_from,
+        "active_reporting_month_to": month_to,
         "is_client_user": is_client_user,
         "can_edit_config": _editor_roles_ok(user, db) and not is_client_user,
     }

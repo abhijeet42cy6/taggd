@@ -493,13 +493,22 @@ export function staffVerticalNavEnforced(storedRole: string | undefined, effecti
   );
 }
 
+/** Leadership modules are opt-in for non–platform-admin roles (not legacy “null = full access”). */
+const LEADERSHIP_VERTICAL_KEYS = new Set(["executive_dashboard", "ceo_view"]);
+
 function staffVerticalPathAllowed(pathname: string, verticalAccess: string[] | null | undefined): boolean {
   const vk = verticalKeyForStaffPath(pathname);
   if (vk == null) return true;
+  const vkLower = vk.toLowerCase();
+  if (LEADERSHIP_VERTICAL_KEYS.has(vkLower)) {
+    if (verticalAccess == null || verticalAccess.length === 0) return false;
+    const set = new Set(verticalAccess.map((x) => String(x).toLowerCase()));
+    return set.has(vkLower);
+  }
   if (verticalAccess == null) return true;
   if (verticalAccess.length === 0) return false;
   const set = new Set(verticalAccess.map((x) => String(x).toLowerCase()));
-  return set.has(vk.toLowerCase());
+  return set.has(vkLower);
 }
 
 /** First route the user may open (sidebar + deep links); `/profile` is the final fallback. */

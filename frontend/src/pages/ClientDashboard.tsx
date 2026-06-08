@@ -36,6 +36,7 @@ import {
   type LayoutBlock,
 } from "@/lib/api";
 import { cn, formatLargeCurrency, formatPercent } from "@/lib/utils";
+import { slaRagDisplayLabel, slaRagUiBucket } from "@/lib/sla-rag";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
 import "@/styles/client-dashboard.css";
@@ -63,16 +64,10 @@ const DEFAULT_LAYOUT: LayoutBlock[] = [
 
 type SlaRow = ClientDashboardSummary["sla_metrics"][number];
 
-function slaStatusLabel(raw: unknown): string {
-  const s = String(raw ?? "").trim().toLowerCase();
-  if (s === "met") return "Met";
-  if (s.includes("not met")) return "Breached";
-  return "Not Reported";
-}
-
-function slaBadgeColor(label: string): "emerald" | "rose" | "slate" {
-  if (label === "Met") return "emerald";
-  if (label === "Breached") return "rose";
+function slaBadgeColor(raw: unknown): "emerald" | "rose" | "slate" {
+  const b = slaRagUiBucket(raw);
+  if (b === "met") return "emerald";
+  if (b === "breached") return "rose";
   return "slate";
 }
 
@@ -95,9 +90,9 @@ type TabKpis = {
 function computeTabKpis(metrics: SlaRow[]): TabKpis {
   let met = 0, notMet = 0, nr = 0;
   for (const m of metrics) {
-    const label = slaStatusLabel(m.status);
-    if (label === "Met") met++;
-    else if (label === "Breached") notMet++;
+    const b = slaRagUiBucket(m.status);
+    if (b === "met") met++;
+    else if (b === "breached") notMet++;
     else nr++;
   }
   const denom = met + notMet;
@@ -116,7 +111,24 @@ function deepCloneLayout(layout: LayoutBlock[]): LayoutBlock[] {
 
 // ─── Block sub-components ───────────────────────────────────────────────────────
 
-function SlaKpiStrip({ kpis, variant }: { kpis: TabKpis; variant: LayoutBlock["variant"] }) {
+function formatReportingRange(from: string, to: string): string {
+  const f = from.trim();
+  const t = to.trim();
+  if (f && t) return f === t ? f : `${f} – ${t}`;
+  if (f) return `from ${f}`;
+  if (t) return `through ${t}`;
+  return "Latest period";
+}
+
+function SlaKpiStrip({
+  kpis,
+  variant,
+  periodLabel,
+}: {
+  kpis: TabKpis;
+  variant: LayoutBlock["variant"];
+  periodLabel: string;
+}) {
   const health = kpis.portfolio_health;
   const label = `${kpis.met_count} met · ${kpis.not_met_count} not met`;
   if (variant === "dense") {
@@ -156,7 +168,7 @@ function SlaKpiStrip({ kpis, variant }: { kpis: TabKpis; variant: LayoutBlock["v
       <Card decoration="top" decorationColor="amber" className="p-3">
         <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">KPIs tracked</Text>
         <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.total_metrics}</Metric>
-        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">Latest reported period</Text>
+        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">{periodLabel}</Text>
       </Card>
     </Grid>
   );
@@ -215,19 +227,21 @@ function SlaTable({ metrics }: { metrics: SlaRow[] }) {
           </TableHead>
           <TableBody>
             {metrics.map((row) => {
-              const label = slaStatusLabel(row.status);
+              const label = slaRagDisplayLabel(row.status);
               return (
                 <TableRow key={row.id}>
                   <TableCell className="whitespace-nowrap text-xs font-medium text-orange-600">{row.account_name}</TableCell>
                   <TableCell className="text-xs text-tremor-content-emphasis">{row.metric_label}</TableCell>
                   <TableCell className="text-[10px] text-tremor-content-subtle">{kpiNatureLabel(row.metric_nature)}</TableCell>
                   <TableCell className="text-xs tabular-nums">{row.target ?? "—"}</TableCell>
-                  <TableCell className="text-xs tabular-nums">{row.latest_score ?? "—"}</TableCell>
+                  <TableCell className="text-xs tabular-nums">
+                    {row.latest_score != null && String(row.latest_score) !== "N/A" ? String(row.latest_score) : "—"}
+                  </TableCell>
                   <TableCell className="text-[10px] tabular-nums text-tremor-content-subtle">
-                    {row.reporting_month && row.reporting_month !== "N/A" ? String(row.reporting_month).slice(0, 10) : "—"}
+                    {row.reporting_month && row.reporting_month !== "N/A" ? String(row.reporting_month).slice(0, 7) : "—"}
                   </TableCell>
                   <TableCell>
-                    <Badge color={slaBadgeColor(label)} size="xs">{label}</Badge>
+                    <Badge color={slaBadgeColor(row.status)} size="xs">{label}</Badge>
                   </TableCell>
                 </TableRow>
               );
@@ -339,6 +353,7 @@ function BlockRenderer({
   tabReqTotal,
   finance,
   isClientUser,
+  slaPeriodLabel,
 }: {
   block: LayoutBlock;
   tabKpis: TabKpis;
@@ -347,10 +362,11 @@ function BlockRenderer({
   tabReqTotal: number;
   finance: Record<string, number>;
   isClientUser: boolean;
+  slaPeriodLabel: string;
 }) {
   switch (block.type) {
     case "sla_kpi_strip":
-      return <SlaKpiStrip kpis={tabKpis} variant={block.variant} />;
+      return <SlaKpiStrip kpis={tabKpis} variant={block.variant} periodLabel={slaPeriodLabel} />;
     case "sla_summary_cards":
       return <SlaSummaryCards kpis={tabKpis} />;
     case "sla_table":
@@ -452,17 +468,29 @@ export function ClientDashboard() {
   const [draftSlaInternal, setDraftSlaInternal] = useState(false);
   const [draftVerticals, setDraftVerticals] = useState<string[]>([]);
   const [draftRegions, setDraftRegions] = useState<string[]>([]);
+  const [draftReportingFrom, setDraftReportingFrom] = useState("");
+  const [draftReportingTo, setDraftReportingTo] = useState("");
+  const [reportingMonthFrom, setReportingMonthFrom] = useState("");
+  const [reportingMonthTo, setReportingMonthTo] = useState("");
   const [saving, setSaving] = useState(false);
 
   // ── Load summary ──────────────────────────────────────────────────────────────
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { reporting_month_from?: string; reporting_month_to?: string }) => {
     setLoading(true);
     setError(null);
     try {
-      const res =
-        scopeClientId === "all"
-          ? await queries.clientDashboardSummary()
-          : await queries.clientDashboardSummary({ client_id: scopeClientId });
+      invalidateCache("client-dashboard/summary");
+      const params: {
+        client_id?: number;
+        reporting_month_from?: string;
+        reporting_month_to?: string;
+      } = {};
+      if (scopeClientId !== "all") params.client_id = scopeClientId;
+      const from = (opts?.reporting_month_from ?? reportingMonthFrom).trim();
+      const to = (opts?.reporting_month_to ?? reportingMonthTo).trim();
+      if (from) params.reporting_month_from = from;
+      if (to) params.reporting_month_to = to;
+      const res = await queries.clientDashboardSummary(params);
       setData(res);
       // Reset to "all" tab whenever data reloads
       setActiveTabKey("all");
@@ -472,9 +500,25 @@ export function ClientDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [scopeClientId]);
+  }, [scopeClientId, reportingMonthFrom, reportingMonthTo]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    setReportingMonthFrom("");
+    setReportingMonthTo("");
+  }, [scopeClientId]);
+
+  useEffect(() => {
+    if (!data) return;
+    if (reportingMonthFrom || reportingMonthTo) return;
+    const from = data.config?.sla_reporting_month_from ?? "";
+    const to = data.config?.sla_reporting_month_to ?? "";
+    if (from || to) {
+      setReportingMonthFrom(String(from).slice(0, 7));
+      setReportingMonthTo(String(to).slice(0, 7));
+    }
+  }, [data, reportingMonthFrom, reportingMonthTo]);
 
   // Load block catalog once
   useEffect(() => {
@@ -509,6 +553,25 @@ export function ClientDashboard() {
     [data, tabPidSet],
   );
   const tabKpis = useMemo(() => computeTabKpis(tabMetrics), [tabMetrics]);
+
+  const slaPeriodLabel = useMemo(() => {
+    if (reportingMonthFrom.trim() || reportingMonthTo.trim()) {
+      return formatReportingRange(reportingMonthFrom, reportingMonthTo);
+    }
+    if (data?.active_reporting_month_from || data?.active_reporting_month_to) {
+      return formatReportingRange(
+        data.active_reporting_month_from ?? "",
+        data.active_reporting_month_to ?? "",
+      );
+    }
+    const months = tabMetrics
+      .map((m) => (m.reporting_month && m.reporting_month !== "N/A" ? String(m.reporting_month).slice(0, 7) : ""))
+      .filter(Boolean)
+      .sort();
+    if (months.length === 0) return "Latest reported period";
+    return months[months.length - 1];
+  }, [reportingMonthFrom, reportingMonthTo, data, tabMetrics]);
+
   const tabReqTotal = useMemo(() => {
     let total = 0;
     const rq = data?.req_by_project ?? {};
@@ -541,6 +604,8 @@ export function ClientDashboard() {
     setDraftSlaInternal(Boolean(data.config?.sla_show_internal_kpis));
     setDraftVerticals(data.config?.project_vertical_filter ?? []);
     setDraftRegions(data.config?.project_region_filter ?? []);
+    setDraftReportingFrom(data.config?.sla_reporting_month_from ? String(data.config.sla_reporting_month_from).slice(0, 7) : "");
+    setDraftReportingTo(data.config?.sla_reporting_month_to ? String(data.config.sla_reporting_month_to).slice(0, 7) : "");
     setBuilderOpen(true);
   };
 
@@ -609,6 +674,8 @@ export function ClientDashboard() {
         sla_show_internal_kpis: draftSlaInternal,
         project_vertical_filter: draftVerticals,
         project_region_filter: draftRegions,
+        sla_reporting_month_from: draftReportingFrom.trim() || null,
+        sla_reporting_month_to: draftReportingTo.trim() || null,
         // Carry forward finance flags from current config
         finance_show_revenue: data?.config?.finance_show_revenue ?? true,
         finance_show_collections: data?.config?.finance_show_collections ?? true,
@@ -618,7 +685,12 @@ export function ClientDashboard() {
       await api.put("/client-dashboard/config", { client_id: saveClientId, config });
       invalidateCache("client-dashboard");
       setBuilderOpen(false);
-      await load();
+      setReportingMonthFrom(draftReportingFrom);
+      setReportingMonthTo(draftReportingTo);
+      await load({
+        reporting_month_from: draftReportingFrom,
+        reporting_month_to: draftReportingTo,
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -714,6 +786,45 @@ export function ClientDashboard() {
             </div>
           ) : null}
 
+          <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
+            <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">SLA from</Text>
+            <input
+              type="month"
+              className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
+              value={reportingMonthFrom}
+              onChange={(e) => setReportingMonthFrom(e.target.value)}
+              list="client-dash-month-options"
+            />
+          </div>
+          <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
+            <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">SLA through</Text>
+            <input
+              type="month"
+              className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
+              value={reportingMonthTo}
+              onChange={(e) => setReportingMonthTo(e.target.value)}
+              list="client-dash-month-options"
+            />
+          </div>
+          {(reportingMonthFrom || reportingMonthTo) ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              onClick={() => {
+                setReportingMonthFrom("");
+                setReportingMonthTo("");
+              }}
+            >
+              Clear dates
+            </Button>
+          ) : null}
+          <datalist id="client-dash-month-options">
+            {(data?.reporting_month_options ?? []).map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+
           <Button type="button" size="xs" variant="secondary" onClick={() => void load()}>
             <RefreshCw size={12} className="mr-1" /> Refresh
           </Button>
@@ -799,6 +910,7 @@ export function ClientDashboard() {
               tabReqTotal={tabReqTotal}
               finance={data!.finance}
               isClientUser={data!.is_client_user}
+              slaPeriodLabel={slaPeriodLabel}
             />
           ))}
         </div>
@@ -922,6 +1034,53 @@ export function ClientDashboard() {
               >
                 {draftSlaInternal ? "✓ " : ""}Show internal KPIs (not only contractual)
               </button>
+            </div>
+
+            {/* ── Default SLA reporting window ── */}
+            <div className="cd-editor-section">
+              <Text className="cd-builder-label">SLA reporting window (client default)</Text>
+              <Text className="mb-2 text-[10px] text-tremor-content-subtle">
+                Optional default month range shown when this client opens the dashboard. Users can override in the toolbar.
+              </Text>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <Text className="mb-1 text-[10px] text-tremor-content-subtle">From</Text>
+                  <input
+                    type="month"
+                    className="rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono"
+                    value={draftReportingFrom}
+                    onChange={(e) => setDraftReportingFrom(e.target.value)}
+                    list="client-dash-builder-month-options"
+                  />
+                </div>
+                <div>
+                  <Text className="mb-1 text-[10px] text-tremor-content-subtle">Through</Text>
+                  <input
+                    type="month"
+                    className="rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono"
+                    value={draftReportingTo}
+                    onChange={(e) => setDraftReportingTo(e.target.value)}
+                    list="client-dash-builder-month-options"
+                  />
+                </div>
+                {(draftReportingFrom || draftReportingTo) ? (
+                  <button
+                    type="button"
+                    className="rounded-tremor-default border border-tremor-border bg-white px-2.5 py-1.5 text-xs text-tremor-content hover:border-orange-300"
+                    onClick={() => {
+                      setDraftReportingFrom("");
+                      setDraftReportingTo("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
+              <datalist id="client-dash-builder-month-options">
+                {(data?.reporting_month_options ?? []).map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
             </div>
 
             {/* ── Vertical filter ── */}

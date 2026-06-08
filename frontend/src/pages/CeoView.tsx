@@ -41,8 +41,10 @@ import {
   ceoRevPerWl1Inr,
   fyRowsTaggdJoinerSheetCohort,
   sumNonTaggdJoiners,
+  type DashboardFilters as DF,
 } from "@/lib/dashboard-aggregates";
 import { formatLargeCurrency, formatPercent } from "@/lib/utils";
+import { DashboardFiltersTremor } from "@/components/tremor-dashboard/DashboardFiltersTremor";
 import { ExecSectionTitle } from "@/components/tremor-dashboard/ExecSectionTitle";
 import { ExecutiveMetricHeroCard } from "@/components/tremor-dashboard/ExecutiveMetricHeroCard";
 import {
@@ -108,6 +110,7 @@ export const CeoView = () => {
   const [reqKpis, setReqKpis] = useState<RequisitionKpis | null>(null);
   const [drilldown, setDrilldown] = useState<Array<{ name: string; revenue: number; count: number }>>([]);
   const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState<DF>(DEFAULT_DASHBOARD_FILTERS);
   const [selectedFyStart, setSelectedFyStart] = useState<number>(2025);
   const [accountIntelSearch, setAccountIntelSearch] = useState("");
   const [accountIntelVertical, setAccountIntelVertical] = useState("all");
@@ -169,8 +172,8 @@ export const CeoView = () => {
 
   // ── Filtered + FY rows ───────────────────────────────────────────────────
   const allRows = useMemo(
-    () => filterFinanceRows(financeRows, projects, DEFAULT_DASHBOARD_FILTERS),
-    [financeRows, projects],
+    () => filterFinanceRows(financeRows, projects, filters),
+    [financeRows, projects, filters],
   );
 
   const fyRows = useMemo(
@@ -378,52 +381,33 @@ export const CeoView = () => {
         <div className="exec-dash-tremor__hero-main min-w-0">
           <Title className="exec-dash-tremor__title text-3xl font-bold tracking-tight">CEO&apos;s View</Title>
           <Text className="mt-1 block text-sm font-medium text-tremor-content-emphasis">
-            Strategic performance dashboard · {stats?.total_projects ?? "—"} clients · {fyShortLabel(selectedFyStart)}
+            Strategic performance dashboard
           </Text>
-          <div className="exec-dash-tremor__meta-row mt-3">
-            <span className="exec-dash-tremor__meta-pill">
-              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--clients" aria-hidden />
-              <span>{stats?.total_projects ?? "—"} clients</span>
-            </span>
-            <span className="exec-dash-tremor__meta-pill">
-              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--fy" aria-hidden />
-              <span>{fyShortLabel(selectedFyStart)}</span>
-            </span>
-          </div>
         </div>
-        <Flex flexDirection="col" alignItems="stretch" justifyContent="start" className="shrink-0 gap-3 sm:flex-row sm:items-end">
-          <Button
-            type="button"
-            variant="secondary"
-            color="orange"
-            size="sm"
-            onClick={() => setDeckEditorOpen(true)}
-            title="Edit board slide deck (JSON)"
-            className="inline-flex items-center gap-2"
-          >
-            <Pencil size={14} aria-hidden />
-            Edit deck
-          </Button>
-          <div className="min-w-[10rem]">
-            <Text className="mb-1 font-semibold text-tremor-content-emphasis">Fiscal year</Text>
-            {fyYears.length === 0 ? (
-              <Text className="text-tremor-content-subtle">No fiscal years in ledger</Text>
-            ) : (
-              <Select
-                value={String(fyYears.includes(selectedFyStart) ? selectedFyStart : fyYears[0])}
-                onValueChange={(v) => setSelectedFyStart(Number(v))}
-                disabled={loading}
-              >
-                {fyYears.map((y) => (
-                  <SelectItem key={y} value={String(y)}>
-                    {fyShortLabel(y)}
-                  </SelectItem>
-                ))}
-              </Select>
-            )}
-          </div>
-        </Flex>
+        <Button
+          type="button"
+          variant="secondary"
+          color="orange"
+          size="sm"
+          onClick={() => setDeckEditorOpen(true)}
+          title="Edit board slide deck (JSON)"
+          className="inline-flex shrink-0 items-center gap-2 self-start lg:self-center"
+        >
+          <Pencil size={14} aria-hidden />
+          Edit deck
+        </Button>
       </div>
+
+      <DashboardFiltersTremor
+        value={filters}
+        onChange={setFilters}
+        projects={projects}
+        financeRows={financeRows}
+        fyYears={fyYears}
+        selectedFyStart={selectedFyStart}
+        onFyChange={setSelectedFyStart}
+        fySelectDisabled={loading}
+      />
 
       <ExecSectionTitle>Financial performance — {fyShortLabel(selectedFyStart)}</ExecSectionTitle>
 

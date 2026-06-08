@@ -264,17 +264,20 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
       setTab(3);
       return;
     }
-    let extra: Record<string, unknown>;
-    try {
-      const j = JSON.parse(form.additional_json);
-      if (j === null || typeof j !== "object" || Array.isArray(j)) {
-        throw new Error("Additional attributes must be a JSON object.");
+    let extra: Record<string, unknown> = {};
+    const additionalJsonRaw = form.additional_json.trim();
+    if (additionalJsonRaw !== "") {
+      try {
+        const j = JSON.parse(additionalJsonRaw);
+        if (j === null || typeof j !== "object" || Array.isArray(j)) {
+          throw new Error("Additional attributes must be a JSON object.");
+        }
+        extra = j as Record<string, unknown>;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Invalid JSON");
+        setTab(3);
+        return;
       }
-      extra = j as Record<string, unknown>;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Invalid JSON");
-      setTab(3);
-      return;
     }
 
     const body: RecordCreate = {
@@ -521,8 +524,9 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
     </div>
   );
 
+  // modal={false}: dropdown search portals to document.body; Radix focus trap otherwise prevents typing in search.
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+    <Sheet modal={false} open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
         side="right"
         showCloseButton={false}
@@ -734,7 +738,7 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
                         </div>
                         <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
                           <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
-                            Additional attributes (JSON)
+                            Additional attributes (JSON, optional)
                           </div>
                           <textarea
                             className="ncp-prop-input"

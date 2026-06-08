@@ -334,6 +334,23 @@ function RoleHome() {
   if (isRecruiterUser(user)) {
     return <Navigate to="/tasks" replace />;
   }
+  if (
+    user &&
+    !navAllowedForRole("/", user.role, {
+      effectiveRole: user.effectiveRole,
+      verticalAccess: user.verticalAccess,
+    })
+  ) {
+    return (
+      <Navigate
+        to={firstAllowedStaffNavPath(user.role, {
+          effectiveRole: user.effectiveRole,
+          verticalAccess: user.verticalAccess,
+        })}
+        replace
+      />
+    );
+  }
   return <Dashboard />;
 }
 

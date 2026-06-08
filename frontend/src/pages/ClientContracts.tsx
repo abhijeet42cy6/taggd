@@ -380,6 +380,10 @@ type ContractDetailSheetProps = {
   /** After MSA/contract file upload, parent refreshes `contracts` / `row`. */
   onMsaUploadComplete: (row: ProjectContractRow) => void;
   goClient: (clientId: number | null) => void;
+  /** When incremented, sheet enters edit mode (e.g. section header Edit). */
+  editRequest?: number;
+  /** Open drawer directly in edit mode when row/id changes. */
+  openInEditMode?: boolean;
 };
 
 // Pretty-print ISO date string → "01 Mar 2024"
@@ -572,6 +576,8 @@ function ContractDetailSheet({
   onSave,
   onMsaUploadComplete,
   goClient,
+  editRequest = 0,
+  openInEditMode = false,
 }: ContractDetailSheetProps) {
   const [editMode, setEditMode] = useState(false);
   const [tab, setTab] = useState(0);
@@ -584,10 +590,14 @@ function ContractDetailSheet({
   useEffect(() => {
     if (open && row) {
       setForm(contractRowToForm(row));
-      setEditMode(false);
+      setEditMode(openInEditMode);
       setTab(0);
     }
-  }, [open, row?.id]);
+  }, [open, row?.id, openInEditMode]);
+
+  useEffect(() => {
+    if (editRequest > 0 && open && row) setEditMode(true);
+  }, [editRequest, open, row?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -617,6 +627,10 @@ function ContractDetailSheet({
   const matchedHeadUser = useMemo(
     () => matchHeadUser(project?.project_head_user_id, projHead, platformUsers),
     [project, projHead, platformUsers],
+  );
+  const msaFilenames = useMemo(
+    () => sortMsaFilenamesNewestFirst(parseSowMsaFilenames(row?.sow_msa_reference)),
+    [row?.sow_msa_reference],
   );
 
   if (!row) return null;
@@ -714,7 +728,6 @@ function ContractDetailSheet({
     </div>
   );
 
-  const msaFilenames = useMemo(() => sortMsaFilenamesNewestFirst(parseSowMsaFilenames(row.sow_msa_reference)), [row.sow_msa_reference]);
   const msaProjectId = row.project_id;
 
   function msaErrFromCatch(e: unknown, fallback: string): string {
@@ -1357,6 +1370,8 @@ export function ClientContracts() {
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [activeRow, setActiveRow] = useState<EnrichedContract | null>(null);
+  const [detailOpenInEditMode, setDetailOpenInEditMode] = useState(false);
+  const [detailEditRequest, setDetailEditRequest] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -1495,12 +1510,33 @@ export function ClientContracts() {
     return rows;
   }, [enriched]);
 
-  function openDetail(row: EnrichedContract) {
+  function openDetail(row: EnrichedContract, openInEditMode = false) {
     setActiveRow(row);
+    setDetailOpenInEditMode(openInEditMode);
     setEditMode(false);
     setForm(contractRowToForm(row));
     setDetailOpen(true);
   }
+
+  function editSelectedContract() {
+    if (!activeRow) return;
+    setDetailOpenInEditMode(true);
+    setDetailEditRequest((n) => n + 1);
+    setDetailOpen(true);
+  }
+
+  const sectionHeaderBtnStyle: React.CSSProperties = {
+    padding: "5px 12px",
+    background: "var(--surface-raised)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-base)",
+    fontFamily: "var(--font)",
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--text-muted)",
+    cursor: "pointer",
+    transition: "all var(--t-base)",
+  };
 
   function openCreateDialog() {
     setCreateForm(() => {
@@ -1772,7 +1808,26 @@ export function ClientContracts() {
       />
 
       {tab === "Portfolio" && (
-        <PlatformSection title="All contracts" action="Refresh" onAction={refresh}>
+        <PlatformSection
+          title="All contracts"
+          action="Refresh"
+          onAction={refresh}
+          headerRight={
+            <button
+              type="button"
+              disabled={!activeRow}
+              title={activeRow ? `Edit contract #${activeRow.id}` : "Select a contract row first"}
+              onClick={editSelectedContract}
+              style={{
+                ...sectionHeaderBtnStyle,
+                opacity: activeRow ? 1 : 0.45,
+                cursor: activeRow ? "pointer" : "not-allowed",
+              }}
+            >
+              Edit
+            </button>
+          }
+        >
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
             <input
               className="platform-search"
@@ -1848,7 +1903,10 @@ export function ClientContracts() {
                     return (
                       <tr
                         key={c.id}
-                        style={{ cursor: "pointer" }}
+                        style={{
+                          cursor: "pointer",
+                          background: activeRow?.id === c.id ? "rgba(255, 107, 53, 0.06)" : undefined,
+                        }}
                         onClick={() => openDetail(c)}
                       >
                         <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)" }}>{c.id}</td>
@@ -2083,6 +2141,7 @@ export function ClientContracts() {
         open={detailOpen}
         onOpenChange={(o) => {
           setDetailOpen(o);
+          if (!o) setDetailOpenInEditMode(false);
         }}
         row={activeRow}
         contracts={contracts}
@@ -2109,6 +2168,8 @@ export function ClientContracts() {
           });
         }}
         goClient={goClient}
+        editRequest={detailEditRequest}
+        openInEditMode={detailOpenInEditMode}
       />
 
       <NewContractSheet

@@ -184,6 +184,15 @@ function forecastMonthKey(r: RevenueForecastWeeklyRow): string {
   return src.slice(0, 7);
 }
 
+/** Rows whose ISO week start matches the governance Monday (normalized). */
+function forecastRowsForGovernanceWeek(rows: RevenueForecastWeeklyRow[], weekMon: string): RevenueForecastWeeklyRow[] {
+  const target = mondayOfYmd(weekMon);
+  return rows.filter((r) => {
+    if (!r.week_start_date) return false;
+    return mondayOfYmd(r.week_start_date) === target;
+  });
+}
+
 /** Indian FY starts in April — return that FY’s starting calendar year (e.g. Mar 2027 → 2026). */
 function indianFyStartYearFromYmd(ymd: string): number {
   const d = parseYmd(ymd);
@@ -345,6 +354,12 @@ export function RevenueTrackers() {
   const scopeProjPortalRef = useRef<HTMLDivElement>(null);
 
   const governanceWeekMon = mondayOfYmd(governanceWeek);
+
+  /** Revenue forecast tab: scoped to the selected governance week (Mon). */
+  const forecastForWeek = useMemo(
+    () => forecastRowsForGovernanceWeek(forecast, governanceWeekMon),
+    [forecast, governanceWeekMon],
+  );
 
   const reload = useCallback(async () => {
     setErr(null);
@@ -580,7 +595,7 @@ export function RevenueTrackers() {
       achN: number;
     };
     const map = new Map<string, Agg>();
-    for (const r of forecast) {
+    for (const r of forecastForWeek) {
       const k = forecastMonthKey(r);
       if (k === "unknown") continue;
       if (!map.has(k))
@@ -612,7 +627,7 @@ export function RevenueTrackers() {
         achPct: a.achN ? a.achSum / a.achN : null,
       };
     });
-  }, [forecast]);
+  }, [forecastForWeek]);
 
   const forecastTotals = useMemo(() => {
     let rev = 0,
@@ -623,7 +638,7 @@ export function RevenueTrackers() {
       openFee = 0;
     let achSum = 0,
       achN = 0;
-    for (const r of forecast) {
+    for (const r of forecastForWeek) {
       rev += r.revenue_forecast_inr || 0;
       mmf += r.mmf_inr || 0;
       openReq += r.open_req || 0;
@@ -644,7 +659,7 @@ export function RevenueTrackers() {
       openFeeL: openFee / LAKHS,
       achPct: achN ? achSum / achN : null,
     };
-  }, [forecast]);
+  }, [forecastForWeek]);
 
   const chartVisibilityMmF = useMemo(() => {
     const selected = new Set(mmfChartProjectIds);
@@ -1592,7 +1607,7 @@ export function RevenueTrackers() {
           <div className="rt-section-hd">
             <div>
               <div className="rt-section-title">Monthly roll-up</div>
-              <div className="rt-section-sub">Aggregated from weekly entries</div>
+              <div className="rt-section-sub">Aggregated from weekly entries for {formatWeekRangeLabel(governanceWeekMon)}</div>
             </div>
             <Button
               type="button"
@@ -1649,7 +1664,9 @@ export function RevenueTrackers() {
               ) : null}
             </table>
             {!forecastMonthly.length && !loading ? (
-              <div style={{ padding: 16, color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>No forecast rows in scope.</div>
+              <div style={{ padding: 16, color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>
+                No forecast rows for {formatWeekRangeLabel(governanceWeekMon)}.
+              </div>
             ) : null}
           </div>
 
@@ -1657,7 +1674,7 @@ export function RevenueTrackers() {
           <div className="rt-section-hd">
             <div>
               <div className="rt-section-title">Weekly entries</div>
-              <div className="rt-section-sub">Raw rows · edit or delete individual submissions</div>
+              <div className="rt-section-sub">Raw rows for {formatWeekRangeLabel(governanceWeekMon)} · edit or delete individual submissions</div>
             </div>
           </div>
           <div className="platform-table-wrap">
@@ -1673,7 +1690,7 @@ export function RevenueTrackers() {
                 </tr>
               </thead>
               <tbody>
-                {forecast.map((r) => (
+                {forecastForWeek.map((r) => (
                   <tr key={r.id}>
                     <td>{r.week_start_date}</td>
                     <td>{r.account_name || projectLabel(r.project_id)}</td>
@@ -1694,8 +1711,13 @@ export function RevenueTrackers() {
                           style={{ fontSize: 10, color: "var(--red)", background: "none", border: "none", cursor: "pointer" }}
                           onClick={async () => {
                             if (!window.confirm("Delete this weekly forecast row?")) return;
-                            await queries.deleteRevenueForecastWeekly(r.id);
-                            await reload();
+                            setErr(null);
+                            try {
+                              await queries.deleteRevenueForecastWeekly(r.id);
+                              await reload();
+                            } catch (e: unknown) {
+                              setErr(e instanceof Error ? e.message : String(e));
+                            }
                           }}
                         >
                           Delete
@@ -1706,8 +1728,10 @@ export function RevenueTrackers() {
                 ))}
               </tbody>
             </table>
-            {!forecast.length && !loading ? (
-              <div style={{ padding: 16, color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>No weekly rows.</div>
+            {!forecastForWeek.length && !loading ? (
+              <div style={{ padding: 16, color: "var(--text-subtle)", fontSize: 12, fontFamily: "var(--mono)" }}>
+                No weekly rows for {formatWeekRangeLabel(governanceWeekMon)}.
+              </div>
             ) : null}
           </div>
       </section>
@@ -1790,7 +1814,7 @@ export function RevenueTrackers() {
         projects={projects}
         defaultProjectId={pid}
         initialRow={editForecastRow}
-        wizardWeekStart={forecastWizard?.week ?? null}
+        wizardWeekStart={forecastWizard?.week ?? governanceWeekMon}
         wizardProjectId={forecastWizard?.projectId ?? null}
         governanceFieldsLocked={!!forecastWizard}
         onSaved={reload}
@@ -1934,9 +1958,10 @@ function ForecastFormDialog({
     return () => document.removeEventListener("click", onDoc);
   }, []);
 
-  const resetEmpty = useCallback(() => {
-    setWeekStart(mondayYmd());
-    setMonthAnchor(todayYmd().slice(0, 7) + "-01");
+  const resetEmpty = useCallback((weekStartDefault?: string | null) => {
+    const weekMon = mondayOfYmd(weekStartDefault || mondayYmd());
+    setWeekStart(weekMon);
+    setMonthAnchor(`${weekMon.slice(0, 7)}-01`);
     setUpdateDate(todayYmd());
     setWeekLabel("");
     setRemarks("");
@@ -1985,11 +2010,11 @@ function ForecastFormDialog({
       fillFromRow(initialRow);
       setStep(1);
     } else {
-      resetEmpty();
+      const defaultWeek = wizardWeekStart ? mondayOfYmd(wizardWeekStart) : mondayYmd();
+      resetEmpty(defaultWeek);
       const wPid = wizardProjectId != null && wizardProjectId > 0 ? wizardProjectId : null;
       if (wPid) setProjectId(wPid);
       else if (defaultProjectId) setProjectId(defaultProjectId);
-      if (wizardWeekStart) setWeekStart(mondayOfYmd(wizardWeekStart));
       setStep(lockProject ? 1 : 0);
     }
   }, [open, initialRow, fillFromRow, resetEmpty, defaultProjectId, wizardWeekStart, wizardProjectId, lockProject]);

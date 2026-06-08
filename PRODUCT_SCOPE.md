@@ -35,7 +35,7 @@ Phase 1 delivers a **role-aware control centre** for leadership, delivery, finan
 
 - **Experience layer:** React application with a unified **platform shell** (navigation, drawers, tables, charts, persona-aware layouts).
 - **API layer:** REST APIs under FastAPI, including modular routers for finance ledger, billing, revenue trackers, weekly submissions, workflows, meetings, tasks, transitions, candidates, contracts, WFM, SLA writes, and AI endpoints.
-- **Data layer:** SQLAlchemy ORM over SQLite by default (environment-driven database URL), with additive runtime migrations for operational continuity.
+- **Data layer:** SQLAlchemy ORM over **PostgreSQL** (local Compose, Cloud SQL `tgddata-pg-prod` in production) via `DATABASE_URL`; **Alembic** for schema. SQLite remains a legacy fallback in code only. Deploy: [`DEPLOYMENT_DOC.md`](DEPLOYMENT_DOC.md).
 - **Cross-cutting:** Authentication (`/auth`), administration (`/admin`), caching on selected reads in the web client, and optional integrations with external AI providers where configured (e.g. agent chat, CEO deck JSON assistance).
 
 ---

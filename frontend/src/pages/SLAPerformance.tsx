@@ -740,10 +740,11 @@ export function SLAPerformance() {
     const notMetPct = withOutcome > 0 ? Math.round((breached / withOutcome) * 1000) / 10 : 0;
     return { met, breached, withOutcome, metPct, notMetPct };
   }, [slaKpiScopeRows]);
-  const notReportedCount = useMemo(
-    () => slaKpiScopeRows.filter((r: any) => statusBucket(r.status) === "not_reported").length,
+  const notReportedMetricRows = useMemo(
+    () => slaKpiScopeRows.filter((r: any) => statusBucket(r.status) === "not_reported"),
     [slaKpiScopeRows],
   );
+  const notReportedCount = notReportedMetricRows.length;
   const notReportedPct =
     slaKpiScopeRows.length > 0 ? Math.round((notReportedCount / slaKpiScopeRows.length) * 100) : 0;
   const scopedAccountCount = useMemo(
@@ -1079,57 +1080,75 @@ export function SLAPerformance() {
     return portfolioTrendAllMonths.filter((row) => allowed.has(String(row.month)));
   }, [portfolioTrendAllMonths, filteredMonths]);
 
-  /** Same FY windows as YoY (p1 / p2): Met % per quarter within each FY — not a cumulative mix across years. */
-  const quarterlyFyQuarterCompare = useMemo(() => {
+  /** Short FY label for QoQ columns, e.g. "FY 24–25" → "24–25". */
+  const fyLabelQoQ = useCallback((label: string) => label.replace(/^FY\s+/i, "").trim(), []);
+
+  /** Met % per quarter within each FY window; QoQ Δ% = % change vs previous quarter in the same FY. */
+  const quarterlyFyQoQCompare = useMemo(() => {
     const qs = ["Q1", "Q2", "Q3", "Q4"] as const;
-    return qs.map((q) => {
-      const p1q = new Set(
-        [...p1Months].filter((m) => monthToQuarterForMode(m, fyMode) === q),
-      );
-      const p2q = new Set(
-        [...p2Months].filter((m) => monthToQuarterForMode(m, fyMode) === q),
-      );
-      let p1m = 0;
-      let p1nm = 0;
-      let p2m = 0;
-      let p2nm = 0;
-      for (const acc of timeseriesKpiScoped) {
-        for (const t of acc.timeline) {
-          const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
-          if (!ym) continue;
-          if (p1q.has(ym)) {
-            p1m += t.met;
-            p1nm += t.not_met;
-          }
-          if (p2q.has(ym)) {
-            p2m += t.met;
-            p2nm += t.not_met;
+
+    const rollupFy = (monthSet: Set<string>) => {
+      const rows = qs.map((q) => {
+        const qMonths = new Set(
+          [...monthSet].filter((m) => monthToQuarterForMode(m, fyMode) === q),
+        );
+        let met = 0;
+        let nm = 0;
+        for (const acc of timeseriesKpiScoped) {
+          for (const t of acc.timeline) {
+            const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
+            if (!ym || !qMonths.has(ym)) continue;
+            met += t.met;
+            nm += t.not_met;
           }
         }
+        const tot = met + nm;
+        return {
+          quarter: q,
+          met,
+          not_met: nm,
+          pct: tot > 0 ? Math.round((met / tot) * 1000) / 10 : null,
+          qoq_pct: null as number | null,
+        };
+      });
+      for (let i = 1; i < rows.length; i++) {
+        const prev = rows[i - 1].pct;
+        const cur = rows[i].pct;
+        if (prev == null || cur == null || prev === 0) continue;
+        rows[i].qoq_pct = Math.round(((cur - prev) / prev) * 1000) / 10;
       }
-      const t1 = p1m + p1nm;
-      const t2 = p2m + p2nm;
-      return {
-        quarter: q,
-        p1_met: p1m,
-        p1_not_met: p1nm,
-        p2_met: p2m,
-        p2_not_met: p2nm,
-        p1_pct: t1 > 0 ? Math.round((p1m / t1) * 1000) / 10 : null,
-        p2_pct: t2 > 0 ? Math.round((p2m / t2) * 1000) / 10 : null,
-      };
-    });
+      return rows;
+    };
+
+    const p1 = rollupFy(p1Months);
+    const p2 = rollupFy(p2Months);
+    return qs.map((q, i) => ({
+      quarter: q,
+      p1_met: p1[i].met,
+      p1_not_met: p1[i].not_met,
+      p1_pct: p1[i].pct,
+      p1_qoq_pct: p1[i].qoq_pct,
+      p2_met: p2[i].met,
+      p2_not_met: p2[i].not_met,
+      p2_pct: p2[i].pct,
+      p2_qoq_pct: p2[i].qoq_pct,
+    }));
   }, [timeseriesKpiScoped, p1Months, p2Months, fyMode]);
 
   const quarterlyCompareChartData = useMemo(
     () =>
-      quarterlyFyQuarterCompare.map((r) => ({
+      quarterlyFyQoQCompare.map((r) => ({
         name: r.quarter,
         p1: r.p1_pct,
         p2: r.p2_pct,
       })),
-    [quarterlyFyQuarterCompare],
+    [quarterlyFyQoQCompare],
   );
+
+  const formatQoqChangePct = (v: number | null) => {
+    if (v == null) return "—";
+    return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  };
 
   /** Account Met % from latest decisive metric rows (same basis as KPI cards / SLA table). */
   const accountMetPctFromLatestRows = useMemo(() => {
@@ -1465,73 +1484,84 @@ export function SLAPerformance() {
     });
   }, [timeseriesKpiScoped, p1Months, p2Months]);
 
+  /** Reporting month for a metric row (latest snapshot) — aligns with table / KPI filters. */
+  const metricRowReportingYm = useCallback((r: any): string | null => {
+    const ps = r.period_start as string | null | undefined;
+    if (ps) {
+      const fromPs = normalizeSlaMonthToYm(ps.length >= 7 ? ps.slice(0, 7) : ps);
+      if (fromPs) return fromPs;
+    }
+    const rm = String(r.reporting_month ?? "").trim();
+    if (rm && rm !== "N/A") return normalizeSlaMonthToYm(rm);
+    return null;
+  }, []);
+
   const notReportedByAccount = useMemo(() => {
-    return timeseriesKpiScoped
-      .map((acc: any) => {
-        const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
-        const name = acc.account_name as string;
-        const short = name.length > 12 ? `${name.slice(0, 11)}…` : name;
-        return { name: short, count: n };
-      })
-      .filter((x) => x.count > 0)
+    const roll = new Map<string, number>();
+    for (const r of notReportedMetricRows) {
+      const name = String((r as any).account_name || "Unknown");
+      roll.set(name, (roll.get(name) ?? 0) + 1);
+    }
+    return Array.from(roll.entries())
+      .map(([name, count]) => ({
+        name: name.length > 12 ? `${name.slice(0, 11)}…` : name,
+        count,
+      }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 12);
-  }, [timeseriesKpiScoped]);
+  }, [notReportedMetricRows]);
 
   const notReportedByRegion = useMemo(() => {
     const roll = new Map<string, number>();
-    for (const acc of timeseriesKpiScoped) {
-      const region = accountMetaMap.get(acc.account_name)?.region || "Unknown";
-      const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
-      roll.set(region, (roll.get(region) ?? 0) + n);
+    for (const r of notReportedMetricRows) {
+      const region = String((r as any).region || "").trim() || "Unknown";
+      roll.set(region, (roll.get(region) ?? 0) + 1);
     }
     return Array.from(roll.entries())
       .map(([name, count]) => ({
         name: name.length > 14 ? `${name.slice(0, 13)}…` : name,
         count,
       }))
-      .filter((x) => x.count > 0)
       .sort((a, b) => b.count - a.count);
-  }, [timeseriesKpiScoped, accountMetaMap]);
+  }, [notReportedMetricRows]);
 
   const notReportedByPractice = useMemo(() => {
     const roll = new Map<string, number>();
-    for (const acc of timeseriesKpiScoped) {
-      const ph = accountMetaMap.get(acc.account_name)?.practice_head || "Unknown";
-      const n = acc.timeline.reduce((s: number, t: any) => s + (t.not_reported ?? 0), 0);
-      roll.set(ph, (roll.get(ph) ?? 0) + n);
+    for (const r of notReportedMetricRows) {
+      const ph = String((r as any).practice_head || "").trim() || "Unknown";
+      roll.set(ph, (roll.get(ph) ?? 0) + 1);
     }
     return Array.from(roll.entries())
       .map(([name, count]) => ({
         name: name.length > 16 ? `${name.slice(0, 15)}…` : name,
         count,
       }))
-      .filter((x) => x.count > 0)
       .sort((a, b) => b.count - a.count);
-  }, [timeseriesKpiScoped, accountMetaMap]);
-
-  const notReportedMonthlySeries = useMemo(() => {
-    const byMonth = new Map<string, number>();
-    for (const acc of timeseriesKpiScoped) {
-      for (const t of acc.timeline) {
-        const nr = t.not_reported ?? 0;
-        if (nr <= 0) continue;
-        const ym = normalizeSlaMonthToYm(String((t as any).month ?? ""));
-        if (!ym) continue;
-        byMonth.set(ym, (byMonth.get(ym) ?? 0) + nr);
-      }
-    }
-    return allMonths.map((m) => ({
-      name: formatMonthColHeader(m),
-      count: byMonth.get(m) ?? 0,
-    }));
-  }, [timeseriesKpiScoped, allMonths]);
+  }, [notReportedMetricRows]);
 
   const notReportedMonthlyChartData = useMemo(() => {
-    const nz = notReportedMonthlySeries.filter((x) => x.count > 0);
-    if (nz.length) return nz.slice(-24);
-    return notReportedMonthlySeries.slice(-12);
-  }, [notReportedMonthlySeries]);
+    const byMonth = new Map<string, number>();
+    let noPeriod = 0;
+    for (const r of notReportedMetricRows) {
+      const ym = metricRowReportingYm(r);
+      if (!ym) {
+        noPeriod += 1;
+        continue;
+      }
+      byMonth.set(ym, (byMonth.get(ym) ?? 0) + 1);
+    }
+    const entries = Array.from(byMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([m, count]) => ({
+        name: formatMonthColHeader(m),
+        count,
+      }));
+    if (noPeriod > 0) {
+      entries.push({ name: "No period", count: noPeriod });
+    }
+    if (entries.length) return entries.slice(-24);
+    return [];
+  }, [notReportedMetricRows, metricRowReportingYm]);
 
   const notReportedSnapshotsTotal = useMemo(
     () =>
@@ -2634,10 +2664,11 @@ export function SLAPerformance() {
         <>
           <div className="sla-dash-card">
             <div className="sla-dash-card-hd">
-              <div className="sla-dash-card-title">Quarterly Met % — FY vs FY</div>
+              <div className="sla-dash-card-title">Quarterly Met % — QoQ within each FY</div>
               <div className="sla-dash-card-sub">
-                Each quarter compares the same calendar window inside {fyLabelP1} and {fyLabelP2} (Indian FY or calendar mode
-                matches the Year-over-Year toggle). Met ÷ (Met + Not met) within that quarter only.
+                Met ÷ (Met + Not met) per quarter inside {fyLabelP1} and {fyLabelP2}. QoQ Δ% is the percent change vs the
+                previous quarter in the same FY (Q1 has no prior quarter). FY windows follow loaded data (Indian FY or
+                calendar years).
               </div>
             </div>
             <div className="sla-dash-card-bd">
@@ -2665,34 +2696,50 @@ export function SLAPerformance() {
                   <thead>
                     <tr>
                       <th>Quarter</th>
-                      <th>{fyLabelP1} Met %</th>
-                      <th>{fyLabelP2} Met %</th>
-                      <th>Δ (pp)</th>
-                      <th>{fyLabelP1} (M / NM)</th>
-                      <th>{fyLabelP2} (M / NM)</th>
+                      <th>{fyLabelQoQ(fyLabelP1)} Met %</th>
+                      <th>{fyLabelQoQ(fyLabelP1)} QoQ Δ%</th>
+                      <th>{fyLabelQoQ(fyLabelP2)} Met %</th>
+                      <th>{fyLabelQoQ(fyLabelP2)} QoQ Δ%</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {quarterlyFyQuarterCompare.map((r) => {
-                      const d =
-                        r.p1_pct != null && r.p2_pct != null
-                          ? `${(r.p2_pct - r.p1_pct) >= 0 ? "+" : ""}${(r.p2_pct - r.p1_pct).toFixed(1)}`
-                          : "—";
-                      return (
-                        <tr key={r.quarter}>
-                          <td>{r.quarter}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.p1_pct == null ? "—" : `${r.p1_pct}%`}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.p2_pct == null ? "—" : `${r.p2_pct}%`}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{d}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>
-                            {r.p1_met + r.p1_not_met === 0 ? "—" : `${r.p1_met} / ${r.p1_not_met}`}
-                          </td>
-                          <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10 }}>
-                            {r.p2_met + r.p2_not_met === 0 ? "—" : `${r.p2_met} / ${r.p2_not_met}`}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {quarterlyFyQoQCompare.map((r) => (
+                      <tr key={r.quarter}>
+                        <td>{r.quarter}</td>
+                        <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.p1_pct == null ? "—" : `${r.p1_pct}%`}</td>
+                        <td
+                          style={{
+                            fontFamily: "'DM Mono',monospace",
+                            color:
+                              r.p1_qoq_pct == null
+                                ? undefined
+                                : r.p1_qoq_pct > 0
+                                  ? "var(--green, #15803d)"
+                                  : r.p1_qoq_pct < 0
+                                    ? "var(--red, #c2410c)"
+                                    : undefined,
+                          }}
+                        >
+                          {formatQoqChangePct(r.p1_qoq_pct)}
+                        </td>
+                        <td style={{ fontFamily: "'DM Mono',monospace" }}>{r.p2_pct == null ? "—" : `${r.p2_pct}%`}</td>
+                        <td
+                          style={{
+                            fontFamily: "'DM Mono',monospace",
+                            color:
+                              r.p2_qoq_pct == null
+                                ? undefined
+                                : r.p2_qoq_pct > 0
+                                  ? "var(--green, #15803d)"
+                                  : r.p2_qoq_pct < 0
+                                    ? "var(--red, #c2410c)"
+                                    : undefined,
+                          }}
+                        >
+                          {formatQoqChangePct(r.p2_qoq_pct)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -2701,7 +2748,7 @@ export function SLAPerformance() {
                 <div className="sla-empty">No quarterly outcomes in the selected FY windows.</div>
               ) : (
                 <div style={{ height: 300 }}>
-                  <SlaFyComparisonGroupedBar
+                  <SlaFyComparisonLineChart
                     data={quarterlyCompareChartData}
                     labelP1={fyLabelP1}
                     labelP2={fyLabelP2}
@@ -3085,19 +3132,22 @@ export function SLAPerformance() {
             <div className="sla-dash-card-hd">
               <div className="sla-dash-card-title">Not reported — summary</div>
               <div className="sla-dash-card-sub">
-                {notReportedSnapshotsTotal} not-reported snapshots in time-series; {notReportedCount} metric rows marked not
-                reported in the table.
+                {notReportedCount} metric rows with not-reported latest status
+                {notReportedSnapshotsTotal > 0
+                  ? ` · ${notReportedSnapshotsTotal} grey/NR cells in historical time-series`
+                  : ""}
+                .
               </div>
             </div>
           </div>
           <div className="sla-dash-card">
             <div className="sla-dash-card-hd">
-              <div className="sla-dash-card-title">By account (snapshots)</div>
-              <div className="sla-dash-card-sub">Sum of not-reported cells per client across all months.</div>
+              <div className="sla-dash-card-title">By account</div>
+              <div className="sla-dash-card-sub">Count of metrics with not-reported latest status per client.</div>
             </div>
             <div className="sla-dash-card-bd">
               {notReportedByAccount.length === 0 ? (
-                <div className="sla-empty">No not-reported snapshots in time-series.</div>
+                <div className="sla-empty">No not-reported metrics in current filters.</div>
               ) : (
                 <SlaNotReportedCountBar data={notReportedByAccount} height={200} />
               )}
@@ -3110,7 +3160,7 @@ export function SLAPerformance() {
             </div>
             <div className="sla-dash-card-bd">
               {notReportedByRegion.length === 0 ? (
-                <div className="sla-empty">No regional not-reported volume.</div>
+                <div className="sla-empty">No not-reported metrics in current filters.</div>
               ) : (
                 <SlaNotReportedCountBar data={notReportedByRegion} height={200} />
               )}
@@ -3123,7 +3173,7 @@ export function SLAPerformance() {
             </div>
             <div className="sla-dash-card-bd">
               {notReportedByPractice.length === 0 ? (
-                <div className="sla-empty">No practice-level not-reported volume.</div>
+                <div className="sla-empty">No not-reported metrics in current filters.</div>
               ) : (
                 <SlaNotReportedCountBar data={notReportedByPractice} height={200} />
               )}
@@ -3132,11 +3182,11 @@ export function SLAPerformance() {
           <div className="sla-dash-card">
             <div className="sla-dash-card-hd">
               <div className="sla-dash-card-title">Monthly trend</div>
-              <div className="sla-dash-card-sub">Portfolio not-reported snapshots by month.</div>
+              <div className="sla-dash-card-sub">Not-reported metrics by latest reporting period.</div>
             </div>
             <div className="sla-dash-card-bd">
               {notReportedMonthlyChartData.length === 0 ? (
-                <div className="sla-empty">No months in time-series.</div>
+                <div className="sla-empty">No reporting period on not-reported metrics.</div>
               ) : (
                 <SlaNotReportedCountBar data={notReportedMonthlyChartData} height={200} />
               )}

@@ -92,13 +92,13 @@ Independent penetration exercises (dated scope, findings, remediation owners) fo
 
 ## Deployment artifacts and operating model
 
-Production references combine **container images** (frontend + API) with **Google Compute Engine** (or comparable compute), **Google Cloud SQL**, and a **customer-owned DNS name** fronted by **Google Cloud HTTPS Load Balancing** with a **Google-managed TLS certificate** (or customer-managed certs uploaded per policy). Traffic flows **`https://<dedicated-domain>` → regional external HTTPS proxy → backend service / instance group → origin application tier**; the **canonical product URL** is always that **FQDN**, not transient third-party hostnames.
+**Primary production (May 2026):** **Cloud Run** API (`tgddata-api`) + **GCS** static SPA + **Cloud SQL PostgreSQL** (`tgddata-pg-prod`) + **GCS** uploads bucket. Browser → GCS `index.html` → HTTPS → Cloud Run; API uses VPC connector to private Cloud SQL and `STORAGE_BACKEND=gcs`. Rollout: **`deploy/gcp/06-deploy-api.sh`**, **`07-deploy-frontend.sh`**.
 
-**Origin tier.** Inside the VM or instance group, **Docker Compose** (or orchestrator equivalent) runs **frontend** and **backend** containers. The frontend image serves the built SPA and **reverse-proxies `/api/`** to the API container on the internal network. Health checks from the load balancer should target **`/`** and optionally **`/api/`** (or a dedicated **`/health`** if introduced) so unhealthy members drain before user impact.
+**Legacy VM:** **GCE** `tgddata-c1-prod-2` at **`https://taggd.aparatus.in/`** — host Nginx/Certbot → loopback **8080** → Compose frontend (proxies **`/api/`** → backend). May still use SQLite on disk until migrated to **`docker-compose.prod.yml`** + Cloud SQL. Rollout: **`scripts/deploy-gcp.sh`**.
 
-Operational detail—including DNS records, backend health checks, firewall tags, and rollout commands—is summarized in **`DEPLOYMENT_DOC.md`**. Artefacts include **`Dockerfile.backend`**, **`Dockerfile.frontend`**, **`docker-compose.yml`**, **origin routing configuration** inside the container stack, and **`requirements.txt`**.
+Operational detail—URLs, verification, migration—is in **`DEPLOYMENT_DOC.md`**. Artefacts: **`Dockerfile.backend.cloudrun`**, **`Dockerfile.backend`**, **`Dockerfile.frontend`**, **`docker-compose.yml`**, **`deploy/gcp/`**, **`alembic/`**, **`requirements.txt`**.
 
-**Infrastructure-as-code.** Helm charts and Terraform roots for the core application may live in customer-specific repos; this codebase ships **images and contracts**. **`scripts/deploy-gcp.sh`** illustrates tarball-and-compose rollout on a reference VM.
+**Infrastructure-as-code.** This repo ships **deploy scripts and images**; customer Terraform/Helm may wrap the same containers.
 
 **Configuration and secrets.** The following categories of secret are typical and should live in **Secret Manager** or a sealed **`.env`** on the host—not in git: **`GEMINI_API_KEY`** (AI provider), **`JWT_SECRET`** (session signing), **Cloud SQL credentials** or proxy binding, **`COMPOSIO_*`** and webhook secrets where Composio is enabled, **`AUTH_BOOTSTRAP_*`** for first boot, and optional **`NGROK_*`** / tunnel tokens **only** if non-production demos require them. **Rotation** and **least-privilege DB users** are operational habits, not application code changes.
 

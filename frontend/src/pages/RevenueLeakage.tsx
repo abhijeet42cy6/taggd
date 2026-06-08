@@ -20,10 +20,20 @@ function fmt(dateStr: string | null | undefined): string {
   }
 }
 
-function currentMonth(): string {
+function recentMonthOptions(count = 24): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  d.setDate(1);
+  for (let i = 0; i < count; i += 1) {
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+    out.push({ value, label });
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
 }
+
+const RL_MONTH_OPTIONS = recentMonthOptions();
 
 type SortKey = keyof RevenueLeakageRow | "";
 type SortDir = "asc" | "desc";
@@ -181,10 +191,10 @@ function DetailDrawer({ row, onClose }: { row: RevenueLeakageRow; onClose: () =>
 // ─── Main page ───────────────────────────────────────────────────────────────
 export function RevenueLeakage() {
   // Filters
-  const [month, setMonth] = useState<string>(currentMonth());
+  const [month, setMonth] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
   const [sohFilter, setSohFilter] = useState<string>("");
-  const [appliedMonth, setAppliedMonth] = useState<string>(currentMonth());
+  const [appliedMonth, setAppliedMonth] = useState<string>("");
   const [appliedProject, setAppliedProject] = useState<number | undefined>(undefined);
   const [appliedSoh, setAppliedSoh] = useState<string>("");
 
@@ -238,10 +248,12 @@ export function RevenueLeakage() {
   }
 
   function clearFilters() {
-    const m = currentMonth();
-    setMonth(m); setAppliedMonth(m);
-    setProjectId(""); setAppliedProject(undefined);
-    setSohFilter(""); setAppliedSoh("");
+    setMonth("");
+    setAppliedMonth("");
+    setProjectId("");
+    setAppliedProject(undefined);
+    setSohFilter("");
+    setAppliedSoh("");
   }
 
   // Sorted rows
@@ -312,13 +324,19 @@ export function RevenueLeakage() {
 
         <div className="rl-filter-field">
           <label className="rl-filter-label">Month</label>
-          <input
-            type="month"
+          <select
             className="rl-filter-input"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            style={{ fontFamily: "var(--mono)", fontSize: 12 }}
-          />
+            value={month || "all"}
+            onChange={(e) => setMonth(e.target.value === "all" ? "" : e.target.value)}
+            style={{ fontFamily: "var(--mono)", fontSize: 12, minWidth: 148 }}
+          >
+            <option value="all">All months</option>
+            {RL_MONTH_OPTIONS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="rl-filter-field">

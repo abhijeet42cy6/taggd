@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -3307,6 +3308,18 @@ async def get_wfm_stats(
         apply_project_scope(db.query(func.count(WFMResourceGap.id)), user, db, WFMResourceGap).scalar() or 0
     )
 
+    benchmark_rows = (
+        apply_project_scope(db.query(WFMHRBenchmark), user, db, WFMHRBenchmark).all()
+    )
+    total_existing_resignations = 0
+    portfolio_hc_summary = None
+    for b in benchmark_rows:
+        metrics = b.sheet_metrics_json if isinstance(b.sheet_metrics_json, dict) else {}
+        resign = metrics.get("resignations") if isinstance(metrics.get("resignations"), dict) else {}
+        total_existing_resignations += int(resign.get("existing") or 0)
+        if portfolio_hc_summary is None and metrics.get("portfolio_hc_summary"):
+            portfolio_hc_summary = metrics["portfolio_hc_summary"]
+
     return JSONResponse(
         content={
         "capacity_fill_rate": round((total_actual / total_ideal * 100), 1) if total_ideal > 0 else 0,
@@ -3320,6 +3333,8 @@ async def get_wfm_stats(
                 "WL4": float(agg.wl4 or 0),
             },
             "open_requisitions": open_reqs,
+            "total_existing_resignations": total_existing_resignations,
+            "portfolio_hc_summary": portfolio_hc_summary,
         },
         headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
     )
@@ -4003,6 +4018,110 @@ def _rl_soh_label(attrs: dict) -> str:
 
 _RL_BENEFICIAL = {"RPO"}
 
+_RL_CANCELLED_STATUSES = (
+    "Canceled",
+    "Cancelled",
+    "Closed Internally",
+    "Position on hold",
+    "CTC Declined",
+    "Void",
+    "On Hold",
+)
+
+_RL_MONTH_ABBR = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def _rl_cancelled_clause():
+    """Cancelled / closed-lost requisitions — ingested status strings vary by client sheet."""
+    return or_(
+        Record.status.in_(_RL_CANCELLED_STATUSES),
+        Record.status.ilike("%cancel%"),
+        Record.status.ilike("%hold%"),
+    )
+
+
+def _rl_parse_month_token(val) -> Optional[str]:
+    """Normalize tracker month tokens to YYYY-MM (e.g. May-24, 2024-05)."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "nan", "null"):
+        return None
+    m = re.match(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[-/\s](\d{2,4})$", s, re.I)
+    if m:
+        mon = _RL_MONTH_ABBR[m.group(1).lower()[:3]]
+        yr = int(m.group(2))
+        if yr < 100:
+            yr += 2000
+        return f"{yr:04d}-{mon:02d}"
+    m = re.match(r"^(\d{4})-(\d{2})$", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    return None
+
+
+def _rl_cohort_month_key(attrs: dict, creation: Optional[datetime.datetime]) -> Optional[str]:
+    """Month bucket for leakage cohort — prefer Req Month from tracker, else creation_date."""
+    for key in ("Req Month", "Selection Month", "Join Month"):
+        ym = _rl_parse_month_token(attrs.get(key))
+        if ym:
+            return ym
+    if creation:
+        return f"{creation.year:04d}-{creation.month:02d}"
+    return None
+
+
+def _rl_attr_first_date(attrs: dict, keys: tuple[str, ...]) -> Optional[datetime.datetime]:
+    for key in keys:
+        dt = _rl_parse_date(attrs.get(key))
+        if dt:
+            return dt
+        ym = _rl_parse_month_token(attrs.get(key))
+        if ym:
+            y, mo = int(ym[:4]), int(ym[5:7])
+            return datetime.datetime(y, mo, 1)
+    return None
+
+
+def _rl_record_in_month(
+    *,
+    month: str,
+    creation: Optional[datetime.datetime],
+    attrs: dict,
+) -> bool:
+    """Match YYYY-MM filter against creation_date and/or tracker Req Month cohort."""
+    try:
+        y, mo = int(month[:4]), int(month[5:7])
+    except (ValueError, IndexError):
+        return True
+    if creation and creation.year == y and creation.month == mo:
+        return True
+    cohort = _rl_cohort_month_key(attrs, creation)
+    return cohort == month
+
+
+def _rl_cancellation_reason(attrs: dict, status: str) -> str:
+    reason = str(attrs.get("Cancellation Reason") or "").strip()
+    if reason:
+        return reason
+    comment = str(attrs.get("Recruiter overall Comment") or "").strip()
+    if comment:
+        return comment[:120]
+    return status or "Not specified"
+
 
 @app.get("/revenue-leakage")
 def get_revenue_leakage(
@@ -4014,16 +4133,13 @@ def get_revenue_leakage(
 ):
     """Revenue leakage analytics for cancelled requisitions in a given month.
 
-    Data source mapping (all from records table + additional_attributes JSON):
-      - Cancelled population : status in ('Canceled', 'Cancelled') — both spellings (ingest / LLM often use 'Cancelled')
-      - Creation date        : records.creation_date
-      - Intake / assigned    : additional_attributes['Intake Meeting Date']
-      - Approved date        : additional_attributes['Approved Date']  (proxy for first CV / pipeline entry)
-      - Days open            : additional_attributes['Days Open']
-      - Cancellation reason  : additional_attributes['Cancellation Reason']
-      - Recruiter            : additional_attributes['Recruiter Full Name']
-      - Source of hire       : additional_attributes['Direct/Indirect']
-      - Req number           : additional_attributes['Job Requisition Number']
+    Data source mapping (records + additional_attributes JSON):
+      - Cancelled population : Canceled/Cancelled plus Closed Internally, Position on hold, etc.
+      - Monthly cohort       : creation_date month and/or Req Month (May-24 → 2024-05)
+      - Intake / assigned    : Intake Meeting Date, else creation_date
+      - Approved / first CV  : Approved Date, CTC Proposal Date, Target date of Selection, 1st set of CV Month
+      - Days open            : Days Open, else creation → Hold / Cancelled Date
+      - Cancellation reason  : Cancellation Reason, else recruiter comment, else status
     """
     from fastapi.responses import JSONResponse
 
@@ -4034,25 +4150,24 @@ def get_revenue_leakage(
         q = q.filter(c)
     q = apply_recruiter_record_scope(q, user, db)
 
-    # ── filter: cancelled requisitions (status spellings vary by sheet / logic generator) ──
-    q = q.filter(or_(Record.status == "Canceled", Record.status == "Cancelled"))
+    # ── filter: cancelled / closed-lost requisitions ─────────────────────────
+    q = q.filter(_rl_cancelled_clause())
 
     # ── filter: project ────────────────────────────────────────────────────
     if project_id:
         assert_project_access(user, db, project_id)
         q = q.filter(Record.project_id == project_id)
 
-    # ── filter: month (by creation_date) ──────────────────────────────────
-    if month:
-        try:
-            y, mo = int(month[:4]), int(month[5:7])
-            month_start = datetime.datetime(y, mo, 1)
-            month_end = datetime.datetime(y + 1, 1, 1) if mo == 12 else datetime.datetime(y, mo + 1, 1)
-            q = q.filter(Record.creation_date >= month_start, Record.creation_date < month_end)
-        except (ValueError, IndexError):
-            pass
-
-    records = q.order_by(Record.id.desc()).all()
+    records_all = q.order_by(Record.id.desc()).all()
+    records = (
+        [
+            r
+            for r in records_all
+            if _rl_record_in_month(month=month, creation=r.creation_date, attrs=r.additional_attributes or {})
+        ]
+        if month
+        else records_all
+    )
 
     # ── per-row analytics ──────────────────────────────────────────────────
     total = len(records)
@@ -4072,18 +4187,27 @@ def get_revenue_leakage(
     for r in records:
         attrs: dict = r.additional_attributes or {}
 
-        # ── dates ──────────────────────────────────────────────────────────
+        # ── dates (ingested column names vary by client tracker) ─────────────
         creation = r.creation_date
-        intake = _rl_parse_date(attrs.get("Intake Meeting Date"))
-        approved = _rl_parse_date(attrs.get("Approved Date"))
-        last_update = _rl_parse_date(attrs.get("Last Update Date"))
+        intake = _rl_attr_first_date(attrs, ("Intake Meeting Date",)) or creation
+        approved = _rl_attr_first_date(
+            attrs,
+            (
+                "Approved Date",
+                "CTC Proposal Date",
+                "Target date of Selection",
+                "1st set of CV Month",
+                "Selection Month",
+            ),
+        )
+        last_update = _rl_attr_first_date(attrs, ("Hold / Cancelled Date", "Last Update Date"))
 
-        # Revenue ageing: Approved Date − Intake Meeting Date
-        # (best proxy for "first pipeline action after assignment" − "assigned")
+        # Revenue ageing: approved − intake (fallback: hold/cancel − creation, Days Open)
         if intake and approved:
             age_days: Optional[float] = (approved - intake).days
+        elif creation and last_update:
+            age_days = (last_update - creation).days
         elif attrs.get("Days Open") is not None:
-            # fallback: ingested ageing
             try:
                 age_days = float(attrs["Days Open"])
             except (ValueError, TypeError):
@@ -4116,14 +4240,24 @@ def get_revenue_leakage(
         rows.append({
             "id": r.id,
             "project_id": r.project_id,
-            "req_number": str(attrs.get("Job Requisition Number") or ""),
+            "req_number": str(
+                attrs.get("Job Requisition Number")
+                or getattr(r, "client_req_id", None)
+                or getattr(r, "excel_provided_id", None)
+                or r.id
+            ),
             "candidate_name": r.candidate_name or "",
             "position_title": r.position_title or "",
             "hiring_manager": r.hiring_manager or "",
-            "recruiter": str(attrs.get("Recruiter Full Name") or ""),
+            "recruiter": str(
+                attrs.get("Recruiter Full Name")
+                or getattr(r, "assigned_recruiter_rpo", None)
+                or getattr(r, "rpo_sourcer", None)
+                or ""
+            ),
             "department": r.department or "",
             "location": str(attrs.get("City") or r.location or ""),
-            "region": str(attrs.get("Region") or ""),
+            "region": str(attrs.get("Region") or getattr(r, "rpo_zone", None) or ""),
             "creation_date": creation.isoformat() if creation else None,
             "intake_date": intake.isoformat() if intake else None,
             "approved_date": approved.isoformat() if approved else None,
@@ -4131,7 +4265,7 @@ def get_revenue_leakage(
             "days_open": attrs.get("Days Open"),
             "ageing_days": age_days,
             "ageing_bucket": bkt,
-            "cancellation_reason": str(attrs.get("Cancellation Reason") or ""),
+            "cancellation_reason": _rl_cancellation_reason(attrs, r.status or ""),
             "sla_48h": (
                 "Met" if (creation and approved and _rl_working_hours(creation, approved) <= 48)
                 else ("Not Met" if (creation and approved) else "No Data")

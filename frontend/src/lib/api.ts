@@ -735,6 +735,7 @@ export const adminApi = {
   patchUser: (
     id: number,
     body: {
+      email?: string;
       is_active?: boolean;
       role?: string;
       password?: string;
@@ -744,6 +745,7 @@ export const adminApi = {
   ) => api.patch(`/admin/users/${id}`, body).then((r) => r.data),
   setUserProjects: (userId: number, project_ids: number[]) =>
     api.put(`/admin/users/${userId}/projects`, { project_ids }).then((r) => r.data),
+  deleteUser: (id: number) => api.delete(`/admin/users/${id}`).then((r) => r.data),
   listProjectsForAdmin: () => api.get<Project[]>("/projects").then((r) => r.data),
 };
 
@@ -1198,6 +1200,9 @@ export type ClientDashboardConfig = {
   finance_show_cm?: boolean;
   project_vertical_filter?: string[];
   project_region_filter?: string[];
+  /** Default SLA reporting window (YYYY-MM) saved per client. */
+  sla_reporting_month_from?: string | null;
+  sla_reporting_month_to?: string | null;
 };
 
 export type ClientDashboardSummary = {
@@ -1231,9 +1236,14 @@ export type ClientDashboardSummary = {
     target: string | null;
     latest_score: string | number | null;
     status: string;
+    status_bucket?: "met" | "not_met" | "not_reported";
     reporting_month: string;
   }>;
   finance: Record<string, number>;
+  /** Distinct YYYY-MM values available in scoped SLA performances (newest first). */
+  reporting_month_options?: string[];
+  active_reporting_month_from?: string | null;
+  active_reporting_month_to?: string | null;
   /** Requisition count per project_id (string key for JSON compat). */
   req_by_project: Record<string, number>;
   is_client_user: boolean;
@@ -1347,6 +1357,7 @@ export const queries = {
       invalidateCache("projects");
       invalidateCache("clients");
       invalidateCache("client/");
+      if ("regional_head" in body) invalidateCache("wfm/");
       return r.data;
     }),
 
@@ -1502,7 +1513,15 @@ export const queries = {
         ? `?project_id=${encodeURIComponent(String(params.project_id))}`
         : "";
     return api
-      .get<{ id: number; email: string; role: string }[]>(`/tasks/meta/assignable-users${q}`)
+      .get<
+        {
+          id: number;
+          email: string;
+          role: string;
+          given_name?: string | null;
+          family_name?: string | null;
+        }[]
+      >(`/tasks/meta/assignable-users${q}`)
       .then((r) => r.data);
   },
 
@@ -2195,13 +2214,18 @@ export const queries = {
           .then((r) => r.data)
     ),
 
-  clientDashboardSummary: (params?: { client_id?: number }) => {
-    const q =
-      params?.client_id != null
-        ? `?client_id=${encodeURIComponent(String(params.client_id))}`
-        : "";
-    return cachedGet<ClientDashboardSummary>(`client-dashboard/summary${q}`, () =>
-      api.get(`/client-dashboard/summary${q}`).then((r) => r.data)
+  clientDashboardSummary: (params?: {
+    client_id?: number;
+    reporting_month_from?: string;
+    reporting_month_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.client_id != null) qs.set("client_id", String(params.client_id));
+    if (params?.reporting_month_from?.trim()) qs.set("reporting_month_from", params.reporting_month_from.trim());
+    if (params?.reporting_month_to?.trim()) qs.set("reporting_month_to", params.reporting_month_to.trim());
+    const q = qs.toString();
+    return cachedGet<ClientDashboardSummary>(`client-dashboard/summary${q ? `?${q}` : ""}`, () =>
+      api.get(`/client-dashboard/summary${q ? `?${q}` : ""}`).then((r) => r.data)
     );
   },
 

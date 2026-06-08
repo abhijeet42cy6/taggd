@@ -123,6 +123,19 @@
   margin: 0;
 }
 
+.billing-ds-table--wide {
+  min-width: 1320px;
+}
+
+.billing-ds-preview-hint {
+  margin: 0;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--ds-border);
+  font-size: 12px;
+  color: var(--ds-text-muted);
+  background: var(--ds-surface);
+}
+
 .billing-ds-table thead th {
   text-align: left;
   font-size: 11px;

@@ -29,6 +29,8 @@ const VL_TABS: { icon: string; label: string }[] = [
   { icon: "💬", label: "Notes" },
 ];
 
+const FY_NONE = "__fy_none__";
+
 function VlSection({
   icon,
   iconTone,
@@ -123,6 +125,7 @@ export function VendorLicenses() {
   const [rows, setRows] = useState<ResumeSupplierLicenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [fyFilter, setFyFilter] = useState<string>("all");
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("create");
@@ -200,14 +203,40 @@ export function VendorLicenses() {
 
   const fyCount = useMemo(() => new Set(rows.map((r) => r.fiscal_year_label).filter(Boolean)).size, [rows]);
 
+  const distinctFiscalYears = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of rows) {
+      const v = (r.fiscal_year_label || "").trim();
+      if (v) s.add(v);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const hasEmptyFy = useMemo(() => rows.some((r) => !(r.fiscal_year_label || "").trim()), [rows]);
+
   const filtered = useMemo(() => {
+    let list = rows;
+    if (fyFilter !== "all") {
+      list = list.filter((r) => {
+        const label = (r.fiscal_year_label || "").trim();
+        if (fyFilter === FY_NONE) return !label;
+        return label === fyFilter;
+      });
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
+    if (!q) return list;
+    return list.filter((r) => {
       const blob = [r.vendor_name, r.fiscal_year_label, r.remarks, String(r.id)].filter(Boolean).join(" ").toLowerCase();
       return blob.includes(q);
     });
-  }, [rows, search]);
+  }, [rows, search, fyFilter]);
+
+  const filtersActive = fyFilter !== "all" || search.trim() !== "";
+
+  function clearFilters() {
+    setSearch("");
+    setFyFilter("all");
+  }
 
   function resetForm() {
     setEditingId(null);
@@ -520,14 +549,54 @@ export function VendorLicenses() {
       )}
 
       <PlatformSection title="License tracker" action="Refresh" onAction={refresh}>
-        <div style={{ marginBottom: 12 }}>
+        <div
+          style={{
+            marginBottom: 12,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+            alignItems: "center",
+          }}
+        >
           <input
             className="platform-search"
-            placeholder="Search vendor, FY, remarks, ID…"
+            placeholder="Search vendor, remarks, ID…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ maxWidth: 400, width: "100%" }}
+            style={{ flex: "1 1 220px", maxWidth: 400, minWidth: 180 }}
           />
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--mono)", whiteSpace: "nowrap" }}>Financial year</span>
+            <select
+              className="platform-search"
+              value={fyFilter}
+              onChange={(e) => setFyFilter(e.target.value)}
+              style={{ width: "auto", minWidth: 148, maxWidth: 220, padding: "8px 10px", cursor: "pointer" }}
+            >
+              <option value="all">All years</option>
+              {hasEmptyFy ? <option value={FY_NONE}>No FY set</option> : null}
+              {distinctFiscalYears.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+          {filtersActive ? (
+            <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--text-muted)" }}>
+              {filtered.length} of {rows.length} shown
+            </span>
+          ) : null}
+          {filtersActive ? (
+            <button
+              type="button"
+              className="platform-dialog__btn"
+              style={{ fontSize: 10, padding: "6px 10px" }}
+              onClick={clearFilters}
+            >
+              Clear filters
+            </button>
+          ) : null}
         </div>
         <div className="platform-table-wrap" style={{ overflowX: "auto" }}>
           <table className="platform-table" style={{ minWidth: 1200 }}>
@@ -553,7 +622,11 @@ export function VendorLicenses() {
               {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={14} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
-                    No rows yet. Add vendors from your JOB BOARD / VENDOR LICENSE TRACKER.
+                    {rows.length === 0
+                      ? "No rows yet. Add vendors from your JOB BOARD / VENDOR LICENSE TRACKER."
+                      : filtersActive
+                        ? "No rows match the current filters."
+                        : "No rows yet. Add vendors from your JOB BOARD / VENDOR LICENSE TRACKER."}
                   </td>
                 </tr>
               )}

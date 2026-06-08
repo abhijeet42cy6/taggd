@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { DismissableLayerBranch } from "@radix-ui/react-dismissable-layer";
 import {
   api,
   invalidateCache,
@@ -23,12 +24,14 @@ import { cn, formatLargeCurrency } from "@/lib/utils";
 import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Download, RefreshCw, Plus, PencilLine, Trash2, FilterX } from "lucide-react";
+import { Download, RefreshCw, Plus, PencilLine, Trash2, FilterX, Maximize2 } from "lucide-react";
+import { BillingRowsExpandDialog } from "@/components/platform/BillingRowsExpandDialog";
 import "@/styles/new-contract-panel.css";
 import "@/styles/billing-ds-table.css";
 
 const PM_NONE = "__pm_none__";
 const FY_NONE = "__fy_none__";
+const TABLE_PREVIEW_LIMIT = 10;
 
 /** Matches backend `workflow_allows_billing_row_edit` (draft + disputed only). */
 function billingRowLocked(r: RevenueBillingRow): boolean {
@@ -521,8 +524,6 @@ function BillingFormNCP({
   assignableUsers,
   tab,
   setTab,
-  /** In-sheet mount target so Radix Sheet focus scope includes the portaled dropdown. */
-  projectDropdownPortalEl,
   billingRowId,
   attachmentsLocked,
   pendingAttachmentFiles,
@@ -536,7 +537,6 @@ function BillingFormNCP({
   assignableUsers: PlatformUserLite[];
   tab: number;
   setTab: (n: number) => void;
-  projectDropdownPortalEl: HTMLDivElement | null;
   billingRowId: number | null;
   attachmentsLocked: boolean;
   pendingAttachmentFiles: File[];
@@ -836,8 +836,8 @@ function BillingFormNCP({
               </button>
               {projDdOpen &&
                 projDdRect &&
-                projectDropdownPortalEl &&
                 createPortal(
+                  <DismissableLayerBranch asChild>
                   <div
                     ref={projPortalRef}
                     className="new-contract-sheet"
@@ -904,8 +904,9 @@ function BillingFormNCP({
                         )}
                       </div>
                     </div>
-                  </div>,
-                  projectDropdownPortalEl,
+                  </div>
+                  </DismissableLayerBranch>,
+                  document.body,
                 )}
             </div>
             {pr("Update date", "update_date", { placeholder: "YYYY-MM-DD" })}
@@ -1209,8 +1210,6 @@ export function Billing() {
   const [baselineDraft, setBaselineDraft] = useState<Draft | null>(null);
   const [billingTab, setBillingTab] = useState(0);
   const [assignableUsers, setAssignableUsers] = useState<PlatformUserLite[]>([]);
-  /** In-sheet DOM node for BillingFormNCP project dropdown portal (Radix focus trap). */
-  const [billingSheetPortalEl, setBillingSheetPortalEl] = useState<HTMLDivElement | null>(null);
   const [pendingAttachmentFiles, setPendingAttachmentFiles] = useState<File[]>([]);
 
   /** Client-side filters for the loaded table (API still uses project + limit). */
@@ -1218,6 +1217,7 @@ export function Billing() {
   const [tableFy, setTableFy] = useState<string>("all");
   const [tablePm, setTablePm] = useState<string>("all");
   const [tableInvoice, setTableInvoice] = useState<"all" | "has" | "none">("all");
+  const [tableExpandOpen, setTableExpandOpen] = useState(false);
 
   const pid = projectFilter === "all" ? undefined : Number(projectFilter);
 
@@ -1698,13 +1698,13 @@ export function Billing() {
             </p>
             <div className="billing-ds-summary-grid">
               <div className="billing-ds-summary-tile">
-                <div className="billing-ds-summary-label">Total net revenue</div>
-                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.netRevenue)}</div>
+                <div className="billing-ds-summary-label">Total revenue in month booked</div>
+                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.revenueBooked)}</div>
               </div>
               <div className="billing-ds-summary-tile">
-                <div className="billing-ds-summary-label">Revenue booked (month)</div>
-                <div className="billing-ds-summary-sub">Σ revenue_booked_inr</div>
-                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.revenueBooked)}</div>
+                <div className="billing-ds-summary-label">Total net revenue</div>
+                <div className="billing-ds-summary-sub">Σ net_revenue_inr</div>
+                <div className="billing-ds-summary-value">{formatLargeCurrency(billingSummary.netRevenue)}</div>
               </div>
               <div className="billing-ds-summary-tile">
                 <div className="billing-ds-summary-label">Total</div>
@@ -1740,7 +1740,41 @@ export function Billing() {
         </div>
       </PlatformSection>
 
-      <PlatformSection title="All billing rows" action="Refresh" onAction={() => void reload()}>
+      <PlatformSection
+        title="All billing rows"
+        headerRight={
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="billing-toolbar-btn"
+              onClick={() => downloadBillingExcel(filteredRows)}
+              disabled={loading || !filteredRows.length}
+              title="Download UTF-8 CSV (opens in Microsoft Excel)"
+            >
+              <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Download Excel
+            </button>
+            <button
+              type="button"
+              className="billing-toolbar-btn"
+              onClick={() => setTableExpandOpen(true)}
+              disabled={loading || !filteredRows.length}
+            >
+              <Maximize2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Show & expand
+            </button>
+            <button
+              type="button"
+              className="billing-toolbar-btn"
+              onClick={() => void reload()}
+              disabled={loading}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 shrink-0", loading && "animate-spin")} aria-hidden />
+              Refresh
+            </button>
+          </div>
+        }
+      >
         {loading ? (
           <div className="text-sm text-muted-foreground font-mono py-8 text-center">Loading…</div>
         ) : rows.length === 0 ? (
@@ -1820,8 +1854,9 @@ export function Billing() {
                   </button>
                 </div>
               ) : (
+                <>
                 <div className="billing-ds-table-scroll">
-                  <table className="billing-ds-table">
+                  <table className="billing-ds-table billing-ds-table--wide">
                     <thead>
                       <tr>
                         <th>ID</th>
@@ -1829,15 +1864,20 @@ export function Billing() {
                         <th>Update</th>
                         <th>FY</th>
                         <th>PM</th>
-                        <th className="billing-ds-th-end">Net rev</th>
+                        <th className="billing-ds-th-end">Revenue booked</th>
+                        <th className="billing-ds-th-end">Total net revenue</th>
                         <th className="billing-ds-th-end">MMF</th>
+                        <th className="billing-ds-th-end">Total joiners</th>
+                        <th className="billing-ds-th-end">RPH</th>
+                        <th className="billing-ds-th-end">Taggd joiner</th>
+                        <th className="billing-ds-th-end">Other joiner</th>
                         <th>Invoice</th>
                         <th>Workflow</th>
                         <th className="billing-ds-th-end">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredRows.map((r) => (
+                      {filteredRows.slice(0, TABLE_PREVIEW_LIMIT).map((r) => (
                         <tr key={r.id}>
                           <td className="billing-ds-id">{r.id}</td>
                           <td style={{ maxWidth: 220 }}>
@@ -1852,10 +1892,25 @@ export function Billing() {
                             {r.project_manager || "—"}
                           </td>
                           <td className="billing-ds-td-end billing-ds-num">
+                            {r.revenue_booked_inr != null ? formatLargeCurrency(r.revenue_booked_inr) : "—"}
+                          </td>
+                          <td className="billing-ds-td-end billing-ds-num font-semibold">
                             {r.net_revenue_inr != null ? formatLargeCurrency(r.net_revenue_inr) : "—"}
                           </td>
                           <td className="billing-ds-td-end billing-ds-num">
                             {r.mmf_inr != null ? formatLargeCurrency(r.mmf_inr) : "—"}
+                          </td>
+                          <td className="billing-ds-td-end billing-ds-num">
+                            {r.total_joiners != null ? r.total_joiners.toLocaleString() : "—"}
+                          </td>
+                          <td className="billing-ds-td-end billing-ds-num">
+                            {r.rph_inr != null ? formatLargeCurrency(r.rph_inr) : "—"}
+                          </td>
+                          <td className="billing-ds-td-end billing-ds-num">
+                            {r.taggd_joiner != null ? r.taggd_joiner.toLocaleString() : "—"}
+                          </td>
+                          <td className="billing-ds-td-end billing-ds-num">
+                            {r.er_ijp_other_count != null ? r.er_ijp_other_count.toLocaleString() : "—"}
                           </td>
                           <td
                             className={cn("billing-ds-invoice", r.invoice_number?.trim() ? "billing-ds-invoice--set" : "billing-ds-invoice--empty")}
@@ -1942,13 +1997,31 @@ export function Billing() {
                     </tbody>
                   </table>
                 </div>
+                {filteredRows.length > TABLE_PREVIEW_LIMIT ? (
+                  <p className="billing-ds-preview-hint">
+                    Showing first {TABLE_PREVIEW_LIMIT} of {filteredRows.length} rows. Use{" "}
+                    <button type="button" className="billing-ds-link-btn" onClick={() => setTableExpandOpen(true)}>
+                      Show & expand
+                    </button>{" "}
+                    for the full list and Excel download.
+                  </p>
+                ) : null}
+                </>
               )}
             </div>
           </div>
         )}
       </PlatformSection>
 
+      <BillingRowsExpandDialog
+        open={tableExpandOpen}
+        onOpenChange={setTableExpandOpen}
+        rows={filteredRows}
+      />
+
+      {/* modal={false}: project picker portals to document.body; Radix focus trap blocks the search input otherwise. */}
       <Sheet
+        modal={false}
         open={dialogOpen}
         onOpenChange={(next) => {
           setDialogOpen(next);
@@ -1969,7 +2042,7 @@ export function Billing() {
             "bg-[#f7f6f3] shadow-xl",
           )}
         >
-          <div ref={setBillingSheetPortalEl} className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+          <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
             {/* ── Scrollable content ──────────────────────── */}
             <div className="ncp-scroll min-h-0 flex-1">
               <div className="ncp-page">
@@ -2013,7 +2086,6 @@ export function Billing() {
                   assignableUsers={assignableUsers}
                   tab={billingTab}
                   setTab={setBillingTab}
-                  projectDropdownPortalEl={billingSheetPortalEl}
                   billingRowId={editId}
                   attachmentsLocked={attachmentsLocked}
                   pendingAttachmentFiles={pendingAttachmentFiles}

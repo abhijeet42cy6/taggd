@@ -143,6 +143,53 @@ def _month_column_map(df: pd.DataFrame, months: list[str]) -> dict:
     return col_map
 
 
+def _months_from_column_map(col_map: dict, df: pd.DataFrame, months: list[str]) -> set[datetime.datetime]:
+    """Reporting months present as columns on a finance sheet."""
+    out: set[datetime.datetime] = set()
+    for m_ref, excel_col in col_map.items():
+        if isinstance(excel_col, datetime.datetime):
+            out.add(excel_col)
+        else:
+            for _, row in df.iterrows():
+                rd = get_month_date(m_ref, _fy_from_row(row))
+                if rd:
+                    out.add(rd)
+    return out
+
+
+def _clear_stale_ledger_field(
+    db: Session,
+    *,
+    category: str,
+    attr_name: str,
+    months_in_sheet: set[datetime.datetime],
+    accounts_in_sheet: set[int],
+    source_fn: str,
+) -> int:
+    """
+    Zero ledger values for account-months absent from the uploaded sheet.
+    Prevents removed accounts (e.g. churned clients) from leaving stale actuals.
+    """
+    if not months_in_sheet or not accounts_in_sheet:
+        return 0
+    stale = (
+        db.query(FinanceMonthlyLedger)
+        .filter(
+            FinanceMonthlyLedger.metric_category == category,
+            FinanceMonthlyLedger.reporting_month.in_(months_in_sheet),
+            ~FinanceMonthlyLedger.project_id.in_(accounts_in_sheet),
+        )
+        .all()
+    )
+    cleared = 0
+    for ledger in stale:
+        if getattr(ledger, attr_name, None) not in (None, 0, 0.0):
+            setattr(ledger, attr_name, 0)
+            ledger.source_filename = source_fn
+            cleared += 1
+    return cleared
+
+
 def ingest_finance_master(file_path):
     """
     Ingests the Master Corporate Finance file (FY24-25_Finance Data.xlsx).
@@ -222,11 +269,18 @@ def ingest_finance_master(file_path):
                     print(f"  Warning: No month columns detected on «{sheet}»; skipping.")
                     continue
 
+                months_in_sheet = _months_from_column_map(col_map, df, months)
+                accounts_in_sheet: set[int] = set()
+                attr_name = f"{val_type}_value"
+                if category == "Cost" and val_type == "actual":
+                    attr_name = "actual_cost"
+
                 for _, row in df.iterrows():
                     p_name = _account_from_row(row)
                     project = get_project(p_name)
                     if not project:
                         continue
+                    accounts_in_sheet.add(project.id)
 
                     for m_ref, excel_col in col_map.items():
                         if isinstance(excel_col, datetime.datetime):
@@ -266,12 +320,19 @@ def ingest_finance_master(file_path):
                             db.add(ledger)
                             db.flush()
 
-                        attr_name = f"{val_type}_value"
-                        if category == "Cost" and val_type == "actual":
-                            attr_name = "actual_cost"
-
                         setattr(ledger, attr_name, val)
                         ledger.source_filename = source_fn
+
+                cleared = _clear_stale_ledger_field(
+                    db,
+                    category=category,
+                    attr_name=attr_name,
+                    months_in_sheet=months_in_sheet,
+                    accounts_in_sheet=accounts_in_sheet,
+                    source_fn=source_fn,
+                )
+                if cleared:
+                    print(f"  Cleared stale {category} {val_type} on {cleared} ledger row(s) not in «{sheet}».")
             except Exception as e:
                 print(f"Warning: Skipped «{sheet}» ({aliases[0]}) due to error: {e}")
 

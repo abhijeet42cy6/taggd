@@ -705,8 +705,9 @@ export function CandidateFormDrawer({
 
   const canSave = projects.length > 0 && !loadingCandidate;
 
+  // modal={false}: dropdown search portals to document.body; Radix focus trap otherwise prevents typing in search.
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+    <Sheet modal={false} open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
         side="right"
         showCloseButton={false}

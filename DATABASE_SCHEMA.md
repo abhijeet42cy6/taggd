@@ -1,6 +1,6 @@
 # Database schema reference
 
-This document describes the application database as defined in SQLAlchemy (`backend/db/database.py`). Default connection: `DATABASE_URL` env var, else `sqlite:///./revenue_generator.db`.
+This document describes the application database as defined in SQLAlchemy (`backend/db/database.py`). **Production and local Docker Compose use PostgreSQL** via `DATABASE_URL` (see `docker-compose.yml`, Cloud SQL on deploy). If `DATABASE_URL` is unset, the code falls back to `sqlite:///./revenue_generator.db` (legacy emergency only; blocked when `APP_ENV=production`). Schema changes: **Alembic** (`alembic/versions/`). See [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
 
 **ORM parity:** the tables below mirror `database.py` on the `base_complete` line of development. Older SQLite files pick up **additive** columns and indexes through `_ensure_*` helpers invoked from `init_db()` (listed in *Runtime migrations*). **Destructive** changes (e.g. dropping legacy `project_budgets` / `project_forecasts` after copying into `finance_monthly_ledger`) run only when the migration module detects those legacy tables.
 

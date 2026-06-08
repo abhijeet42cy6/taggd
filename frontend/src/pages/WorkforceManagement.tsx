@@ -43,6 +43,7 @@ import {
   wfmMatchesFilter,
   wfmRowsVm,
   wfmOpenPositionsFromSheet,
+  wfmResignationsFromSheet,
   wfmRowAdditionalHcProxy,
   wfmRowProjectedHc,
   wfmRowNetVarianceVsProjected,
@@ -250,6 +251,7 @@ export function WorkforceManagement() {
     const totVariance = totIdeal - totActual;
     const totAdditionalHc = filteredRows.reduce((s, r) => s + wfmRowAdditionalHcProxy(r), 0);
     const totOpenSheet = filteredRows.reduce((s, r) => s + wfmOpenPositionsFromSheet(r), 0);
+    const totResignations = filteredRows.reduce((s, r) => s + wfmResignationsFromSheet(r), 0);
     const totGapRows = filteredRows.reduce((s, r) => s + Number(r.resource_gap_row_count ?? 0), 0);
     const totProjectedHc = filteredRows.reduce((s, r) => s + wfmRowProjectedHc(r), 0);
     const totNetVar = totIdeal - totProjectedHc;
@@ -280,6 +282,7 @@ export function WorkforceManagement() {
       totVariance,
       totAdditionalHc,
       totOpenSheet,
+      totResignations,
       totGapRows,
       totProjectedHc,
       totNetVar,
@@ -298,6 +301,7 @@ export function WorkforceManagement() {
     let sumIdealForProd = 0;
     let sumProdWeighted = 0;
     let sumOpenSheet = 0;
+    let sumResignations = 0;
     let sumAdditional = 0;
     let sumActual = 0;
     let sumIdeal = 0;
@@ -315,6 +319,7 @@ export function WorkforceManagement() {
         sumProdWeighted += prod * idealN;
       }
       sumOpenSheet += wfmOpenPositionsFromSheet(r);
+      sumResignations += wfmResignationsFromSheet(r);
       sumAdditional += wfmRowAdditionalHcProxy(r);
     }
     const wProdRaw =
@@ -322,7 +327,7 @@ export function WorkforceManagement() {
         ? sumProdWeighted / sumIdealForProd
         : rows.reduce((s, r) => s + Number(r.lateral_productivity_target ?? 0), 0) / rows.length;
     const wProd = Number.isFinite(wProdRaw) ? wProdRaw : 0;
-    const portfolioProjected = sumActual + sumAdditional + sumOpenSheet;
+    const portfolioProjected = rows.reduce((s, r) => s + wfmRowProjectedHc(r), 0);
     const varianceVsActual = sumIdeal - sumActual;
     const staffGapPctActual = sumIdeal > 0 ? ((sumIdeal - sumActual) / sumIdeal) * 100 : 0;
     const varianceVsProjected = sumIdeal - portfolioProjected;
@@ -345,6 +350,7 @@ export function WorkforceManagement() {
       revenueInr,
       wProd,
       sumOpenSheet,
+      sumResignations,
       sumAdditional,
       portfolioProjected,
       overstaffed,
@@ -356,6 +362,15 @@ export function WorkforceManagement() {
       staffGapPctProjected,
     };
   }, [rows]);
+
+  const portfolioResignationsLatest = Number(
+    stats?.portfolio_hc_summary?.latest?.resignations ?? NaN,
+  );
+  const sumResignationsTracked = Number(
+    stats?.total_existing_resignations ?? portfolioWorkbook?.sumResignations ?? 0,
+  );
+  const hasResignationIngest =
+    sumResignationsTracked > 0 || Number.isFinite(portfolioResignationsLatest);
 
   // ── render ──────────────────────────────────────────────────────────────────
   return (
@@ -426,7 +441,7 @@ export function WorkforceManagement() {
             <Card decoration="top" decorationColor="teal" className="p-3">
               <Text className="text-[10px] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">Ideal HC</Text>
               <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatNumber(idealHc)}</Metric>
-              <Text className="mt-0.5 text-[10px] text-tremor-content-subtle md:text-[11px]">Σ ideal headcount</Text>
+              <Text className="mt-0.5 text-[10px] text-tremor-content-subtle md:text-[11px]">Sum of ideal HC</Text>
             </Card>
             <Card decoration="top" decorationColor="blue" className="p-3">
               <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Actual HC</Text>
@@ -447,23 +462,42 @@ export function WorkforceManagement() {
                 <Badge color="slate" size="xs">Sheet</Badge>
               </Flex>
               <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
-                Σ open_positions.total from workbook JSON per client (feeds projected HC). Gap upload lists{" "}
-                <span className="font-medium text-tremor-content-emphasis">{formatNumber(openRequisitionsTotal, 0)}</span> open gap{" "}
-                records — a separate pipeline count, not included in the sheet total above.
+                Workbook total ·{" "}
+                <span className="font-medium text-tremor-content-emphasis">{formatNumber(openRequisitionsTotal, 0)}</span> gap reqs (excluded)
               </Text>
             </Card>
             <Card decoration="top" decorationColor="slate" className="p-3">
               <Text className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">Resignations</Text>
-              <Metric className="mt-1 text-lg tabular-nums text-tremor-content-subtle md:text-xl">Not tracked</Metric>
+              <Flex justifyContent="between" alignItems="start" className="mt-1 flex-wrap gap-1">
+                <Metric className="text-lg tabular-nums md:text-xl">
+                  {hasResignationIngest ? formatNumber(sumResignationsTracked) : "Not tracked"}
+                </Metric>
+                {hasResignationIngest ? <Badge color="slate" size="xs">Q4 sheet</Badge> : null}
+              </Flex>
               <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
-                Not ingested on the WFM workbook path — projected HC below assumes 0 resignations.
+                {hasResignationIngest ? (
+                  <>
+                    Σ per client (Existing Resignation)
+                    {Number.isFinite(portfolioResignationsLatest) ? (
+                      <>
+                        {" "}
+                        · HC summary latest{" "}
+                        <span className="font-medium text-tremor-content-emphasis">
+                          {formatNumber(portfolioResignationsLatest, 0)}
+                        </span>
+                      </>
+                    ) : null}
+                  </>
+                ) : (
+                  "Re-ingest WFM workbook to load Q4 + HC summary tabs"
+                )}
               </Text>
             </Card>
             <Card decoration="top" decorationColor="violet" className="p-3">
               <Text className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-400">Projected HC</Text>
               <Metric className="mt-1 text-lg tabular-nums md:text-xl">{formatNumber(portfolioWorkbook.portfolioProjected)}</Metric>
               <Text className="mt-0.5 text-[10px] leading-snug text-tremor-content-subtle md:text-[11px]">
-                Actual + additional proxy + sheet open positions (no resignations)
+                Actual + proxy + open − resignations
               </Text>
             </Card>
           </Grid>
@@ -776,6 +810,7 @@ export function WorkforceManagement() {
                   const gapColor = wfmFillColor(pct, idealN);
                   const statusLbl = wfmStatusLabel(pct, idealN);
                   const openSheet = wfmOpenPositionsFromSheet(r);
+                  const resignations = wfmResignationsFromSheet(r);
                   const gapReqRows = Number(r.resource_gap_row_count ?? 0);
                   const projRow = wfmRowProjectedHc(r);
                   const netVar = wfmRowNetVarianceVsProjected(r);
@@ -836,7 +871,9 @@ export function WorkforceManagement() {
                           {formatNumber(gapReqRows, 0)} reqs
                         </Text>
                       </TableCell>
-                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">—</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">
+                        {resignations > 0 ? formatNumber(resignations) : "—"}
+                      </TableCell>
                       <TableCell className="text-right text-xs tabular-nums font-medium text-violet-800 dark:text-violet-300">
                         {formatNumber(projRow)}
                       </TableCell>
@@ -892,7 +929,11 @@ export function WorkforceManagement() {
                         {formatNumber(projectTableTotals.totGapRows, 0)} reqs
                       </span>
                     </TableFooterCell>
-                    <TableFooterCell className="text-right text-xs text-tremor-content-subtle">—</TableFooterCell>
+                    <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-tremor-content-subtle">
+                      {projectTableTotals.totResignations > 0
+                        ? formatNumber(projectTableTotals.totResignations)
+                        : "—"}
+                    </TableFooterCell>
                     <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-violet-800 dark:text-violet-300">
                       {formatNumber(projectTableTotals.totProjectedHc)}
                     </TableFooterCell>

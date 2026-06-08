@@ -1,19 +1,17 @@
 /**
- * Executive Risk Radar — per-client health from **available** finance ledger, forecast, revenue, SLA, WFM only.
- * - No requisition/tracker stats in the score.
- * - No neutral penalty for missing data: each domain is `null` if insufficient data; composite reweights over non-null domains only.
+ * Executive Risk Radar — per-client health from finance ledger + SLA only.
+ * Domains: budget revenue attainment, actual revenue YoY, CM%, SLA Met %.
+ * Missing data is excluded from composite (reweighted), not penalized.
  */
 import type { FinanceRowVm } from "@/lib/view-models/finance";
 import { aggregateFinanceFromRows } from "@/lib/dashboard-aggregates";
 
 export type DomainRisk = "OK" | "MED" | "HIGH";
 
-/** Base weights renormalized over domains with data. */
-const W_REVENUE = 0.2;
-const W_FINANCE = 0.25;
-const W_FORECAST = 0.2;
+const W_BUDGET_REV = 0.3;
+const W_ACTUAL_REV = 0.25;
+const W_CM = 0.25;
 const W_SLA = 0.2;
-const W_WFM = 0.15;
 
 const CM_TARGET_PCT = 35;
 
@@ -44,8 +42,8 @@ function bucketSlaRag(rag: string | null | undefined): "met" | "not_met" | "not_
 
 type FinanceAgg = NonNullable<ReturnType<typeof aggregateFinanceFromRows>>;
 
-/** Budget vs actual revenue (ledger). */
-function scoreRevenue(agg: FinanceAgg | null): number | null {
+/** Actual ÷ budget revenue (ledger). */
+function scoreBudgetRevenue(agg: FinanceAgg | null): number | null {
   if (!agg) return null;
   const b = agg.revenue_budget_inr;
   const a = agg.revenue_actual_inr;
@@ -53,46 +51,52 @@ function scoreRevenue(agg: FinanceAgg | null): number | null {
   return null;
 }
 
-/** CM%, collections, unbilled / bad-debt stress (excludes top-line rev attainment). */
-function scoreFinanceOps(agg: FinanceAgg | null): number | null {
-  if (!agg) return null;
-  const a = agg.revenue_actual_inr;
-  const b = agg.revenue_budget_inr;
-  if (a <= 0 && b <= 0) return null;
-  const cmPct = a > 0 ? (agg.total_cm_inr / a) * 100 : 0;
-  const cmScore = a > 0 ? clamp((cmPct / CM_TARGET_PCT) * 100) : 50;
-  const collScore =
-    agg.total_collection_target_inr > 0
-      ? clamp((agg.total_collected_inr / agg.total_collection_target_inr) * 100)
-      : null;
-  const unbPct = a > 0 ? (agg.total_unbilled_inr / a) * 100 : 0;
-  const denom = agg.total_collected_inr + agg.total_bad_debt_inr;
-  const bdPct = denom > 0 ? (agg.total_bad_debt_inr / denom) * 100 : 0;
-  const unbPenalty = clamp(unbPct * 0.35, 0, 30);
-  const bdPenalty = clamp(bdPct * 0.5, 0, 25);
-  const stress = 100 - unbPenalty - bdPenalty;
-  if (collScore == null) {
-    if (a <= 0) return null;
-    return clamp(Math.round(cmScore * 0.6 + stress * 0.4));
-  }
-  if (a <= 0) return clamp(Math.round(collScore * 0.5 + stress * 0.5));
-  return clamp(Math.round(cmScore * 0.35 + collScore * 0.35 + stress * 0.3));
+function normAccount(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase();
 }
 
-/** Actual vs **forecast** only (no budget fallback). */
-function scoreForecast(agg: FinanceAgg | null): number | null {
-  if (!agg) return null;
-  const f = agg.revenue_forecast_inr;
-  const a = agg.revenue_actual_inr;
-  if (f == null || f <= 0) return null;
-  return clamp((a / f) * 100);
-}
-
-function scoreSlaForProject(
-  slaRows: Array<{ project_id: number; status: string }>,
+function financeRowsForClient(
+  rows: FinanceRowVm[],
   projectId: number,
+  accountName: string,
+): FinanceRowVm[] {
+  const acc = normAccount(accountName);
+  return rows.filter((r) => {
+    if (r.project_id === projectId) return true;
+    if (!acc) return false;
+    return normAccount(r.account_name) === acc;
+  });
+}
+
+/** Actual revenue vs prior FY actual (YoY index, 100 = flat). */
+function scoreActualRevenueYoY(agg: FinanceAgg | null, priorActualInr: number | null | undefined): number | null {
+  if (!agg) return null;
+  const a = agg.revenue_actual_inr;
+  const p = priorActualInr ?? 0;
+  if (a <= 0 || p <= 0) return null;
+  return clamp((a / p) * 100);
+}
+
+/** CM% vs 35% target. */
+function scoreCmPct(agg: FinanceAgg | null): number | null {
+  if (!agg) return null;
+  const a = agg.revenue_actual_inr;
+  if (a <= 0) return null;
+  const cmPct = (agg.total_cm_inr / a) * 100;
+  return clamp((cmPct / CM_TARGET_PCT) * 100);
+}
+
+function scoreSlaForClient(
+  slaRows: Array<{ project_id: number; account_name?: string; status: string }>,
+  projectId: number,
+  accountName: string,
 ): number | null {
-  const rows = slaRows.filter((r) => r.project_id === projectId);
+  const accNorm = normAccount(accountName);
+  const rows = slaRows.filter((r) => {
+    if (r.project_id === projectId) return true;
+    if (!accNorm) return false;
+    return normAccount(r.account_name) === accNorm;
+  });
   if (!rows.length) return null;
   let met = 0;
   let notMet = 0;
@@ -106,43 +110,17 @@ function scoreSlaForProject(
   return clamp(Math.round((met / dec) * 100));
 }
 
-function scoreWfmForProject(
-  wfmRows: Array<{
-    project_id: number;
-    ideal_hc: number | null;
-    actual_hc_total: number | null;
-    reporting_date: string | null;
-  }>,
-  projectId: number,
-): number | null {
-  const rows = wfmRows.filter((r) => r.project_id === projectId);
-  if (!rows.length) return null;
-  const sorted = [...rows].sort((a, b) => {
-    const ta = a.reporting_date ? new Date(a.reporting_date).getTime() : 0;
-    const tb = b.reporting_date ? new Date(b.reporting_date).getTime() : 0;
-    return tb - ta;
-  });
-  const b = sorted[0];
-  const ideal = Number(b.ideal_hc ?? 0);
-  const actual = Number(b.actual_hc_total ?? 0);
-  if (ideal <= 0) return null;
-  const fill = (actual / ideal) * 100;
-  if (fill >= 95 && fill <= 105) return 92;
-  if (fill >= 85) return 82;
-  if (fill >= 70) return 68;
-  if (fill >= 55) return 55;
-  return clamp(Math.round(fill * 0.9));
-}
-
-function compositeFromAvailable(
-  s: { revenue: number | null; finance: number | null; forecast: number | null; sla: number | null; wfm: number | null },
-): number | null {
+function compositeFromAvailable(s: {
+  budgetRev: number | null;
+  actualRev: number | null;
+  cm: number | null;
+  sla: number | null;
+}): number | null {
   const w = {
-    revenue: W_REVENUE,
-    finance: W_FINANCE,
-    forecast: W_FORECAST,
+    budgetRev: W_BUDGET_REV,
+    actualRev: W_ACTUAL_REV,
+    cm: W_CM,
     sla: W_SLA,
-    wfm: W_WFM,
   } as const;
   type K = keyof typeof w;
   let acc = 0;
@@ -167,21 +145,19 @@ export type ClientRiskRadarRow = {
   id: number;
   name: string;
   scores: {
-    revenue: number | null;
-    finance: number | null;
-    forecast: number | null;
+    budgetRev: number | null;
+    actualRev: number | null;
+    cm: number | null;
     sla: number | null;
-    wfm: number | null;
   };
   /** Renormalized over available domains; null if no domain has data. */
   composite: number | null;
   risk: DomainRisk | null;
   levels: {
-    revenue: DomainRisk | null;
-    finance: DomainRisk | null;
-    forecast: DomainRisk | null;
+    budgetRev: DomainRisk | null;
+    actualRev: DomainRisk | null;
+    cm: DomainRisk | null;
     sla: DomainRisk | null;
-    wfm: DomainRisk | null;
   };
   /** Optional pipeline context (requisitions) for drawer only — not used in scoring. */
   positions: number;
@@ -194,11 +170,10 @@ export type ClientRiskRadarRow = {
 
 export function worstDomainName(row: ClientRiskRadarRow): string {
   const entries: [string, number][] = [
-    ["Revenue", row.scores.revenue],
-    ["Finance", row.scores.finance],
-    ["Forecast", row.scores.forecast],
+    ["Budget rev", row.scores.budgetRev],
+    ["Actual rev", row.scores.actualRev],
+    ["CM%", row.scores.cm],
     ["SLA", row.scores.sla],
-    ["WFM", row.scores.wfm],
   ].filter((x): x is [string, number] => x[1] != null);
   if (!entries.length) return "—";
   entries.sort((a, b) => a[1] - b[1]);
@@ -206,15 +181,10 @@ export function worstDomainName(row: ClientRiskRadarRow): string {
 }
 
 export function buildClientRiskRadarRows(
-  clients: { id: number; name: string }[],
+  clients: { id: number; name: string; accountName: string }[],
   kpiRows: FinanceRowVm[],
-  slaData: Array<{ project_id: number; status: string }>,
-  wfmData: Array<{
-    project_id: number;
-    ideal_hc: number | null;
-    actual_hc_total: number | null;
-    reporting_date: string | null;
-  }>,
+  priorKpiRows: FinanceRowVm[],
+  slaData: Array<{ project_id: number; account_name?: string; status: string }>,
   /** Optional: requisition rollups for drawer (not used in score). */
   pipelineById: Map<
     number,
@@ -223,24 +193,25 @@ export function buildClientRiskRadarRows(
 ): ClientRiskRadarRow[] {
   const out: ClientRiskRadarRow[] = [];
   for (const c of clients) {
-    const sub = kpiRows.filter((r) => r.project_id === c.id);
+    const sub = financeRowsForClient(kpiRows, c.id, c.accountName);
     const agg = sub.length ? aggregateFinanceFromRows(sub) : null;
 
-    const revenue = scoreRevenue(agg);
-    const finance = scoreFinanceOps(agg);
-    const forecast = scoreForecast(agg);
-    const sla = scoreSlaForProject(slaData, c.id);
-    const wfm = scoreWfmForProject(wfmData, c.id);
+    const priorSub = financeRowsForClient(priorKpiRows, c.id, c.accountName);
+    const priorAgg = priorSub.length ? aggregateFinanceFromRows(priorSub) : null;
 
-    const scores = { revenue, finance, forecast, sla, wfm };
+    const budgetRev = scoreBudgetRevenue(agg);
+    const actualRev = scoreActualRevenueYoY(agg, priorAgg?.revenue_actual_inr);
+    const cm = scoreCmPct(agg);
+    const sla = scoreSlaForClient(slaData, c.id, c.accountName);
+
+    const scores = { budgetRev, actualRev, cm, sla };
     const composite = compositeFromAvailable(scores);
     const risk = riskFromComposite(composite);
     const levels = {
-      revenue: riskFromScore(revenue),
-      finance: riskFromScore(finance),
-      forecast: riskFromScore(forecast),
+      budgetRev: riskFromScore(budgetRev),
+      actualRev: riskFromScore(actualRev),
+      cm: riskFromScore(cm),
       sla: riskFromScore(sla),
-      wfm: riskFromScore(wfm),
     };
 
     const pl = pipelineById.get(c.id);

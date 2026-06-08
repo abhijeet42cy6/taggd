@@ -173,13 +173,21 @@ def descendant_user_ids(db: Session, manager_id: int) -> Set[int]:
     return out
 
 
+LEADERSHIP_VERTICAL_KEYS = frozenset({"executive_dashboard", "ceo_view"})
+
+
 def _staff_vertical_allow_list_allows(keys: Optional[Set[str]], vertical_key: str) -> bool:
     """None = unrestricted (legacy / not configured); empty = no module access."""
+    vk = vertical_key.lower()
+    if vk in LEADERSHIP_VERTICAL_KEYS:
+        if keys is None or len(keys) == 0:
+            return False
+        return vk in {k.lower() for k in keys}
     if keys is None:
         return True
     if len(keys) == 0:
         return False
-    return vertical_key.lower() in {k.lower() for k in keys}
+    return vk in {k.lower() for k in keys}
 
 
 def operations_may_access_vertical(profile: UserAccessProfile, vertical_key: str) -> bool:

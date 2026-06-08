@@ -74,7 +74,7 @@ export function WfmSummaryTable({
           <TableHeaderCell className="min-w-[88px] text-right">
             <Text className="block text-[11px] font-semibold leading-tight">Projected HC</Text>
             <Text className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-tremor-content-subtle">
-              Actual + addl + open
+              Actual + addl + open − resign
             </Text>
           </TableHeaderCell>
           <TableHeaderCell className="min-w-[88px] text-right">
@@ -114,7 +114,9 @@ export function WfmSummaryTable({
               </TableCell>
               <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">{formatNumber(r.additional_hc)}</TableCell>
               <TableCell className="text-right text-xs tabular-nums text-sky-800 dark:text-sky-300">{formatNumber(r.open_positions)}</TableCell>
-              <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">—</TableCell>
+              <TableCell className="text-right text-xs tabular-nums text-tremor-content-subtle">
+                {r.resignations > 0 ? formatNumber(r.resignations) : "—"}
+              </TableCell>
               <TableCell className="text-right text-xs tabular-nums font-medium text-violet-800 dark:text-violet-300">
                 {formatNumber(r.projected_hc)}
               </TableCell>
@@ -173,7 +175,9 @@ export function WfmSummaryTable({
             <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-sky-800 dark:text-sky-300">
               {formatNumber(totals.open_positions)}
             </TableFooterCell>
-            <TableFooterCell className="text-right text-xs text-tremor-content-subtle">—</TableFooterCell>
+            <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-tremor-content-subtle">
+              {totals.resignations > 0 ? formatNumber(totals.resignations) : "—"}
+            </TableFooterCell>
             <TableFooterCell className="text-right text-xs tabular-nums font-semibold text-violet-800 dark:text-violet-300">
               {formatNumber(totals.projected_hc)}
             </TableFooterCell>

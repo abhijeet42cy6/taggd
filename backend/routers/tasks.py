@@ -225,7 +225,7 @@ def list_assignable_users(
         if not id_set:
             return []
         rows = q.filter(User.id.in_(id_set)).all()
-        return [{"id": u.id, "email": u.email, "role": u.role} for u in rows]
+        return [_assignable_user_payload(u) for u in rows]
 
     if is_platform_admin(user):
         rows = q.all()
@@ -245,7 +245,17 @@ def list_assignable_users(
             id_set = {r[0] for r in uids}
             id_set.add(user.id)
             rows = q.filter(User.id.in_(id_set)).all()
-    return [{"id": u.id, "email": u.email, "role": u.role} for u in rows]
+    return [_assignable_user_payload(u) for u in rows]
+
+
+def _assignable_user_payload(u: User) -> dict:
+    return {
+        "id": u.id,
+        "email": u.email,
+        "role": u.role,
+        "given_name": getattr(u, "given_name", None),
+        "family_name": getattr(u, "family_name", None),
+    }
 
 
 @router.get("")

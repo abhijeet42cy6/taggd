@@ -4,6 +4,7 @@ Enterprise-oriented deployment guide for tgddata: **Google Cloud Run** as the pr
 
 **Related docs:**
 
+- [`DEPLOYMENT_DOC.md`](../DEPLOYMENT_DOC.md) — operator index (Cloud Run primary, VM legacy)  
 - [`POSTGRES_MIGRATION.md`](POSTGRES_MIGRATION.md) — Alembic, local Postgres, data migration  
 - [`GCP_CLOUD_SQL_DEVELOPMENT.md`](GCP_CLOUD_SQL_DEVELOPMENT.md) — `tgddata-pg-prod` instance, proxy, compose  
 

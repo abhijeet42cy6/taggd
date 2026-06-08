@@ -1,8 +1,10 @@
+import json
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from backend.auth.profile import ROLE_CLIENT_USER, ROLE_PROJECT_HEAD, VERTICAL_KEYS, effective_role
 from backend.db.database import Project, User, UserProjectAssignment, get_db
@@ -25,6 +27,41 @@ VALID_ROLES = frozenset(
 )
 
 
+def _normalized_vertical_access(raw: object) -> Optional[List[str]]:
+    """
+    Normalize historical/dirty DB payloads into a canonical list[str].
+    Accepts JSON arrays, CSV strings, and list-like values.
+    """
+    values: List[str]
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        values = [str(x) for x in raw]
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        try:
+            loaded = json.loads(text)
+        except Exception:
+            loaded = None
+        if isinstance(loaded, list):
+            values = [str(x) for x in loaded]
+        else:
+            values = [x for x in text.split(",")]
+    else:
+        return None
+    out: List[str] = []
+    seen = set()
+    for item in values:
+        key = str(item).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
 def _normalize_role_input(role: str) -> str:
     r = role.strip().lower()
     aliases = {"admin": "platform_admin", "manager": "project_head"}
@@ -40,6 +77,7 @@ class UserCreate(BaseModel):
 
 
 class UserPatch(BaseModel):
+    email: Optional[str] = Field(default=None, min_length=3)
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
@@ -64,7 +102,7 @@ def list_users(
             .filter(UserProjectAssignment.user_id == u.id)
             .all()
         )
-        va = getattr(u, "vertical_access_json", None)
+        va = _normalized_vertical_access(getattr(u, "vertical_access_json", None))
         out.append(
             {
                 "id": u.id,
@@ -73,7 +111,7 @@ def list_users(
                 "is_active": u.is_active,
                 "project_ids": [r[0] for r in pids],
                 "manager_user_id": getattr(u, "manager_user_id", None),
-                "vertical_access": list(va) if isinstance(va, list) else va,
+                "vertical_access": va,
             }
         )
     return out
@@ -132,6 +170,14 @@ def patch_user(
     u = db.query(User).filter(User.id == user_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
+    if body.email is not None:
+        email = body.email.strip().lower()
+        if not email:
+            raise HTTPException(status_code=400, detail="Email cannot be empty")
+        existing = db.query(User).filter(User.email == email, User.id != user_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        u.email = email
     if u.id == admin.id and body.is_active is False:
         raise HTTPException(status_code=400, detail="Cannot disable yourself")
     if body.role is not None:
@@ -173,7 +219,7 @@ def patch_user(
         "role": u.role,
         "is_active": u.is_active,
         "manager_user_id": getattr(u, "manager_user_id", None),
-        "vertical_access": u.vertical_access_json if isinstance(u.vertical_access_json, list) else None,
+        "vertical_access": _normalized_vertical_access(getattr(u, "vertical_access_json", None)),
     }
 
 
@@ -224,3 +270,26 @@ def set_user_projects(
 
     db.commit()
     return {"user_id": user_id, "project_ids": sorted(seen)}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    u = db.query(User).filter(User.id == user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    if u.id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    db.delete(u)
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="User cannot be deleted because related records still reference this account.",
+        ) from e
+    return {"status": "ok", "deleted_user_id": user_id}

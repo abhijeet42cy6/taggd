@@ -35,7 +35,7 @@ python3 backend/scripts/ingest_excel_master_filled_workbooks.py \
   --wfm path/to/09_workforce_management_filled.xlsx
 ```
 
-Omit `--finance`, `--sla`, or `--wfm` if you only need a subset. Set `DATABASE_URL` if not using the default SQLite file (`sqlite:///./revenue_generator.db` relative to the process working directory).
+Omit `--finance`, `--sla`, or `--wfm` if you only need a subset. Set `DATABASE_URL` to your target database (local Docker Postgres: `postgresql+psycopg://tgddata:tgddata_dev@127.0.0.1:5432/tgddata`, or Cloud SQL via proxy). Legacy SQLite path only if you explicitly set `sqlite:///...`.
 
 **WFM (`09` — `wfm_hr_benchmarks`, `wfm_resource_gaps`):** the `project_id` column in the sheet holds the **account name** (string), not a numeric FK. The loader resolves names with `resolve_project_for_sla` and falls back to `get_or_create_project`. Re-importing the same file **basename** replaces prior rows with that `source_filename` (idempotent). This is **not** the legacy **`ingest_wfm.py`** **Projected HC** positional layout — the legacy path additionally fills **`sheet_metrics_json`**, **`Open Positin List`** → gaps (`uploaded_by = ingest_wfm_master`), and **`POST /wfm/upload`**; see **`docs/DATA_INGESTION_RUNBOOK.md`** §7.
 

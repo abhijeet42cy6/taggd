@@ -5,6 +5,8 @@ This document describes the **SQLite → PostgreSQL** migration for tgddata: why
 **Last updated:** May 2026  
 **Stack:** PostgreSQL **16**, **psycopg 3** (`psycopg[binary]`), **SQLAlchemy 2.x**, **Alembic 1.x**, **FastAPI** backend, **Docker Compose** for local and VM deploys.
 
+**Deploy index:** [`DEPLOYMENT_DOC.md`](../DEPLOYMENT_DOC.md) (Cloud Run primary; VM legacy).
+
 ---
 
 ## 1. Goals
@@ -535,7 +537,7 @@ Expect `"database":"ok"` and non-zero `projects` / `records` when migration succ
 ## 17. Related documentation
 
 - [`CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md`](CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md) — Cloud Run, GCS/S3 storage, load balancing, AWS portability.
-- `DEPLOYMENT_DOC.md` — VM, Nginx, GCP deploy scripts (update compose references to Postgres as you adopt this guide).
+- [`DEPLOYMENT_DOC.md`](../DEPLOYMENT_DOC.md) — operator index (Cloud Run primary; VM + host Nginx legacy).
 - `docs/ENTERPRISE_SECURITY_ANALYSIS_AND_ROADMAP.md` — security posture including Postgres recommendation.
 - `docs/CLOUD_DB_RE_INGESTION_RUNBOOK.md` — data re-ingestion after cloud DB exists (set `DATABASE_URL` to Postgres).
 - `.env.example` — copy-paste URL templates.

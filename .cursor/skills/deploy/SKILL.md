@@ -14,7 +14,7 @@ description: >-
 
 **Default production path** for the stack built in May 2026: **Cloud Run API + Cloud SQL Postgres + GCS** (static UI + uploads). Run deploy scripts from **repository root** unless the user explicitly asks for the **legacy VM** (`taggd.aparatus.in`).
 
-Full docs: [`docs/GCP_CLOUD_RUN_DEPLOYMENT_GUIDE.md`](../../docs/GCP_CLOUD_RUN_DEPLOYMENT_GUIDE.md), [`deploy/gcp/README.md`](../../deploy/gcp/README.md).
+Index: [`DEPLOYMENT_DOC.md`](../../DEPLOYMENT_DOC.md). Detail: [`docs/GCP_CLOUD_RUN_DEPLOYMENT_GUIDE.md`](../../docs/GCP_CLOUD_RUN_DEPLOYMENT_GUIDE.md), [`deploy/gcp/README.md`](../../deploy/gcp/README.md).
 
 ---
 
@@ -32,7 +32,9 @@ Full docs: [`docs/GCP_CLOUD_RUN_DEPLOYMENT_GUIDE.md`](../../docs/GCP_CLOUD_RUN_D
 | **VPC connector** | `tgddata-run-connector` | Required: Cloud Run → private Cloud SQL |
 | **GCS uploads** | `gs://taggd-tgddata-prod-uploads` | `STORAGE_BACKEND=gcs` |
 | **GCS web (SPA)** | `gs://taggd-tgddata-prod-web` | Static React build |
-| **SPA URL (bookmark)** | `https://storage.googleapis.com/taggd-tgddata-prod-web/index.html#/login` | Hash routes; hard-refresh after deploy |
+| **Production domain** | `https://trops.taggd.in` | Single host: UI + API (HTTPS LB `8.232.241.48`) |
+| **LB static IP** | `tgddata-trops-ip` → `8.232.241.48` | Client DNS: **A** `trops` → this IP |
+| **SPA URL (staging)** | `https://storage.googleapis.com/taggd-tgddata-prod-web/index.html#/login` | Until trops cutover; hash routes |
 | **Runtime SA** | `tgddata-runtime@taggd-491107.iam.gserviceaccount.com` | Cloud Run service account |
 | **Artifact Registry** | `asia-south1-docker.pkg.dev/taggd-491107/tgddata` | API Docker images |
 | **Secrets (SM)** | `TGDDATA_DATABASE_URL`, `JWT_SECRET`, `GEMINI_API_KEY`, `tgddata-pg-prod-db-password` | Never commit |
@@ -150,12 +152,37 @@ Canonical SQLite source (if needed): `SQLITE_SOURCE_PATH` or `/Users/arjun/Softw
 
 ---
 
+## Custom domain `trops.taggd.in` (single hostname — no `api.taggd.in`)
+
+**Client DNS (only record):**
+
+| Type | Host | Value |
+|------|------|--------|
+| A | `trops` | `8.232.241.48` |
+
+**GCP:** `./deploy/gcp/08-setup-trops-lb.sh` — LB routes API paths → Cloud Run, default → GCS. Doc: [`docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md`](../../docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md).
+
+**After DNS + cert ACTIVE, deploy app:**
+
+```bash
+export CORS_ALLOW_ORIGINS='https://trops.taggd.in,https://storage.googleapis.com'
+./deploy/gcp/06-deploy-api.sh
+export VITE_API_BASE_URL='https://trops.taggd.in'
+export GCS_WEB_BASE='/'
+export VITE_STATIC_HOSTING='0'
+./deploy/gcp/07-deploy-frontend.sh
+```
+
+Users open **`https://trops.taggd.in/`** (BrowserRouter, not `#/login`).
+
+---
+
 ## Critical build / routing rules (Cloud Run)
 
-1. **`VITE_API_BASE_URL`** = Cloud Run URL with **no** trailing `/api`  
-   - Wrong: `https://tgddata-api-….run.app/api` → dashboard 404 on `/api/stats/global`  
-   - `07-deploy-frontend.sh` strips mistaken `/api`; API has `ApiPrefixStripMiddleware` as safety net.
-2. **GCS SPA** uses `base=./` and **HashRouter** (`#/login`) on `storage.googleapis.com`.
+1. **`VITE_API_BASE_URL`** = API origin with **no** trailing `/api`  
+   - Staging: `https://tgddata-api-….run.app`  
+   - Production domain: `https://trops.taggd.in` (same host as UI via LB path rules)
+2. **GCS staging URL** uses `base=./` and **HashRouter** (`#/login`) on `storage.googleapis.com`. **trops.taggd.in** uses `GCS_WEB_BASE=/` and `VITE_STATIC_HOSTING=0`.
 3. **Postgres migration:** JSON columns like `records.revenue_results` may be **strings** — use `backend/core/json_fields.as_json_dict()` when reading `.get()` in Python.
 
 ---

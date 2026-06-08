@@ -2,7 +2,7 @@
 
 Short changelog for the Cloud Run rollout. For the **full guide** (architecture, issues, and **how to deploy local code changes**), see **[`GCP_CLOUD_RUN_DEPLOYMENT_GUIDE.md`](GCP_CLOUD_RUN_DEPLOYMENT_GUIDE.md)**.
 
-**Also:** [`deploy/gcp/README.md`](../deploy/gcp/README.md), [`CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md`](CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md), [`POSTGRES_MIGRATION.md`](POSTGRES_MIGRATION.md)
+**Also:** [`DEPLOYMENT_DOC.md`](../DEPLOYMENT_DOC.md), [`deploy/gcp/README.md`](../deploy/gcp/README.md), [`CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md`](CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md), [`POSTGRES_MIGRATION.md`](POSTGRES_MIGRATION.md)
 
 ---
 

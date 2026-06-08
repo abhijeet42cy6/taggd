@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -11,19 +11,16 @@ import {
   Text,
   TextInput,
   Title,
-  Select,
-  SelectItem,
 } from "@tremor/react";
 import { downloadCandidateCvFile, queries, type CandidateRow, type Project } from "@/lib/api";
 import { isPlatformAdminRole, isReadOnlyClient, isRecruiterUser, useAuth } from "@/lib/auth";
 import { CandidateFormDrawer } from "@/components/platform/CandidateFormDrawer";
 import { StatusTag } from "@/components/platform/PlatformBlocks";
+import { projectDisplayName, SearchableProjectFilterSelect } from "@/components/platform/searchable-pickers";
 import { Skeleton } from "@/components/platform/Skeleton";
 
 const flatCard =
   "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
-
-const ALL_PROJECTS = "__all_projects__";
 
 export function Candidates() {
   const { user } = useAuth();
@@ -68,6 +65,12 @@ export function Candidates() {
     queries.projects().then(setProjects).catch(() => setProjects([]));
   }, []);
 
+  const projectById = useMemo(() => {
+    const m = new Map<number, Project>();
+    for (const p of projects) m.set(p.id, p);
+    return m;
+  }, [projects]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -100,8 +103,6 @@ export function Candidates() {
     : readOnly
       ? "Candidates on the projects enabled for your portal account."
       : "RPO candidate rows scoped to your projects — each line is tied to one requisition.";
-
-  const projectSelectValue = projectId.trim() === "" ? ALL_PROJECTS : projectId;
 
   return (
     <div className="candidates-tremor space-y-3 pb-8 md:space-y-4">
@@ -145,18 +146,12 @@ export function Candidates() {
             </div>
             <div className="w-full min-w-0 shrink-0 lg:w-64">
               <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Project</Text>
-              <Select
-                value={projectSelectValue}
-                onValueChange={(v) => setProjectId(v === ALL_PROJECTS ? "" : v)}
-                aria-label="Filter by project"
-              >
-                <SelectItem value={ALL_PROJECTS}>All projects</SelectItem>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    PRJ-{p.id} {p.account_name || p.filename || ""}
-                  </SelectItem>
-                ))}
-              </Select>
+              <SearchableProjectFilterSelect
+                projects={projects}
+                value={projectId}
+                onChange={setProjectId}
+                disabled={loading && projects.length === 0}
+              />
             </div>
             <div className="flex w-full shrink-0 flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
               <Button type="button" size="xs" variant="secondary" onClick={() => void load()}>
@@ -241,7 +236,20 @@ export function Candidates() {
                       </TableCell>
                       <TableCell className="text-sm">{r.full_name || "—"}</TableCell>
                       <TableCell className="text-sm tabular-nums">{r.client_candidate_id}</TableCell>
-                      <TableCell className="text-sm tabular-nums">PRJ-{r.project_id}</TableCell>
+                      <TableCell className="text-sm">
+                        {(() => {
+                          const pr = projectById.get(r.project_id);
+                          const name = pr ? projectDisplayName(pr) : `Project ${r.project_id}`;
+                          return (
+                            <span title={`PRJ-${r.project_id}`}>
+                              {name}
+                              <span className="mt-0.5 block text-[10px] tabular-nums text-tremor-content-subtle">
+                                PRJ-{r.project_id}
+                              </span>
+                            </span>
+                          );
+                        })()}
+                      </TableCell>
                       <TableCell className="text-sm tabular-nums">REQ-{r.record_id}</TableCell>
                       <TableCell className="max-w-[7.5rem] truncate text-sm" title={r.assigned_recruiter || undefined}>
                         {r.assigned_recruiter_user_id != null

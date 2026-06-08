@@ -6,6 +6,10 @@ Sheet selection:
   - Primary: "Projected HC - FY26" (exact)
   - Fallback: first sheet whose name contains "Projected HC" (case-insensitive) and does not
     contain "(Q4)" — the Q4-only layout uses different column semantics at the same indices.
+  - Supplemental: matching "Projected HC … (Q4)" tab → per-client Existing Resignation →
+    sheet_metrics_json.resignations (main FY row indices unchanged).
+  - Supplemental: "HC_Summary Excluding Optum" (or similar) → portfolio time series →
+    sheet_metrics_json.portfolio_hc_summary on each benchmark row.
 """
 from __future__ import annotations
 
@@ -122,6 +126,167 @@ def _open_positions_sheet_name(names: list[str]) -> Optional[str]:
     return None
 
 
+def _fy_token_from_sheet_name(sheet_name: str) -> Optional[str]:
+    m = re.search(r"FY\s*(\d{2})", sheet_name, re.I)
+    return f"FY{m.group(1)}" if m else None
+
+
+def _pick_q4_projected_hc_sheet(xl: pd.ExcelFile, primary_sheet: str) -> Optional[str]:
+    """Q4 tab has per-client Existing Resignation; column layout differs from the main FY sheet."""
+    candidates = [
+        n for n in xl.sheet_names if "projected hc" in n.lower() and "(q4)" in n.lower()
+    ]
+    if not candidates:
+        return None
+    fy = _fy_token_from_sheet_name(primary_sheet)
+    if fy:
+        for name in candidates:
+            if fy.lower() in name.lower():
+                return name
+    return candidates[0]
+
+
+def _hc_summary_sheet_name(names: list[str]) -> Optional[str]:
+    for n in names:
+        low = n.lower()
+        if "hc_summary" in low.replace(" ", "") or "summary excluding optum" in low:
+            return n
+    return None
+
+
+def _header_col_index(header_row: pd.Series, *needles: str) -> Optional[int]:
+    """Find first column whose header row cell contains all needles (case-insensitive)."""
+    for cidx in range(header_row.shape[0]):
+        cell = header_row.iloc[cidx]
+        if cell is None or (isinstance(cell, float) and pd.isna(cell)):
+            continue
+        low = str(cell).strip().lower()
+        if all(n.lower() in low for n in needles):
+            return cidx
+    return None
+
+
+def _load_q4_resignations_by_charge_code(
+    file_path: str, xl: pd.ExcelFile, primary_sheet: str, logs: list[str]
+) -> tuple[Optional[str], dict[str, dict[str, int]]]:
+    """
+    Parse per-client resignation counts from the Q4 Projected HC tab.
+    Keys are upper-cased charge codes (CNO…).
+    """
+    sheet = _pick_q4_projected_hc_sheet(xl, primary_sheet)
+    if not sheet:
+        _log(logs, "No Projected HC (Q4) sheet found; per-client resignations skipped.")
+        return None, {}
+
+    df = pd.read_excel(file_path, sheet_name=sheet, header=None)
+    if len(df) < 4:
+        _log(logs, f"Sheet {sheet!r} too short; per-client resignations skipped.")
+        return sheet, {}
+
+    header = df.iloc[2]
+    col_existing = _header_col_index(header, "existing", "resignation")
+    col_replacement_exited = _header_col_index(header, "replacement", "exited")
+    if col_existing is None:
+        _log(logs, f"Sheet {sheet!r}: no 'Existing Resignation' column; per-client resignations skipped.")
+        return sheet, {}
+
+    by_code: dict[str, dict[str, int]] = {}
+    for _idx, row in df.iloc[3:].iterrows():
+        cust_cell = row.iloc[0] if len(row) > 0 else None
+        cust_id = str(cust_cell).strip().upper() if pd.notnull(cust_cell) else ""
+        if not cust_id or cust_id == "NAN" or "CNO" not in cust_id:
+            continue
+        existing = _safe_int(row.iloc[col_existing]) if len(row) > col_existing else 0
+        replacement_exited = (
+            _safe_int(row.iloc[col_replacement_exited])
+            if col_replacement_exited is not None and len(row) > col_replacement_exited
+            else 0
+        )
+        if existing <= 0 and replacement_exited <= 0:
+            continue
+        by_code[cust_id] = {
+            "existing": existing,
+            "replacement_exited": replacement_exited,
+        }
+
+    _log(
+        logs,
+        f"Q4 resignations ({sheet!r}): {len(by_code)} client(s) with counts; "
+        f"Σ existing={sum(v['existing'] for v in by_code.values())}.",
+    )
+    return sheet, by_code
+
+
+_HC_SUMMARY_ROW_KEYS: list[tuple[str, str]] = [
+    ("existing_hc_incl_hr_guru", "existing headcount"),
+    ("replacements_incl_resignation", "replacement positions including resignation"),
+    ("new_hires", "number of new hires"),
+    ("overall_numbers", "overall numbers"),
+    ("resignations", "number of resignation"),
+    ("ideal_hc_productivity", "ideal hc as per productivity"),
+    ("net_variance_after_resignations", "net variance (after excluding resignations)"),
+    ("variance_from_last_update", "variance from last update"),
+]
+
+
+def _ingest_hc_summary_excluding_optum(
+    file_path: str, xl: pd.ExcelFile, logs: list[str]
+) -> Optional[dict[str, Any]]:
+    """Portfolio-level HC summary time series (Excluding Optum tab)."""
+    sheet = _hc_summary_sheet_name(xl.sheet_names)
+    if not sheet:
+        _log(logs, "No HC_Summary / Summary Excluding Optum sheet found; portfolio HC summary skipped.")
+        return None
+
+    df = pd.read_excel(file_path, sheet_name=sheet, header=None)
+    if df.shape[0] < 3 or df.shape[1] < 2:
+        _log(logs, f"Sheet {sheet!r} too small; portfolio HC summary skipped.")
+        return None
+
+    date_row = df.iloc[0]
+    snapshots: list[dict[str, Any]] = []
+    for cidx in range(1, df.shape[1]):
+        raw_date = date_row.iloc[cidx]
+        if raw_date is None or (isinstance(raw_date, float) and pd.isna(raw_date)):
+            continue
+        ts = pd.to_datetime(raw_date, errors="coerce")
+        if pd.isna(ts):
+            continue
+        as_of = ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10]
+        point: dict[str, Any] = {"as_of": as_of}
+        for key, label_needle in _HC_SUMMARY_ROW_KEYS:
+            for ridx in range(1, df.shape[0]):
+                label_cell = df.iloc[ridx, 0]
+                if label_cell is None or (isinstance(label_cell, float) and pd.isna(label_cell)):
+                    continue
+                label = str(label_cell).strip().lower()
+                if label_needle not in label:
+                    continue
+                val = _safe_float(df.iloc[ridx, cidx])
+                if val is not None:
+                    point[key] = val
+                break
+        if len(point) > 1:
+            snapshots.append(point)
+
+    if not snapshots:
+        _log(logs, f"Sheet {sheet!r}: no dated snapshots parsed.")
+        return None
+
+    latest = snapshots[-1]
+    payload: dict[str, Any] = {
+        "sheet": sheet,
+        "snapshots": snapshots,
+        "latest": latest,
+    }
+    _log(
+        logs,
+        f"HC summary ({sheet!r}): {len(snapshots)} snapshot(s); "
+        f"latest {latest.get('as_of')}: resignations={latest.get('resignations')}.",
+    )
+    return payload
+
+
 def _ingest_open_positions(
     db: Session, file_path: str, source_fn: str, logs: list[str]
 ) -> int:
@@ -230,6 +395,10 @@ def ingest_wfm_master(file_path: str, db: Optional[Session] = None) -> dict[str,
         "benchmarks_saved": 0,
         "gap_rows_written": 0,
         "sheet_used": None,
+        "q4_sheet_used": None,
+        "q4_resignation_clients": 0,
+        "total_existing_resignations": 0,
+        "portfolio_hc_summary": None,
         "reporting_date": None,
     }
 
@@ -252,12 +421,22 @@ def ingest_wfm_master(file_path: str, db: Optional[Session] = None) -> dict[str,
         result["sheet_used"] = sheet
         _log(logs, f"Using sheet: {sheet!r}")
 
+        q4_sheet, q4_by_charge = _load_q4_resignations_by_charge_code(
+            file_path, xl, sheet, logs
+        )
+        result["q4_sheet_used"] = q4_sheet
+        result["q4_resignation_clients"] = len(q4_by_charge)
+
+        portfolio_hc_summary = _ingest_hc_summary_excluding_optum(file_path, xl, logs)
+        result["portfolio_hc_summary"] = portfolio_hc_summary
+
         df = pd.read_excel(file_path, sheet_name=sheet, header=None)
         reporting_date = _fy_reporting_date_from_sheet(df)
         result["reporting_date"] = reporting_date.isoformat()
         _log(logs, f"Reporting snapshot date (FY start): {reporting_date.date()}")
 
         data_rows = df.iloc[3:]
+        total_existing_resignations = 0
         projects_touched = 0
         benchmarks_saved = 0
 
@@ -348,6 +527,17 @@ def ingest_wfm_master(file_path: str, db: Optional[Session] = None) -> dict[str,
                 },
             }
 
+            q4_row = q4_by_charge.get(cust_id.upper())
+            if q4_row:
+                sheet_metrics["resignations"] = {
+                    "existing": q4_row["existing"],
+                    "replacement_exited": q4_row["replacement_exited"],
+                    "source_sheet": q4_sheet,
+                }
+                total_existing_resignations += q4_row["existing"]
+            if portfolio_hc_summary is not None:
+                sheet_metrics["portfolio_hc_summary"] = portfolio_hc_summary
+
             project, match_reason = resolve_project_for_sla(db, account_label)
             if not project:
                 project = Project(
@@ -407,6 +597,8 @@ def ingest_wfm_master(file_path: str, db: Optional[Session] = None) -> dict[str,
             benchmarks_saved += 1
 
         gap_n = _ingest_open_positions(db, file_path, source_fn, logs)
+
+        result["total_existing_resignations"] = total_existing_resignations
 
         db.commit()
         result.update(

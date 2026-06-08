@@ -11,7 +11,7 @@ Finance: {'issues': ['finance_cash_flow / finance_efficiency_kpis: each 24-row b
 **Convention**
 
 - Run **CLI scripts from the repository root** so imports resolve (`python3 backend/scripts/...`).
-- Set `DATABASE_URL` if you are not using the default SQLite file (`sqlite:///./revenue_generator.db` relative to the process working directory).
+- Set `DATABASE_URL` to Postgres (e.g. `docker compose up -d postgres` then `postgresql+psycopg://tgddata:tgddata_dev@127.0.0.1:5432/tgddata`) or Cloud SQL via Auth Proxy. SQLite is legacy-only.
 - Paths below use the repo’s `excel_files_imp/` folder; adjust paths for your environment.
 
 ---

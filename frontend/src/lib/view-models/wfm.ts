@@ -56,9 +56,35 @@ export function wfmStatsVm(raw: any) {
 
 /** One row from GET /wfm/data (benchmark snapshot per client / reporting period). */
 /** Subset of `sheet_metrics_json` from WFM ingest (see `ingest_wfm.py`). */
+export type WfmSheetResignationsJson = {
+  existing?: number;
+  replacement_exited?: number;
+  source_sheet?: string;
+};
+
+export type WfmPortfolioHcSnapshot = {
+  as_of?: string;
+  resignations?: number;
+  replacements_incl_resignation?: number;
+  new_hires?: number;
+  overall_numbers?: number;
+  existing_hc_incl_hr_guru?: number;
+  ideal_hc_productivity?: number;
+  net_variance_after_resignations?: number;
+  variance_from_last_update?: number;
+};
+
+export type WfmPortfolioHcSummaryJson = {
+  sheet?: string;
+  snapshots?: WfmPortfolioHcSnapshot[];
+  latest?: WfmPortfolioHcSnapshot;
+};
+
 export type WfmSheetMetricsJson = {
   open_positions?: { wl1?: number; wl2?: number; wl3?: number; wl4?: number; total?: number };
   variance?: { hc_bench?: number | null; after_hiring?: number | null };
+  resignations?: WfmSheetResignationsJson;
+  portfolio_hc_summary?: WfmPortfolioHcSummaryJson;
 };
 
 export type WfmBenchmarkRowVm = {
@@ -100,6 +126,13 @@ export function wfmOpenPositionsFromSheet(r: WfmBenchmarkRowVm): number {
   return typeof t === "number" && Number.isFinite(t) ? t : 0;
 }
 
+/** Per-client existing resignations from Q4 tab (ingest_wfm_master). */
+export function wfmResignationsFromSheet(r: WfmBenchmarkRowVm): number {
+  const j = r.sheet_metrics_json as WfmSheetMetricsJson | null | undefined;
+  const n = j?.resignations?.existing;
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
+
 /**
  * "Additional" HC proxy: YTD lateral HC target above current roster (temp / stretch in workbook).
  * Distinct from WL band mix (often equals actual when self-consistent).
@@ -110,10 +143,15 @@ export function wfmRowAdditionalHcProxy(r: WfmBenchmarkRowVm): number {
   return Math.max(0, target - actual);
 }
 
-/** Projected roster strength ≈ actual + (target − roster buffer) + sheet open positions; resignations not in ingest (0). */
+/** Projected roster strength ≈ actual + proxy + sheet open − existing resignations (Q4 tab). */
 export function wfmRowProjectedHc(r: WfmBenchmarkRowVm): number {
   const actual = Number(r.actual_hc_total ?? 0);
-  return actual + wfmRowAdditionalHcProxy(r) + wfmOpenPositionsFromSheet(r);
+  return (
+    actual +
+    wfmRowAdditionalHcProxy(r) +
+    wfmOpenPositionsFromSheet(r) -
+    wfmResignationsFromSheet(r)
+  );
 }
 
 /** Ideal − projected HC (whether pipeline closes the gap vs ideal). */
@@ -181,6 +219,7 @@ function wfmAggregateRows(
     sumActual: number;
     sumAdditional: number;
     sumOpen: number;
+    sumResignations: number;
     sumProjected: number;
     sumProdWeighted: number;
     sumIdealForProd: number;
@@ -202,6 +241,7 @@ function wfmAggregateRows(
         sumActual: 0,
         sumAdditional: 0,
         sumOpen: 0,
+        sumResignations: 0,
         sumProjected: 0,
         sumProdWeighted: 0,
         sumIdealForProd: 0,
@@ -219,6 +259,7 @@ function wfmAggregateRows(
     acc.sumActual += actual;
     acc.sumAdditional += wfmRowAdditionalHcProxy(r);
     acc.sumOpen += wfmOpenPositionsFromSheet(r);
+    acc.sumResignations += wfmResignationsFromSheet(r);
     acc.sumProjected += wfmRowProjectedHc(r);
     acc.clientCount += 1;
     if (ideal > 0 && Number.isFinite(prod)) {
@@ -241,7 +282,7 @@ function wfmAggregateRows(
         variance_ideal_actual: a.sumIdeal - a.sumActual,
         additional_hc: a.sumAdditional,
         open_positions: a.sumOpen,
-        resignations: 0,
+        resignations: a.sumResignations,
         projected_hc: a.sumProjected,
         net_variance_actual_projected: a.sumActual - a.sumProjected,
         fill_pct: wfmFillPct(a.sumActual, a.sumIdeal),
@@ -289,6 +330,7 @@ export function wfmSummaryTotals(rows: WfmSummaryRowVm[]): WfmSummaryRowVm | nul
   let sumActual = 0;
   let sumAdditional = 0;
   let sumOpen = 0;
+  let sumResignations = 0;
   let sumProjected = 0;
   let sumProdWeighted = 0;
   let sumIdealForProd = 0;
@@ -300,6 +342,7 @@ export function wfmSummaryTotals(rows: WfmSummaryRowVm[]): WfmSummaryRowVm | nul
     sumActual += r.actual_hc_total;
     sumAdditional += r.additional_hc;
     sumOpen += r.open_positions;
+    sumResignations += r.resignations;
     sumProjected += r.projected_hc;
     clients += r.client_count;
     if (r.ideal_hc > 0 && Number.isFinite(r.lateral_productivity_target)) {
@@ -319,7 +362,7 @@ export function wfmSummaryTotals(rows: WfmSummaryRowVm[]): WfmSummaryRowVm | nul
     variance_ideal_actual: sumIdeal - sumActual,
     additional_hc: sumAdditional,
     open_positions: sumOpen,
-    resignations: 0,
+    resignations: sumResignations,
     projected_hc: sumProjected,
     net_variance_actual_projected: sumActual - sumProjected,
     fill_pct: wfmFillPct(sumActual, sumIdeal),

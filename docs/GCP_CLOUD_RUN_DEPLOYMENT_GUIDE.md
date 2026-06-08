@@ -4,6 +4,7 @@ This document records the **Cloud Run + Cloud SQL + GCS** production setup for t
 
 **Related:**
 
+- **Deployment index:** [`DEPLOYMENT_DOC.md`](../DEPLOYMENT_DOC.md) (primary vs legacy VM)
 - Script reference: [`deploy/gcp/README.md`](../deploy/gcp/README.md)
 - Architecture: [`CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md`](CLOUD_RUN_AND_MULTI_CLOUD_DEPLOYMENT.md)
 - Postgres / migration: [`POSTGRES_MIGRATION.md`](POSTGRES_MIGRATION.md)

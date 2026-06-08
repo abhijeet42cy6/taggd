@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deploy this repo to a GCE VM using Google Cloud CLI.
-# Full procedure, verification, and troubleshooting: see DEPLOYMENT_DOC.md (§5).
+# Legacy: deploy this repo to GCE VM tgddata-c1-prod-2 (taggd.aparatus.in).
+# Primary production deploy: deploy/gcp/06-deploy-api.sh + 07-deploy-frontend.sh — see DEPLOYMENT_DOC.md.
 # Default project: taggd-491107 (override with GCP_PROJECT).
 set -euo pipefail
 

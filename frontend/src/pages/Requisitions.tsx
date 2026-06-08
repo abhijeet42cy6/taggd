@@ -28,6 +28,20 @@ import { requisitionFunnelVm } from "@/lib/view-models/requisitions";
 import { formatCurrency } from "@/lib/utils";
 
 const PER_PAGE = 50;
+const PAGE_WINDOW = 7;
+
+function buildVisiblePageNumbers(current: number, total: number, windowSize = PAGE_WINDOW): number[] {
+  if (total <= windowSize) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  let start = Math.max(1, current - Math.floor(windowSize / 2));
+  let end = start + windowSize - 1;
+  if (end > total) {
+    end = total;
+    start = Math.max(1, end - windowSize + 1);
+  }
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
 
 const flatCard =
   "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
@@ -107,6 +121,10 @@ export function Requisitions() {
   const records = result?.records ?? [];
   const totalRecords = result?.total ?? 0;
   const totalPages = result?.pages ?? 1;
+  const visiblePages = useMemo(
+    () => buildVisiblePageNumbers(page, totalPages),
+    [page, totalPages],
+  );
 
   const funnel = useMemo(() => {
     if (debouncedSearch) {
@@ -380,26 +398,46 @@ export function Requisitions() {
         </div>
 
         {totalPages > 1 ? (
-          <Flex justifyContent="center" className="flex-wrap gap-1.5 border-t border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
-            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-              const p = i + 1;
-              return (
-                <Button
-                  key={p}
-                  type="button"
-                  size="xs"
-                  variant={page === p ? "primary" : "light"}
-                  color="orange"
-                  className="min-w-[1.75rem] px-0 tabular-nums"
-                  onClick={() => setPage(p)}
-                >
-                  {p}
-                </Button>
-              );
-            })}
-            {totalPages > 7 ? (
+          <Flex justifyContent="center" alignItems="center" className="flex-wrap gap-1.5 border-t border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+              aria-label="Previous page"
+            >
+              ←
+            </Button>
+            {visiblePages[0] > 1 ? (
+              <Text className="self-center text-xs text-tremor-content-subtle">…</Text>
+            ) : null}
+            {visiblePages.map((p) => (
+              <Button
+                key={p}
+                type="button"
+                size="xs"
+                variant={page === p ? "primary" : "light"}
+                color="orange"
+                className="min-w-[1.75rem] px-0 tabular-nums"
+                onClick={() => setPage(p)}
+              >
+                {p}
+              </Button>
+            ))}
+            {visiblePages[visiblePages.length - 1] < totalPages ? (
               <Text className="self-center text-xs text-tremor-content-subtle">…{totalPages} pages</Text>
             ) : null}
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              aria-label="Next page"
+            >
+              →
+            </Button>
           </Flex>
         ) : null}
       </Card>

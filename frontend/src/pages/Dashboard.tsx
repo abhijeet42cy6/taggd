@@ -22,6 +22,7 @@ import {
 import { ExecSectionTitle } from "@/components/tremor-dashboard/ExecSectionTitle";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
 import { ProductivityAveragesSection } from "@/components/platform/ProductivityAveragesSection";
+import { ExecAccountScorecardSection } from "@/components/tremor-dashboard/ExecAccountScorecardSection";
 import {
   DEFAULT_DASHBOARD_FILTERS,
   filterFinanceRows,
@@ -63,9 +64,10 @@ export const Dashboard = () => {
   const [slaStats, setSlaStats] = useState<ReturnType<typeof slaStatsVm> | null>(null);
   const [wfmStats, setWfmStats] = useState<any>(null);
   const [reqKpis, setReqKpis] = useState<RequisitionKpis | null>(null);
-  const [drilldown, setDrilldown] = useState<Array<{ name: string; revenue: number; count: number }>>([]);
   /** Per-project rows for Risk Radar (SLA / WFM detail — not portfolio-wide stats). */
-  const [slaDataRows, setSlaDataRows] = useState<{ project_id: number; status: string }[]>([]);
+  const [slaDataRows, setSlaDataRows] = useState<
+    { project_id: number; account_name: string; status: string }[]
+  >([]);
   const [wfmDataRows, setWfmDataRows] = useState<
     { project_id: number; ideal_hc: number | null; actual_hc_total: number | null; reporting_date: string | null }[]
   >([]);
@@ -99,7 +101,6 @@ export const Dashboard = () => {
           sStats,
           wfm,
           rk,
-          dd,
           slaD,
           wfmD,
         ] = await Promise.allSettled([
@@ -110,7 +111,6 @@ export const Dashboard = () => {
           withTimeout(queries.slaStats(), T_STD, null),
           withTimeout(queries.wfmStats(), T_STD, null),
           withTimeout(queries.requisitionKpis(), T_STD, null),
-          withTimeout(queries.globalDrilldown("hiring_manager"), T_STD, []),
           withTimeout(queries.slaData(), T_STD, []),
           withTimeout(queries.wfmData(), T_STD, []),
         ]);
@@ -127,11 +127,11 @@ export const Dashboard = () => {
         if (sStats.status === "fulfilled" && sStats.value) setSlaStats(slaStatsVm(sStats.value));
         if (wfm.status === "fulfilled") setWfmStats(wfm.value);
         if (rk.status === "fulfilled") setReqKpis(rk.value as RequisitionKpis);
-        if (dd.status === "fulfilled") setDrilldown((dd.value as any) || []);
         if (slaD.status === "fulfilled" && Array.isArray(slaD.value)) {
           setSlaDataRows(
-            (slaD.value as { project_id: number; status: string }[]).map((r) => ({
+            (slaD.value as { project_id: number; account_name?: string; status: string }[]).map((r) => ({
               project_id: r.project_id,
+              account_name: String(r.account_name ?? ""),
               status: String(r.status ?? ""),
             })),
           );
@@ -273,6 +273,7 @@ export const Dashboard = () => {
       .map((p) => ({
         id: p.id,
         name: (p.engagement_name || p.account_name || p.filename || `Project ${p.id}`).trim() || `Project ${p.id}`,
+        accountName: (p.account_name || p.engagement_name || "").trim(),
       }));
   }, [projects, filters]);
 
@@ -281,11 +282,11 @@ export const Dashboard = () => {
       buildClientRiskRadarRows(
         riskClients,
         kpiRows,
+        priorKpiRows,
         slaDataRows,
-        wfmDataRows,
         pipelineByProjectId,
       ),
-    [riskClients, kpiRows, slaDataRows, wfmDataRows, pipelineByProjectId],
+    [riskClients, kpiRows, priorKpiRows, slaDataRows, pipelineByProjectId],
   );
 
   const selectedClient = riskRows.find((r) => r.name === drawerClient);
@@ -311,7 +312,7 @@ export const Dashboard = () => {
   const collAtt = ct > 0 ? (coll / ct) * 100 : 0;
   const revAtt = displayFinance?.rev_attainment ?? 0;
 
-  /* ── Risk radar: domain level → pill (revenue+finance+fcst+SLA+WFM; reweighted on available data only) ── */
+  /* ── Risk radar: budget rev, actual rev YoY, CM%, SLA ── */
   function riskDotCls(color: "green" | "amber" | "red"): string {
     return `exec-risk-dot exec-risk-dot--${color}`;
   }
@@ -335,25 +336,6 @@ export const Dashboard = () => {
       <div className="exec-dash-tremor__hero">
         <div className="exec-dash-tremor__hero-main">
           <Title className="exec-dash-tremor__title text-3xl font-bold tracking-tight">Executive Overview</Title>
-          <div className="exec-dash-tremor__meta-row">
-            <span className="exec-dash-tremor__meta-pill">
-              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--clients" aria-hidden />
-              <span>{stats?.total_projects ?? "—"} clients</span>
-            </span>
-            <span className="exec-dash-tremor__meta-pill">
-              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--reqs" aria-hidden />
-              <span>{(reqKpis?.total_records ?? stats?.total_records ?? 0).toLocaleString()} requisitions</span>
-            </span>
-            <span className="exec-dash-tremor__meta-pill">
-              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--fy" aria-hidden />
-              <span>{fyShortLabel(selectedFyStart)}</span>
-            </span>
-            <span className="exec-dash-tremor__meta-muted hidden sm:inline">·</span>
-            <span className="exec-dash-tremor__meta-pill">
-              <span className="exec-dash-tremor__meta-dot exec-dash-tremor__meta-dot--modules" aria-hidden />
-              <span>Finance · SLA · WFM</span>
-            </span>
-          </div>
         </div>
       </div>
 
@@ -399,7 +381,6 @@ export const Dashboard = () => {
               ...(priorFinance
                 ? [{ label: `${compareFyLabel} Actual`, value: formatLargeCurrency(priorFinance.revenue_actual_inr) }]
                 : []),
-              ...(drilldown[0] ? [{ label: "Top HM", value: drilldown[0].name }] : []),
             ]}
             onDrillIn={() => setRevenueActualDrillOpen(true)}
             drillAriaLabel="Open actual revenue account breakdown and charts"
@@ -644,15 +625,14 @@ export const Dashboard = () => {
       <div className="space-y-4">
         <ExecSectionTitle>Portfolio monitor and pipeline</ExecSectionTitle>
         <Text className="block font-medium leading-relaxed text-tremor-content-emphasis">
-          <span className="font-semibold text-tremor-content-strong">Risk radar</span> uses only{" "}
-          <span className="font-semibold text-tremor-content-strong">ledger + SLA + WFM</span> (selected FY, same
-          account filters as the finance table). Domains:{" "}
-          <span className="font-semibold text-orange-700">Revenue</span> (budget vs actual),{" "}
-          <span className="font-semibold text-orange-700">Finance</span> (CM, collections, unbilled/bad debt),{" "}
-          <span className="font-semibold text-orange-700">Forecast</span> (actual vs forecast, when forecast exists),{" "}
-          <span className="font-semibold text-orange-700">SLA</span>,{" "}
-          <span className="font-semibold text-orange-700">WFM</span>. Missing data in a column does not drag the score;
-          composite reweights over available domains. Requisition rows are shown in the drawer only, not in the score.
+          <span className="font-semibold text-tremor-content-strong">Risk radar</span> uses{" "}
+          <span className="font-semibold text-tremor-content-strong">finance ledger + SLA</span> for the selected FY and
+          account filters. Domains:{" "}
+          <span className="font-semibold text-orange-700">Budget rev</span> (actual ÷ budget),{" "}
+          <span className="font-semibold text-orange-700">Actual rev</span> (YoY vs prior FY actual),{" "}
+          <span className="font-semibold text-orange-700">CM%</span> (vs 35% target),{" "}
+          <span className="font-semibold text-orange-700">SLA</span> (Met ÷ Met+Not met). Missing data is excluded from
+          the composite score. Requisition counts appear in the client drawer only.
         </Text>
 
         <TremorDashboardSection
@@ -667,11 +647,10 @@ export const Dashboard = () => {
               <thead>
                 <tr>
                   <th style={{ width: "20%" }}>Client</th>
-                  <th>Revenue</th>
-                  <th>Finance</th>
-                  <th>Fcst</th>
+                  <th>Budget rev</th>
+                  <th>Actual rev</th>
+                  <th>CM%</th>
                   <th>SLA</th>
-                  <th>WFM</th>
                   <th style={{ textAlign: "right" }}>Score</th>
                 </tr>
               </thead>
@@ -681,11 +660,10 @@ export const Dashboard = () => {
                     <td>
                       <div className="exec-risk-table__name" title={p.name}>{p.name}</div>
                     </td>
-                    <td>{riskRadarCell(p.levels.revenue)}</td>
-                    <td>{riskRadarCell(p.levels.finance)}</td>
-                    <td>{riskRadarCell(p.levels.forecast)}</td>
+                    <td>{riskRadarCell(p.levels.budgetRev)}</td>
+                    <td>{riskRadarCell(p.levels.actualRev)}</td>
+                    <td>{riskRadarCell(p.levels.cm)}</td>
                     <td>{riskRadarCell(p.levels.sla)}</td>
-                    <td>{riskRadarCell(p.levels.wfm)}</td>
                     <td style={{ textAlign: "right" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
                         {p.composite == null ? (
@@ -713,7 +691,7 @@ export const Dashboard = () => {
                 ))}
                 {riskRows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="exec-empty">No client data yet</td>
+                    <td colSpan={6} className="exec-empty">No client data yet</td>
                   </tr>
                 )}
               </tbody>
@@ -721,25 +699,11 @@ export const Dashboard = () => {
           </div>
         </TremorDashboardSection>
 
-        <TremorDashboardSection tag="Drilldown" title="Top hiring managers by revenue">
-          <table className="exec-drilldown-table">
-            <thead>
-              <tr><th>Hiring manager</th><th style={{ textAlign: "right" }}>Revenue</th><th style={{ textAlign: "right" }}>Reqs</th></tr>
-            </thead>
-            <tbody>
-              {drilldown.slice(0, 8).map((d) => (
-                <tr key={d.name}>
-                  <td>{d.name}</td>
-                  <td className="text-right font-semibold tabular-nums text-tremor-content-strong">{formatCurrency(d.revenue)}</td>
-                  <td style={{ textAlign: "right" }}>{d.count}</td>
-                </tr>
-              ))}
-              {drilldown.length === 0 && (
-                <tr><td colSpan={3} className="exec-empty">—</td></tr>
-              )}
-            </tbody>
-          </table>
-        </TremorDashboardSection>
+        <ExecAccountScorecardSection
+          fyLabel={fyShortLabel(selectedFyStart)}
+          kpiRows={kpiRows}
+          projects={projects}
+        />
       </div>
 
       {/* ── Client drawer (new-contract-sheet chrome) ── */}
@@ -862,10 +826,9 @@ export const Dashboard = () => {
                       <div className="ncp-prop-row ncp-prop-row--tall-value">
                         <div className="ncp-prop-label">Domain scores (0–100)</div>
                         <div style={{ fontSize: 12, lineHeight: 1.55, color: "var(--ncp-text-primary)", padding: "6px 8px" }}>
-                          Rev {selectedClient.scores.revenue ?? "—"} · Fin {selectedClient.scores.finance ?? "—"} · Fcst{" "}
-                          {selectedClient.scores.forecast ?? "—"}
-                          <br />
-                          SLA {selectedClient.scores.sla ?? "—"} · WFM {selectedClient.scores.wfm ?? "—"}
+                          Rev (budget) {selectedClient.scores.budgetRev ?? "—"} · Rev (actual YoY){" "}
+                          {selectedClient.scores.actualRev ?? "—"} · CM% {selectedClient.scores.cm ?? "—"} · SLA{" "}
+                          {selectedClient.scores.sla ?? "—"}
                             </div>
                                             </div>
                                         </div>
@@ -910,11 +873,10 @@ export const Dashboard = () => {
             <thead>
               <tr>
                 <th>Client</th>
-                <th>Revenue</th>
-                <th>Finance</th>
-                <th>Fcst</th>
+                <th>Budget rev</th>
+                <th>Actual rev</th>
+                <th>CM%</th>
                 <th>SLA</th>
-                <th>WFM</th>
                 <th style={{ textAlign: "right" }}>Score</th>
               </tr>
             </thead>
@@ -925,11 +887,10 @@ export const Dashboard = () => {
                   onClick={() => { setHeatmapFullOpen(false); setDrawerClient(p.name); }}
                 >
                   <td><div className="exec-risk-table__name" title={p.name}>{p.name}</div></td>
-                  <td>{riskRadarCell(p.levels.revenue)}</td>
-                  <td>{riskRadarCell(p.levels.finance)}</td>
-                  <td>{riskRadarCell(p.levels.forecast)}</td>
+                  <td>{riskRadarCell(p.levels.budgetRev)}</td>
+                  <td>{riskRadarCell(p.levels.actualRev)}</td>
+                  <td>{riskRadarCell(p.levels.cm)}</td>
                   <td>{riskRadarCell(p.levels.sla)}</td>
-                  <td>{riskRadarCell(p.levels.wfm)}</td>
                   <td style={{ textAlign: "right" }}>
                     <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{p.composite ?? "—"}</span>
                   </td>
@@ -939,8 +900,8 @@ export const Dashboard = () => {
           </table>
         </div>
         <p className="exec-heatmap-footnote">
-          Only ledger (FY + filters), forecast column, revenue vs budget, SLA, and WFM. Missing data is excluded from
-          the composite, not treated as a failing score.
+          Budget rev (actual ÷ budget), actual rev (YoY vs prior FY), CM% (35% target), and SLA. Missing domains are
+          excluded from the composite, not treated as failing.
         </p>
       </PlatformDrawer>
 

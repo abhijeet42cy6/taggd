@@ -9,6 +9,7 @@ import "@/styles/new-contract-panel.css";
 /** Matches backend `auth/profile.py` VERTICAL_KEYS — order is UI-only. */
 export const VERTICAL_MODULES: { key: string; label: string }[] = [
   { key: "executive_dashboard", label: "Executive Overview (dashboard)" },
+  { key: "ceo_view", label: "CEO's View" },
   { key: "finance", label: "Finance" },
   { key: "sla", label: "SLA" },
   { key: "wfm", label: "WFM" },
@@ -32,6 +33,40 @@ export const VERTICAL_MODULES: { key: string; label: string }[] = [
 ];
 
 const ALL_VERTICAL_KEYS = VERTICAL_MODULES.map((m) => m.key);
+
+function normalizeVerticalAccess(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  let values: string[] = [];
+  if (Array.isArray(raw)) {
+    values = raw.map((x) => String(x));
+  } else if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) values = parsed.map((x) => String(x));
+      else values = text.split(",");
+    } catch {
+      values = text.split(",");
+    }
+  } else {
+    return null;
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of values) {
+    const key = String(v).trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+/** Staff module-picker defaults when `vertical_access` is unset. Full selection ⇒ omit on create ⇒ DB NULL (backend: all non-leadership modules; leadership requires explicit keys). */
+function defaultStaffVerticalKeys(_role: string): Set<string> {
+  return new Set(ALL_VERTICAL_KEYS);
+}
 
 const VERTICAL_MODULES_CLIENT_CREATE = VERTICAL_MODULES.filter((m) => m.key !== "admin_users");
 
@@ -410,7 +445,7 @@ export function AdminUsers() {
   const [cPassword, setCPassword] = useState("");
   const [cRole, setCRole] = useState("project_head");
   const [cManagerUserId, setCManagerUserId] = useState("");
-  const [cVerticals, setCVerticals] = useState<Set<string>>(() => new Set(ALL_VERTICAL_KEYS));
+  const [cVerticals, setCVerticals] = useState<Set<string>>(() => defaultStaffVerticalKeys("project_head"));
   const [cClientModules, setCClientModules] = useState<string[]>(["portfolio", "sla"]);
   /** New-user wizard only (edit access uses `selectedProjects`). */
   const [cProjectIds, setCProjectIds] = useState<number[]>([]);
@@ -419,9 +454,10 @@ export function AdminUsers() {
 
   const [accessModalUser, setAccessModalUser] = useState<AdminUserRow | null>(null);
   const [accessTab, setAccessTab] = useState<AccessTabIdx>(0);
+  const [draftEmail, setDraftEmail] = useState("");
   const [draftRole, setDraftRole] = useState("");
   const [draftManagerId, setDraftManagerId] = useState<string>("");
-  const [draftVerticals, setDraftVerticals] = useState<Set<string>>(() => new Set(ALL_VERTICAL_KEYS));
+  const [draftVerticals, setDraftVerticals] = useState<Set<string>>(() => defaultStaffVerticalKeys("project_head"));
   const [draftNewPassword, setDraftNewPassword] = useState("");
   const [draftNewPasswordConfirm, setDraftNewPasswordConfirm] = useState("");
 
@@ -433,15 +469,16 @@ export function AdminUsers() {
     setAccessTab(0);
     setDraftNewPassword("");
     setDraftNewPasswordConfirm("");
+    setDraftEmail(row.email);
     setDraftRole(row.role);
     setDraftManagerId(row.manager_user_id != null ? String(row.manager_user_id) : "");
     setSelectedProjects([...(row.project_ids ?? [])]);
-    const va = row.vertical_access;
+    const va = normalizeVerticalAccess(row.vertical_access as unknown);
     const stored = (row.role || "").toLowerCase();
     if (stored === "client_user" && (va == null || va.length === 0)) {
       setDraftVerticals(new Set(["portfolio", "sla"]));
     } else if (va == null || va.length === 0) {
-      setDraftVerticals(new Set(ALL_VERTICAL_KEYS));
+      setDraftVerticals(defaultStaffVerticalKeys(row.role));
     } else {
       setDraftVerticals(new Set(va));
     }
@@ -450,6 +487,7 @@ export function AdminUsers() {
   function closeAccessModal() {
     setAccessModalUser(null);
     setAccessTab(0);
+    setDraftEmail("");
     setDraftNewPassword("");
     setDraftNewPasswordConfirm("");
   }
@@ -475,7 +513,7 @@ export function AdminUsers() {
     setCPassword("");
     setCRole("project_head");
     setCManagerUserId("");
-    setCVerticals(new Set(ALL_VERTICAL_KEYS));
+    setCVerticals(defaultStaffVerticalKeys("project_head"));
     setCClientModules(["portfolio", "sla"]);
     setCProjectIds([]);
     setLoadError(null);
@@ -598,6 +636,11 @@ export function AdminUsers() {
     }
     const pw = draftNewPassword.trim();
     const pwc = draftNewPasswordConfirm.trim();
+    const email = draftEmail.trim().toLowerCase();
+    if (!email) {
+      setLoadError("Email cannot be empty.");
+      return;
+    }
     if (pw !== "" || pwc !== "") {
       if (pw.length < 6) {
         setLoadError("New password must be at least 6 characters.");
@@ -617,6 +660,7 @@ export function AdminUsers() {
         vertical_access = vertical_access.filter((k) => k !== "admin_users");
       }
       const patch: Parameters<typeof adminApi.patchUser>[1] = {
+        email,
         role: draftRole,
         manager_user_id,
         vertical_access,
@@ -630,6 +674,25 @@ export function AdminUsers() {
       await refresh();
     } catch (e: unknown) {
       setLoadError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAccessUser() {
+    if (!accessModalUser) return;
+    const ok = window.confirm(
+      `Delete user ${accessModalUser.email}? This action cannot be undone.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setLoadError(null);
+    try {
+      await adminApi.deleteUser(accessModalUser.id);
+      closeAccessModal();
+      await refresh();
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setBusy(false);
     }
@@ -914,7 +977,7 @@ export function AdminUsers() {
                         if (v === "client_user") {
                           setCClientModules((prev) => (prev.length ? prev : ["portfolio", "sla"]));
                         } else {
-                          setCVerticals(new Set(ALL_VERTICAL_KEYS));
+                          setCVerticals(defaultStaffVerticalKeys(v));
                         }
                       }}
                     >
@@ -973,7 +1036,7 @@ export function AdminUsers() {
                     </div>,
                   )
                 ) : (
-                  ncpSection("📊", "ncp-blue", "Module allow-list", "Unchecked routes stay hidden; all checked = full access (same as legacy default when unset).",
+                  ncpSection("📊", "ncp-blue", "Module access", "Unchecked routes stay hidden. Executive Overview and CEO's View are on by default only for platform admins; grant them explicitly for other roles.",
                     <>
                       <div
                         style={{
@@ -1014,7 +1077,7 @@ export function AdminUsers() {
                         ))}
                       </div>
                       <p style={{ fontSize: 11, color: "var(--ncp-text-muted)", margin: "12px 0 0", lineHeight: 1.45 }}>
-                        For executive, operations, project head, and recruiter roles, this list gates sections and APIs (e.g. /finance). Client portal uses the tab above.
+                        For executive, operations, project head, and recruiter roles, this list gates sections and APIs (e.g. /finance). Platform admins get leadership modules by default.
                       </p>
                     </>,
                   )
@@ -1168,15 +1231,15 @@ export function AdminUsers() {
                   </div>
 
                   <div className={cn("ncp-panel", accessTab === 0 && "ncp-panel-active")}>
-                    {ncpSection("✉️", "ncp-blue", "Account", "Platform login email (read-only)",
+                    {ncpSection("✉️", "ncp-blue", "Account", "Platform login email",
                       cPr(
                         "Email",
                         <input
                           className="ncp-prop-input"
                           type="email"
-                          readOnly
-                          value={accessModalUser.email}
-                          aria-readonly="true"
+                          autoComplete="off"
+                          value={draftEmail}
+                          onChange={(e) => setDraftEmail(e.target.value)}
                         />,
                       ),
                     )}
@@ -1285,7 +1348,7 @@ export function AdminUsers() {
                         </div>,
                       )
                     ) : (
-                      ncpSection("📊", "ncp-blue", "Module allow-list", "For executive, operations, project head, and recruiter, this gates sections and APIs (e.g. /finance, /sla-performance).",
+                      ncpSection("📊", "ncp-blue", "Module access", "For executive, operations, project head, and recruiter, this gates sections and APIs. Executive Overview and CEO's View require an explicit check for non-admin roles.",
                         <>
                           <div
                             style={{
@@ -1327,7 +1390,7 @@ export function AdminUsers() {
                           </div>
                           <p style={{ fontSize: 11, color: "var(--ncp-text-muted)", margin: "12px 0 0", lineHeight: 1.45 }}>
                             All boxes checked stores the full module list. None checked stores an empty list and removes gated-route access until you assign modules again.
-                            Users with no saved list in the database still get full module access (legacy default).
+                            Executive Overview and CEO&apos;s View are not granted by legacy unset lists — check them explicitly when needed.
                           </p>
                         </>,
                       )
@@ -1360,7 +1423,17 @@ export function AdminUsers() {
                 >
                   {accessTab > 0 ? "← Back" : "Cancel"}
                 </button>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="ncp-btn ncp-btn-ghost"
+                    style={{ color: "var(--red, #b91c1c)", borderColor: "color-mix(in srgb, var(--red, #b91c1c) 35%, var(--ncp-border))" }}
+                    disabled={busy}
+                    onClick={() => void deleteAccessUser()}
+                    title="Permanently delete this account"
+                  >
+                    Delete user
+                  </button>
                   {accessTab < EDIT_ACCESS_TABS.length - 1 ? (
                     <button type="button" className="ncp-btn ncp-btn-primary" onClick={() => setAccessTab((t) => (t + 1) as AccessTabIdx)}>
                       Next →

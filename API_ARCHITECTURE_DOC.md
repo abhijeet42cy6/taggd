@@ -11,8 +11,9 @@ The system follows a standard modern web stack:
   - **Environment Context**: Runs locally on `http://localhost:5173` (or network host IP). All API calls from the frontend are statically routed to the backend via an `API_BASE` configuration (e.g., `http://localhost:8000/api` or `http://localhost:8000`).
 - **Backend**: FastAPI (Python), serving as the core ingestion engine, API gateway, and agent coordinator.
   - **Environment Context**: Runs locally on `http://localhost:8000` (e.g., via `uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload`). This exposes the API endpoints to the frontend interface.
-- **Database**: SQLite (`revenue_generator.db`) managed via SQLAlchemy ORM.
-  - **Connection Config**: The database connection string defaults to `sqlite:///./revenue_generator.db` in `backend/db/database.py`. It operates locally without requiring an external DB host, keeping the system lightweight. SQLAlchemy's `SessionLocal` manages thread-safe connections.
+- **Database**: **PostgreSQL** in production (Cloud SQL `tgddata-pg-prod`) and local Docker Compose (`postgres:16-alpine` in `docker-compose.yml`). SQLAlchemy ORM + **Alembic** migrations (`backend/db/engine.py`, `alembic/`).
+  - **Connection**: `DATABASE_URL` env var (see `.env.example`). Legacy fallback `sqlite:///./revenue_generator.db` when unset; **not allowed** when `APP_ENV=production` (Cloud Run).
+  - **Deploy / ops**: [`DEPLOYMENT_DOC.md`](DEPLOYMENT_DOC.md), [`docs/POSTGRES_MIGRATION.md`](docs/POSTGRES_MIGRATION.md).
 - **AI Layer**: Deeply integrated Gemini AI agents (`LogicGeneratorAgent`, `ColumnMapperAgent`) that handle dynamic schema mapping and complex business logic generation.
 
 ## 2. Codebase Structure (`/backend`)

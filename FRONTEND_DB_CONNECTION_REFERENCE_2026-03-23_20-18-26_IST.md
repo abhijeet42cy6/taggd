@@ -9,7 +9,9 @@
 
 Frontend does not connect to DB directly.
 
-`React (frontend)` -> `FastAPI endpoints (backend)` -> `SQLAlchemy models` -> `Database (revenue_generator.db or DATABASE_URL target)`
+`React (frontend)` -> `FastAPI endpoints (backend)` -> `SQLAlchemy models` -> `Database (PostgreSQL in prod/local compose; DATABASE_URL env)`
+
+**Deploy targets:** Cloud Run + GCS + Cloud SQL (primary) or legacy VM `https://taggd.aparatus.in/` — see [`DEPLOYMENT_DOC.md`](DEPLOYMENT_DOC.md).
 
 ---
 

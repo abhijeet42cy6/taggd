@@ -7,6 +7,140 @@ export function projectLabel(p: Project): string {
   return `${(p.account_name || p.filename || `Project ${p.id}`).slice(0, 100)} (ID ${p.id})`;
 }
 
+/** Human-readable project label for tables and filters (engagement / account name first). */
+export function projectDisplayName(p: Project, opts?: { includePrj?: boolean }): string {
+  const base =
+    (p.engagement_name && String(p.engagement_name).trim()) ||
+    (p.account_name && String(p.account_name).trim()) ||
+    (p.filename && String(p.filename).trim()) ||
+    `Project ${p.id}`;
+  return opts?.includePrj ? `${base} · PRJ-${p.id}` : base;
+}
+
+/** Single-select project filter with search and an explicit “All projects” option. */
+export function SearchableProjectFilterSelect({
+  projects,
+  value,
+  onChange,
+  disabled,
+  className,
+  ariaLabel = "Filter by project",
+}: {
+  projects: Project[];
+  value: string;
+  onChange: (projectId: string) => void;
+  disabled?: boolean;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const selected = value.trim() ? projects.find((p) => String(p.id) === value.trim()) : null;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const label = projectDisplayName(p, { includePrj: true }).toLowerCase();
+      return label.includes(q) || String(p.id).includes(q) || `prj-${p.id}`.includes(q);
+    });
+  }, [projects, search]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      window.setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }, [open]);
+
+  const triggerLabel = selected ? projectDisplayName(selected, { includePrj: true }) : "All projects";
+
+  const pick = (id: string) => {
+    onChange(id);
+    setOpen(false);
+    setSearch("");
+  };
+
+  return (
+    <div ref={wrapRef} className={className ? `relative w-full ${className}` : "relative w-full"}>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="relative w-full truncate rounded-tremor-default border border-tremor-border bg-tremor-background py-2 pl-3 pr-8 text-left text-tremor-default text-tremor-content-emphasis shadow-tremor-input outline-none transition duration-100 hover:bg-tremor-background-muted focus:border-tremor-brand-subtle focus:ring-2 focus:ring-tremor-brand-muted disabled:opacity-50 dark:border-dark-tremor-border dark:bg-dark-tremor-background dark:text-dark-tremor-content-emphasis dark:shadow-dark-tremor-input dark:hover:bg-dark-tremor-background-muted dark:focus:border-dark-tremor-brand-subtle dark:focus:ring-dark-tremor-brand-muted"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {triggerLabel}
+        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-tremor-content-subtle">▾</span>
+      </button>
+      {open ? (
+        <div
+          className="absolute left-0 right-0 z-[80] mt-1 overflow-hidden rounded-tremor-default border border-tremor-border bg-tremor-background shadow-lg dark:border-dark-tremor-border dark:bg-dark-tremor-background"
+          role="listbox"
+        >
+          <div className="border-b border-tremor-border p-2 dark:border-dark-tremor-border">
+            <input
+              ref={searchRef}
+              type="search"
+              className="platform-search w-full max-w-none text-xs"
+              placeholder="Search projects…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+              }}
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1">
+            <button
+              type="button"
+              role="option"
+              aria-selected={!value.trim()}
+              className={`w-full px-3 py-2 text-left text-xs hover:bg-tremor-background-muted dark:hover:bg-dark-tremor-background-muted ${!value.trim() ? "bg-orange-50 font-semibold text-orange-700 dark:bg-orange-950/30 dark:text-orange-300" : "text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis"}`}
+              onClick={() => pick("")}
+            >
+              All projects
+            </button>
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-tremor-content-subtle">No projects match your search.</div>
+            ) : (
+              filtered.map((p) => {
+                const id = String(p.id);
+                const active = value.trim() === id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    className={`w-full px-3 py-2 text-left text-xs hover:bg-tremor-background-muted dark:hover:bg-dark-tremor-background-muted ${active ? "bg-orange-50 font-semibold text-orange-700 dark:bg-orange-950/30 dark:text-orange-300" : "text-tremor-content-emphasis dark:text-dark-tremor-content-emphasis"}`}
+                    onClick={() => pick(id)}
+                  >
+                    {projectDisplayName(p, { includePrj: true })}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Type-to-filter; value must be chosen from the list (validated on submit). */
 export function SearchableProjectPicker({
   projects,

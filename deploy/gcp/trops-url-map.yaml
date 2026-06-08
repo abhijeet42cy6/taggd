@@ -1,0 +1,80 @@
+# HTTPS LB URL map: trops.taggd.in
+# Default → GCS SPA; listed paths → Cloud Run tgddata-api
+name: tgddata-trops-url-map
+defaultService: https://www.googleapis.com/compute/v1/projects/taggd-491107/global/backendBuckets/tgddata-trops-web
+hostRules:
+  - hosts:
+      - trops.taggd.in
+    pathMatcher: trops-matcher
+pathMatchers:
+  - name: trops-matcher
+    defaultService: https://www.googleapis.com/compute/v1/projects/taggd-491107/global/backendBuckets/tgddata-trops-web
+    pathRules:
+      - paths:
+          - /auth
+          - /auth/*
+          - /admin
+          - /admin/*
+          - /projects
+          - /projects/*
+          - /clients
+          - /clients/*
+          - /records
+          - /records/*
+          - /stats
+          - /stats/*
+          - /sla
+          - /sla/*
+          - /wfm
+          - /wfm/*
+          - /finance
+          - /finance/*
+          - /upload
+          - /upload/*
+          - /ingestion
+          - /ingestion/*
+          - /activity
+          - /activity/*
+          - /data-ops
+          - /data-ops/*
+          - /api
+          - /api/*
+          - /agent
+          - /agent/*
+          - /revenue-leakage
+          - /revenue-leakage/*
+          - /revenue-trackers
+          - /revenue-trackers/*
+          - /revenue-weekly-submissions
+          - /revenue-weekly-submissions/*
+          - /revenue-billing
+          - /revenue-billing/*
+          - /finance-billing-workflow
+          - /finance-billing-workflow/*
+          - /candidates
+          - /candidates/*
+          - /candidate-masters
+          - /candidate-masters/*
+          - /contracts
+          - /contracts/*
+          - /meetings
+          - /meetings/*
+          - /vendor-licenses
+          - /vendor-licenses/*
+          - /tasks
+          - /tasks/*
+          - /transitions
+          - /transitions/*
+          - /ceo-deck
+          - /ceo-deck/*
+          - /integrations
+          - /integrations/*
+          - /client-dashboard
+          - /client-dashboard/*
+          - /health
+          - /ready
+          - /docs
+          - /docs/*
+          - /openapi.json
+          - /redoc
+        service: https://www.googleapis.com/compute/v1/projects/taggd-491107/global/backendServices/tgddata-trops-api
