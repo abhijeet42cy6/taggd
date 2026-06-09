@@ -29,10 +29,32 @@ class WfmBenchmarkUpsertBody(BaseModel):
     lateral_productivity_target: float = 0.0
     ideal_hc: float = 0.0
     actual_hc_total: int = 0
+    open_position: int = 0
+    additional_hc: float = 0.0
+    resignation: int = 0
     wl1_hires: int = 0
     wl2_hires: int = 0
     wl3_hires: int = 0
     wl4_hires: int = 0
+
+
+def _merge_platform_sheet_metrics(
+    existing: dict | None,
+    *,
+    open_position: int,
+    additional_hc: float,
+    resignation: int,
+) -> dict:
+    """Preserve ingest JSON; overlay platform-entered open / additional HC / resignation."""
+    metrics: dict = dict(existing) if isinstance(existing, dict) else {}
+    open_positions = dict(metrics.get("open_positions") or {})
+    open_positions["total"] = int(open_position)
+    metrics["open_positions"] = open_positions
+    resignations = dict(metrics.get("resignations") or {})
+    resignations["existing"] = int(resignation)
+    metrics["resignations"] = resignations
+    metrics["additional_hc"] = float(additional_hc)
+    return metrics
 
 
 def _parse_month_first_day(s: str) -> datetime.datetime:
@@ -67,6 +89,12 @@ async def wfm_benchmark_upsert(
         )
         .first()
     )
+    sheet_metrics = _merge_platform_sheet_metrics(
+        row.sheet_metrics_json if row else None,
+        open_position=body.open_position,
+        additional_hc=body.additional_hc,
+        resignation=body.resignation,
+    )
     if row:
         row.lateral_revenue_target = body.lateral_revenue_target
         row.lateral_hc_target = body.lateral_hc_target
@@ -77,6 +105,7 @@ async def wfm_benchmark_upsert(
         row.wl2_hires = body.wl2_hires
         row.wl3_hires = body.wl3_hires
         row.wl4_hires = body.wl4_hires
+        row.sheet_metrics_json = sheet_metrics
         row.uploaded_by = "platform"
     else:
         db.add(
@@ -92,6 +121,7 @@ async def wfm_benchmark_upsert(
                 wl2_hires=body.wl2_hires,
                 wl3_hires=body.wl3_hires,
                 wl4_hires=body.wl4_hires,
+                sheet_metrics_json=sheet_metrics,
                 uploaded_by="platform",
             )
         )

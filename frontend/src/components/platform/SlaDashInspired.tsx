@@ -16,8 +16,15 @@ export type SlaBifurcationSlice = {
   pct: number;
   met: number;
   notMet: number;
+  /** Met + not met (excludes not reported). */
   total: number;
-  accent: "blue" | "violet" | "rose" | "emerald";
+  /** Metrics in this slice with no Met/Not met status. */
+  notReported: number;
+  /** All metrics matching this slice (reported + not reported). */
+  inSlice: number;
+  accent: "blue" | "violet" | "rose" | "red" | "emerald";
+  /** Default: met %. Penalties triggered: show breach count instead. */
+  variant?: "met_rate" | "penalties_triggered";
 };
 
 function downloadBlob(filename: string, content: string, mime: string) {
@@ -161,36 +168,79 @@ export function SlaBifurcationTiles({
   slices: SlaBifurcationSlice[];
   onDrill: (key: string) => void;
 }) {
-  if (!slices.some((s) => s.total > 0)) return null;
+  if (!slices.some((s) => s.inSlice > 0)) return null;
   return (
     <div className="sla-dash-card sla-bifurcation-wrap">
       <div className="sla-dash-card-hd">
-        <div className="sla-dash-card-title">SLA bifurcation (latest row per metric)</div>
+        <div className="sla-dash-card-title">SLA bifurcation (latest status per metric)</div>
         <div className="sla-dash-card-sub">
-          Same rule as reference dashboard: Met ÷ (Met + Not met), excluding not reported. Double-click a tile for the
-          metric list.
+          Contractual, internal, and non-penalty tiles show met %. The penalty tile counts penalty SLAs currently not met
+          (Red/Amber). Double-click a tile for the metric list.
         </div>
       </div>
       <div className="sla-dash-card-bd">
         <div className="sla-bifurcation-grid">
-          {slices.map((s) => (
+          {slices.map((s) => {
+            const isPenaltyTriggered = s.variant === "penalties_triggered";
+            const hasReported = s.total > 0;
+            const heroValue = isPenaltyTriggered ? String(s.notMet) : hasReported ? formatPercent(s.pct) : "—";
+            const heroNote = isPenaltyTriggered
+              ? s.notMet === 1
+                ? "KPI with penalty triggered"
+                : "KPIs with penalty triggered"
+              : hasReported
+                ? "met rate (reported only)"
+                : null;
+            const reportedLine = isPenaltyTriggered
+              ? hasReported
+                ? `${s.met} in compliance · ${s.notMet} triggered of ${s.total} reported penalty SLAs`
+                : "No reported penalty SLA outcomes yet"
+              : hasReported
+                ? `${s.met} met · ${s.notMet} not met of ${s.total} reported`
+                : "No reported outcomes yet";
+            const coverageLine =
+              s.notReported > 0
+                ? `${s.notReported} not reported · ${s.inSlice} total in slice`
+                : `${s.inSlice} metric${s.inSlice === 1 ? "" : "s"} in slice`;
+            return (
             <button
               key={s.key}
               type="button"
-              className={cn("sla-bifurcation-tile", `sla-bifurcation-tile--${s.accent}`)}
+              className={cn(
+                "sla-bifurcation-tile",
+                `sla-bifurcation-tile--${s.accent}`,
+                isPenaltyTriggered && s.notMet > 0 && "sla-bifurcation-tile--penalty-active",
+              )}
               onDoubleClick={() => onDrill(s.key)}
-              title="Double-click to list metrics in this slice"
+              title={
+                isPenaltyTriggered
+                  ? "Double-click to list penalty SLAs with a triggered penalty"
+                  : "Double-click to list metrics in this slice"
+              }
             >
               <div className="sla-bifurcation-tile__label">{s.label}</div>
-              <div className="sla-bifurcation-tile__pct">{s.total > 0 ? formatPercent(s.pct) : "—"}</div>
+              <div
+                className={cn(
+                  "sla-bifurcation-tile__pct",
+                  isPenaltyTriggered && s.notMet > 0 && "sla-bifurcation-tile__pct--danger",
+                  isPenaltyTriggered && s.notMet === 0 && "sla-bifurcation-tile__pct--clear",
+                )}
+              >
+                {heroValue}
+              </div>
+              {heroNote ? <div className="sla-bifurcation-tile__pct-note">{heroNote}</div> : null}
               <div className="sla-bifurcation-tile__sub">{s.subtitle}</div>
-              {s.total > 0 ? (
-                <div className="sla-bifurcation-tile__hint">Met {s.met} · Not met {s.notMet}</div>
+              {s.inSlice > 0 ? (
+                <>
+                  <div className="sla-bifurcation-tile__hint">{reportedLine}</div>
+                  <div className="sla-bifurcation-tile__hint sla-bifurcation-tile__hint--muted">{coverageLine}</div>
+                </>
               ) : (
-                <div className="sla-bifurcation-tile__hint">No outcomes in slice</div>
+                <div className="sla-bifurcation-tile__hint">No metrics in slice</div>
               )}
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

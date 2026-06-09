@@ -1244,15 +1244,19 @@ export function SLAPerformance() {
     const agg = (pred: (r: any) => boolean) => {
       let met = 0;
       let notMet = 0;
+      let notReported = 0;
+      let inSlice = 0;
       for (const r of slaKpiScopeRows) {
         if (!pred(r)) continue;
+        inSlice++;
         const b = statusBucket(r.status);
         if (b === "met") met++;
         else if (b === "breached") notMet++;
+        else notReported++;
       }
       const total = met + notMet;
       const pct = total > 0 ? (met / total) * 100 : 0;
-      return { met, notMet, total, pct };
+      return { met, notMet, notReported, inSlice, total, pct };
     };
     const contractual = (r: any) => kpiTypeLabel(r.metric_nature).toLowerCase().includes("contract");
     const internal = (r: any) => !contractual(r) && kpiTypeLabel(r.metric_nature).toLowerCase().includes("internal");
@@ -1277,9 +1281,10 @@ export function SLAPerformance() {
       },
       {
         key: "penalty",
-        label: "Penalty",
-        subtitle: "Nature mentions penalty",
-        accent: "rose",
+        label: "Penalties triggered",
+        subtitle: "Penalty SLAs not met (latest status)",
+        accent: "red",
+        variant: "penalties_triggered",
         ...p,
       },
       {
@@ -1615,7 +1620,7 @@ export function SLAPerformance() {
     const preds: Record<string, (r: any) => boolean> = {
       contractual,
       internal,
-      penalty: (r) => isPenaltyNature(r.metric_nature),
+      penalty: (r) => isPenaltyNature(r.metric_nature) && statusBucket(r.status) === "breached",
       non_penalty: (r) => !isPenaltyNature(r.metric_nature),
     };
     const pred = preds[bifurDrillKey];
@@ -3395,7 +3400,7 @@ export function SLAPerformance() {
             : bifurDrillKey === "internal"
               ? "Bifurcation — Internal KPI"
               : bifurDrillKey === "penalty"
-                ? "Bifurcation — Penalty"
+                ? "Penalties triggered — penalty SLAs not met"
                 : bifurDrillKey === "non_penalty"
                   ? "Bifurcation — Non-penalty"
                   : "Bifurcation"

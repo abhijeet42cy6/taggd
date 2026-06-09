@@ -82,6 +82,8 @@ export type WfmPortfolioHcSummaryJson = {
 
 export type WfmSheetMetricsJson = {
   open_positions?: { wl1?: number; wl2?: number; wl3?: number; wl4?: number; total?: number };
+  /** Explicit additional HC from platform WFM form (overrides lateral-target proxy). */
+  additional_hc?: number;
   variance?: { hc_bench?: number | null; after_hiring?: number | null };
   resignations?: WfmSheetResignationsJson;
   portfolio_hc_summary?: WfmPortfolioHcSummaryJson;
@@ -138,6 +140,11 @@ export function wfmResignationsFromSheet(r: WfmBenchmarkRowVm): number {
  * Distinct from WL band mix (often equals actual when self-consistent).
  */
 export function wfmRowAdditionalHcProxy(r: WfmBenchmarkRowVm): number {
+  const j = r.sheet_metrics_json as WfmSheetMetricsJson | null | undefined;
+  const manual = j?.additional_hc;
+  if (typeof manual === "number" && Number.isFinite(manual)) {
+    return manual;
+  }
   const actual = Number(r.actual_hc_total ?? 0);
   const target = Number(r.lateral_hc_target ?? 0);
   return Math.max(0, target - actual);

@@ -3,7 +3,13 @@ import { createPortal } from "react-dom";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { adminApi, queries, wfmBenchmarkApi, type Project } from "@/lib/api";
-import type { WfmBenchmarkRowVm } from "@/lib/view-models/wfm";
+import {
+  wfmOpenPositionsFromSheet,
+  wfmResignationsFromSheet,
+  wfmRowAdditionalHcProxy,
+  type WfmBenchmarkRowVm,
+  type WfmSheetMetricsJson,
+} from "@/lib/view-models/wfm";
 import {
   emptyWfmOrgMetadataDraft,
   wfmOrgDraftFromSources,
@@ -52,17 +58,46 @@ function parseIntSafe(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Strip non-numeric chars; integers disallow decimals. */
+function sanitizeNumericInput(raw: string, integer: boolean): string {
+  if (!raw.trim()) return "";
+  if (integer) return raw.replace(/\D/g, "");
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot === -1) return cleaned;
+  return cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
+}
+
+const TARGET_HC_FIELDS = [
+  { key: "lateralRevenue", label: "Lateral revenue target (INR)", integer: false },
+  { key: "lateralHcTarget", label: "Lateral HC target", integer: false },
+  { key: "lateralProductivity", label: "Lateral productivity target (lacs)", integer: false },
+  { key: "idealHc", label: "Ideal HC", integer: false },
+  { key: "actualHcTotal", label: "Actual HC (total)", integer: true },
+  { key: "openPosition", label: "Open position", integer: true },
+  { key: "additionalHc", label: "Additional HC", integer: false },
+  { key: "resignation", label: "Resignation", integer: true },
+] as const;
+
 const emptyForm = {
   lateralRevenue: "",
   lateralHcTarget: "",
   lateralProductivity: "",
   idealHc: "",
   actualHcTotal: "",
+  openPosition: "",
+  additionalHc: "",
+  resignation: "",
   wl1: "",
   wl2: "",
   wl3: "",
   wl4: "",
 };
+
+function sheetMetricsFromRow(r: WfmBenchmarkRowVm): WfmSheetMetricsJson | null {
+  const j = r.sheet_metrics_json;
+  return j && typeof j === "object" ? (j as WfmSheetMetricsJson) : null;
+}
 
 function wfmSection(icon: string, colorCls: string, title: string, desc: string, body: React.ReactNode) {
   return (
@@ -165,12 +200,20 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
     (r: WfmBenchmarkRowVm) => {
       setProjectId(r.project_id ?? "");
       setReportingMonth(monthFromReportingDate(r.reporting_date));
+      const sheet = sheetMetricsFromRow(r);
+      const additionalHc =
+        typeof sheet?.additional_hc === "number" && Number.isFinite(sheet.additional_hc)
+          ? sheet.additional_hc
+          : wfmRowAdditionalHcProxy(r);
       setForm({
         lateralRevenue: String(r.lateral_revenue_target ?? 0),
         lateralHcTarget: String(r.lateral_hc_target ?? 0),
         lateralProductivity: String(r.lateral_productivity_target ?? 0),
         idealHc: String(r.ideal_hc ?? 0),
         actualHcTotal: String(r.actual_hc_total ?? 0),
+        openPosition: String(wfmOpenPositionsFromSheet(r)),
+        additionalHc: String(additionalHc),
+        resignation: String(wfmResignationsFromSheet(r)),
         wl1: String(r.wl1_hires ?? 0),
         wl2: String(r.wl2_hires ?? 0),
         wl3: String(r.wl3_hires ?? 0),
@@ -341,6 +384,9 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
         lateral_productivity_target: parseNum(form.lateralProductivity),
         ideal_hc: parseNum(form.idealHc),
         actual_hc_total: parseIntSafe(form.actualHcTotal),
+        open_position: parseIntSafe(form.openPosition),
+        additional_hc: parseNum(form.additionalHc),
+        resignation: parseIntSafe(form.resignation),
         wl1_hires: parseIntSafe(form.wl1),
         wl2_hires: parseIntSafe(form.wl2),
         wl3_hires: parseIntSafe(form.wl3),
@@ -632,24 +678,22 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                   "🎯",
                   "ncp-teal",
                   "Targets & headcount",
-                  "Lateral revenue / HC / productivity targets and ideal vs actual HC.",
+                  "Lateral revenue / HC / productivity targets, ideal vs actual HC, open positions, and attrition.",
                   <>
-                    {(
-                      [
-                        ["lateralRevenue", "Lateral revenue target (INR)"] as const,
-                        ["lateralHcTarget", "Lateral HC target"] as const,
-                        ["lateralProductivity", "Lateral productivity target (lacs)"] as const,
-                        ["idealHc", "Ideal HC"] as const,
-                        ["actualHcTotal", "Actual HC (total)"] as const,
-                      ] as const
-                    ).map(([key, lab]) => (
+                    {TARGET_HC_FIELDS.map(({ key, label, integer }) => (
                       <div key={key} className="ncp-prop-row">
-                        <div className="ncp-prop-label">{lab}</div>
+                        <div className="ncp-prop-label">{label}</div>
                         <input
                           className="ncp-prop-input font-mono"
-                          inputMode="decimal"
+                          type="number"
+                          inputMode={integer ? "numeric" : "decimal"}
+                          min={0}
+                          step={integer ? 1 : "any"}
+                          autoComplete="off"
                           value={form[key]}
-                          onChange={(e) => setField(key, e.target.value)}
+                          onChange={(e) =>
+                            setField(key, sanitizeNumericInput(e.target.value, integer))
+                          }
                         />
                       </div>
                     ))}

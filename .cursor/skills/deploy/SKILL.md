@@ -32,9 +32,8 @@ Index: [`DEPLOYMENT_DOC.md`](../../DEPLOYMENT_DOC.md). Detail: [`docs/GCP_CLOUD_
 | **VPC connector** | `tgddata-run-connector` | Required: Cloud Run → private Cloud SQL |
 | **GCS uploads** | `gs://taggd-tgddata-prod-uploads` | `STORAGE_BACKEND=gcs` |
 | **GCS web (SPA)** | `gs://taggd-tgddata-prod-web` | Static React build |
-| **Production domain** | `https://trops.taggd.in` | Single host: UI + API (HTTPS LB `8.232.241.48`) |
-| **LB static IP** | `tgddata-trops-ip` → `8.232.241.48` | Client DNS: **A** `trops` → this IP |
-| **SPA URL (staging)** | `https://storage.googleapis.com/taggd-tgddata-prod-web/index.html#/login` | Until trops cutover; hash routes |
+| **SPA URL (production)** | `https://storage.googleapis.com/taggd-tgddata-prod-web/app.html#/login` | **Canonical entry** — use `app.html`, not `index.html` |
+| **SPA URL (legacy)** | `https://storage.googleapis.com/taggd-tgddata-prod-web/index.html#/login` | May be edge-cached up to ~1h after a bad deploy |
 | **Runtime SA** | `tgddata-runtime@taggd-491107.iam.gserviceaccount.com` | Cloud Run service account |
 | **Artifact Registry** | `asia-south1-docker.pkg.dev/taggd-491107/tgddata` | API Docker images |
 | **Secrets (SM)** | `TGDDATA_DATABASE_URL`, `JWT_SECRET`, `GEMINI_API_KEY`, `tgddata-pg-prod-db-password` | Never commit |
@@ -96,8 +95,20 @@ From **repository root** after local testing:
 ./deploy/gcp/07-deploy-frontend.sh
 ```
 
-- Builds with `VITE_API_BASE_URL=<Cloud Run URL>` (**no** `/api`), `VITE_STATIC_HOSTING=1`, `base=./`.
-- Upload: `gsutil -m rsync -r -d` → `gs://taggd-tgddata-prod-web/`.
+Default (`FRONTEND_HOST=gcs`) — **do not override** unless you know what you are doing:
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `FRONTEND_HOST` | `gcs` (default) | GCS path-style hosting on `storage.googleapis.com` |
+| `VITE_STATIC_HOSTING` | `1` | Enables HashRouter + relative asset paths |
+| `GCS_WEB_BASE` | `./` | Relative `./assets/…` in `index.html` (required for GCS path URLs) |
+| `VITE_API_BASE_URL` | Cloud Run URL from `06` | **No** `/api` suffix — API serves `/auth`, `/projects`, … at root |
+
+Build output is rsync'd to `gs://taggd-tgddata-prod-web/`. The script uploads `index.html` and **`app.html`** (same shell) with `Cache-Control: no-cache`.
+
+**Canonical login URL after deploy:**
+
+`https://storage.googleapis.com/taggd-tgddata-prod-web/app.html#/login`
 
 ### Full app release (most common)
 
@@ -116,6 +127,37 @@ Scripts `01`–`05` only when creating env, buckets, IAM, VPC connector, or **SQ
 
 ---
 
+## GCS frontend hosting (production config)
+
+The live UI is a **static SPA on GCS**, not a custom domain. Routing rules:
+
+1. **HashRouter** — routes are `#/login`, `#/dashboard`, etc. GCS has no server-side SPA rewrite.
+2. **`base=./`** — asset URLs in `index.html` must be `./assets/…`, never `/assets/…`.
+3. **`VITE_STATIC_HOSTING=1`** — frontend calls Cloud Run directly (full HTTPS origin), not via a same-host `/api` proxy.
+4. **`VITE_API_BASE_URL`** — set automatically to the Cloud Run service URL (no trailing `/api`). Example: `https://tgddata-api-lnucyjw2sa-el.a.run.app`.
+5. **CORS** — Cloud Run must allow `https://storage.googleapis.com` in `CORS_ALLOW_ORIGINS`.
+6. **Entry URL** — always share **`app.html#/login`**. `index.html` can be edge-cached for up to ~1h after a broken deploy; `app.html` is uploaded with `no-cache` on every deploy.
+
+**Verify build before upload** (script checks this):
+
+```bash
+grep -E 'src="/assets/' frontend/dist/index.html && echo "BAD: root-absolute assets" || echo "OK: relative assets"
+```
+
+**If `gsutil rsync` stalls from a laptop** (flaky link to `storage.googleapis.com`):
+
+- Script already uses `GSUtil:parallel_process_count=1` and excludes legacy `group-14004.png` (~55MB).
+- Minimal manual upload for a code-only change:
+
+```bash
+cd frontend/dist
+gsutil -o "GSUtil:parallel_process_count=1" cp assets/index-*.js assets/index-*.css assets/*.woff2 gs://taggd-tgddata-prod-web/assets/
+gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp index.html gs://taggd-tgddata-prod-web/index.html
+gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp index.html gs://taggd-tgddata-prod-web/app.html
+```
+
+---
+
 ## After deploy — verify (agent must run)
 
 ```bash
@@ -127,11 +169,15 @@ curl -s https://tgddata-api-lnucyjw2sa-el.a.run.app/ready
 gcloud run services describe tgddata-api --project=taggd-491107 --region=asia-south1 \
   --format='value(status.latestReadyRevisionName,status.url)'
 
+# SPA shell + assets (use --http1.1 if curl fails on HTTP/2)
+curl -sS -o /dev/null -w "app.html:%{http_code}\n" --http1.1 \
+  "https://storage.googleapis.com/taggd-tgddata-prod-web/app.html"
+
 # Recent errors
 gcloud run services logs read tgddata-api --project=taggd-491107 --region=asia-south1 --limit=40
 ```
 
-**Browser:** open SPA URL, hard-refresh (Cmd+Shift+R). Login with a user that exists in **Cloud SQL** (not necessarily local-only accounts).
+**Browser:** open `https://storage.googleapis.com/taggd-tgddata-prod-web/app.html#/login`, hard-refresh (Cmd+Shift+R). Login with a user that exists in **Cloud SQL** (not necessarily local-only accounts).
 
 **Executive Overview:** DevTools → `/stats/global` and `/stats/global/monitor` must be **200** (not 404 `/api/...`, not 500 on `revenue_results`).
 
@@ -152,38 +198,13 @@ Canonical SQLite source (if needed): `SQLITE_SOURCE_PATH` or `/Users/arjun/Softw
 
 ---
 
-## Custom domain `trops.taggd.in` (single hostname — no `api.taggd.in`)
+## Critical build / routing rules
 
-**Client DNS (only record):**
-
-| Type | Host | Value |
-|------|------|--------|
-| A | `trops` | `8.232.241.48` |
-
-**GCP:** `./deploy/gcp/08-setup-trops-lb.sh` — LB routes API paths → Cloud Run, default → GCS. Doc: [`docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md`](../../docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md).
-
-**After DNS + cert ACTIVE, deploy app:**
-
-```bash
-export CORS_ALLOW_ORIGINS='https://trops.taggd.in,https://storage.googleapis.com'
-./deploy/gcp/06-deploy-api.sh
-export VITE_API_BASE_URL='https://trops.taggd.in'
-export GCS_WEB_BASE='/'
-export VITE_STATIC_HOSTING='0'
-./deploy/gcp/07-deploy-frontend.sh
-```
-
-Users open **`https://trops.taggd.in/`** (BrowserRouter, not `#/login`).
-
----
-
-## Critical build / routing rules (Cloud Run)
-
-1. **`VITE_API_BASE_URL`** = API origin with **no** trailing `/api`  
-   - Staging: `https://tgddata-api-….run.app`  
-   - Production domain: `https://trops.taggd.in` (same host as UI via LB path rules)
-2. **GCS staging URL** uses `base=./` and **HashRouter** (`#/login`) on `storage.googleapis.com`. **trops.taggd.in** uses `GCS_WEB_BASE=/` and `VITE_STATIC_HOSTING=0`.
-3. **Postgres migration:** JSON columns like `records.revenue_results` may be **strings** — use `backend/core/json_fields.as_json_dict()` when reading `.get()` in Python.
+1. **`VITE_API_BASE_URL`** = Cloud Run origin with **no** trailing `/api`  
+   Example: `https://tgddata-api-lnucyjw2sa-el.a.run.app`
+2. **GCS URL** requires `base=./`, `VITE_STATIC_HOSTING=1`, and **HashRouter** (`#/login`).
+3. **Do not** build with `GCS_WEB_BASE=/` or `VITE_STATIC_HOSTING=0` for the GCS bucket — that produces root-absolute `/assets/` paths that break on `storage.googleapis.com/…/app.html`.
+4. **Postgres migration:** JSON columns like `records.revenue_results` may be **strings** — use `backend/core/json_fields.as_json_dict()` when reading `.get()` in Python.
 
 ---
 
@@ -193,9 +214,11 @@ Users open **`https://trops.taggd.in/`** (BrowserRouter, not `#/login`).
 |--------|--------|
 | Cloud Build upload `400` / DNS | Retry `06-deploy-api.sh` from stable network |
 | `/ready` database not ok | Check VPC connector READY (`04c-setup-vpc-connector.sh`), redeploy `06` |
-| Login Network Error | CORS + correct API URL; use `…/index.html#/login` |
+| Login Network Error | CORS must include `https://storage.googleapis.com`; verify `VITE_API_BASE_URL` points at Cloud Run (no `/api`) |
+| White screen / old JS after deploy | Open **`app.html#/login`**, not `index.html`; hard-refresh; check DevTools for 404 on `./assets/index-*.js` |
 | KPI banner, 404 on `/api/stats/…` | Redeploy `07`; hard-refresh cached JS |
 | KPI banner, 500 on monitor | Logs: `AttributeError` on `revenue_results` → redeploy API with `json_fields` fix |
+| `gsutil rsync` stalls at 70–90% | Use single-threaded upload (script default); upload JS/CSS/HTML only; retry from stable network |
 | `Cannot read tgddata-pg-prod-db-password` | `gcloud auth login`; Secret Manager accessor on deployer account |
 
 ---
@@ -216,7 +239,7 @@ source scripts/gcp-env-tgddata-c1-prod-2.sh
 | Frontend API base | `/api` (relative) | Full Cloud Run HTTPS URL |
 | DB promote | `./scripts/promote-db-to-gcp.sh` | `05-migrate-database-via-public-ip.sh` |
 
-Do **not** mix VM frontend build settings with Cloud Run without understanding `/api` prefix differences.
+Do **not** mix VM frontend build settings with Cloud Run/GCS without understanding `/api` prefix differences.
 
 ---
 
@@ -225,5 +248,6 @@ Do **not** mix VM frontend build settings with Cloud Run without understanding `
 1. Confirm user wants **Cloud Run + GCS** (default) vs **VM**.
 2. Run `06` / `07` from repo root; wait for completion.
 3. `curl /ready` and check logs for 500s.
-4. Remind user to hard-refresh SPA and use Cloud SQL login.
-5. Do not commit `.env` or run destructive git commands unless asked.
+4. Verify `app.html` and referenced `./assets/index-*.js` return **200**.
+5. Remind user to open **`app.html#/login`** (not `index.html`) and use a Cloud SQL login.
+6. Do not commit `.env` or run destructive git commands unless asked.

@@ -2468,6 +2468,9 @@ export type WfmBenchmarkUpsertPayload = {
   lateral_productivity_target: number;
   ideal_hc: number;
   actual_hc_total: number;
+  open_position: number;
+  additional_hc: number;
+  resignation: number;
   wl1_hires: number;
   wl2_hires: number;
   wl3_hires: number;
