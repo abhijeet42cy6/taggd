@@ -10,7 +10,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, not_
+from sqlalchemy import and_, func, or_, not_
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
@@ -43,7 +43,8 @@ from .core.processor import ExcelProcessor
 from .core.revenue_logic_loader import RevenueLogicCompileError, load_calculate_from_source
 from .core.ingestion_audit import log_ingestion_event, list_ingestion_events_for_user
 from .core.activity_log import activity_log_to_dict, list_activity_for_user, log_activity
-from .core.column_mapping_normalize import build_column_mapping_v2
+from .core.column_mapping_normalize import build_column_mapping_v3, split_column_mapping
+from .core.status_lexicon import build_status_lexicon_from_workbook
 from .core.record_field_synonyms import merge_llm_and_heuristic_record_fields
 from .core.project_head_resolution import assigned_project_heads_by_project, resolve_project_head_label
 from .core.json_fields import as_json_dict
@@ -74,13 +75,25 @@ RECORD_SOURCE_JOINER_TYPES = frozenset(
 
 
 def finalize_ingest_column_mapping(mapping_result, headers: list) -> dict:
-    """Universal + RPO `record_fields`, merged LLM + heuristic; persisted as column_mapping v2."""
+    """Universal + RPO `record_fields`, merged LLM + heuristic; base v3 payload (status lexicon attached separately)."""
     rf = merge_llm_and_heuristic_record_fields(
         mapping_result.record_field_mapping,
         headers,
         mapping_result.mapping,
     )
-    return build_column_mapping_v2(mapping_result.mapping, rf)
+    return build_column_mapping_v3(mapping_result.mapping, rf)
+
+
+def attach_status_lexicon_to_mapping(
+    column_mapping_payload: dict,
+    file_path: str,
+    sheet_names: list,
+) -> dict:
+    """Detect status column, map all unique Excel values → system statuses; merge into column_mapping v3."""
+    uni, rf = split_column_mapping(column_mapping_payload)
+    sheets = sheet_names if isinstance(sheet_names, list) else [sheet_names]
+    lexicon = build_status_lexicon_from_workbook(file_path, sheets, universal_map=uni)
+    return build_column_mapping_v3(uni, rf, status_lexicon=lexicon or None)
 
 
 def _matchmaker_project_id_in_scope(
@@ -187,6 +200,7 @@ app.include_router(client_dashboard_router)
 from .auth.deps import get_current_user, allowed_project_ids, can_create_unmatched_project
 from .auth.scope import (
     apply_project_scope,
+    apply_record_access_scope,
     apply_recruiter_record_scope,
     assert_project_access,
     assert_client_access,
@@ -388,6 +402,9 @@ class RecordRpoPatch(BaseModel):
     selection_date_req: Optional[str] = None
     loi_date_req: Optional[str] = None
     closure_date_req: Optional[str] = None
+    req_offered_date: Optional[str] = None
+    offered_accept_date: Optional[str] = None
+    req_cancelled_date: Optional[str] = None
     rpo_stage: Optional[str] = None
     ageing_days: Optional[int] = None
     ageing_bracket: Optional[str] = None
@@ -408,6 +425,9 @@ _RECORD_RPO_DATE_FIELDS = frozenset(
         "selection_date_req",
         "loi_date_req",
         "closure_date_req",
+        "req_offered_date",
+        "offered_accept_date",
+        "req_cancelled_date",
     }
 )
 _RECORD_RPO_INT_FIELDS = frozenset(
@@ -678,18 +698,21 @@ async def upload_file(
         mapper_agent = ColumnMapperAgent()
         mapping_result = mapper_agent.map_columns(headers, sample_rows)
         column_mapping_payload = finalize_ingest_column_mapping(mapping_result, headers)
+        column_mapping_payload = attach_status_lexicon_to_mapping(
+            column_mapping_payload,
+            file_path,
+            [classification.tracker_sheet],
+        )
         project.column_mapping = column_mapping_payload
-        
-        # Identify the pos_id_column (e.g. Req ID, Job ID, etc.) for deduplication
-        pos_id_col = None
-        id_keywords = ['req', 'job id', 'job code', 'position id', 'id', 'sl no']
-        for h in headers:
-            if any(k in h.lower() for k in id_keywords):
-                pos_id_col = h
-                break
-        
-        # Fallback to Position Title if no ID found
-        project.pos_id_column = pos_id_col or mapping_result.mapping.get("position_title") or headers[0]
+
+        from .core.pos_id_column import resolve_pos_id_column
+
+        pos_id_col = resolve_pos_id_column(headers)
+        project.pos_id_column = (
+            pos_id_col
+            or mapping_result.mapping.get("position_title")
+            or headers[0]
+        )
         db.commit()
 
         # Step 3: Logic Synthesis
@@ -944,17 +967,20 @@ async def pro_confirm_upload(
         mapper_agent = ColumnMapperAgent()
         mapping_result = mapper_agent.map_columns(all_headers, all_samples)
         column_mapping_payload = finalize_ingest_column_mapping(mapping_result, all_headers)
+        column_mapping_payload = attach_status_lexicon_to_mapping(
+            column_mapping_payload,
+            file_path,
+            data_sheets,
+        )
         project.column_mapping = column_mapping_payload
-        
-        # Identity Keyword search for pos_id (Unified for all sheets)
-        pos_id_col = None
-        id_keywords = ['req', 'job id', 'job code', 'position id', 'id', 'sl no', 'reference']
-        for h in all_headers:
-            if any(k in h.lower() for k in id_keywords):
-                pos_id_col = h
-                break
-        
-        project.pos_id_column = pos_id_col or mapping_result.mapping.get("position_title") or all_headers[0]
+
+        from .core.pos_id_column import resolve_pos_id_column
+
+        project.pos_id_column = (
+            resolve_pos_id_column(all_headers)
+            or mapping_result.mapping.get("position_title")
+            or all_headers[0]
+        )
         project.tracker_sheet = ",".join(data_sheets)
         project.contract_sheet = contract_sheet
         db.commit()
@@ -1044,7 +1070,11 @@ def recalculate_project_ledger(
     count = 0
     
     from .core.processor import _derive_global_status, _sanitize_value
-    
+    from .core.column_mapping_normalize import get_status_lexicon_from_mapping
+    from .core.status_lexicon import lookup_status_entry, merge_global_status_with_revenue
+
+    status_lexicon = get_status_lexicon_from_mapping(project.column_mapping)
+
     for r in records:
         # Reconstruct row_dict from standard columns + additional_attributes
         row_dict = {**r.additional_attributes}
@@ -1061,7 +1091,14 @@ def recalculate_project_ledger(
                 calc_results = {k: _sanitize_value(v) for k, v in calc_results.items()}
             
             r.revenue_results = calc_results
-            r.global_status = _derive_global_status(calc_results)
+            if status_lexicon:
+                attrs = r.additional_attributes if isinstance(r.additional_attributes, dict) else {}
+                raw_status = attrs.get("status_raw_excel") or r.status
+                entry = lookup_status_entry(status_lexicon, raw_status)
+                r.global_status = merge_global_status_with_revenue(entry.get("global_status", "PIPELINE"), calc_results)
+            else:
+                g = _derive_global_status(calc_results)
+                r.global_status = "UNPROCESSED" if g == "VOID" else g
             count += 1
         except Exception:
             continue
@@ -1842,7 +1879,7 @@ def get_all_records(
             "per_page": per_page,
             "pages": math.ceil(total / per_page) if per_page else 1,
         },
-        headers={"Cache-Control": "public, max-age=15, stale-while-revalidate=30"},
+        headers={"Cache-Control": "private, max-age=15, stale-while-revalidate=30"},
     )
 
 
@@ -2465,7 +2502,7 @@ def get_global_monitoring(
     from fastapi.responses import JSONResponse
     
     def _rec(q):
-        return apply_project_scope(q, user, db, Record)
+        return apply_record_access_scope(q, user, db)
 
     today = datetime.datetime.utcnow()
 
@@ -2596,7 +2633,7 @@ def get_global_monitoring(
             "revenue_total": revenue_total,
             "project_stats": project_stats,
         },
-        headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
+        headers={"Cache-Control": "private, max-age=30, stale-while-revalidate=60"},
     )
 
 @app.get("/stats/drilldown")
@@ -2647,7 +2684,7 @@ def get_requisition_kpis(
     offer_like = st.like("%offer%")
 
     def _rq():
-        return apply_project_scope(db.query(func.count(Record.id)), user, db, Record)
+        return apply_record_access_scope(db.query(func.count(Record.id)), user, db)
 
     joiners = _rq().filter(Record.global_status == "CLOSED").scalar() or 0
     open_req = (
@@ -2674,7 +2711,35 @@ def get_requisition_kpis(
             "joiners": int(joiners),
             "total_records": int(total_records),
         },
-        headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
+        headers={"Cache-Control": "private, max-age=30, stale-while-revalidate=60"},
+    )
+
+
+@app.get("/stats/requisitions/departments")
+def get_requisition_department_breakdown(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Top departments from scoped requisition rows (same scope as GET /records/all)."""
+    from fastapi.responses import JSONResponse
+
+    dept_col = func.trim(Record.department)
+    rows = (
+        apply_record_access_scope(db.query(dept_col, func.count(Record.id)), user, db)
+        .filter(Record.department.isnot(None), dept_col != "", func.lower(dept_col) != "nan")
+        .group_by(dept_col)
+        .order_by(func.count(Record.id).desc())
+        .all()
+    )
+    items = [{"name": name, "value": int(cnt)} for name, cnt in rows if name and str(name).strip()]
+    top = items[:8]
+    other = sum(x["value"] for x in items[8:])
+    if other > 0:
+        top.append({"name": "Other", "value": other})
+
+    return JSONResponse(
+        content={"items": top},
+        headers={"Cache-Control": "private, max-age=30, stale-while-revalidate=60"},
     )
 
 
@@ -3277,40 +3342,55 @@ async def upload_sla_master(
         )
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/wfm/stats")
-async def get_wfm_stats(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Summary of Workforce Management — SQL aggregates only."""
-    from fastapi.responses import JSONResponse
-
-    agg = (
+def _latest_wfm_benchmark_rows(db: Session, user: User):
+    """One row per project: the benchmark with the latest reporting_date (matches frontend dedupe)."""
+    latest_sub = (
         apply_project_scope(
             db.query(
-                func.sum(WFMHRBenchmark.ideal_hc).label("total_ideal"),
-                func.sum(WFMHRBenchmark.actual_hc_total).label("total_actual"),
-                func.sum(WFMHRBenchmark.wl1_hires).label("wl1"),
-                func.sum(WFMHRBenchmark.wl2_hires).label("wl2"),
-                func.sum(WFMHRBenchmark.wl3_hires).label("wl3"),
-                func.sum(WFMHRBenchmark.wl4_hires).label("wl4"),
+                WFMHRBenchmark.project_id,
+                func.max(WFMHRBenchmark.reporting_date).label("max_date"),
             ),
             user,
             db,
             WFMHRBenchmark,
         )
-        .one()
+        .group_by(WFMHRBenchmark.project_id)
+        .subquery()
+    )
+    return (
+        apply_project_scope(db.query(WFMHRBenchmark), user, db, WFMHRBenchmark)
+        .join(
+            latest_sub,
+            and_(
+                WFMHRBenchmark.project_id == latest_sub.c.project_id,
+                WFMHRBenchmark.reporting_date == latest_sub.c.max_date,
+            ),
+        )
+        .all()
     )
 
-    total_ideal  = float(agg.total_ideal  or 0)
-    total_actual = float(agg.total_actual or 0)
+
+@app.get("/wfm/stats")
+async def get_wfm_stats(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Summary of Workforce Management — latest benchmark snapshot per project only."""
+    from fastapi.responses import JSONResponse
+
+    benchmark_rows = _latest_wfm_benchmark_rows(db, user)
+
+    total_ideal = sum(float(b.ideal_hc or 0) for b in benchmark_rows)
+    total_actual = sum(float(b.actual_hc_total or 0) for b in benchmark_rows)
+    wl1 = sum(float(b.wl1_hires or 0) for b in benchmark_rows)
+    wl2 = sum(float(b.wl2_hires or 0) for b in benchmark_rows)
+    wl3 = sum(float(b.wl3_hires or 0) for b in benchmark_rows)
+    wl4 = sum(float(b.wl4_hires or 0) for b in benchmark_rows)
+
     open_reqs = (
         apply_project_scope(db.query(func.count(WFMResourceGap.id)), user, db, WFMResourceGap).scalar() or 0
     )
 
-    benchmark_rows = (
-        apply_project_scope(db.query(WFMHRBenchmark), user, db, WFMHRBenchmark).all()
-    )
     total_existing_resignations = 0
     portfolio_hc_summary = None
     for b in benchmark_rows:
@@ -3327,16 +3407,16 @@ async def get_wfm_stats(
         "total_ideal_hc": total_ideal,
         "hc_gap": round(total_ideal - total_actual, 1),
         "wl_distribution": {
-                "WL1": float(agg.wl1 or 0),
-                "WL2": float(agg.wl2 or 0),
-                "WL3": float(agg.wl3 or 0),
-                "WL4": float(agg.wl4 or 0),
+                "WL1": wl1,
+                "WL2": wl2,
+                "WL3": wl3,
+                "WL4": wl4,
             },
             "open_requisitions": open_reqs,
             "total_existing_resignations": total_existing_resignations,
             "portfolio_hc_summary": portfolio_hc_summary,
         },
-        headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
+        headers={"Cache-Control": "private, max-age=15, stale-while-revalidate=30"},
     )
 
 @app.get("/wfm/data")
@@ -3398,7 +3478,7 @@ async def get_wfm_details(
 
     return JSONResponse(
         content=res,
-        headers={"Cache-Control": "public, max-age=30, stale-while-revalidate=60"},
+        headers={"Cache-Control": "private, max-age=15, stale-while-revalidate=30"},
     )
 
 @app.post("/wfm/upload")

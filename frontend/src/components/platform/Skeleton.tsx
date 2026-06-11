@@ -21,14 +21,17 @@ export function Skeleton({
   height = 16,
   radius = 6,
   style,
+  className,
 }: {
   width?: string | number;
   height?: number;
   radius?: number;
   style?: React.CSSProperties;
+  className?: string;
 }) {
   return (
     <div
+      className={className}
       style={{
         ...shimmerStyle,
         width,
@@ -49,6 +52,32 @@ export function SkeletonKpiRow({ count = 7 }: { count?: number }) {
           <Skeleton height={10} width="55%" />
           <Skeleton height={26} width="75%" radius={5} />
           <Skeleton height={8} width="40%" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Tremor hero-card-shaped placeholders (client detail / exec-style KPI rows). */
+export function SkeletonHeroKpiRow({ count = 4 }: { count?: number }) {
+  const gridClass =
+    count >= 6
+      ? "client-metric-grid client-metric-grid--6"
+      : count === 3
+        ? "client-metric-grid client-metric-grid--4"
+        : "client-metric-grid client-metric-grid--4";
+
+  return (
+    <div className={gridClass}>
+      {Array.from({ length: count }, (_, i) => (
+        <div
+          key={i}
+          className="client-metric-card relative min-w-0 rounded-tremor-default border-l-4 border-orange-500/25 bg-gradient-to-b from-white via-white to-orange-50/30 p-4 shadow-tremor-card ring-1 ring-black/[0.04] sm:p-5"
+        >
+          <Skeleton height={18} width="48%" radius={999} className="max-w-full opacity-80" />
+          <Skeleton height={28} width="72%" radius={8} className="mt-3 max-w-full opacity-90" />
+          <Skeleton height={14} width="100%" radius={6} className="mt-3 max-w-full opacity-70" />
+          <Skeleton height={12} width="55%" radius={6} className="mt-3 max-w-full opacity-60" />
         </div>
       ))}
     </div>

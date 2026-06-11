@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 # Add project root to path so we can import from backend
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from backend.core.sla_period import canonical_month_label, parse_sla_score_column_name
+from backend.core.sla_period import (
+    canonical_month_label,
+    discover_sla_period_score_columns,
+    parse_sla_score_column_name,
+)
 from backend.core.sla_project_resolve import resolve_project_for_sla
 from backend.db.database import (
     MetricDefinition,
@@ -26,22 +30,8 @@ logger = logging.getLogger(__name__)
 
 
 def _sla_score_data_columns(columns: list[str]) -> list[str]:
-    """
-    Columns that hold period scores + pair with the next column for MET/RAG.
-
-    Excludes catalog headers that contain the word \"Score\" but are not monthly
-    snapshots (e.g. \"Metrics to be picked of BE Score (...)\" in Raw Data SLA Basefile).
-    """
-    out: list[str] = []
-    for c in columns:
-        s = str(c).strip()
-        if "Score" not in s:
-            continue
-        low = s.lower()
-        if "metrics to be picked" in low:
-            continue
-        out.append(c)
-    return out
+    """See ``discover_sla_period_score_columns`` in ``backend.core.sla_period``."""
+    return discover_sla_period_score_columns(columns)
 
 
 def _metric_group_column_name(columns: list[str]) -> Optional[str]:
@@ -134,6 +124,17 @@ def ingest_sla(file_path: str, db: Optional[Session] = None) -> Optional[dict[st
         result["score_columns"] = score_cols
         log_line(f"Base File loaded: {len(df)} rows, {len(df.columns)} columns.")
         log_line(f"Score snapshot columns (data): {len(score_cols)} — {score_cols[:12]}{'...' if len(score_cols) > 12 else ''}")
+        if len(score_cols) > 12:
+            log_line(f"… plus {len(score_cols) - 12} more through {score_cols[-1]!r}")
+        period_labels = sorted(
+            {
+                canonical_month_label(parse_sla_score_column_name(c))
+                for c in score_cols
+                if parse_sla_score_column_name(c)
+            }
+        )
+        if period_labels:
+            log_line(f"Calendar periods covered: {period_labels[0]} … {period_labels[-1]} ({len(period_labels)} months)")
         if excluded:
             log_line(f"Excluded non-period 'Score' columns ({len(excluded)}): {excluded}")
 

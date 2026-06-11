@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-COLUMN_MAPPING_VERSION = 2
+COLUMN_MAPPING_VERSION = 3
 KEY_VERSION = "version"
 KEY_UNIVERSAL = "universal"
 KEY_RECORD_FIELDS = "record_fields"
+KEY_STATUS_LEXICON = "status_lexicon"
 
 
 def split_column_mapping(raw: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -35,12 +36,37 @@ def split_column_mapping(raw: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
 
 
 def build_column_mapping_v2(universal: Dict[str, str], record_fields: Dict[str, str]) -> Dict[str, Any]:
-    """Persistable JSON for `Project.column_mapping`."""
+    """Persistable JSON for `Project.column_mapping` (v2 without status lexicon)."""
     return {
+        KEY_VERSION: 2,
+        KEY_UNIVERSAL: dict(universal),
+        KEY_RECORD_FIELDS: dict(record_fields),
+    }
+
+
+def build_column_mapping_v3(
+    universal: Dict[str, str],
+    record_fields: Dict[str, str],
+    status_lexicon: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Persistable JSON for `Project.column_mapping` including requisition status lexicon."""
+    payload: Dict[str, Any] = {
         KEY_VERSION: COLUMN_MAPPING_VERSION,
         KEY_UNIVERSAL: dict(universal),
         KEY_RECORD_FIELDS: dict(record_fields),
     }
+    if status_lexicon:
+        payload[KEY_STATUS_LEXICON] = status_lexicon
+    return payload
+
+
+def get_status_lexicon_from_mapping(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    lex = raw.get(KEY_STATUS_LEXICON)
+    if isinstance(lex, dict) and lex.get("value_map"):
+        return lex
+    return None
 
 
 def all_mapped_excel_headers(universal: Dict[str, str], record_fields: Dict[str, str]) -> frozenset[str]:

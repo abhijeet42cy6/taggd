@@ -32,8 +32,8 @@
 
 ```bash
 gcloud run services describe tgddata-api --project=taggd-491107 --region=asia-south1 --format='value(status.url)'
-# SPA bookmark (hash routes):
-# https://storage.googleapis.com/taggd-tgddata-prod-web/index.html#/login
+# SPA (production — use app.html, not index.html):
+# https://storage.googleapis.com/taggd-tgddata-prod-web/app.html#/login
 ```
 
 Generated copies: `deploy/gcp/.generated/api-url.txt`, `web-url.txt`.
@@ -179,7 +179,7 @@ Tarball **excludes:** `.git`, `node_modules`, `revenue_generator.db`, `deploy/gc
 | Symptom | Action |
 |--------|--------|
 | `/ready` database not ok | Check VPC connector; redeploy `06-deploy-api.sh` |
-| Login network error | CORS + `VITE_API_BASE_URL` without `/api`; use `…/index.html#/login` |
+| Login network error | CORS must include `https://storage.googleapis.com`; use `…/app.html#/login` |
 | KPI 404 on `/api/stats/…` | Redeploy `07`; hard-refresh; API has no global `/api` prefix |
 | KPI 500 on monitor | Postgres JSON strings — `backend/core/json_fields.as_json_dict()`; redeploy API |
 | Cloud Build upload fails | Retry from stable network |

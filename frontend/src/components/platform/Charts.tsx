@@ -694,9 +694,48 @@ export function SlaExecutiveMetPctBar({ data, height = 140 }: { data: SlaRankBar
   );
 }
 
-export type SlaDeltaBarDatum = { name: string; delta: number };
+export type SlaDeltaBarDatum = {
+  name: string;
+  delta: number;
+  p1?: number | null;
+  p2?: number | null;
+  account?: string;
+};
 
-export function SlaExecutiveDeltaBar({ data, height = 140 }: { data: SlaDeltaBarDatum[]; height?: number }) {
+function SlaExecutiveDeltaTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: SlaDeltaBarDatum }>;
+}) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  return (
+    <div style={slaTooltipStyle}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{d.account ?? d.name}</div>
+      {d.p1 != null && d.p2 != null ? (
+        <div style={{ fontSize: 10, color: COLORS.text2 }}>
+          {d.p1.toFixed(1)}% → {d.p2.toFixed(1)}%
+        </div>
+      ) : null}
+      <div style={{ fontSize: 11, marginTop: 2 }}>
+        {d.delta >= 0 ? "+" : ""}
+        {d.delta.toFixed(1)} pp
+      </div>
+    </div>
+  );
+}
+
+export function SlaExecutiveDeltaBar({
+  data,
+  height = 140,
+  onSelectAccount,
+}: {
+  data: SlaDeltaBarDatum[];
+  height?: number;
+  onSelectAccount?: (account: string) => void;
+}) {
   if (!data.length) return null;
   const vals = data.map((d) => d.delta);
   const maxAbs = Math.max(5, ...vals.map((v) => Math.abs(v)));
@@ -705,14 +744,35 @@ export function SlaExecutiveDeltaBar({ data, height = 140 }: { data: SlaDeltaBar
     <ResponsiveContainer width="100%" height={height}>
       <BarChart layout="vertical" data={data} style={CHART_STYLE} margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal />
-        <XAxis type="number" domain={domain} tick={{ ...SLA_CHART_TICK_SM }} tickFormatter={(v) => `${v}%`} />
-        <YAxis type="category" dataKey="name" width={88} tick={{ ...SLA_CHART_TICK_SM }} axisLine={false} tickLine={false} />
+        <XAxis type="number" domain={domain} tick={{ ...SLA_CHART_TICK_SM }} tickFormatter={(v) => `${v} pp`} />
+        <YAxis type="category" dataKey="name" width={100} tick={{ ...SLA_CHART_TICK_SM, fontSize: 9 }} axisLine={false} tickLine={false} />
         <ReferenceLine x={0} stroke={COLORS.border} strokeDasharray="4 3" />
-        <Tooltip contentStyle={slaTooltipStyle} formatter={(v: number) => [`${v >= 0 ? "+" : ""}${v.toFixed(1)} pp`, "Δ Met %"]} />
-        <Bar dataKey="delta" radius={[0, 3, 3, 0]} barSize={14}>
+        <Tooltip content={<SlaExecutiveDeltaTooltip />} />
+        <Bar
+          dataKey="delta"
+          radius={[0, 3, 3, 0]}
+          barSize={14}
+          cursor={onSelectAccount ? "pointer" : undefined}
+          onClick={(barData) => {
+            const acc = (barData as unknown as { payload?: SlaDeltaBarDatum })?.payload?.account;
+            if (acc && onSelectAccount) onSelectAccount(acc);
+          }}
+        >
           {data.map((e, i) => (
             <Cell key={i} fill={e.delta >= 0 ? "color-mix(in srgb, var(--green) 65%, transparent)" : "color-mix(in srgb, var(--red) 65%, transparent)"} />
           ))}
+          <LabelList
+            dataKey="delta"
+            position="right"
+            formatter={(v: number, _n: string, entry: { payload?: SlaDeltaBarDatum }) => {
+              const p = entry?.payload;
+              if (p?.p1 != null && p?.p2 != null) {
+                return `${p.p1.toFixed(0)}→${p.p2.toFixed(0)}%`;
+              }
+              return `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}`;
+            }}
+            style={{ fontSize: 8, fill: COLORS.text3, fontFamily: "'DM Mono',monospace" }}
+          />
         </Bar>
       </BarChart>
     </ResponsiveContainer>

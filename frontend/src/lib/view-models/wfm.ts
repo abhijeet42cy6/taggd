@@ -44,6 +44,12 @@ export function wfmStatusLabel(pct: number, ideal: number): "Strong" | "Watch" |
   return "At Risk";
 }
 
+export function wfmStatusToBadgeColor(label: "Strong" | "Watch" | "At Risk"): "emerald" | "amber" | "rose" {
+  if (label === "Strong") return "emerald";
+  if (label === "Watch") return "amber";
+  return "rose";
+}
+
 export function wfmMatchesFilter(pct: number, ideal: number, filter: "all" | "strong" | "watch" | "risk"): boolean {
   if (filter === "all") return true;
   const b = wfmFillBand(pct, ideal);
@@ -81,6 +87,7 @@ export type WfmPortfolioHcSummaryJson = {
 };
 
 export type WfmSheetMetricsJson = {
+  ideal_hc_by_wl?: { wl1?: number; wl2?: number; wl3?: number; wl4?: number; total?: number };
   open_positions?: { wl1?: number; wl2?: number; wl3?: number; wl4?: number; total?: number };
   /** Explicit additional HC from platform WFM form (overrides lateral-target proxy). */
   additional_hc?: number;
@@ -312,6 +319,97 @@ export function wfmAggregateByRegionalHead(rows: WfmBenchmarkRowVm[]): WfmSummar
       secondary: (r.regional_head || "").trim() || "Unassigned",
     }),
   );
+}
+
+type WfmWlBandKey = "wl1" | "wl2" | "wl3plus";
+
+const WFM_WL_BANDS: { key: WfmWlBandKey; label: string; sub: string }[] = [
+  { key: "wl1", label: "WL1", sub: "Entry level" },
+  { key: "wl2", label: "WL2", sub: "Mid level" },
+  { key: "wl3plus", label: "WL3 & above", sub: "Senior / leadership" },
+];
+
+function wfmSheetIdealHcByWl(r: WfmBenchmarkRowVm, band: WfmWlBandKey): number {
+  const j = r.sheet_metrics_json as WfmSheetMetricsJson | null | undefined;
+  const ib = j?.ideal_hc_by_wl;
+  if (!ib) return 0;
+  if (band === "wl1") return Number(ib.wl1 ?? 0);
+  if (band === "wl2") return Number(ib.wl2 ?? 0);
+  return Number(ib.wl3 ?? 0) + Number(ib.wl4 ?? 0);
+}
+
+function wfmSheetOpenByWl(r: WfmBenchmarkRowVm, band: WfmWlBandKey): number {
+  const j = r.sheet_metrics_json as WfmSheetMetricsJson | null | undefined;
+  const op = j?.open_positions;
+  if (!op) return 0;
+  if (band === "wl1") return Number(op.wl1 ?? 0);
+  if (band === "wl2") return Number(op.wl2 ?? 0);
+  return Number(op.wl3 ?? 0) + Number(op.wl4 ?? 0);
+}
+
+function wfmActualHcByWl(r: WfmBenchmarkRowVm, band: WfmWlBandKey): number {
+  if (band === "wl1") return Number(r.wl1_hires ?? 0);
+  if (band === "wl2") return Number(r.wl2_hires ?? 0);
+  return Number(r.wl3_hires ?? 0) + Number(r.wl4_hires ?? 0);
+}
+
+/** Portfolio rollup by work level (WL1 / WL2 / WL3+). */
+export function wfmAggregateByWlBand(rows: WfmBenchmarkRowVm[]): WfmSummaryRowVm[] {
+  return WFM_WL_BANDS.map(({ key, label, sub }) => {
+    let sumRev = 0;
+    let sumIdeal = 0;
+    let sumActual = 0;
+    let sumOpen = 0;
+    let sumProdWeighted = 0;
+    let sumIdealForProd = 0;
+    let clientCount = 0;
+
+    for (const r of rows) {
+      const idealBand = wfmSheetIdealHcByWl(r, key);
+      const idealAll = Number(
+        (r.sheet_metrics_json as WfmSheetMetricsJson | null | undefined)?.ideal_hc_by_wl?.total ?? r.ideal_hc ?? 0,
+      );
+      const actual = wfmActualHcByWl(r, key);
+      const open = wfmSheetOpenByWl(r, key);
+      const rev = Number(r.lateral_revenue_target ?? 0);
+      const prod = Number(r.lateral_productivity_target ?? 0);
+
+      if (idealBand > 0 || actual > 0 || open > 0) clientCount += 1;
+
+      sumIdeal += idealBand;
+      sumActual += actual;
+      sumOpen += open;
+
+      if (idealAll > 0 && idealBand > 0) {
+        sumRev += rev * (idealBand / idealAll);
+      }
+      if (idealBand > 0 && Number.isFinite(prod)) {
+        sumIdealForProd += idealBand;
+        sumProdWeighted += prod * idealBand;
+      }
+    }
+
+    const projected = sumActual + sumOpen;
+    const wProd = sumIdealForProd > 0 ? sumProdWeighted / sumIdealForProd : 0;
+
+    return {
+      key,
+      labelPrimary: label,
+      labelSecondary: sub,
+      lateral_revenue_target: sumRev,
+      lateral_productivity_target: wProd,
+      ideal_hc: sumIdeal,
+      actual_hc_total: sumActual,
+      variance_ideal_actual: sumIdeal - sumActual,
+      additional_hc: 0,
+      open_positions: sumOpen,
+      resignations: 0,
+      projected_hc: projected,
+      net_variance_actual_projected: sumActual - projected,
+      fill_pct: wfmFillPct(sumActual, sumIdeal),
+      client_count: clientCount,
+    };
+  });
 }
 
 export function wfmAggregateByPracticeHead(rows: WfmBenchmarkRowVm[]): WfmSummaryRowVm[] {

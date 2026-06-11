@@ -19,10 +19,7 @@ The API was healthy, but the frontend shell served from GCS referenced missing J
 There were two related issues:
 
 1. **Wrong frontend build profile for the URL being used**
-   - A frontend build was produced with custom-domain settings intended for `https://trops.taggd.in/`:
-     - `GCS_WEB_BASE=/`
-     - `VITE_STATIC_HOSTING=0`
-     - `VITE_API_BASE_URL=https://trops.taggd.in`
+   - A frontend build was produced with root-domain settings (`GCS_WEB_BASE=/`, `VITE_STATIC_HOSTING=0`) instead of GCS path-style hosting.
    - That generated root-absolute asset paths in HTML, e.g.:
      - `src="/assets/index-1ps6BGb0.js"`
    - For path-style GCS URL access, those paths are wrong (they resolve to `/assets/...` at host root instead of bucket path context).
@@ -56,26 +53,20 @@ There were two related issues:
 
 `deploy/gcp/07-deploy-frontend.sh` was updated to prevent recurrence:
 
-- Enforce **GCS defaults** when `FRONTEND_HOST` is not `trops`:
-  - `base=./`, `VITE_STATIC_HOSTING=1`, API base from Cloud Run URL.
-- Keep `trops` behavior only when explicitly requested:
-  - `FRONTEND_HOST=trops`.
-- Add validation guard:
-  - Fail deploy if GCS build outputs root-absolute `src="/assets/..."`.
-- Upload HTML with strict no-cache headers:
-  - `Cache-Control: no-cache, no-store, must-revalidate`.
-- Publish both:
-  - `index.html` and `app.html` (same shell) to provide cache-bypass fallback.
+- Always builds for **GCS path-style hosting**: `base=./`, `VITE_STATIC_HOSTING=1`, API base from Cloud Run URL.
+- Fail deploy if build outputs root-absolute `src="/assets/..."`.
+- Upload HTML with strict no-cache headers: `Cache-Control: no-cache, no-store, must-revalidate`.
+- Publish both `index.html` and `app.html` (same shell) — **`app.html` is the canonical production entry**.
 
 ## Current operational guidance
 
-- **For GCS staging users** use:
+- **Production login URL:**
   - `https://storage.googleapis.com/taggd-tgddata-prod-web/app.html#/login`
-- Use `index.html#/login` once edge cache has fully refreshed.
-- Use `FRONTEND_HOST=trops` deployment mode only when fully cut over to custom domain `https://trops.taggd.in/`.
+- Avoid sharing `index.html#/login` after deploys — edge cache may serve a stale shell for up to ~1h.
+- Never deploy with `GCS_WEB_BASE=/` or `VITE_STATIC_HOSTING=0` for this bucket.
 
 ## Lessons learned
 
-1. One bucket can host multiple delivery modes, but build flags must match the URL pattern users open.
+1. Build flags must match the URL pattern users open (`storage.googleapis.com/.../app.html` requires relative `./assets`).
 2. `index.html` should always be no-cache; hashed assets can remain long-cache.
 3. Keep a stable alternate entrypoint (`app.html`) for emergency cache bypass after bad shell deploys.

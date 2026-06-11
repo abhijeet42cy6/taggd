@@ -44,6 +44,23 @@ _ANNOTATION_AND_CORE_TYPES: Final[tuple[str, ...]] = (
     "bytes",
 )
 
+# LLM-generated revenue logic commonly uses these; RestrictedPython omits several by default.
+_EXTRA_SAFE_BUILTINS: Final[tuple[str, ...]] = (
+    "any",
+    "all",
+    "min",
+    "max",
+    "sum",
+    "abs",
+    "round",
+    "len",
+    "enumerate",
+    "zip",
+    "range",
+    "sorted",
+    "isinstance",
+)
+
 
 class RevenueLogicCompileError(ValueError):
     """Raised when stored logic cannot be compiled under the restricted policy."""
@@ -66,6 +83,9 @@ def _restricted_builtins() -> dict[str, Any]:
     merged["__import__"] = _safe_import
     for _n in _ANNOTATION_AND_CORE_TYPES:
         merged[_n] = getattr(builtins, _n)
+    for _n in _EXTRA_SAFE_BUILTINS:
+        if _n not in merged:
+            merged[_n] = getattr(builtins, _n)
     return merged
 
 

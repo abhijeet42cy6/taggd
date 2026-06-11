@@ -95,11 +95,10 @@ From **repository root** after local testing:
 ./deploy/gcp/07-deploy-frontend.sh
 ```
 
-Default (`FRONTEND_HOST=gcs`) — **do not override** unless you know what you are doing:
+GCS path-style hosting — **do not override** build env unless you know what you are doing:
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| `FRONTEND_HOST` | `gcs` (default) | GCS path-style hosting on `storage.googleapis.com` |
 | `VITE_STATIC_HOSTING` | `1` | Enables HashRouter + relative asset paths |
 | `GCS_WEB_BASE` | `./` | Relative `./assets/…` in `index.html` (required for GCS path URLs) |
 | `VITE_API_BASE_URL` | Cloud Run URL from `06` | **No** `/api` suffix — API serves `/auth`, `/projects`, … at root |
@@ -184,6 +183,8 @@ gcloud run services logs read tgddata-api --project=taggd-491107 --region=asia-s
 ---
 
 ## Database / data updates (cloud)
+
+**Safe schema changes (additive columns, no row loss):** see [`.cursor/skills/cloud_sql_update/SKILL.md`](../cloud_sql_update/SKILL.md) for backup, verify, and `_ensure_*` vs Alembic detail.
 
 | Goal | Command |
 |------|---------|

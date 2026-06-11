@@ -10,10 +10,25 @@ import {
   type ProjectContractRow,
 } from "@/lib/api";
 import { clientsVm, type ClientVm } from "@/lib/view-models/clients";
-import { cn, formatCurrency, formatLacs, formatNumber, formatPercent } from "@/lib/utils";
 import {
-  PlatformKpi, PlatformSection, PageHeader, Tabs, StatusTag, KvRow,
+  cn,
+  displayRecordReqId,
+  formatCurrency,
+  formatLacs,
+  formatNumber,
+  formatOfferedCtc,
+  formatPercent,
+  recordOpeningFeeInr,
+  recordRevenueInr,
+} from "@/lib/utils";
+import {
+  PlatformSection, PageHeader, Tabs, StatusTag, KvRow,
 } from "@/components/platform/PlatformBlocks";
+import {
+  AccountMetricCard,
+  ClientMetricGrid,
+  platformAccentToDecoration,
+} from "@/components/tremor-dashboard/AccountMetricCard";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +38,8 @@ import {
 } from "@/components/ui/dialog";
 import { RequisitionRecordDrawer } from "@/components/platform/RequisitionRecordDrawer";
 import { RequisitionCreateDrawer } from "@/components/platform/RequisitionCreateDrawer";
-import { SkeletonKpiRow, SkeletonTable, Skeleton } from "@/components/platform/Skeleton";
+import { SkeletonHeroKpiRow, SkeletonTable, Skeleton } from "@/components/platform/Skeleton";
+import "@/styles/exec-dash-premium.css";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReqStatusStackedBar, AgeingBars, LevelDonutChart } from "@/components/platform/Charts";
 import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
@@ -995,13 +1011,35 @@ export function ClientDetail() {
   const ageingBuckets = useMemo(() => buildAgeingBuckets(allRecords), [allRecords]);
   const levelData = useMemo(() => buildLevelData(allRecords), [allRecords]);
 
-  // Revenue stats
-  const totalRevenue = useMemo(() =>
-    allRecords.reduce((s, r) => s + (r.revenue_results?.revenue ?? 0), 0), [allRecords]);
-  const totalOpeningFees = useMemo(() =>
-    allRecords.reduce((s, r) => s + (r.revenue_results?.opening_fee ?? 0), 0), [allRecords]);
+  // Revenue stats — placement fees from revenue logic (not candidate CTC)
+  const totalRevenue = useMemo(
+    () => allRecords.reduce((s, r) => s + recordRevenueInr(r.revenue_results), 0),
+    [allRecords],
+  );
+  const totalOpeningFees = useMemo(
+    () => allRecords.reduce((s, r) => s + recordOpeningFeeInr(r.revenue_results), 0),
+    [allRecords],
+  );
   const totalClosingFees = useMemo(() =>
-    allRecords.reduce((s, r) => s + (r.revenue_results?.closing_fee ?? 0), 0), [allRecords]);
+    allRecords.reduce((s, r) => s + Number(r.revenue_results?.closing_fee ?? 0), 0), [allRecords]);
+  const projectsWithoutRevenueLogic = useMemo(
+    () => (clientVm?.projects ?? []).filter((p) => !(p as Project).revenue_logic_code).length,
+    [clientVm],
+  );
+  const recordsWithoutRevenue = useMemo(
+    () => allRecords.filter((r) => recordRevenueInr(r.revenue_results) <= 0).length,
+    [allRecords],
+  );
+  const revenueKpiDelta = useMemo(() => {
+    if (totalRevenue > 0) return `Opening: ${formatCurrency(totalOpeningFees)}`;
+    if (projectsWithoutRevenueLogic > 0) {
+      return `${projectsWithoutRevenueLogic} SBU(s) without revenue logic — configure & recalculate`;
+    }
+    if (recordsWithoutRevenue > 0) {
+      return `${recordsWithoutRevenue} row(s) — run revenue recalc (fees ≠ CTC)`;
+    }
+    return "Placement fees from revenue logic (not CTC)";
+  }, [totalRevenue, totalOpeningFees, projectsWithoutRevenueLogic, recordsWithoutRevenue]);
   const closedCount = useMemo(() =>
     allRecords.filter((r) => (r.global_status || "").toUpperCase() === "CLOSED").length, [allRecords]);
   const activeCount = useMemo(() =>
@@ -1135,64 +1173,109 @@ export function ClientDetail() {
           )}
         >
           {loadingOps ? (
-            <SkeletonKpiRow count={4} />
+            <SkeletonHeroKpiRow count={4} />
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-              <PlatformKpi
-                label="SLA % met"
+            <ClientMetricGrid count={4}>
+              <AccountMetricCard
+                eyebrow="SLA % met"
                 value={slaSnapshot?.metPct != null ? formatPercent(slaSnapshot.metPct) : "—"}
-                accent={slaSnapshot?.metPct != null && slaSnapshot.metPct >= 70 ? "green" : slaSnapshot?.metPct != null && slaSnapshot.metPct >= 50 ? "amber" : "blue"}
+                decorationColor={platformAccentToDecoration(
+                  slaSnapshot?.metPct != null && slaSnapshot.metPct >= 70
+                    ? "green"
+                    : slaSnapshot?.metPct != null && slaSnapshot.metPct >= 50
+                      ? "amber"
+                      : "blue",
+                )}
+                hint={slaSnapshot?.metPct == null ? "No SLA series for this account" : "Met ÷ (met + not met)"}
                 subtext={slaSnapshot ? `Month: ${slaSnapshot.month}` : undefined}
-                delta={slaSnapshot?.metPct == null ? "No SLA series for this account" : "Met ÷ (met + not met)"}
               />
-              <PlatformKpi
-                label="WFM capacity fill"
+              <AccountMetricCard
+                eyebrow="WFM capacity fill"
                 value={wfmSnapshot?.fillPct != null ? `${wfmSnapshot.fillPct}%` : "—"}
-                accent={
+                decorationColor={platformAccentToDecoration(
                   wfmSnapshot?.fillPct == null
                     ? "blue"
                     : wfmSnapshot.fillPct <= 100
                       ? "teal"
-                      : "amber"
+                      : "amber",
+                )}
+                hint={
+                  wfmSnapshot
+                    ? `Ideal ${formatNumber(wfmSnapshot.ideal)} · Actual ${formatNumber(wfmSnapshot.actual)}`
+                    : "No WFM row for these projects"
                 }
-                subtext={wfmSnapshot ? `Σ actual / Σ ideal HC (${wfmSnapshot.nProjects} project${wfmSnapshot.nProjects > 1 ? "s" : ""})` : undefined}
-                delta={wfmSnapshot ? `Ideal ${formatNumber(wfmSnapshot.ideal)} · Actual ${formatNumber(wfmSnapshot.actual)}` : "No WFM row for these projects"}
+                subtext={
+                  wfmSnapshot
+                    ? `Σ actual / Σ ideal HC (${wfmSnapshot.nProjects} project${wfmSnapshot.nProjects > 1 ? "s" : ""})`
+                    : undefined
+                }
               />
-              <PlatformKpi
-                label="Productivity target"
+              <AccountMetricCard
+                eyebrow="Productivity target"
                 value={wfmSnapshot != null && wfmSnapshot.prodAvg > 0 ? formatLacs(wfmSnapshot.prodAvg) : "—"}
-                accent="amber"
+                decorationColor={platformAccentToDecoration("amber")}
                 subtext="Ideal-weighted lateral productivity target (WFM), lacs"
-                delta={wfmSnapshot?.reportingDate ? `As of ${wfmSnapshot.reportingDate.slice(0, 10)}` : undefined}
+                footnote={wfmSnapshot?.reportingDate ? `As of ${wfmSnapshot.reportingDate.slice(0, 10)}` : undefined}
               />
-              <PlatformKpi
-                label="HC gap (open)"
+              <AccountMetricCard
+                eyebrow="HC gap (open)"
                 value={wfmSnapshot != null ? formatNumber(Math.round(wfmSnapshot.ideal - wfmSnapshot.actual)) : "—"}
-                accent={wfmSnapshot && wfmSnapshot.ideal - wfmSnapshot.actual > 0 ? "red" : "green"}
+                decorationColor={platformAccentToDecoration(
+                  wfmSnapshot && wfmSnapshot.ideal - wfmSnapshot.actual > 0 ? "red" : "green",
+                )}
                 subtext="Ideal − actual headcount (latest)"
-                delta="From wfm_hr_benchmarks"
+                footnote="From wfm_hr_benchmarks"
               />
-            </div>
+            </ClientMetricGrid>
           )}
         </PlatformSection>
       )}
 
       {/* KPI RIBBON */}
       {loadingMeta || !allRecords.length
-        ? <SkeletonKpiRow count={6} />
+        ? <SkeletonHeroKpiRow count={6} />
         : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10 }}>
-            <PlatformKpi label="Total Reqs" value={allRecords.length} accent="blue" delta="All time" />
-            <PlatformKpi label="Open" value={openCount} accent="teal" delta={`${fillRate}% fill rate`} />
-            <PlatformKpi label="Closed / Joined" value={closedCount} accent="green" delta="▲ Placed" />
-            <PlatformKpi label="Revenue" value={formatCurrency(totalRevenue)} accent="blue"
-              delta={`Opening: ${formatCurrency(totalOpeningFees)}`} />
-            <PlatformKpi label="Fill Rate" value={`${fillRate}%`}
-              accent={fillRate >= 75 ? "green" : fillRate >= 50 ? "amber" : "red"} />
-            <PlatformKpi label="Avg Ageing" value={`${avgAgeing}d`}
-              accent={avgAgeing <= 45 ? "green" : avgAgeing <= 75 ? "amber" : "red"}
-              delta={avgAgeing > 75 ? "⚠ High" : "— Normal"} />
-          </div>
+          <ClientMetricGrid count={6}>
+            <AccountMetricCard
+              eyebrow="Total Reqs"
+              value={allRecords.length}
+              decorationColor={platformAccentToDecoration("blue")}
+              hint="All time"
+            />
+            <AccountMetricCard
+              eyebrow="Open"
+              value={openCount}
+              decorationColor={platformAccentToDecoration("teal")}
+              hint={`${fillRate}% fill rate`}
+            />
+            <AccountMetricCard
+              eyebrow="Closed / Joined"
+              value={closedCount}
+              decorationColor={platformAccentToDecoration("green")}
+              hint="▲ Placed"
+            />
+            <AccountMetricCard
+              eyebrow="Revenue"
+              value={formatCurrency(totalRevenue)}
+              decorationColor={platformAccentToDecoration("blue")}
+              hint={revenueKpiDelta}
+            />
+            <AccountMetricCard
+              eyebrow="Fill Rate"
+              value={`${fillRate}%`}
+              decorationColor={platformAccentToDecoration(
+                fillRate >= 75 ? "green" : fillRate >= 50 ? "amber" : "red",
+              )}
+            />
+            <AccountMetricCard
+              eyebrow="Avg Ageing"
+              value={`${avgAgeing}d`}
+              decorationColor={platformAccentToDecoration(
+                avgAgeing <= 45 ? "green" : avgAgeing <= 75 ? "amber" : "red",
+              )}
+              hint={avgAgeing > 75 ? "⚠ High" : "— Normal"}
+            />
+          </ClientMetricGrid>
         )
       }
 
@@ -1373,8 +1456,8 @@ export function ClientDetail() {
                     </td></tr>
                   )}
                   {records.map((r) => {
-                    const reqId = (r.additional_attributes?.position_code as string) || `REQ-${r.id}`;
-                    const rev = r.revenue_results?.revenue ?? 0;
+                    const reqId = displayRecordReqId(r);
+                    const rev = recordRevenueInr(r.revenue_results);
                     const ageColor = r.ageing != null ? (r.ageing > 90 ? "var(--red)" : r.ageing > 60 ? "var(--amber)" : "var(--green)") : "var(--text-muted)";
                     const createdDate = r.creation_date ? new Date(r.creation_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—";
                     return (
@@ -1390,7 +1473,7 @@ export function ClientDetail() {
                         <td style={{ fontFamily: "'DM Mono',monospace", color: ageColor, fontSize: 10 }}>
                           {r.ageing != null ? `${r.ageing}d` : "—"}
                         </td>
-                        <td>{r.offered_ctc ? `₹${(r.offered_ctc / 100000).toFixed(1)}L` : "—"}</td>
+                        <td>{formatOfferedCtc(r.offered_ctc)}</td>
                         <td style={{ color: rev > 0 ? "var(--green)" : "var(--text-muted)" }}>{rev > 0 ? formatCurrency(rev) : "—"}</td>
                       </tr>
                     );
@@ -1480,7 +1563,7 @@ export function ClientDetail() {
                       const e = hmMap.get(hm)!;
                       e.total++;
                       if ((r.global_status || "").toUpperCase() === "CLOSED") e.closed++;
-                      e.revenue += r.revenue_results?.revenue ?? 0;
+                      e.revenue += recordRevenueInr(r.revenue_results);
                     }
                     return Array.from(hmMap.entries())
                       .sort((a, b) => b[1].total - a[1].total)

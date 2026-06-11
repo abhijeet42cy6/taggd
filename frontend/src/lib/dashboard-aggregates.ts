@@ -116,6 +116,17 @@ export function isProjectEligibleForFinanceAccountList(p: Project): boolean {
   return true;
 }
 
+/**
+ * Book62 regional rollup rows (e.g. account_name = region = "Middle East") are not client accounts.
+ * Exclude from exec risk radar / per-client health tables.
+ */
+export function isRegionalRollupProject(p: Project): boolean {
+  const account = (p.account_name ?? "").trim().toLowerCase();
+  const region = (p.region ?? "").trim().toLowerCase();
+  if (!account || !region) return false;
+  return account === region;
+}
+
 export function filterFinanceRows(
   rows: FinanceRowVm[],
   projects: Project[],

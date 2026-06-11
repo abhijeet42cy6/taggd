@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { COMPANY_VALUES_SESSION_FLAG } from "./company-values";
-import { api, clearApiCache } from "./api";
+import { api, clearApiCache, setApiCacheScope } from "./api";
 
 const TOKEN_KEY = "tgddata_access_token";
 
@@ -103,6 +103,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     setUser(authUser);
     setProjectIds(data.project_ids);
+    const pidKey =
+      data.project_ids === null
+        ? "all"
+        : data.project_ids.slice().sort((a, b) => a - b).join(",");
+    setApiCacheScope(`u${data.id}:${pidKey}`);
     return authUser;
   }, [applyToken]);
 
@@ -125,6 +130,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [applyToken, refreshMe]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setApiCacheScope("anon");
+      return;
+    }
+    const pidKey = projectIds === null ? "all" : projectIds.slice().sort((a, b) => a - b).join(",");
+    setApiCacheScope(`u${user.id}:${pidKey}`);
+  }, [user?.id, projectIds]);
 
   const login = useCallback(
     async (email: string, password: string): Promise<AuthUser | null> => {
@@ -162,6 +176,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
       setUser(authUser);
       setProjectIds(data.project_ids);
+      const pidKey =
+        data.project_ids === null
+          ? "all"
+          : data.project_ids.slice().sort((a, b) => a - b).join(",");
+      setApiCacheScope(`u${data.id}:${pidKey}`);
       try {
         sessionStorage.setItem(COMPANY_VALUES_SESSION_FLAG, "1");
       } catch {
@@ -388,6 +407,16 @@ export const RECRUITER_LANDING_PATH = "/tasks";
 export function isRecruiterUser(user: AuthUser | null | undefined): boolean {
   if (!user) return false;
   return (user.effectiveRole ?? user.role).toLowerCase() === "recruiter";
+}
+
+/** `null` = full org (platform admin or executive with no project assignments). */
+export function hasUnrestrictedProjectAccess(projectIds: number[] | null | undefined): boolean {
+  return projectIds == null;
+}
+
+/** User is limited to explicit project assignments (may be empty). */
+export function isProjectScopedUser(projectIds: number[] | null | undefined): boolean {
+  return projectIds != null;
 }
 
 /** Post-login or “go home” path from resolved `/auth/me` user. */

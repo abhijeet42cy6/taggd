@@ -1,14 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { queries, type CandidateMasterDetail, type CandidateMasterRow } from "@/lib/api";
 import { isPlatformAdminRole, isReadOnlyClient, useAuth } from "@/lib/auth";
-import { PageHeader, PlatformSection } from "@/components/platform/PlatformBlocks";
+import { PageHeader, PlatformSection, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
+import "@/styles/new-contract-panel.css";
 
 type PlacementFilter = "all" | "single" | "multi";
 type SortKey = "name" | "placements" | "updated";
@@ -392,45 +389,207 @@ export function CandidateStore() {
         )}
       </PlatformSection>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent style={{ maxWidth: 560 }}>
-          <DialogHeader>
-            <DialogTitle style={{ fontFamily: "'Syne',sans-serif" }}>
-              {detail ? `Master MST-${detail.id}` : "Loading…"}
-            </DialogTitle>
-          </DialogHeader>
-          {detail ? (
-            <div style={{ display: "grid", gap: 10, fontSize: 11 }}>
-              <div>
-                <strong>Display name:</strong> {detail.display_name || "—"}
-              </div>
-              <div style={{ color: "var(--text-muted)" }}>
-                Email (norm): {detail.email_normalized || "—"} · Phone (norm): {detail.phone_normalized || "—"}
-              </div>
-              <div style={{ fontWeight: 600, marginTop: 8 }}>Placements you can see</div>
-              <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
-                {detail.placements.map((p) => (
-                  <div
-                    key={p.id}
-                    style={{
-                      padding: 8,
-                      borderRadius: 8,
-                      border: "1px solid var(--border)",
-                      fontFamily: "'DM Mono',monospace",
-                      fontSize: 10,
-                    }}
-                  >
-                    CAN-{p.id} · PRJ-{p.project_id} · REQ-{p.record_id} · {p.client_candidate_id}
-                    <div style={{ fontFamily: "inherit", marginTop: 4, color: "var(--text-subtle)" }}>
-                      {p.full_name || "—"} · {p.current_stage || "—"} · {p.global_status || "—"}
+      <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className={cn(
+            "flex h-full max-h-[100dvh] flex-col gap-0 border-l p-0",
+            "data-[side=right]:w-full data-[side=right]:max-w-[calc(100vw-1rem)]",
+            "sm:data-[side=right]:w-[min(calc(100vw-2rem),56rem)] sm:data-[side=right]:max-w-[min(calc(100vw-2rem),56rem)]",
+            "bg-[#f7f6f3] shadow-xl",
+          )}
+        >
+          <div className="new-contract-sheet flex min-h-0 flex-1 flex-col">
+            <div className="ncp-scroll min-h-0 flex-1">
+              <div className="ncp-page">
+                <div className="ncp-header">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="ncp-breadcrumb">
+                      <span>Candidate store</span>
+                      <span className="ncp-breadcrumb-sep">›</span>
+                      <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 10 }}>
+                        {detail ? `MST-${detail.id}` : "…"}
+                      </span>
                     </div>
+                    <h1 className="ncp-h1">
+                      {detail ? `Master MST-${detail.id}` : "Loading master…"}
+                    </h1>
+                    <p className="ncp-subtitle" style={{ marginTop: 4 }}>
+                      {detail
+                        ? "Enterprise identity linked across mandate placements you can access."
+                        : "Fetching master profile and placements…"}
+                    </p>
                   </div>
-                ))}
+                  <button
+                    type="button"
+                    className="ncp-close-btn"
+                    aria-label="Close"
+                    onClick={() => setDetailOpen(false)}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {detail ? (
+                  <>
+                    <div className="ncp-section" style={{ marginBottom: 12 }}>
+                      <div className="ncp-section-header" style={{ cursor: "default" }}>
+                        <div className={cn("ncp-section-icon", "ncp-blue")}>👤</div>
+                        <div>
+                          <div className="ncp-section-label">Identity</div>
+                          <div className="ncp-section-desc">
+                            Normalized contact fields and display name used for deduplication.
+                          </div>
+                        </div>
+                      </div>
+                      <div className="ncp-section-body" style={{ maxHeight: "none" }}>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Display name</div>
+                          <div
+                            className="ncp-computed-field"
+                            style={{ border: "none", background: "transparent", minHeight: 36 }}
+                          >
+                            <span>{detail.display_name || "—"}</span>
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Email (normalized)</div>
+                          <div
+                            className="ncp-computed-field"
+                            style={{ border: "none", background: "transparent", minHeight: 36 }}
+                          >
+                            <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11 }}>
+                              {detail.email_normalized || "—"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Phone (normalized)</div>
+                          <div
+                            className="ncp-computed-field"
+                            style={{ border: "none", background: "transparent", minHeight: 36 }}
+                          >
+                            <span style={{ fontFamily: "var(--ncp-mono)", fontSize: 11 }}>
+                              {detail.phone_normalized || "—"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Global fingerprint</div>
+                          <div
+                            className="ncp-computed-field"
+                            style={{ border: "none", background: "transparent", minHeight: 36 }}
+                          >
+                            <span
+                              style={{
+                                fontFamily: "var(--ncp-mono)",
+                                fontSize: 10,
+                                color: "var(--ncp-text-muted)",
+                                wordBreak: "break-all",
+                              }}
+                              title={detail.global_fingerprint || undefined}
+                            >
+                              {detail.global_fingerprint || "—"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Last updated</div>
+                          <div
+                            className="ncp-computed-field"
+                            style={{ border: "none", background: "transparent", minHeight: 36 }}
+                          >
+                            <span>{fmtWhen(detail.updated_at)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="ncp-section" style={{ marginBottom: 12 }}>
+                      <div className="ncp-section-header" style={{ cursor: "default" }}>
+                        <div className={cn("ncp-section-icon", "ncp-orange")}>◇</div>
+                        <div>
+                          <div className="ncp-section-label">Placements you can see</div>
+                          <div className="ncp-section-desc">
+                            {detail.placements.length === 1
+                              ? "1 mandate-level candidate row linked to this master."
+                              : `${detail.placements.length} mandate-level candidate rows linked to this master.`}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="ncp-section-body" style={{ maxHeight: "none" }}>
+                        {detail.placements.length === 0 ? (
+                          <p className="ncp-hint" style={{ margin: 0 }}>
+                            No placements visible for your scope.
+                          </p>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {detail.placements.map((p) => (
+                              <div
+                                key={p.id}
+                                className="ncp-project-btn ncp-selected"
+                                style={{ cursor: "default", pointerEvents: "none", alignItems: "flex-start" }}
+                              >
+                                <span className="ncp-project-icon" style={{ fontSize: 11, marginTop: 2 }}>
+                                  CAN
+                                </span>
+                                <div className="ncp-project-meta" style={{ minWidth: 0, flex: 1 }}>
+                                  <strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    {p.full_name || detail.display_name || "Unnamed candidate"}
+                                  </strong>
+                                  <span
+                                    style={{
+                                      fontFamily: "var(--ncp-mono)",
+                                      fontSize: 10,
+                                      color: "var(--ncp-accent)",
+                                      display: "block",
+                                      marginTop: 2,
+                                    }}
+                                  >
+                                    CAN-{p.id} · PRJ-{p.project_id} · REQ-{p.record_id} · {p.client_candidate_id}
+                                  </span>
+                                  <span
+                                    style={{
+                                      display: "flex",
+                                      flexWrap: "wrap",
+                                      gap: 8,
+                                      alignItems: "center",
+                                      marginTop: 6,
+                                      fontSize: 11,
+                                      color: "var(--ncp-text-muted)",
+                                    }}
+                                  >
+                                    <span>Stage: {p.current_stage || "—"}</span>
+                                    {p.global_status ? (
+                                      <StatusTag status={p.global_status} />
+                                    ) : (
+                                      <span>Status: —</span>
+                                    )}
+                                    {p.email_id ? <span>{p.email_id}</span> : null}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ padding: "24px 0", color: "var(--ncp-text-muted)", fontSize: 12 }}>Loading…</div>
+                )}
               </div>
             </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+
+            <div className="ncp-footer">
+              <button type="button" className="ncp-btn ncp-btn-primary" onClick={() => setDetailOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

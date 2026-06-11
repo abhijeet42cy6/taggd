@@ -383,6 +383,129 @@ export function SlaWorkspaceRegionsMap({
   );
 }
 
+export type SlaAccountRankDatum = {
+  account: string;
+  metPct: number;
+  met: number;
+  notMet: number;
+  notReported: number;
+  decisive: number;
+};
+
+function slaMetPctBand(pct: number): "green" | "amber" | "red" {
+  if (pct >= 75) return "green";
+  if (pct >= 50) return "amber";
+  return "red";
+}
+
+function SlaExecRankColumn({
+  title,
+  hint,
+  rows,
+  barMax,
+  onSelectAccount,
+}: {
+  title: string;
+  hint: string;
+  rows: SlaAccountRankDatum[];
+  barMax: number;
+  onSelectAccount?: (account: string) => void;
+}) {
+  const domain = Math.max(barMax, 1);
+  return (
+    <div className="sla-exec-rank-col">
+      <div className="sla-exec-rank-col-hd">{title}</div>
+      <div className="sla-exec-rank-col-sub">{hint}</div>
+      {rows.length === 0 ? (
+        <div className="sla-empty">No accounts with decisive outcomes in scope.</div>
+      ) : (
+        <ul className="sla-exec-rank-list" role="list">
+          {rows.map((row) => {
+            const band = slaMetPctBand(row.metPct);
+            const lowN = row.decisive < 3;
+            return (
+              <li key={row.account}>
+                <button
+                  type="button"
+                  className="sla-exec-rank-row"
+                  onClick={() => onSelectAccount?.(row.account)}
+                  title={`${row.account}: ${row.metPct.toFixed(1)}% Met (${row.met} met · ${row.notMet} not met${row.notReported > 0 ? ` · ${row.notReported} not reported` : ""})`}
+                >
+                  <span className="sla-exec-rank-row__name">{row.account}</span>
+                  <span className="sla-exec-rank-row__viz" aria-hidden>
+                    <span className="sla-exec-rank-row__track">
+                      <span
+                        className={cn("sla-exec-rank-row__bar", `sla-exec-rank-row__bar--${band}`)}
+                        style={{ width: `${Math.min(100, (row.metPct / domain) * 100)}%` }}
+                      />
+                    </span>
+                    <span className={cn("sla-exec-rank-row__pct", `sla-exec-rank-row__pct--${band}`)}>
+                      {row.metPct.toFixed(1)}%
+                    </span>
+                  </span>
+                  <span className="sla-exec-rank-row__meta">
+                    {row.met} met · {row.notMet} not met
+                    {row.notReported > 0 ? ` · ${row.notReported} NR` : ""}
+                    {lowN ? " · low n" : ""}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Top / bottom account Met % — latest decisive rows, band colours, click to filter table. */
+export function SlaExecutiveAccountRankPanel({
+  top,
+  bottom,
+  portfolioMetPct,
+  minDecisive = 3,
+  onSelectAccount,
+}: {
+  top: SlaAccountRankDatum[];
+  bottom: SlaAccountRankDatum[];
+  portfolioMetPct: number | null;
+  minDecisive?: number;
+  onSelectAccount?: (account: string) => void;
+}) {
+  const bottomMax = bottom.length
+    ? Math.max(50, ...bottom.map((r) => r.metPct)) + 5
+    : 100;
+  return (
+    <div className="sla-exec-rank-panel">
+      <div className="sla-exec-rank-panel__note">
+        <span className="sla-exec-rank-basis">Basis: latest decisive row per metric</span>
+        {portfolioMetPct != null ? (
+          <span className="sla-exec-rank-portfolio">Portfolio Met %: {formatPercent(portfolioMetPct)}</span>
+        ) : null}
+        {minDecisive > 1 ? (
+          <span className="sla-exec-rank-min-n">Rankings prefer accounts with ≥{minDecisive} decisive metrics</span>
+        ) : null}
+      </div>
+      <div className="sla-exec-rank-panel__cols">
+        <SlaExecRankColumn
+          title="Top performers"
+          hint="Highest Met % (met ÷ met + not met)"
+          rows={top}
+          barMax={100}
+          onSelectAccount={onSelectAccount}
+        />
+        <SlaExecRankColumn
+          title="Needs attention"
+          hint="Lowest Met % on latest decisive rows"
+          rows={bottom}
+          barMax={bottomMax}
+          onSelectAccount={onSelectAccount}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function SlaBenchmarkForecastCards({ variant = "both" }: { variant?: "both" | "bench" | "forecast" }) {
   const showBench = variant === "both" || variant === "bench";
   const showFore = variant === "both" || variant === "forecast";

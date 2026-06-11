@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Button,
   Card,
+  Flex,
   Table,
   TableBody,
   TableCell,
@@ -18,6 +19,22 @@ import { CandidateFormDrawer } from "@/components/platform/CandidateFormDrawer";
 import { StatusTag } from "@/components/platform/PlatformBlocks";
 import { projectDisplayName, SearchableProjectFilterSelect } from "@/components/platform/searchable-pickers";
 import { Skeleton } from "@/components/platform/Skeleton";
+
+const PER_PAGE = 50;
+const PAGE_WINDOW = 7;
+
+function buildVisiblePageNumbers(current: number, total: number, windowSize = PAGE_WINDOW): number[] {
+  if (total <= windowSize) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  let start = Math.max(1, current - Math.floor(windowSize / 2));
+  let end = start + windowSize - 1;
+  if (end > total) {
+    end = total;
+    start = Math.max(1, end - windowSize + 1);
+  }
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
 
 const flatCard =
   "overflow-hidden border-0 p-0 shadow-tremor-card ring-1 ring-tremor-ring dark:bg-dark-tremor-background dark:shadow-dark-tremor-card dark:ring-dark-tremor-ring";
@@ -40,6 +57,7 @@ export function Candidates() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<"create" | "edit">("create");
   const [drawerCandidateId, setDrawerCandidateId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
 
   const defaultDrawerProjectId =
     projectId.trim() !== "" && !Number.isNaN(parseInt(projectId, 10)) ? parseInt(projectId, 10) : null;
@@ -62,6 +80,10 @@ export function Candidates() {
   }, [search]);
 
   useEffect(() => {
+    setPage(1);
+  }, [debounced, projectId]);
+
+  useEffect(() => {
     queries.projects().then(setProjects).catch(() => setProjects([]));
   }, []);
 
@@ -79,8 +101,8 @@ export function Candidates() {
       const data = await queries.candidatesList({
         project_id: pid != null && !Number.isNaN(pid) ? pid : undefined,
         search: debounced || undefined,
-        limit: 100,
-        offset: 0,
+        limit: PER_PAGE,
+        offset: (page - 1) * PER_PAGE,
       });
       setRows(data.items);
       setTotal(data.total);
@@ -92,11 +114,17 @@ export function Candidates() {
     } finally {
       setLoading(false);
     }
-  }, [debounced, projectId]);
+  }, [debounced, page, projectId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const visiblePages = useMemo(
+    () => buildVisiblePageNumbers(page, totalPages),
+    [page, totalPages],
+  );
 
   const subtitle = recruiterView
     ? "Mandate-level pipeline rows where you are the assigned recruiter or hiring manager (or on your projects)."
@@ -166,8 +194,13 @@ export function Candidates() {
           </div>
         </div>
 
-        <div className="border-b border-tremor-border px-4 py-2.5 dark:border-dark-tremor-border">
+        <div className="flex flex-col gap-1 border-b border-tremor-border px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between dark:border-dark-tremor-border">
           <Title className="text-sm font-semibold text-tremor-content-strong">Results ({total.toLocaleString()})</Title>
+          {total > 0 ? (
+            <Text className="text-xs tabular-nums text-tremor-content-subtle">
+              {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, total)} of {total.toLocaleString()}
+            </Text>
+          ) : null}
         </div>
 
         <input
@@ -333,6 +366,50 @@ export function Candidates() {
             </div>
           )}
         </div>
+
+        {totalPages > 1 ? (
+          <Flex justifyContent="center" alignItems="center" className="flex-wrap gap-1.5 border-t border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+              aria-label="Previous page"
+            >
+              ←
+            </Button>
+            {visiblePages[0] > 1 ? (
+              <Text className="self-center text-xs text-tremor-content-subtle">…</Text>
+            ) : null}
+            {visiblePages.map((p) => (
+              <Button
+                key={p}
+                type="button"
+                size="xs"
+                variant={page === p ? "primary" : "light"}
+                color="orange"
+                className="min-w-[1.75rem] px-0 tabular-nums"
+                onClick={() => setPage(p)}
+              >
+                {p}
+              </Button>
+            ))}
+            {visiblePages[visiblePages.length - 1] < totalPages ? (
+              <Text className="self-center text-xs text-tremor-content-subtle">…{totalPages} pages</Text>
+            ) : null}
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              aria-label="Next page"
+            >
+              →
+            </Button>
+          </Flex>
+        ) : null}
       </Card>
 
       <CandidateFormDrawer

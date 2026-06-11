@@ -32,6 +32,7 @@ import {
   aggregateFinanceFromRows,
   emptyFinanceAggregate,
   isProjectEligibleForFinanceAccountList,
+  isRegionalRollupProject,
   projectMatchesExecFilters,
   quarterlyPlanActualForFy,
   quarterlyCollectionForFy,
@@ -269,6 +270,7 @@ export const Dashboard = () => {
   const riskClients = useMemo(() => {
     return projects
       .filter(isProjectEligibleForFinanceAccountList)
+      .filter((p) => !isRegionalRollupProject(p))
       .filter((p) => projectMatchesExecFilters(p, filters))
       .map((p) => ({
         id: p.id,
@@ -632,7 +634,7 @@ export const Dashboard = () => {
           <span className="font-semibold text-orange-700">Actual rev</span> (YoY vs prior FY actual),{" "}
           <span className="font-semibold text-orange-700">CM%</span> (vs 35% target),{" "}
           <span className="font-semibold text-orange-700">SLA</span> (Met ÷ Met+Not met). Missing data is excluded from
-          the composite score. Requisition counts appear in the client drawer only.
+          the composite score. The client drawer shows finance actual (ledger) and pipeline revenue (req tracker) separately.
         </Text>
 
         <TremorDashboardSection
@@ -782,11 +784,27 @@ export const Dashboard = () => {
                 </div>
             </div>
                       <div className="ncp-prop-row">
-                        <div className="ncp-prop-label">Revenue</div>
+                        <div className="ncp-prop-label">Finance actual (FY)</div>
                         <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>
-                          {formatCurrency(selectedClient.revenue)}
-            </div>
-                            </div>
+                          {selectedClient.finance_actual_inr != null
+                            ? formatLargeCurrency(selectedClient.finance_actual_inr)
+                            : "—"}
+                        </div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Finance budget (FY)</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>
+                          {selectedClient.finance_budget_inr != null
+                            ? formatLargeCurrency(selectedClient.finance_budget_inr)
+                            : "—"}
+                        </div>
+                      </div>
+                      <div className="ncp-prop-row">
+                        <div className="ncp-prop-label">Pipeline revenue</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>
+                          {formatCurrency(selectedClient.pipeline_revenue_inr)}
+                        </div>
+                      </div>
                       <div className="ncp-prop-row">
                         <div className="ncp-prop-label">Composite score</div>
                         <div style={{ fontSize: 13, fontWeight: 500, fontFamily: "var(--ncp-mono)", padding: "6px 8px" }}>

@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { queries, type CandidateRow, type Project, type RecordCreate, type RecordRow } from "@/lib/api";
+import { queries, type CandidateRow, type Project, type RecordCreate, type RecordRpoPatch, type RecordRow } from "@/lib/api";
+import {
+  CANDIDATE_NAME_PRESETS,
+  DIVERSITY_OPTIONS,
+  candidateNameSelectOptions,
+} from "@/lib/requisition-form-options";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import "@/styles/new-contract-panel.css";
@@ -39,6 +44,11 @@ type CreateForm = {
   global_status: string;
   creation_date: string;
   joining_date: string;
+  req_offered_date: string;
+  offered_accept_date: string;
+  req_cancelled_date: string;
+  selection_date_req: string;
+  diversity: string;
   additional_json: string;
   source_joiner_type: string;
 };
@@ -57,6 +67,11 @@ function emptyForm(): CreateForm {
     global_status: "ACTIVE",
     creation_date: "",
     joining_date: "",
+    req_offered_date: "",
+    offered_accept_date: "",
+    req_cancelled_date: "",
+    selection_date_req: "",
+    diversity: "",
     additional_json: "{}",
     source_joiner_type: "",
   };
@@ -279,6 +294,9 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
         return;
       }
     }
+    const div = form.diversity.trim();
+    if (div) extra.diversity = div;
+    else delete extra.diversity;
 
     const body: RecordCreate = {
       project_id: pid,
@@ -305,6 +323,20 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
     if (Object.keys(body.additional_attributes ?? {}).length === 0) {
       delete body.additional_attributes;
     }
+
+    const rpo: RecordRpoPatch = {};
+    const setRpoDate = (
+      key: "req_offered_date" | "offered_accept_date" | "req_cancelled_date" | "selection_date_req",
+      val: string,
+    ) => {
+      const t = val.trim();
+      if (t) rpo[key] = t;
+    };
+    setRpoDate("req_offered_date", form.req_offered_date);
+    setRpoDate("offered_accept_date", form.offered_accept_date);
+    setRpoDate("req_cancelled_date", form.req_cancelled_date);
+    setRpoDate("selection_date_req", form.selection_date_req);
+    if (Object.keys(rpo).length) body.rpo = rpo;
 
     setCreating(true);
     setError(null);
@@ -632,15 +664,46 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
                           ))}
                         </div>
                         {candidateMode === "manual" && (
-                          <div className="ncp-prop-row" style={{ borderTop: "none" }}>
-                            <div className="ncp-prop-label">Full name</div>
-                            <input
-                              className="ncp-prop-input"
-                              value={form.candidate_name}
-                              onChange={(e) => setF("candidate_name", e.target.value)}
-                              placeholder="Candidate full name"
-                            />
-                          </div>
+                          <>
+                            <div className="ncp-prop-row" style={{ borderTop: "none" }}>
+                              <div className="ncp-prop-label">Candidate</div>
+                              <select
+                                className="ncp-prop-input"
+                                value={
+                                  CANDIDATE_NAME_PRESETS.includes(
+                                    form.candidate_name as (typeof CANDIDATE_NAME_PRESETS)[number],
+                                  )
+                                    ? form.candidate_name
+                                    : ""
+                                }
+                                onChange={(e) => {
+                                  if (e.target.value) setF("candidate_name", e.target.value);
+                                }}
+                              >
+                                <option value="">— Custom name below —</option>
+                                {CANDIDATE_NAME_PRESETS.map((n) => (
+                                  <option key={n} value={n}>
+                                    {n}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="ncp-prop-row">
+                              <div className="ncp-prop-label">Full name</div>
+                              <input
+                                className="ncp-prop-input"
+                                list="req-create-candidate-presets"
+                                value={form.candidate_name}
+                                onChange={(e) => setF("candidate_name", e.target.value)}
+                                placeholder="Full name or pick YTJ / Offered Drop in"
+                              />
+                              <datalist id="req-create-candidate-presets">
+                                {candidateNameSelectOptions(form.candidate_name).map((n) => (
+                                  <option key={n} value={n} />
+                                ))}
+                              </datalist>
+                            </div>
+                          </>
                         )}
                         {candidateMode === "none" && (
                           <div
@@ -665,6 +728,21 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
                   <div className={cn("ncp-panel", tab === 2 && "ncp-panel-active")}>
                     {section("🏢", "ncp-green", "Role & organisation", "Position title and internal routing fields.", (
                       <>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Diversity</div>
+                          <select
+                            className="ncp-prop-input"
+                            value={form.diversity}
+                            onChange={(e) => setF("diversity", e.target.value)}
+                          >
+                            <option value="">— Select —</option>
+                            {DIVERSITY_OPTIONS.map((d) => (
+                              <option key={d} value={d}>
+                                {d}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         {propRow("Position title *", "position_title", "e.g. Senior Engineer")}
                         {propRow("Hiring manager", "hiring_manager")}
                         {propRow("Department", "department")}
@@ -734,6 +812,22 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
                           <div className="ncp-date-cell">
                             <label>Joining (optional)</label>
                             <input type="date" value={form.joining_date} onChange={(e) => setF("joining_date", e.target.value)} />
+                          </div>
+                          <div className="ncp-date-cell">
+                            <label>Req offered (optional)</label>
+                            <input type="date" value={form.req_offered_date} onChange={(e) => setF("req_offered_date", e.target.value)} />
+                          </div>
+                          <div className="ncp-date-cell">
+                            <label>Offered accept (optional)</label>
+                            <input type="date" value={form.offered_accept_date} onChange={(e) => setF("offered_accept_date", e.target.value)} />
+                          </div>
+                          <div className="ncp-date-cell">
+                            <label>Req cancelled (optional)</label>
+                            <input type="date" value={form.req_cancelled_date} onChange={(e) => setF("req_cancelled_date", e.target.value)} />
+                          </div>
+                          <div className="ncp-date-cell">
+                            <label>Candidate selection (optional)</label>
+                            <input type="date" value={form.selection_date_req} onChange={(e) => setF("selection_date_req", e.target.value)} />
                           </div>
                         </div>
                         <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>

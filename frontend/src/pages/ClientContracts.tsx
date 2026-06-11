@@ -12,12 +12,16 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import {
   PageHeader,
-  PlatformKpi,
   PlatformSection,
   Tabs,
   StatusTag,
 } from "@/components/platform/PlatformBlocks";
-import { Skeleton } from "@/components/platform/Skeleton";
+import { SkeletonHeroKpiRow } from "@/components/platform/Skeleton";
+import {
+  AccountMetricCard,
+  ClientMetricGrid,
+  platformAccentToDecoration,
+} from "@/components/tremor-dashboard/AccountMetricCard";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +33,7 @@ import { NewContractSheet } from "@/components/platform/NewContractSheet";
 import type { NewContractOrgBundle } from "@/components/platform/NewContractOrgFlow";
 import { cn } from "@/lib/utils";
 import "@/styles/new-contract-panel.css";
+import "@/styles/exec-dash-premium.css";
 
 type EnrichedContract = ProjectContractRow & {
   sbuLabel: string;
@@ -1747,39 +1752,37 @@ export function ClientContracts() {
       </div>
 
       {loading ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} height={72} />
-          ))}
-        </div>
+        <SkeletonHeroKpiRow count={4} />
       ) : (
         <>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          <PlatformKpi
-            label="Contracts on file"
+        <ClientMetricGrid count={4}>
+          <AccountMetricCard
+            eyebrow="Contracts on file"
             value={kpis.total}
-            accent="blue"
+            decorationColor={platformAccentToDecoration("blue")}
             subtext={statusFilter === "all" ? "Scoped portfolio" : `Filtered · ${statusFilter}`}
           />
-          <PlatformKpi
-            label="Active / renewed / expired"
+          <AccountMetricCard
+            eyebrow="Active / renewed / expired"
             value={`${kpis.active} / ${kpis.renewed} / ${kpis.expired}`}
-            accent="teal"
+            decorationColor={platformAccentToDecoration("teal")}
+            hint={`${kpis.active} active · ${kpis.renewed} renewed · ${kpis.expired} expired`}
             subtext={statusFilter === "all" ? "By row status" : "Within filtered rows"}
           />
-          <PlatformKpi
-            label="Σ Signed ACV"
+          <AccountMetricCard
+            eyebrow="Σ Signed ACV"
             value={kpis.totalAcv > 0 ? formatCurrency(kpis.totalAcv) : "—"}
-            accent="green"
+            decorationColor={platformAccentToDecoration("green")}
             subtext={statusFilter === "all" ? "INR from contract rows" : "INR · filtered rows"}
           />
-          <PlatformKpi
-            label="Renewal radar"
+          <AccountMetricCard
+            eyebrow="Renewal radar"
             value={`${kpis.expiring90} ≤90d · ${kpis.overdue} overdue`}
-            accent={kpis.overdue > 0 ? "red" : "amber"}
+            decorationColor={platformAccentToDecoration(kpis.overdue > 0 ? "red" : "amber")}
+            hint={kpis.overdue > 0 ? `⚠ ${kpis.overdue} past end date` : kpis.expiring90 > 0 ? `${kpis.expiring90} renewing within 90 days` : "No renewals due soon"}
             subtext={statusFilter === "all" ? "End date vs today" : "Filtered contracts only"}
           />
-        </div>
+        </ClientMetricGrid>
         <div
           role="toolbar"
           aria-label="Filter contracts by status"

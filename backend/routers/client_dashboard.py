@@ -18,7 +18,8 @@ from backend.auth.profile import (
     effective_role,
     resolve_user_profile,
 )
-from backend.auth.scope import apply_project_scope, assert_client_access
+from backend.auth.scope import apply_project_scope, apply_record_access_scope, assert_client_access
+from backend.core.client_pipeline_metrics import compute_pipeline_metrics
 from backend.auth.verticals import require_vertical
 from backend.core.sla_period import bucket_sla_rag
 from backend.db.database import (
@@ -68,6 +69,36 @@ BLOCK_CATALOG: list[dict[str, str]] = [
         "category": "Requisitions",
     },
     {
+        "type": "pipeline_kpi_strip",
+        "label": "Pipeline KPI strip",
+        "desc": "WIP, offered, YTJ, ageing, TTO, TTF with period comparison",
+        "category": "Requisitions",
+    },
+    {
+        "type": "pipeline_quality_strip",
+        "label": "Pipeline quality strip",
+        "desc": "Diversity %, RPO source mix %, offer drop ratio",
+        "category": "Requisitions",
+    },
+    {
+        "type": "pipeline_activity_chart",
+        "label": "Pipeline activity trend",
+        "desc": "Monthly opens, offers, joiners, and drops",
+        "category": "Requisitions",
+    },
+    {
+        "type": "pipeline_ageing_chart",
+        "label": "WIP ageing distribution",
+        "desc": "Ageing buckets for open requisitions",
+        "category": "Requisitions",
+    },
+    {
+        "type": "pipeline_mix_charts",
+        "label": "Diversity & source mix",
+        "desc": "Joiner diversity and source composition donuts",
+        "category": "Requisitions",
+    },
+    {
         "type": "engagements_table",
         "label": "Engagements table",
         "desc": "Roster of allocated project engagements",
@@ -84,11 +115,15 @@ BLOCK_CATALOG: list[dict[str, str]] = [
 ALLOWED_BLOCK_TYPES = {b["type"] for b in BLOCK_CATALOG}
 
 DEFAULT_LAYOUT: list[dict[str, Any]] = [
-    {"id": "sla_kpi_strip", "type": "sla_kpi_strip", "variant": "card", "order": 0},
-    {"id": "sla_summary_cards", "type": "sla_summary_cards", "variant": "card", "order": 1},
-    {"id": "sla_table", "type": "sla_table", "variant": "card", "order": 2},
-    {"id": "req_kpi", "type": "req_kpi", "variant": "dense", "order": 3},
-    {"id": "engagements_table", "type": "engagements_table", "variant": "card", "order": 4},
+    {"id": "pipeline_kpi_strip", "type": "pipeline_kpi_strip", "variant": "card", "order": 0},
+    {"id": "pipeline_quality_strip", "type": "pipeline_quality_strip", "variant": "card", "order": 1},
+    {"id": "pipeline_activity_chart", "type": "pipeline_activity_chart", "variant": "card", "order": 2},
+    {"id": "pipeline_ageing_chart", "type": "pipeline_ageing_chart", "variant": "card", "order": 3},
+    {"id": "pipeline_mix_charts", "type": "pipeline_mix_charts", "variant": "card", "order": 4},
+    {"id": "sla_kpi_strip", "type": "sla_kpi_strip", "variant": "card", "order": 5},
+    {"id": "sla_summary_cards", "type": "sla_summary_cards", "variant": "card", "order": 6},
+    {"id": "sla_table", "type": "sla_table", "variant": "card", "order": 7},
+    {"id": "engagements_table", "type": "engagements_table", "variant": "card", "order": 8},
 ]
 
 DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
@@ -103,6 +138,9 @@ DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
     "project_region_filter": [],
     "sla_reporting_month_from": None,
     "sla_reporting_month_to": None,
+    "pipeline_period_anchor": None,
+    "pipeline_granularity": "month",
+    "pipeline_compare": "mom",
 }
 
 
@@ -123,10 +161,29 @@ def _widgets_to_layout(widgets: dict[str, Any]) -> list[dict[str, Any]]:
         if widgets.get(old_key, True):
             layout.append({"id": new_type, "type": new_type, "variant": "card", "order": order})
             order += 1
-    # Inject req_kpi if not represented
-    if not any(b["type"] == "req_kpi" for b in layout):
-        layout.append({"id": "req_kpi", "type": "req_kpi", "variant": "dense", "order": order})
+    pipeline_defaults = [
+        ("pipeline_kpi_strip", "card"),
+        ("pipeline_quality_strip", "card"),
+        ("pipeline_activity_chart", "card"),
+    ]
+    for ptype, variant in pipeline_defaults:
+        if not any(b["type"] == ptype for b in layout):
+            layout.append({"id": ptype, "type": ptype, "variant": variant, "order": order})
+            order += 1
     return layout
+
+
+def _ensure_pipeline_blocks_in_layout(layout: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prepend pipeline blocks when upgrading older v2 layouts."""
+    if any(b.get("type") == "pipeline_kpi_strip" for b in layout):
+        return layout
+    prepend = [
+        {"id": "pipeline_kpi_strip", "type": "pipeline_kpi_strip", "variant": "card", "order": 0},
+        {"id": "pipeline_quality_strip", "type": "pipeline_quality_strip", "variant": "card", "order": 1},
+        {"id": "pipeline_activity_chart", "type": "pipeline_activity_chart", "variant": "card", "order": 2},
+    ]
+    shifted = [{**b, "order": int(b.get("order", 0)) + len(prepend)} for b in layout]
+    return prepend + shifted
 
 
 def _validate_layout(layout: list[Any]) -> list[dict[str, Any]]:
@@ -158,7 +215,8 @@ def _deep_merge_config(stored: Optional[dict[str, Any]]) -> dict[str, Any]:
     # layout: v2 stored layout wins; v1 widgets converted; else default
     if "layout" in stored and isinstance(stored["layout"], list):
         validated = _validate_layout(stored["layout"])
-        out["layout"] = validated if validated else copy.deepcopy(DEFAULT_LAYOUT)
+        base_layout = validated if validated else copy.deepcopy(DEFAULT_LAYOUT)
+        out["layout"] = _ensure_pipeline_blocks_in_layout(base_layout)
     elif "widgets" in stored and isinstance(stored.get("widgets"), dict):
         out["layout"] = _widgets_to_layout(stored["widgets"])
 
@@ -173,6 +231,9 @@ def _deep_merge_config(stored: Optional[dict[str, Any]]) -> dict[str, Any]:
         "project_region_filter",
         "sla_reporting_month_from",
         "sla_reporting_month_to",
+        "pipeline_period_anchor",
+        "pipeline_granularity",
+        "pipeline_compare",
     ):
         if k in stored:
             out[k] = stored[k]
@@ -467,10 +528,16 @@ async def client_dashboard_summary(
     client_id: Optional[int] = None,
     reporting_month_from: Optional[str] = Query(None, description="SLA reporting month from (YYYY-MM)"),
     reporting_month_to: Optional[str] = Query(None, description="SLA reporting month to (YYYY-MM)"),
+    pipeline_period: Optional[str] = Query(None, description="Pipeline anchor period (YYYY-MM or YYYY-Qn)"),
+    pipeline_granularity: Optional[str] = Query(None, description="Pipeline period granularity: month | quarter"),
+    pipeline_compare: Optional[str] = Query(None, description="Pipeline compare: mom | qoq | none"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Aggregated SLA + finance + project roster with v2 layout config."""
+    profile = resolve_user_profile(user, db)
+    is_client_user = profile.is_client_user
+
     projects_all = _scoped_projects(db, user, client_id)
 
     # Collect distinct clients visible to this user
@@ -485,12 +552,21 @@ async def client_dashboard_summary(
         client_rows.append({"id": cid, "official_name": c.official_name if c else "Unknown client"})
     client_rows.sort(key=lambda x: x["official_name"])
 
+    # Client portal logins must never land on a multi-org aggregate when scoped to one client.
+    if is_client_user and client_id is None and len(client_rows) == 1:
+        client_id = client_rows[0]["id"]
+        projects_all = _scoped_projects(db, user, client_id)
+
     # ── Phase A fix: always resolve a single client_id for config loading ──
     # For client_users with exactly 1 client, or any request with 1 scoped client,
     # load their config reliably regardless of whether client_id was passed in the URL.
     resolved_client_id: Optional[int] = client_id
     if resolved_client_id is None and len(client_rows) == 1:
         resolved_client_id = client_rows[0]["id"]
+
+    if is_client_user and resolved_client_id is not None:
+        client_rows = [c for c in client_rows if c["id"] == resolved_client_id]
+        projects_all = [p for p in projects_all if p.client_id == resolved_client_id]
 
     cfg_row: Optional[ClientDashboardConfig] = None
     if resolved_client_id is not None:
@@ -513,9 +589,6 @@ async def client_dashboard_summary(
 
     projects = _filter_projects_with_config(projects_all, merged)
     project_ids = [p.id for p in projects]
-
-    profile = resolve_user_profile(user, db)
-    is_client_user = profile.is_client_user
 
     finance_full = _finance_snapshot(db, project_ids)
 
@@ -573,16 +646,61 @@ async def client_dashboard_summary(
     if not fin_flags.get("finance_show_unbilled"):
         finance_out.pop("total_unbilled", None)
 
-    # Requisitions per project (for tab-level aggregation on the frontend)
+    # Requisitions per project + pipeline metrics
     req_by_project: dict[str, int] = {}
+    pipeline_metrics: dict[str, Any] = compute_pipeline_metrics([])
+    pipeline_by_project: dict[str, Any] = {}
     if project_ids:
         rq_rows = (
-            db.query(Record.project_id, func.count(Record.id))
-            .filter(Record.project_id.in_(project_ids))
+            apply_record_access_scope(
+                db.query(Record.project_id, func.count(Record.id)).filter(Record.project_id.in_(project_ids)),
+                user,
+                db,
+            )
             .group_by(Record.project_id)
             .all()
         )
         req_by_project = {str(pid): int(cnt) for pid, cnt in rq_rows}
+
+        records_all = (
+            apply_record_access_scope(
+                db.query(Record).filter(Record.project_id.in_(project_ids)),
+                user,
+                db,
+            ).all()
+        )
+        p_anchor = (
+            pipeline_period.strip()
+            if pipeline_period and str(pipeline_period).strip()
+            else merged.get("pipeline_period_anchor")
+        )
+        p_gran = (
+            pipeline_granularity.strip().lower()
+            if pipeline_granularity and str(pipeline_granularity).strip()
+            else (merged.get("pipeline_granularity") or "month")
+        )
+        p_cmp = (
+            pipeline_compare.strip().lower()
+            if pipeline_compare and str(pipeline_compare).strip()
+            else (merged.get("pipeline_compare") or "mom")
+        )
+        pipeline_metrics = compute_pipeline_metrics(
+            records_all,
+            period_anchor=str(p_anchor) if p_anchor else None,
+            granularity=str(p_gran),
+            compare=str(p_cmp),
+        )
+        by_pid: dict[int, list[Record]] = {}
+        for r in records_all:
+            if r.project_id is not None:
+                by_pid.setdefault(r.project_id, []).append(r)
+        for pid in project_ids:
+            pipeline_by_project[str(pid)] = compute_pipeline_metrics(
+                by_pid.get(pid, []),
+                period_anchor=str(p_anchor) if p_anchor else None,
+                granularity=str(p_gran),
+                compare=str(p_cmp),
+            )
 
     # BU/SBU tabs
     bu_tabs = _bu_tabs(projects)
@@ -612,6 +730,8 @@ async def client_dashboard_summary(
         "sla_metrics": sla_metrics,
         "finance": finance_out,
         "req_by_project": req_by_project,
+        "pipeline_metrics": pipeline_metrics,
+        "pipeline_by_project": pipeline_by_project,
         "bu_tabs": bu_tabs,
         "reporting_month_options": reporting_month_options,
         "active_reporting_month_from": month_from,

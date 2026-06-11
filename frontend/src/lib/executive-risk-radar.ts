@@ -165,7 +165,11 @@ export type ClientRiskRadarRow = {
   active: number;
   on_hold: number;
   pipeline: number;
-  revenue: number;
+  /** Sum of req-tracker `revenue_results.revenue` (not finance ledger). */
+  pipeline_revenue_inr: number;
+  /** Finance ledger actual / budget for the selected FY + filters (INR). */
+  finance_actual_inr: number | null;
+  finance_budget_inr: number | null;
 };
 
 export function worstDomainName(row: ClientRiskRadarRow): string {
@@ -227,7 +231,9 @@ export function buildClientRiskRadarRows(
       active: pl?.active ?? 0,
       on_hold: pl?.on_hold ?? 0,
       pipeline: pl?.pipeline ?? 0,
-      revenue: pl?.revenue ?? 0,
+      pipeline_revenue_inr: pl?.revenue ?? 0,
+      finance_actual_inr: agg?.revenue_actual_inr ?? null,
+      finance_budget_inr: agg?.revenue_budget_inr ?? null,
     });
   }
 

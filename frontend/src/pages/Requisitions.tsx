@@ -19,13 +19,19 @@ import {
 } from "@tremor/react";
 import { queries, type Project, type RecordRow, type RecordsPage, type RequisitionKpis } from "@/lib/api";
 import { StatusTag } from "@/components/platform/PlatformBlocks";
-import { isRecruiterUser, useAuth } from "@/lib/auth";
+import {
+  hasUnrestrictedProjectAccess,
+  isProjectScopedUser,
+  isReadOnlyClient,
+  isRecruiterUser,
+  useAuth,
+} from "@/lib/auth";
 import { RequisitionCreateDrawer } from "@/components/platform/RequisitionCreateDrawer";
 import { RequisitionRecordDrawer } from "@/components/platform/RequisitionRecordDrawer";
 import { LevelDonutChart, AgeingBars } from "@/components/platform/Charts";
 import { SkeletonTable, SkeletonKpiRow, Skeleton } from "@/components/platform/Skeleton";
-import { requisitionFunnelVm } from "@/lib/view-models/requisitions";
-import { formatCurrency } from "@/lib/utils";
+import { REQUISITION_FUNNEL_UNPROCESSED_LABEL, requisitionFunnelVm } from "@/lib/view-models/requisitions";
+import { displayRecordReqId, formatCurrency, formatOfferedCtc } from "@/lib/utils";
 
 const PER_PAGE = 50;
 const PAGE_WINDOW = 7;
@@ -62,7 +68,7 @@ function buildDeptData(records: import("@/lib/api").RecordRow[]) {
 }
 
 const funnelBarColor: Record<string, React.ComponentProps<typeof ProgressBar>["color"]> = {
-  Draft: "slate",
+  [REQUISITION_FUNNEL_UNPROCESSED_LABEL]: "slate",
   Open: "orange",
   Screening: "teal",
   Offer: "amber",
@@ -71,8 +77,12 @@ const funnelBarColor: Record<string, React.ComponentProps<typeof ProgressBar>["c
 };
 
 export function Requisitions() {
-  const { user } = useAuth();
+  const { user, projectIds } = useAuth();
   const recruiterView = isRecruiterUser(user);
+  const readOnlyClient = isReadOnlyClient(user);
+  const scopedView = isProjectScopedUser(projectIds);
+  const portfolioView = hasUnrestrictedProjectAccess(projectIds);
+  const scopeKey = user?.id ?? "anon";
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -83,23 +93,62 @@ export function Requisitions() {
   const [globalStatusBreakdown, setGlobalStatusBreakdown] = useState<Record<string, number>>({});
   const [monitor, setMonitor] = useState<import("@/lib/api").GlobalMonitor | null>(null);
   const [reqKpis, setReqKpis] = useState<RequisitionKpis | null>(null);
+  const [deptBreakdown, setDeptBreakdown] = useState<Array<{ name: string; value: number }>>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [addReqOpen, setAddReqOpen] = useState(false);
 
   useEffect(() => {
     queries.projects().then(setProjects).catch(() => setProjects([]));
-  }, []);
+  }, [scopeKey]);
 
   useEffect(() => {
-    queries.globalMonitor().then((m) => {
-      setGlobalStatusBreakdown(m.status_breakdown ?? {});
-      setMonitor(m);
-    }).catch(() => {});
-  }, []);
+    let mounted = true;
+    queries
+      .globalMonitor()
+      .then((m) => {
+        if (!mounted) return;
+        setGlobalStatusBreakdown(m.status_breakdown ?? {});
+        setMonitor(m);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setGlobalStatusBreakdown({});
+        setMonitor(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [scopeKey]);
 
   useEffect(() => {
-    queries.requisitionKpis().then(setReqKpis).catch(() => setReqKpis(null));
-  }, []);
+    let mounted = true;
+    queries
+      .requisitionKpis()
+      .then((k) => {
+        if (mounted) setReqKpis(k);
+      })
+      .catch(() => {
+        if (mounted) setReqKpis(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [scopeKey]);
+
+  useEffect(() => {
+    let mounted = true;
+    queries
+      .requisitionDepartments()
+      .then((d) => {
+        if (mounted) setDeptBreakdown(d.items ?? []);
+      })
+      .catch(() => {
+        if (mounted) setDeptBreakdown([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [scopeKey]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
@@ -114,7 +163,7 @@ export function Requisitions() {
       .then((data) => { if (mounted) { setResult(data); setLoading(false); } })
       .catch(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [page, debouncedSearch]);
+  }, [page, debouncedSearch, scopeKey]);
 
   useEffect(() => { setPage(1); }, [debouncedSearch]);
 
@@ -133,7 +182,7 @@ export function Requisitions() {
     const sb = globalStatusBreakdown;
     if (Object.keys(sb).length === 0) return requisitionFunnelVm(records);
     return {
-      Draft: sb["UNPROCESSED"] ?? 0,
+      [REQUISITION_FUNNEL_UNPROCESSED_LABEL]: sb["UNPROCESSED"] ?? 0,
       Open: sb["ACTIVE"] ?? 0,
       Screening: sb["PIPELINE"] ?? 0,
       Offer: 0,
@@ -153,15 +202,38 @@ export function Requisitions() {
     { label: "90+ days", count: monitorBuckets["90+ days"] ?? monitorBuckets["90–plus days"] ?? 0, max: ageingMax, color: "var(--red)" },
   ];
 
-  const deptData = useMemo(() => buildDeptData(records), [records]);
+  const deptData = useMemo(
+    () => (debouncedSearch ? buildDeptData(records) : deptBreakdown),
+    [debouncedSearch, records, deptBreakdown],
+  );
 
-  const subtitle = recruiterView
-    ? reqKpis
-      ? `${reqKpis.total_records.toLocaleString()} visible to you — assigned to you or on your projects (same scope as the table below)`
-      : `${totalRecords.toLocaleString()} on this view · loading KPIs…`
-    : reqKpis
-      ? `${reqKpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are portfolio-wide`
-      : `${totalRecords.toLocaleString()} on this view · loading portfolio KPIs…`;
+  const scopeLabel = useMemo(() => {
+    if (portfolioView) return "portfolio-wide";
+    if (scopedView && (projectIds?.length ?? 0) === 0) return "no projects assigned";
+    if (readOnlyClient) return "your client portal projects";
+    if (recruiterView) return "your assigned requisitions and projects";
+    return "your assigned projects";
+  }, [portfolioView, scopedView, projectIds, readOnlyClient, recruiterView]);
+
+  const subtitle = reqKpis
+    ? recruiterView
+      ? `${reqKpis.total_records.toLocaleString()} visible to you — ${scopeLabel} (same scope as the table below)`
+      : scopedView
+        ? `${reqKpis.total_records.toLocaleString()} in tracker — scoped to ${scopeLabel}`
+        : `${reqKpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are ${scopeLabel}`
+    : `${totalRecords.toLocaleString()} on this view · loading KPIs…`;
+
+  const funnelSubtitle = debouncedSearch
+    ? "Counts from filtered rows on this page"
+    : scopedView || recruiterView
+      ? "Counts from your scoped requisitions (same rules as the table)"
+      : "Counts from global status across the portfolio";
+
+  const ageingSubtitle = debouncedSearch
+    ? "Ageing from filtered rows; department chart from search results on this page"
+    : scopedView || recruiterView
+      ? "Ageing and department mix from your scoped requisitions"
+      : "Ageing from monitor; department chart from scoped tracker";
 
   const onRequisitionSaved = useCallback((updated: RecordRow) => {
     setSelected(updated);
@@ -186,6 +258,7 @@ export function Requisitions() {
       setGlobalStatusBreakdown(m.status_breakdown ?? {});
       setMonitor(m);
     }).catch(() => {});
+    queries.requisitionDepartments().then((d) => setDeptBreakdown(d.items ?? [])).catch(() => setDeptBreakdown([]));
   }, []);
 
   return (
@@ -232,7 +305,7 @@ export function Requisitions() {
         <Card className={flatCard}>
           <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
             <Title className="text-base font-semibold text-tremor-content-strong">Pipeline funnel</Title>
-            <Text className="mt-0.5 text-xs text-tremor-content-subtle">Counts from global status (search uses this page only)</Text>
+            <Text className="mt-0.5 text-xs text-tremor-content-subtle">{funnelSubtitle}</Text>
           </div>
           <div className="px-4 py-3">
             {loading && !result ? (
@@ -247,7 +320,7 @@ export function Requisitions() {
                   const pct = funnelMax > 0 ? (v / funnelMax) * 100 : 0;
                   return (
                     <div key={k} className="flex items-center gap-2">
-                      <Text className="w-[5.5rem] shrink-0 text-xs font-medium text-tremor-content-strong">{k}</Text>
+                      <Text className="w-[6.75rem] shrink-0 text-xs font-medium leading-tight text-tremor-content-strong">{k}</Text>
                       <div className="min-w-0 flex-1">
                         <ProgressBar
                           value={pct}
@@ -269,7 +342,7 @@ export function Requisitions() {
         <Card className={flatCard}>
           <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
             <Title className="text-base font-semibold text-tremor-content-strong">Ageing + department mix</Title>
-            <Text className="mt-0.5 text-xs text-tremor-content-subtle">Ageing from monitor; department chart from this page</Text>
+            <Text className="mt-0.5 text-xs text-tremor-content-subtle">{ageingSubtitle}</Text>
           </div>
           <div className="px-4 py-3">
             <AgeingBars buckets={ageingBuckets} />
@@ -363,7 +436,7 @@ export function Requisitions() {
                   </TableRow>
                 ) : (
                   records.map((r) => {
-                    const reqId = (r.additional_attributes?.position_code as string) || `REQ-${r.id}`;
+                    const reqId = displayRecordReqId(r);
                     const rev = r.revenue_results?.revenue ?? 0;
                     return (
                       <TableRow
@@ -381,7 +454,7 @@ export function Requisitions() {
                         <TableCell className="text-sm">{r.department || "—"}</TableCell>
                         <TableCell className="text-sm">{r.location || "—"}</TableCell>
                         <TableCell className="text-right text-sm tabular-nums">
-                          {r.offered_ctc ? `₹${(r.offered_ctc / 100000).toFixed(1)}L` : "—"}
+                          {formatOfferedCtc(r.offered_ctc)}
                         </TableCell>
                         <TableCell
                           className={`text-right text-sm tabular-nums ${rev > 0 ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-tremor-content-subtle"}`}

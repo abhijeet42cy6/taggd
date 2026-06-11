@@ -54,3 +54,21 @@ def calculate(row):
 """
     fn = load_calculate_from_source(src)
     assert fn({})["revenue"] == 3.0
+
+
+def test_calculate_with_any_builtin_llm_style():
+    """Pinned project logic (Birla/Ambuja) branches on status via any(...)."""
+    src = """
+def calculate(row: dict) -> dict:
+    status_str = str(row.get("Status") or "").strip().lower()
+    if any(x in status_str for x in ("cancel", "void")):
+        return {"revenue": 0.0, "opening_fee": 0.0, "closing_fee": 0.0, "status": "Cancelled"}
+    if any(x in status_str for x in ("documentation", "offer")):
+        return {"revenue": 0.0, "opening_fee": 0.0, "closing_fee": 50000.0, "status": "Offer Stage"}
+    return {"revenue": 0.0, "opening_fee": 25000.0, "closing_fee": 0.0, "status": "In Progress"}
+"""
+    fn = load_calculate_from_source(src)
+    out = fn({"Status": "Documentation"})
+    assert out["closing_fee"] == 50000.0
+    assert out["status"] == "Offer Stage"
+    assert fn({"Status": "Cancelled"})["status"] == "Cancelled"

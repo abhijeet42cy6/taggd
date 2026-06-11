@@ -783,6 +783,7 @@ export function IngestionCenter() {
         }
       }
       wfm.appendLog(`[${tsNow()}] ✓ WFM data committed`, "success");
+      invalidateCache("wfm");
     } catch (err: any) {
       wfm.appendLog(`[${tsNow()}] ✗ ${err?.response?.data?.detail || err.message}`, "error");
     } finally {

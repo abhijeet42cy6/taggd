@@ -9,7 +9,13 @@ Set DATABASE_URL, e.g.:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+# Local `uvicorn` does not load `.env` automatically; read repo-root env before DATABASE_URL.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine

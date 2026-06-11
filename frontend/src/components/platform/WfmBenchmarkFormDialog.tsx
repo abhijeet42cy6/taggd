@@ -70,7 +70,6 @@ function sanitizeNumericInput(raw: string, integer: boolean): string {
 
 const TARGET_HC_FIELDS = [
   { key: "lateralRevenue", label: "Lateral revenue target (INR)", integer: false },
-  { key: "lateralHcTarget", label: "Lateral HC target", integer: false },
   { key: "lateralProductivity", label: "Lateral productivity target (lacs)", integer: false },
   { key: "idealHc", label: "Ideal HC", integer: false },
   { key: "actualHcTotal", label: "Actual HC (total)", integer: true },
@@ -678,7 +677,7 @@ export function WfmBenchmarkFormDialog({ open, onOpenChange, wfmRows, onSaved }:
                   "🎯",
                   "ncp-teal",
                   "Targets & headcount",
-                  "Lateral revenue / HC / productivity targets, ideal vs actual HC, open positions, and attrition.",
+                  "Lateral revenue and productivity targets, ideal vs actual HC, open positions, and attrition.",
                   <>
                     {TARGET_HC_FIELDS.map(({ key, label, integer }) => (
                       <div key={key} className="ncp-prop-row">

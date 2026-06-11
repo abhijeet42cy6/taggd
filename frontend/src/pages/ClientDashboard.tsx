@@ -37,9 +37,19 @@ import {
 } from "@/lib/api";
 import { cn, formatLargeCurrency, formatPercent } from "@/lib/utils";
 import { slaRagDisplayLabel, slaRagUiBucket } from "@/lib/sla-rag";
+import { isReadOnlyClient, useAuth } from "@/lib/auth";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
+import {
+  PipelineActivityChart,
+  PipelineAgeingChart,
+  PipelineKpiStrip,
+  PipelineMixCharts,
+  PipelineQualityStrip,
+} from "@/components/tremor-dashboard/ClientPipelineBlocks";
+import { mergePipelineForProjects } from "@/lib/client-pipeline-metrics";
 import "@/styles/client-dashboard.css";
+import "@/styles/exec-dash-premium.css";
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
@@ -48,16 +58,25 @@ const BLOCK_CATALOG_LABELS: Record<BlockType, string> = {
   sla_summary_cards: "SLA summary cards",
   sla_table: "SLA KPI table",
   req_kpi: "Requisitions KPI",
+  pipeline_kpi_strip: "Pipeline KPI strip",
+  pipeline_quality_strip: "Pipeline quality strip",
+  pipeline_activity_chart: "Pipeline activity trend",
+  pipeline_ageing_chart: "WIP ageing distribution",
+  pipeline_mix_charts: "Diversity & source mix",
   engagements_table: "Engagements table",
   finance_strip: "Finance snapshot",
 };
 
 const DEFAULT_LAYOUT: LayoutBlock[] = [
-  { id: "sla_kpi_strip", type: "sla_kpi_strip", variant: "card", order: 0 },
-  { id: "sla_summary_cards", type: "sla_summary_cards", variant: "card", order: 1 },
-  { id: "sla_table", type: "sla_table", variant: "card", order: 2 },
-  { id: "req_kpi", type: "req_kpi", variant: "dense", order: 3 },
-  { id: "engagements_table", type: "engagements_table", variant: "card", order: 4 },
+  { id: "pipeline_kpi_strip", type: "pipeline_kpi_strip", variant: "card", order: 0 },
+  { id: "pipeline_quality_strip", type: "pipeline_quality_strip", variant: "card", order: 1 },
+  { id: "pipeline_activity_chart", type: "pipeline_activity_chart", variant: "card", order: 2 },
+  { id: "pipeline_ageing_chart", type: "pipeline_ageing_chart", variant: "card", order: 3 },
+  { id: "pipeline_mix_charts", type: "pipeline_mix_charts", variant: "card", order: 4 },
+  { id: "sla_kpi_strip", type: "sla_kpi_strip", variant: "card", order: 5 },
+  { id: "sla_summary_cards", type: "sla_summary_cards", variant: "card", order: 6 },
+  { id: "sla_table", type: "sla_table", variant: "card", order: 7 },
+  { id: "engagements_table", type: "engagements_table", variant: "card", order: 8 },
 ];
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
@@ -351,6 +370,7 @@ function BlockRenderer({
   tabMetrics,
   tabProjects,
   tabReqTotal,
+  tabPipeline,
   finance,
   isClientUser,
   slaPeriodLabel,
@@ -360,6 +380,7 @@ function BlockRenderer({
   tabMetrics: SlaRow[];
   tabProjects: ClientDashboardSummary["projects"];
   tabReqTotal: number;
+  tabPipeline: ReturnType<typeof mergePipelineForProjects>;
   finance: Record<string, number>;
   isClientUser: boolean;
   slaPeriodLabel: string;
@@ -373,6 +394,16 @@ function BlockRenderer({
       return <SlaTable metrics={tabMetrics} />;
     case "req_kpi":
       return <ReqKpi total={tabReqTotal} variant={block.variant} />;
+    case "pipeline_kpi_strip":
+      return <PipelineKpiStrip metrics={tabPipeline} variant={block.variant} />;
+    case "pipeline_quality_strip":
+      return <PipelineQualityStrip metrics={tabPipeline} />;
+    case "pipeline_activity_chart":
+      return <PipelineActivityChart metrics={tabPipeline} />;
+    case "pipeline_ageing_chart":
+      return <PipelineAgeingChart metrics={tabPipeline} />;
+    case "pipeline_mix_charts":
+      return <PipelineMixCharts metrics={tabPipeline} />;
     case "engagements_table":
       return <EngagementsTable projects={tabProjects} />;
     case "finance_strip":
@@ -457,6 +488,8 @@ function BuilderBlockRow({
 // ─── Main component ─────────────────────────────────────────────────────────────
 
 export function ClientDashboard() {
+  const { user } = useAuth();
+  const isClientUser = isReadOnlyClient(user);
   const [data, setData] = useState<ClientDashboardSummary | null>(null);
   const [catalog, setCatalog] = useState<BlockCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -472,25 +505,49 @@ export function ClientDashboard() {
   const [draftReportingTo, setDraftReportingTo] = useState("");
   const [reportingMonthFrom, setReportingMonthFrom] = useState("");
   const [reportingMonthTo, setReportingMonthTo] = useState("");
+  const [pipelinePeriod, setPipelinePeriod] = useState("");
+  const [pipelineGranularity, setPipelineGranularity] = useState<"month" | "quarter">("month");
+  const [pipelineCompare, setPipelineCompare] = useState<"mom" | "qoq" | "none">("mom");
   const [saving, setSaving] = useState(false);
 
   // ── Load summary ──────────────────────────────────────────────────────────────
-  const load = useCallback(async (opts?: { reporting_month_from?: string; reporting_month_to?: string }) => {
+  const load = useCallback(async (opts?: {
+    reporting_month_from?: string;
+    reporting_month_to?: string;
+    pipeline_period?: string;
+    pipeline_granularity?: string;
+    pipeline_compare?: string;
+  }) => {
     setLoading(true);
     setError(null);
+    if (isClientUser) {
+      setData(null);
+    }
     try {
       invalidateCache("client-dashboard/summary");
       const params: {
         client_id?: number;
         reporting_month_from?: string;
         reporting_month_to?: string;
+        pipeline_period?: string;
+        pipeline_granularity?: string;
+        pipeline_compare?: string;
       } = {};
       if (scopeClientId !== "all") params.client_id = scopeClientId;
       const from = (opts?.reporting_month_from ?? reportingMonthFrom).trim();
       const to = (opts?.reporting_month_to ?? reportingMonthTo).trim();
       if (from) params.reporting_month_from = from;
       if (to) params.reporting_month_to = to;
+      const pp = (opts?.pipeline_period ?? pipelinePeriod).trim();
+      const pg = opts?.pipeline_granularity ?? pipelineGranularity;
+      const pc = opts?.pipeline_compare ?? pipelineCompare;
+      if (pp) params.pipeline_period = pp;
+      if (pg) params.pipeline_granularity = pg;
+      if (pc) params.pipeline_compare = pc;
       const res = await queries.clientDashboardSummary(params);
+      if (isClientUser && res.clients.length > 1 && res.selected_client_id == null) {
+        throw new Error("Client dashboard scope could not be resolved. Please refresh or contact your programme owner.");
+      }
       setData(res);
       // Reset to "all" tab whenever data reloads
       setActiveTabKey("all");
@@ -500,13 +557,14 @@ export function ClientDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [scopeClientId, reportingMonthFrom, reportingMonthTo]);
+  }, [scopeClientId, reportingMonthFrom, reportingMonthTo, pipelinePeriod, pipelineGranularity, pipelineCompare, isClientUser]);
 
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     setReportingMonthFrom("");
     setReportingMonthTo("");
+    setPipelinePeriod("");
   }, [scopeClientId]);
 
   useEffect(() => {
@@ -519,6 +577,26 @@ export function ClientDashboard() {
       setReportingMonthTo(String(to).slice(0, 7));
     }
   }, [data, reportingMonthFrom, reportingMonthTo]);
+
+  useEffect(() => {
+    if (!data) return;
+    if (pipelinePeriod) return;
+    const anchor = data.config?.pipeline_period_anchor;
+    if (anchor) {
+      setPipelinePeriod(String(anchor));
+      return;
+    }
+    const opts = data.pipeline_metrics?.period_month_options ?? [];
+    if (opts.length > 0) setPipelinePeriod(opts[0]);
+  }, [data, pipelinePeriod]);
+
+  useEffect(() => {
+    if (!data?.config) return;
+    const g = data.config.pipeline_granularity;
+    if (g === "month" || g === "quarter") setPipelineGranularity(g);
+    const c = data.config.pipeline_compare;
+    if (c === "mom" || c === "qoq" || c === "none") setPipelineCompare(c);
+  }, [data?.config?.pipeline_granularity, data?.config?.pipeline_compare]);
 
   // Load block catalog once
   useEffect(() => {
@@ -579,6 +657,15 @@ export function ClientDashboard() {
       total += rq[String(pid)] ?? 0;
     }
     return total;
+  }, [data, tabPidSet]);
+
+  const tabPipeline = useMemo(() => {
+    if (!data?.pipeline_by_project) return data?.pipeline_metrics ?? null;
+    const ids = [...tabPidSet];
+    if (ids.length === (data.projects?.length ?? 0)) {
+      return data.pipeline_metrics ?? null;
+    }
+    return mergePipelineForProjects(data.pipeline_by_project, ids);
   }, [data, tabPidSet]);
 
   // ── Layout (from config or default) ──────────────────────────────────────────
@@ -676,6 +763,9 @@ export function ClientDashboard() {
         project_region_filter: draftRegions,
         sla_reporting_month_from: draftReportingFrom.trim() || null,
         sla_reporting_month_to: draftReportingTo.trim() || null,
+        pipeline_period_anchor: pipelinePeriod.trim() || null,
+        pipeline_granularity: pipelineGranularity,
+        pipeline_compare: pipelineCompare,
         // Carry forward finance flags from current config
         finance_show_revenue: data?.config?.finance_show_revenue ?? true,
         finance_show_collections: data?.config?.finance_show_collections ?? true,
@@ -732,7 +822,12 @@ export function ClientDashboard() {
     [catalog],
   );
 
-  const hasData = !loading && data && data.projects.length > 0;
+  const showOrgPicker =
+    !isClientUser && !data?.is_client_user && (data?.clients?.length ?? 0) > 1;
+  const clientScopeReady =
+    !isClientUser || activeClientId != null || (data?.clients?.length ?? 0) <= 1;
+  const showDashboardBody = !loading && data && clientScopeReady;
+  const hasData = showDashboardBody && data.projects.length > 0;
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
@@ -746,11 +841,11 @@ export function ClientDashboard() {
         <Title className="client-dash-tremor__title mt-0.5 text-2xl font-bold tracking-tight md:text-3xl">
           {activeClientName ?? "Client dashboard"}
         </Title>
-        {activeClientName && !data?.is_client_user ? (
+        {activeClientName ? (
           <div className="client-dash-tremor__scope-chip">
             <span className="client-dash-tremor__scope-chip-label">Viewing</span>
             <span className="client-dash-tremor__scope-chip-name">{activeClientName}</span>
-            {scopeClientId === "all" && (data?.clients?.length ?? 0) > 1 ? (
+            {!isClientUser && !data?.is_client_user && scopeClientId === "all" && (data?.clients?.length ?? 0) > 1 ? (
               <span className="client-dash-tremor__scope-chip-hint">Single-client scope</span>
             ) : null}
           </div>
@@ -764,7 +859,7 @@ export function ClientDashboard() {
       <div className="client-dash-tremor__toolbar">
         <div className="flex flex-wrap items-end justify-start gap-3">
           {/* Org picker — only for non-client users with multiple clients */}
-          {!data?.is_client_user && (data?.clients?.length ?? 0) > 1 ? (
+          {!showOrgPicker ? null : (
             <div className="min-w-[12rem] max-w-full flex-1 sm:max-w-xs">
               <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Organisation</Text>
               <SearchSelect
@@ -784,7 +879,7 @@ export function ClientDashboard() {
                 Click the field, then type to filter.
               </Text>
             </div>
-          ) : null}
+          )}
 
           <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
             <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">SLA from</Text>
@@ -825,6 +920,58 @@ export function ClientDashboard() {
             ))}
           </datalist>
 
+          <div className="w-full border-t border-tremor-border/60 pt-3 mt-1 flex flex-wrap items-end gap-3">
+            <Text className="w-full text-[10px] font-semibold uppercase tracking-wide text-orange-600">Requisition period</Text>
+            <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
+              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Period</Text>
+              {pipelineGranularity === "month" ? (
+                <input
+                  type="month"
+                  className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
+                  value={pipelinePeriod.length >= 7 ? pipelinePeriod.slice(0, 7) : pipelinePeriod}
+                  onChange={(e) => setPipelinePeriod(e.target.value)}
+                  list="client-dash-pipeline-month-options"
+                />
+              ) : (
+                <input
+                  type="text"
+                  placeholder="2026-Q1"
+                  className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
+                  value={pipelinePeriod}
+                  onChange={(e) => setPipelinePeriod(e.target.value.toUpperCase())}
+                />
+              )}
+            </div>
+            <div className="min-w-[7rem]">
+              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Granularity</Text>
+              <select
+                className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs text-tremor-content-strong"
+                value={pipelineGranularity}
+                onChange={(e) => setPipelineGranularity(e.target.value as "month" | "quarter")}
+              >
+                <option value="month">Month</option>
+                <option value="quarter">Quarter</option>
+              </select>
+            </div>
+            <div className="min-w-[7rem]">
+              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Compare</Text>
+              <select
+                className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs text-tremor-content-strong"
+                value={pipelineCompare}
+                onChange={(e) => setPipelineCompare(e.target.value as "mom" | "qoq" | "none")}
+              >
+                <option value="mom">Month on month</option>
+                <option value="qoq">Quarter on quarter</option>
+                <option value="none">No compare</option>
+              </select>
+            </div>
+            <datalist id="client-dash-pipeline-month-options">
+              {(data?.pipeline_metrics?.period_month_options ?? []).map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </div>
+
           <Button type="button" size="xs" variant="secondary" onClick={() => void load()}>
             <RefreshCw size={12} className="mr-1" /> Refresh
           </Button>
@@ -856,14 +1003,14 @@ export function ClientDashboard() {
       ) : null}
 
       {/* Loading skeleton */}
-      {loading && !data ? (
+      {(loading && !data) || (isClientUser && loading) || (isClientUser && data && !clientScopeReady) ? (
         <Card className="overflow-hidden border-0 p-8 text-center ring-1 ring-tremor-ring">
           <Text className="text-sm text-tremor-content-subtle">Loading dashboard…</Text>
         </Card>
       ) : null}
 
       {/* Empty state */}
-      {!loading && data && data.projects.length === 0 ? (
+      {showDashboardBody && data.projects.length === 0 ? (
         <Card className="border border-dashed border-tremor-border p-8 text-center">
           <Text className="text-sm text-tremor-content-subtle">
             No engagements match the current filters or assignments. Ask your programme owner to confirm project allocation.
@@ -908,8 +1055,9 @@ export function ClientDashboard() {
               tabMetrics={tabMetrics}
               tabProjects={tabProjects}
               tabReqTotal={tabReqTotal}
+              tabPipeline={tabPipeline}
               finance={data!.finance}
-              isClientUser={data!.is_client_user}
+              isClientUser={isClientUser || data!.is_client_user}
               slaPeriodLabel={slaPeriodLabel}
             />
           ))}

@@ -17,8 +17,12 @@ _QUARTER_FIRST_MONTH: dict[str, tuple[int, int]] = {
     "JAS25": (2025, 7),
     "OND 24": (2024, 10),
     "OND24": (2024, 10),
+    "OND'25": (2025, 10),
+    "OND25": (2025, 10),
     "JFM'25": (2025, 1),
     "JFM25": (2025, 1),
+    "JFM'26": (2026, 1),
+    "JFM26": (2026, 1),
     "AMJ25": (2025, 4),
     "AMJ26": (2026, 4),
 }
@@ -150,6 +154,48 @@ def parse_sla_score_column_name(col_name: str) -> Optional[dt.date]:
     """
     label = str(col_name).replace("Score", "").strip()
     return parse_sla_month_label(label)
+
+
+def is_sla_rag_status_column(col_name: str) -> bool:
+    """True when a column is the MET/RAG companion next to a period score column."""
+    low = str(col_name or "").lower().strip()
+    if not low:
+        return False
+    if "met/not_met" in low or "met / not_met" in low:
+        return True
+    if "rag" in low and "score" not in low:
+        return True
+    return False
+
+
+def discover_sla_period_score_columns(columns: list[str]) -> list[str]:
+    """
+    Period snapshot columns on the SLA Base File sheet.
+
+    Legacy headers: ``Apr24 Score`` (paired with ``… MET/NOT_MET`` in the next column).
+    Newer templates (FY25–26+): bare month labels such as ``March'26`` with
+    ``March'26 MET/NOT_MET`` — no ``Score`` suffix.
+    """
+    out: list[str] = []
+    cols = [str(c).strip() for c in columns]
+    for i, s in enumerate(cols):
+        if not s:
+            continue
+        low = s.lower()
+        if "metrics to be picked" in low:
+            continue
+        if "Score" in s:
+            out.append(s)
+            continue
+        if parse_sla_month_label(s) is None:
+            continue
+        if low == "ytd":
+            continue
+        next_col = cols[i + 1] if i + 1 < len(cols) else ""
+        if not is_sla_rag_status_column(next_col):
+            continue
+        out.append(s)
+    return out
 
 
 def sort_key_for_month_label(m: str) -> float:

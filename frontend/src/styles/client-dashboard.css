@@ -76,6 +76,16 @@
   scrollbar-width: none;
 }
 
+.client-metric-grid--3 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+}
+
+@media (min-width: 640px) {
+  .client-metric-grid--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .cd-bu-tabs::-webkit-scrollbar {
   display: none;
 }

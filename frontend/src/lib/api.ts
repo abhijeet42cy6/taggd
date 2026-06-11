@@ -392,6 +392,8 @@ export type RequisitionKpis = {
   total_records: number;
 };
 
+export type RequisitionDeptItem = { name: string; value: number };
+
 /** Count mapped columns for legacy flat `column_mapping` or v2 `{ universal, record_fields }`. */
 export function columnMappingEntryCount(
   cm: Record<string, unknown> | Record<string, string> | null | undefined
@@ -800,6 +802,9 @@ export type RecordRpoPatch = {
   selection_date_req?: string;
   loi_date_req?: string;
   closure_date_req?: string;
+  req_offered_date?: string;
+  offered_accept_date?: string;
+  req_cancelled_date?: string;
   rpo_stage?: string;
   ageing_days?: number;
   ageing_bracket?: string;
@@ -836,6 +841,7 @@ export type RecordRow = {
     status?: string;
   };
   additional_attributes?: Record<string, unknown>;
+  excel_provided_id?: string | null;
 } & Partial<RecordRpoPatch>;
 
 /** PATCH /records/{id} — partial update; null clears optional fields where supported */
@@ -1082,6 +1088,20 @@ export type BudgetForecastData = {
 
 type CacheEntry<T> = { data: T; fetchedAt: number };
 const _cache = new Map<string, CacheEntry<unknown>>();
+let _cacheScope = "anon";
+
+/** Tie SWR cache to the logged-in user + project scope (clears on change). */
+export function setApiCacheScope(scope: string) {
+  const next = scope || "anon";
+  if (_cacheScope !== next) {
+    _cacheScope = next;
+    _cache.clear();
+  }
+}
+
+function scopedCacheKey(key: string): string {
+  return `${_cacheScope}:${key}`;
+}
 
 const TTL_MS: Record<string, number> = {
   default:          15_000,   // 15s — shorter so mutations show up without waiting as long
@@ -1116,7 +1136,8 @@ function ttlFor(key: string) {
  * - After TTL: returns stale data immediately AND fires background refresh.
  */
 async function cachedGet<T>(cacheKey: string, fetcher: () => Promise<T>): Promise<T> {
-  const entry = _cache.get(cacheKey) as CacheEntry<T> | undefined;
+  const key = scopedCacheKey(cacheKey);
+  const entry = _cache.get(key) as CacheEntry<T> | undefined;
   const ttl = ttlFor(cacheKey);
   const now = Date.now();
 
@@ -1127,27 +1148,31 @@ async function cachedGet<T>(cacheKey: string, fetcher: () => Promise<T>): Promis
     }
     // Stale — return immediately, refresh in background
     fetcher()
-      .then((fresh) => _cache.set(cacheKey, { data: fresh, fetchedAt: Date.now() }))
+      .then((fresh) => _cache.set(key, { data: fresh, fetchedAt: Date.now() }))
       .catch(() => { /* silent background failure — stale data stays */ });
     return entry.data;
   }
 
   // No cache entry — fetch and store
   const data = await fetcher();
-  _cache.set(cacheKey, { data, fetchedAt: now });
+  _cache.set(key, { data, fetchedAt: now });
   return data;
 }
 
 /** Manually invalidate cache keys matching a prefix (call after mutations) */
 export function invalidateCache(prefix: string) {
+  const scoped = scopedCacheKey(prefix);
   for (const key of _cache.keys()) {
-    if (key.startsWith(prefix)) _cache.delete(key);
+    if (key.includes(`:${prefix}`) || key.endsWith(`:${prefix}`) || key === scoped) {
+      _cache.delete(key);
+    }
   }
 }
 
 /** Clear all cached API responses (use on logout / login / user switch). */
 export function clearApiCache() {
   _cache.clear();
+  _cacheScope = "anon";
 }
 
 // ─── QUERY FUNCTIONS ──────────────────────────────────────────────────────────
@@ -1158,6 +1183,11 @@ export type BlockType =
   | "sla_summary_cards"
   | "sla_table"
   | "req_kpi"
+  | "pipeline_kpi_strip"
+  | "pipeline_quality_strip"
+  | "pipeline_activity_chart"
+  | "pipeline_ageing_chart"
+  | "pipeline_mix_charts"
   | "engagements_table"
   | "finance_strip";
 
@@ -1203,7 +1233,13 @@ export type ClientDashboardConfig = {
   /** Default SLA reporting window (YYYY-MM) saved per client. */
   sla_reporting_month_from?: string | null;
   sla_reporting_month_to?: string | null;
+  /** Default pipeline period anchor (YYYY-MM or YYYY-Qn). */
+  pipeline_period_anchor?: string | null;
+  pipeline_granularity?: "month" | "quarter" | string;
+  pipeline_compare?: "mom" | "qoq" | "none" | string;
 };
+
+export type ClientPipelineMetrics = import("@/lib/client-pipeline-metrics").ClientPipelineMetrics;
 
 export type ClientDashboardSummary = {
   clients: Array<{ id: number; official_name: string }>;
@@ -1246,6 +1282,8 @@ export type ClientDashboardSummary = {
   active_reporting_month_to?: string | null;
   /** Requisition count per project_id (string key for JSON compat). */
   req_by_project: Record<string, number>;
+  pipeline_metrics: ClientPipelineMetrics;
+  pipeline_by_project: Record<string, ClientPipelineMetrics>;
   is_client_user: boolean;
   can_edit_config: boolean;
 };
@@ -1275,6 +1313,11 @@ export const queries = {
   requisitionKpis: () =>
     cachedGet<RequisitionKpis>("stats/requisitions/kpis", () =>
       api.get<RequisitionKpis>("/stats/requisitions/kpis").then((r) => r.data)
+    ),
+
+  requisitionDepartments: () =>
+    cachedGet<{ items: RequisitionDeptItem[] }>("stats/requisitions/departments", () =>
+      api.get<{ items: RequisitionDeptItem[] }>("/stats/requisitions/departments").then((r) => r.data)
     ),
 
   projects: () =>
@@ -2218,11 +2261,17 @@ export const queries = {
     client_id?: number;
     reporting_month_from?: string;
     reporting_month_to?: string;
+    pipeline_period?: string;
+    pipeline_granularity?: string;
+    pipeline_compare?: string;
   }) => {
     const qs = new URLSearchParams();
     if (params?.client_id != null) qs.set("client_id", String(params.client_id));
     if (params?.reporting_month_from?.trim()) qs.set("reporting_month_from", params.reporting_month_from.trim());
     if (params?.reporting_month_to?.trim()) qs.set("reporting_month_to", params.reporting_month_to.trim());
+    if (params?.pipeline_period?.trim()) qs.set("pipeline_period", params.pipeline_period.trim());
+    if (params?.pipeline_granularity?.trim()) qs.set("pipeline_granularity", params.pipeline_granularity.trim());
+    if (params?.pipeline_compare?.trim()) qs.set("pipeline_compare", params.pipeline_compare.trim());
     const q = qs.toString();
     return cachedGet<ClientDashboardSummary>(`client-dashboard/summary${q ? `?${q}` : ""}`, () =>
       api.get(`/client-dashboard/summary${q ? `?${q}` : ""}`).then((r) => r.data)
@@ -2249,6 +2298,16 @@ export const queries = {
 
   wfmData: () =>
     cachedGet("wfm/data", () => api.get("/wfm/data").then((r) => r.data)),
+
+  /** Bypass SWR cache — use after WFM upload / manual edit so KPI cards refresh immediately. */
+  wfmFresh: async () => {
+    invalidateCache("wfm");
+    const [stats, data] = await Promise.all([
+      api.get("/wfm/stats").then((r) => r.data),
+      api.get("/wfm/data").then((r) => r.data),
+    ]);
+    return { stats, data };
+  },
 
   // ─── DATA OPERATIONS (Integrity / Risk) ────────────────────────────────────
 
@@ -2481,7 +2540,10 @@ export const wfmBenchmarkApi = {
   upsert: (body: WfmBenchmarkUpsertPayload) =>
     api
       .post<{ status: string; project_id: number; reporting_date: string }>("/wfm/benchmark-upsert", body)
-      .then((r) => r.data),
+      .then((r) => {
+        invalidateCache("wfm");
+        return r.data;
+      }),
 };
 
 // ─── Revenue Leakage ────────────────────────────────────────────────────────

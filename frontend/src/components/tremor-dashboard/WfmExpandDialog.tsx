@@ -14,13 +14,15 @@ import {
   Text,
   Title,
 } from "@tremor/react";
-import { cn, formatLacs, formatNumber, formatPercent } from "@/lib/utils";
+import { cn, formatNumber, formatPercent } from "@/lib/utils";
+import { WfmClientHeadcountTable, computeWfmClientTableTotals } from "@/components/tremor-dashboard/WfmClientHeadcountTable";
 import {
   wfmFillBand,
   wfmFillColor,
   wfmFillPct,
   wfmMatchesFilter,
   wfmStatusLabel,
+  wfmStatusToBadgeColor,
   type WfmBenchmarkRowVm,
 } from "@/lib/view-models/wfm";
 
@@ -44,11 +46,7 @@ function barFillColor(pct: number, ideal: number): "emerald" | "amber" | "rose" 
   return "rose";
 }
 
-export function wfmStatusToBadgeColor(label: "Strong" | "Watch" | "At Risk"): "emerald" | "amber" | "rose" {
-  if (label === "Strong") return "emerald";
-  if (label === "Watch") return "amber";
-  return "rose";
-}
+export { wfmStatusToBadgeColor } from "@/lib/view-models/wfm";
 
 export function WfmFilterChipRow({
   value,
@@ -102,7 +100,7 @@ export function WfmExpandDialog({
   const titles: Record<NonNullable<WfmExpandMode>, string> = {
     hc: "Ideal vs Actual HC — All Clients",
     gap: "Resource Gap Summary — All Clients",
-    benchmark: "Workforce Benchmark Snapshot — All Clients",
+    benchmark: "Client Headcount & Variance",
   };
 
   const filteredItems = items.filter((b) => wfmMatchesFilter(b.pct, b.ideal, filter));
@@ -229,71 +227,10 @@ export function WfmExpandDialog({
             (filteredRows.length === 0 ? (
               <Text className="text-tremor-default text-tremor-content-subtle">No clients match this filter</Text>
             ) : (
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableHeaderCell>Client</TableHeaderCell>
-                    <TableHeaderCell>Practice head</TableHeaderCell>
-                    <TableHeaderCell className="text-right">Lateral tgt</TableHeaderCell>
-                    <TableHeaderCell className="text-right">Productivity (lacs)</TableHeaderCell>
-                    <TableHeaderCell className="text-right">Ideal HC</TableHeaderCell>
-                    <TableHeaderCell className="text-right">Actual HC</TableHeaderCell>
-                    <TableHeaderCell className="text-right">HC Gap</TableHeaderCell>
-                    <TableHeaderCell className="text-right">Fill rate</TableHeaderCell>
-                    <TableHeaderCell className="text-right">WL1</TableHeaderCell>
-                    <TableHeaderCell className="text-right">WL2</TableHeaderCell>
-                    <TableHeaderCell className="text-right">WL3+</TableHeaderCell>
-                    <TableHeaderCell>Status</TableHeaderCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredRows.map((r, i) => {
-                    const idealN = Number(r.ideal_hc ?? 0);
-                    const actualN = Number(r.actual_hc_total ?? 0);
-                    const hcGap = idealN - actualN;
-                    const pct = wfmFillPct(actualN, idealN);
-                    const gapColor = wfmFillColor(pct, idealN);
-                    const statusLbl = wfmStatusLabel(pct, idealN);
-                    return (
-                      <TableRow key={i}>
-                        <TableCell className="max-w-[180px] truncate font-medium text-tremor-content-strong">
-                          {r.account_name || `Project ${r.project_id}`}
-                        </TableCell>
-                        <TableCell className="max-w-[140px] truncate text-tremor-content-subtle" title={r.practice_head || ""}>
-                          {r.practice_head || "—"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {r.lateral_hc_target != null ? formatNumber(r.lateral_hc_target) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {r.lateral_productivity_target != null ? formatLacs(r.lateral_productivity_target) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{formatNumber(idealN)}</TableCell>
-                        <TableCell className="text-right tabular-nums" style={{ color: gapColor }}>
-                          {formatNumber(actualN)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums" style={{ color: gapColor }}>
-                          {hcGap >= 0 ? "−" : "+"}
-                          {formatNumber(Math.abs(hcGap))}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums" style={{ color: gapColor }}>
-                          {formatPercent(pct)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{r.wl1_hires ?? "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{r.wl2_hires ?? "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {(r.wl3_hires ?? 0) + (r.wl4_hires ?? 0) || "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge size="xs" color={wfmStatusToBadgeColor(statusLbl)}>
-                            {statusLbl}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+              <WfmClientHeadcountTable
+                rows={filteredRows}
+                totals={computeWfmClientTableTotals(filteredRows)}
+              />
             ))}
         </div>
       </DialogPanel>

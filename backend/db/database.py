@@ -577,6 +577,9 @@ class Record(Base, AuditMixin):
     selection_date_req = Column(DateTime, nullable=True)
     loi_date_req = Column(DateTime, nullable=True)
     closure_date_req = Column(DateTime, nullable=True)
+    req_offered_date = Column(DateTime, nullable=True)
+    offered_accept_date = Column(DateTime, nullable=True)
+    req_cancelled_date = Column(DateTime, nullable=True)
     rpo_stage = Column(String, nullable=True)
     ageing_days = Column(Integer, nullable=True)
     ageing_bracket = Column(String, nullable=True)
@@ -1591,6 +1594,28 @@ def _ensure_records_rpo_columns():
         logging.warning("records RPO columns migration: %s", e)
 
 
+def _ensure_record_pipeline_date_columns():
+    """Add requisition pipeline milestone dates (SQLite + PostgreSQL)."""
+    from sqlalchemy import inspect, text
+
+    new_cols = ("req_offered_date", "offered_accept_date", "req_cancelled_date")
+    try:
+        with engine.connect() as conn:
+            insp = inspect(engine)
+            if not insp.has_table("records"):
+                return
+            existing = {c["name"] for c in insp.get_columns("records")}
+            dt = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+            for col in new_cols:
+                if col not in existing:
+                    conn.execute(text(f"ALTER TABLE records ADD COLUMN {col} {dt}"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("records pipeline date columns migration: %s", e)
+
+
 def _ensure_candidates_profile_columns():
     """SQLite: add CV, professional experience, and created-by columns on legacy DBs."""
     from sqlalchemy import text
@@ -1853,6 +1878,7 @@ def _run_sqlite_legacy_migrations() -> None:
     _ensure_client_lifecycle_and_project_hierarchy_columns()
     _ensure_client_project_hierarchy_tag_columns()
     _ensure_records_rpo_columns()
+    _ensure_record_pipeline_date_columns()
     _ensure_candidates_profile_columns()
     _ensure_projects_project_head_column()
     _ensure_projects_taggd_joiner_sheet_column()
@@ -1887,6 +1913,7 @@ def init_db():
         # PostgreSQL: schema from Alembic (deploy / migrate script). create_all as safety net for dev.
         if os.getenv("DB_CREATE_ALL_ON_INIT", "").strip().lower() in ("1", "true", "yes"):
             Base.metadata.create_all(bind=engine)
+        _ensure_record_pipeline_date_columns()
         try:
             from backend.core.budget_forecast_ledger import migrate_legacy_project_budget_forecast_tables
 

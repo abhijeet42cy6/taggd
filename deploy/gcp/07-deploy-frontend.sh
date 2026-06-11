@@ -19,33 +19,21 @@ fi
 API_URL="${API_URL%/}"
 API_URL="${API_URL%/api}"
 
-# Two release channels — do not mix env from a trops cutover into a GCS bucket deploy.
-# Default (gcs): storage.googleapis.com/.../index.html#/login → base=./, API=Cloud Run.
-# trops:         FRONTEND_HOST=trops → base=/, API=https://trops.taggd.in (LB single host).
-if [ "${FRONTEND_HOST:-gcs}" = "trops" ]; then
-  export VITE_STATIC_HOSTING="${VITE_STATIC_HOSTING:-0}"
-  GCS_WEB_BASE="${GCS_WEB_BASE:-/}"
-  VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://trops.taggd.in}"
-  VITE_API_BASE_URL="${VITE_API_BASE_URL%/}"
-  VITE_API_BASE_URL="${VITE_API_BASE_URL%/api}"
-else
-  if [ -n "${VITE_API_BASE_URL:-}" ] && [ "${VITE_API_BASE_URL%/}" != "${API_URL}" ]; then
-    log "Ignoring VITE_API_BASE_URL=${VITE_API_BASE_URL} (GCS deploy uses Cloud Run: ${API_URL})"
-  fi
-  export VITE_STATIC_HOSTING=1
-  GCS_WEB_BASE=./
-  VITE_API_BASE_URL="${API_URL}"
+# GCS path-style hosting: storage.googleapis.com/.../app.html#/login → base=./, API=Cloud Run.
+if [ -n "${VITE_API_BASE_URL:-}" ] && [ "${VITE_API_BASE_URL%/}" != "${API_URL}" ]; then
+  log "Ignoring VITE_API_BASE_URL=${VITE_API_BASE_URL} (GCS deploy uses Cloud Run: ${API_URL})"
 fi
-log "Building frontend (FRONTEND_HOST=${FRONTEND_HOST:-gcs}) VITE_API_BASE_URL=${VITE_API_BASE_URL} VITE_STATIC_HOSTING=${VITE_STATIC_HOSTING} base=${GCS_WEB_BASE}"
+export VITE_STATIC_HOSTING=1
+GCS_WEB_BASE=./
+VITE_API_BASE_URL="${API_URL}"
+log "Building frontend VITE_API_BASE_URL=${VITE_API_BASE_URL} VITE_STATIC_HOSTING=${VITE_STATIC_HOSTING} base=${GCS_WEB_BASE}"
 
 cd "${_REPO_ROOT}/frontend"
 if [ -f package-lock.json ]; then npm ci; else npm install; fi
 VITE_API_BASE_URL="${VITE_API_BASE_URL}" VITE_STATIC_HOSTING="${VITE_STATIC_HOSTING}" npm run build -- --base="${GCS_WEB_BASE}"
 
-if [ "${FRONTEND_HOST:-gcs}" != "trops" ]; then
-  if grep -qE 'src="/assets/' dist/index.html 2>/dev/null; then
-    die "GCS build has root-absolute /assets in index.html (expected ./assets). Do not set GCS_WEB_BASE=/ or FRONTEND_HOST=trops for this URL."
-  fi
+if grep -qE 'src="/assets/' dist/index.html 2>/dev/null; then
+  die "GCS build has root-absolute /assets in index.html (expected ./assets). Do not set GCS_WEB_BASE=/ for this URL."
 fi
 
 log "Uploading to gs://${GCS_WEB_BUCKET}"

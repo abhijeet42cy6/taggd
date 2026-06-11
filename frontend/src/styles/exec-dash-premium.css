@@ -197,3 +197,88 @@
     0 14px 36px -22px rgb(0 0 0 / 0.14),
     0 8px 20px -14px rgb(249 115 22 / 0.14);
 }
+
+/* Client detail KPI rows — auto-fit keeps card-sized columns (not full-width stacks) */
+.client-metric-grid {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  width: 100%;
+  align-items: stretch;
+}
+
+/* ~170px min → 2-up at ~360px content, 4-up when ~740px+ */
+.client-metric-grid--4 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+}
+
+/* ~148px min → 2-up narrow, up to 6 across when wide */
+.client-metric-grid--6 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
+}
+
+/* Per-card fluid type + wrapping inside narrow platform content */
+.client-metric-card {
+  container-type: inline-size;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.client-metric-card__inner {
+  min-width: 0;
+  width: 100%;
+}
+
+.client-metric-card__eyebrow-wrap {
+  max-width: 100%;
+}
+
+.client-metric-card__eyebrow {
+  font-size: clamp(9px, 2.4cqi + 6px, 10px);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.25;
+}
+
+.client-metric-card__value {
+  font-size: clamp(1.125rem, 6cqi + 0.35rem, 1.875rem) !important;
+  line-height: 1.2 !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.client-metric-card__hint,
+.client-metric-card__subtext,
+.client-metric-card__footnote {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.client-metric-card__hint {
+  font-size: clamp(10px, 2.2cqi + 7px, 11px);
+}
+
+.client-metric-card__hint--emerald {
+  background: rgb(209 250 229);
+  color: rgb(6 95 70);
+}
+
+.client-metric-card__hint--rose {
+  background: rgb(255 228 230);
+  color: rgb(190 18 60);
+}
+
+.client-metric-card__hint--amber {
+  background: rgb(254 243 199);
+  color: rgb(146 64 14);
+}
+
+.client-metric-card__hint--slate {
+  background: rgb(241 245 249);
+  color: rgb(71 85 105);
+}

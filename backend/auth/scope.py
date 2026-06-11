@@ -93,6 +93,12 @@ def scoped_clause_record(user: User, db: Session):
     return Record.project_id.in_(ids)
 
 
+def apply_record_access_scope(q: Query, user: User, db: Session) -> Query:
+    """Project assignments plus recruiter assignment rules (same scope as GET /records/all)."""
+    q = apply_project_scope(q, user, db, Record)
+    return apply_recruiter_record_scope(q, user, db)
+
+
 def apply_recruiter_record_scope(q: Query, user: User, db: Session) -> Query:
     """Recruiters: only requisitions assigned to them (FK) or legacy string match on email/local-part."""
     if effective_role(user) != ROLE_RECRUITER:

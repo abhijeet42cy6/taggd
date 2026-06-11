@@ -16,8 +16,12 @@ const QUARTER_FIRST_MONTH: Record<string, [number, number]> = {
   JAS25: [2025, 7],
   "OND 24": [2024, 10],
   OND24: [2024, 10],
+  "OND'25": [2025, 10],
+  OND25: [2025, 10],
   "JFM'25": [2025, 1],
   JFM25: [2025, 1],
+  "JFM'26": [2026, 1],
+  JFM26: [2026, 1],
   AMJ25: [2025, 4],
   AMJ26: [2026, 4],
 };

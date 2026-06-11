@@ -1,7 +1,11 @@
 import pandas as pd
 from sqlalchemy.orm import Session
 from ..db.database import Project, Record
-from .column_mapping_normalize import all_mapped_excel_headers, split_column_mapping
+from .column_mapping_normalize import all_mapped_excel_headers, get_status_lexicon_from_mapping, split_column_mapping
+from typing import Optional
+
+from .pos_id_column import normalize_pos_id_value
+from .status_lexicon import get_status_lexicon, merge_global_status_with_revenue, resolve_row_status
 from .record_field_synonyms import INGESTABLE_RECORD_COLUMNS, field_coercion_kind
 import datetime
 import json
@@ -38,6 +42,25 @@ def _safe_float(val) -> float:
         return f
     except Exception:
         return 0.0
+
+
+def _normalize_offered_ctc(val) -> Optional[float]:
+    """Annual CTC in absolute INR; fix spreadsheets stored with an extra ×1e5."""
+    if val is None or _is_na(val):
+        return None
+    f = _safe_float(val)
+    if f <= 0:
+        return None
+    if f >= 100_000_000_000:
+        f /= 100_000.0
+    return f
+
+
+def _clean_candidate_name(val) -> str:
+    s = str(val or "").strip()
+    if _is_na(val) or s.lower() in ("unknown", "nan", "none", "nat", ""):
+        return ""
+    return s
 
 
 def _safe_date(val):
@@ -219,6 +242,7 @@ class ExcelProcessor:
         pos_id_col_name = project_ref.pos_id_column if project_ref else None
 
         universal_map, record_fields_map = split_column_mapping(mapping)
+        status_lexicon = get_status_lexicon(mapping) or get_status_lexicon_from_mapping(mapping)
         # Per-sheet mapped headers: universal + record_fields apply to all sheets; unmapped columns vary by sheet
         base_mapped = all_mapped_excel_headers(universal_map, record_fields_map)
 
@@ -252,11 +276,17 @@ class ExcelProcessor:
                 if non_empty_count < (len(row_dict) * 0.15):
                     continue
 
-                name = str(universal_data.get("candidate_name") or "").strip()
+                name = _clean_candidate_name(universal_data.get("candidate_name"))
                 title = str(universal_data.get("position_title") or "").strip()
+                if _is_na(universal_data.get("position_title")):
+                    title = ""
                 
                 # Check for Pos ID value for the specific anchor
-                pos_id_val = str(row_dict.get(pos_id_col_name) or "") if pos_id_col_name else ""
+                pos_id_val = (
+                    normalize_pos_id_value(row_dict.get(pos_id_col_name))
+                    if pos_id_col_name
+                    else ""
+                )
 
                 # Skip genuinely empty rows
                 if not name and not title and not pos_id_val:
@@ -295,11 +325,22 @@ class ExcelProcessor:
                     calc_results = {"revenue": 0, "status": f"Calc Error: {str(e)}", "opening_fee": 0, "closing_fee": 0}
 
                 g_status = _derive_global_status(calc_results)
-                if g_status == "VOID": g_status = "UNPROCESSED"
+                if g_status == "VOID":
+                    g_status = "UNPROCESSED"
 
-                # Identity Coalescing
+                row_status_raw: Optional[str] = None
+                row_canonical_status = str(universal_data.get("status") or "")
+                if status_lexicon:
+                    row_status_raw, row_canonical_status, lex_global = resolve_row_status(
+                        row_dict,
+                        status_lexicon,
+                        candidate_name=name,
+                    )
+                    g_status = merge_global_status_with_revenue(lex_global, calc_results)
+
+                # Identity Coalescing — only synthesize REQ:// when we have a real req id
                 final_name = name
-                if (not final_name or final_name.lower() in ["unknown", "nan", "none", ""]) and pos_id_val:
+                if not final_name and pos_id_val:
                     final_name = f"REQ://{pos_id_val}"
 
                 # --- 5. Delta Phase: Match with Database ---
@@ -310,9 +351,9 @@ class ExcelProcessor:
                     # (Candidate Name, Status, or logic results might have evolved)
                     existing_record.candidate_name = final_name or "Unknown"
                     existing_record.position_title = title
-                    existing_record.status = str(universal_data.get("status") or "")
+                    existing_record.status = row_canonical_status
                     existing_record.hiring_manager = str(universal_data.get("hiring_manager") or "").strip() or None
-                    existing_record.offered_ctc = _safe_float(universal_data.get("offered_ctc"))
+                    existing_record.offered_ctc = _normalize_offered_ctc(universal_data.get("offered_ctc"))
                     existing_record.creation_date = universal_data.get("creation_date")
                     existing_record.location = str(universal_data.get("location") or "").strip() or None
                     existing_record.department = str(universal_data.get("department") or "").strip() or None
@@ -322,16 +363,20 @@ class ExcelProcessor:
                     existing_record.excel_row_index = excel_pos # Update position if shifted
                     existing_record.excel_provided_id = pos_id_val # Update if ID column metadata changed
                     _apply_record_field_columns(existing_record, row_dict, record_fields_map)
-                    existing_record.additional_attributes = _additional_attributes(row_dict, base_mapped)
+                    attrs = _additional_attributes(row_dict, base_mapped)
+                    if row_status_raw is not None:
+                        attrs = dict(attrs)
+                        attrs["status_raw_excel"] = row_status_raw
+                    existing_record.additional_attributes = attrs
                 else:
                     # NEW Record creation
                     new_record = Record(
                         project_id=project_id,
                         candidate_name=final_name or "Unknown",
                         position_title=title,
-                        status=str(universal_data.get("status") or ""),
+                        status=row_canonical_status,
                         hiring_manager=(str(universal_data.get("hiring_manager") or "").strip() or None),
-                        offered_ctc=_safe_float(universal_data.get("offered_ctc")),
+                        offered_ctc=_normalize_offered_ctc(universal_data.get("offered_ctc")),
                         joining_date=universal_data.get("joining_date"),
                         creation_date=universal_data.get("creation_date"),
                         location=str(universal_data.get("location") or "").strip() or None,
@@ -344,6 +389,10 @@ class ExcelProcessor:
                         excel_provided_id=pos_id_val,
                     )
                     _apply_record_field_columns(new_record, row_dict, record_fields_map)
+                    if row_status_raw is not None:
+                        attrs = dict(new_record.additional_attributes or {})
+                        attrs["status_raw_excel"] = row_status_raw
+                        new_record.additional_attributes = attrs
                     self.db.add(new_record)
 
         # Batch commit all additions and updates

@@ -22,7 +22,6 @@ import { SkeletonKpiRow, SkeletonTable } from "@/components/platform/Skeleton";
 import {
   SlaComplianceBar,
   SlaExecutiveDeltaBar,
-  SlaExecutiveMetPctBar,
   SlaFyComparisonGroupedBar,
   SlaFyComparisonLineChart,
   SlaFyPortfolioMetNotMetBar,
@@ -35,6 +34,7 @@ import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import {
   SlaAccountHealthRail,
   SlaBifurcationTiles,
+  SlaExecutiveAccountRankPanel,
   SlaExportInlineBar,
   SlaInsightsStrip,
   SlaWorkspaceRegionsMap,
@@ -1152,31 +1152,68 @@ export function SLAPerformance() {
 
   /** Account Met % from latest decisive metric rows (same basis as KPI cards / SLA table). */
   const accountMetPctFromLatestRows = useMemo(() => {
-    const by = new Map<string, { met: number; nm: number }>();
+    const by = new Map<string, { met: number; nm: number; nr: number }>();
     for (const r of slaKpiScopeRows) {
       const acc = String((r as any).account_name || "Unknown");
       const b = statusBucket((r as any).status);
-      if (!by.has(acc)) by.set(acc, { met: 0, nm: 0 });
+      if (!by.has(acc)) by.set(acc, { met: 0, nm: 0, nr: 0 });
       const c = by.get(acc)!;
       if (b === "met") c.met++;
       else if (b === "breached") c.nm++;
+      else c.nr++;
     }
     return [...by.entries()]
       .map(([account, c]) => {
-        const t = c.met + c.nm;
-        return { account, met_pct: t > 0 ? Math.round((c.met / t) * 1000) / 10 : null as number | null };
+        const decisive = c.met + c.nm;
+        return {
+          account,
+          met: c.met,
+          notMet: c.nm,
+          notReported: c.nr,
+          decisive,
+          metPct: decisive > 0 ? Math.round((c.met / decisive) * 1000) / 10 : null as number | null,
+        };
       })
-      .filter((x): x is { account: string; met_pct: number } => x.met_pct != null);
+      .filter((x): x is typeof x & { metPct: number } => x.metPct != null);
   }, [slaKpiScopeRows]);
 
-  const executiveBest = useMemo(
-    () => [...accountMetPctFromLatestRows].sort((a, b) => b.met_pct - a.met_pct).slice(0, 5),
-    [accountMetPctFromLatestRows],
-  );
-  const executiveWorst = useMemo(
-    () => [...accountMetPctFromLatestRows].sort((a, b) => a.met_pct - b.met_pct).slice(0, 5),
-    [accountMetPctFromLatestRows],
-  );
+  const EXEC_RANK_MIN_DECISIVE = 3;
+
+  const executiveAccountRanks = useMemo(() => {
+    const eligible = accountMetPctFromLatestRows.filter((x) => x.decisive >= EXEC_RANK_MIN_DECISIVE);
+    const pool = eligible.length >= 2 ? eligible : accountMetPctFromLatestRows;
+    const sorted = [...pool].sort((a, b) => b.metPct - a.metPct);
+    const top = sorted.slice(0, 5).map((r) => ({
+      account: r.account,
+      metPct: r.metPct,
+      met: r.met,
+      notMet: r.notMet,
+      notReported: r.notReported,
+      decisive: r.decisive,
+    }));
+    const topNames = new Set(top.map((r) => r.account));
+    const bottom = [...sorted]
+      .reverse()
+      .filter((r) => !topNames.has(r.account))
+      .slice(0, 5)
+      .map((r) => ({
+        account: r.account,
+        metPct: r.metPct,
+        met: r.met,
+        notMet: r.notMet,
+        notReported: r.notReported,
+        decisive: r.decisive,
+      }));
+    return { top, bottom };
+  }, [accountMetPctFromLatestRows]);
+
+  const fyMovementAvailability = useMemo(() => {
+    const withBoth = fyComparisonTableRows.filter((r) => r.p1 != null && r.p2 != null);
+    return {
+      eligible: withBoth.length,
+      totalAccounts: fyComparisonTableRows.length,
+    };
+  }, [fyComparisonTableRows]);
 
   const executiveImproved = useMemo(() => {
     return [...fyComparisonTableRows]
@@ -1193,6 +1230,22 @@ export function SLAPerformance() {
       .sort((a, b) => a.delta - b.delta)
       .slice(0, 5);
   }, [fyComparisonTableRows]);
+
+  const focusSlaAccount = useCallback((account: string) => {
+    setAcctFilter(account);
+    setHealthAccountPick(new Set([account]));
+    setHealthFilterTier(null);
+    setTableWorkspaceRegion(null);
+    setSlaView("overview");
+  }, []);
+
+  const focusSlaRegion = useCallback((label: string | null) => {
+    setTableWorkspaceRegion(label);
+    setHealthAccountPick(null);
+    setHealthFilterTier(null);
+    setAcctFilter("all");
+    if (label) setSlaView("overview");
+  }, []);
 
   /** Portfolio met / not-met snapshot counts for the two FY windows (timeseries). */
   const portfolioFySnapshots = useMemo(() => {
@@ -1576,13 +1629,6 @@ export function SLAPerformance() {
       ),
     [timeseriesKpiScoped],
   );
-
-  const regionalRankP2 = useMemo(() => {
-    return [...fyRegionalChartData]
-      .filter((r) => r.p2 != null)
-      .map((r) => ({ name: r.name, p2: r.p2 as number }))
-      .sort((a, b) => b.p2 - a.p2);
-  }, [fyRegionalChartData]);
 
   const regionsForFilter = useMemo(() => {
     const s = new Set<string>();
@@ -2211,109 +2257,110 @@ export function SLAPerformance() {
               )}
 
               {slaView === "executive" && (
-                <div className="sla-rank-grid" style={{ marginBottom: 14 }}>
-                  <div className="sla-dash-card">
+                <div className="sla-rank-grid sla-rank-grid--executive" style={{ marginBottom: 14 }}>
+                  <div className="sla-dash-card sla-dash-card--wide">
                     <div className="sla-dash-card-hd">
-                      <div className="sla-dash-card-title">Top accounts (Met %)</div>
-                      <div className="sla-dash-card-sub">From latest decisive metric rows per account (same basis as KPI tiles).</div>
+                      <div className="sla-dash-card-title">Account performance</div>
+                      <div className="sla-dash-card-sub">
+                        Top and bottom accounts by Met % on latest decisive rows — click a row to filter the SLA table.
+                      </div>
                     </div>
                     <div className="sla-dash-card-bd">
-                      {executiveBest.length === 0 ? (
+                      {executiveAccountRanks.top.length === 0 && executiveAccountRanks.bottom.length === 0 ? (
                         <div className="sla-empty">No account-level outcomes in current filters.</div>
                       ) : (
-                        <SlaExecutiveMetPctBar
-                          data={executiveBest.map((r) => ({
-                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
-                            value: r.met_pct,
-                          }))}
-                          height={132}
+                        <SlaExecutiveAccountRankPanel
+                          top={executiveAccountRanks.top}
+                          bottom={executiveAccountRanks.bottom}
+                          portfolioMetPct={slaKpiMetNotMet.withOutcome > 0 ? slaKpiMetNotMet.metPct : null}
+                          minDecisive={EXEC_RANK_MIN_DECISIVE}
+                          onSelectAccount={focusSlaAccount}
                         />
                       )}
                     </div>
                   </div>
-                  <div className="sla-dash-card">
-                    <div className="sla-dash-card-hd">
-                      <div className="sla-dash-card-title">Bottom accounts (Met %)</div>
-                      <div className="sla-dash-card-sub">Lowest Met % on latest decisive rows (met + not met only).</div>
+
+                  {(executiveImproved.length > 0 || executiveDeclined.length > 0) ? (
+                    <>
+                      <div className="sla-dash-card">
+                        <div className="sla-dash-card-hd">
+                          <div className="sla-dash-card-title">Most improved (FY)</div>
+                          <div className="sla-dash-card-sub">
+                            <span className="sla-exec-rank-basis">Basis: FY timeseries rollup</span>
+                            {" · "}
+                            {fyLabelP2} vs {fyLabelP1} (Met % change in pp)
+                          </div>
+                        </div>
+                        <div className="sla-dash-card-bd">
+                          <SlaExecutiveDeltaBar
+                            data={executiveImproved.map((r) => ({
+                              name: r.account.length > 18 ? `${r.account.slice(0, 17)}…` : r.account,
+                              account: r.account,
+                              delta: r.delta,
+                              p1: r.p1,
+                              p2: r.p2,
+                            }))}
+                            height={Math.max(132, executiveImproved.length * 28)}
+                            onSelectAccount={focusSlaAccount}
+                          />
+                        </div>
+                      </div>
+                      <div className="sla-dash-card">
+                        <div className="sla-dash-card-hd">
+                          <div className="sla-dash-card-title">Most declined (FY)</div>
+                          <div className="sla-dash-card-sub">
+                            <span className="sla-exec-rank-basis">Basis: FY timeseries rollup</span>
+                            {" · "}
+                            Largest drop in Met % between FY windows
+                          </div>
+                        </div>
+                        <div className="sla-dash-card-bd">
+                          <SlaExecutiveDeltaBar
+                            data={executiveDeclined.map((r) => ({
+                              name: r.account.length > 18 ? `${r.account.slice(0, 17)}…` : r.account,
+                              account: r.account,
+                              delta: r.delta,
+                              p1: r.p1,
+                              p2: r.p2,
+                            }))}
+                            height={Math.max(132, executiveDeclined.length * 28)}
+                            onSelectAccount={focusSlaAccount}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="sla-dash-card sla-dash-card--wide sla-dash-card--fy-callout">
+                      <div className="sla-dash-card-hd">
+                        <div className="sla-dash-card-title">FY movement unavailable</div>
+                        <div className="sla-dash-card-sub">
+                          <span className="sla-exec-rank-basis">Basis: FY timeseries rollup</span>
+                          {" · "}
+                          {fyLabelP2} vs {fyLabelP1}
+                        </div>
+                      </div>
+                      <div className="sla-dash-card-bd">
+                        <p className="sla-exec-fy-callout">
+                          {fyMovementAvailability.eligible === 0 ? (
+                            <>
+                              No accounts have Met / Not met cells in <strong>both</strong> FY windows under current
+                              filters ({fyMovementAvailability.totalAccounts} account
+                              {fyMovementAvailability.totalAccounts === 1 ? "" : "s"} in scope).
+                              Widen the reporting period or confirm prior-year SLA ingestion.
+                            </>
+                          ) : (
+                            <>Not enough FY comparison data to rank movers.</>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                    <div className="sla-dash-card-bd">
-                      {executiveWorst.length === 0 ? (
-                        <div className="sla-empty">No account-level outcomes in current filters.</div>
-                      ) : (
-                        <SlaExecutiveMetPctBar
-                          data={executiveWorst.map((r) => ({
-                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
-                            value: r.met_pct,
-                          }))}
-                          height={132}
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <div className="sla-dash-card">
-                    <div className="sla-dash-card-hd">
-                      <div className="sla-dash-card-title">Most improved (FY)</div>
-                      <div className="sla-dash-card-sub">{fyLabelP2} vs {fyLabelP1}.</div>
-                    </div>
-                    <div className="sla-dash-card-bd">
-                      {executiveImproved.length === 0 ? (
-                        <div className="sla-empty">Need both periods in data.</div>
-                      ) : (
-                        <SlaExecutiveDeltaBar
-                          data={executiveImproved.map((r) => ({
-                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
-                            delta: (r.p2 ?? 0) - (r.p1 ?? 0),
-                          }))}
-                          height={132}
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <div className="sla-dash-card">
-                    <div className="sla-dash-card-hd">
-                      <div className="sla-dash-card-title">Most declined (FY)</div>
-                      <div className="sla-dash-card-sub">Largest drop in Met % between FY windows.</div>
-                    </div>
-                    <div className="sla-dash-card-bd">
-                      {executiveDeclined.length === 0 ? (
-                        <div className="sla-empty">Need both periods in data.</div>
-                      ) : (
-                        <SlaExecutiveDeltaBar
-                          data={executiveDeclined.map((r) => ({
-                            name: r.account.length > 14 ? `${r.account.slice(0, 13)}…` : r.account,
-                            delta: (r.p2 ?? 0) - (r.p1 ?? 0),
-                          }))}
-                          height={132}
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <div className="sla-dash-card">
-                    <div className="sla-dash-card-hd">
-                      <div className="sla-dash-card-title">Regions — {fyLabelP2}</div>
-                      <div className="sla-dash-card-sub">Met % by region (rolled up).</div>
-                    </div>
-                    <div className="sla-dash-card-bd">
-                      {regionalRankP2.length === 0 ? (
-                        <div className="sla-empty">No regional rollup.</div>
-                      ) : (
-                        <ul className="sla-rank-list">
-                          {regionalRankP2.slice(0, 3).map((r) => (
-                            <li key={`t-${r.name}`}>
-                              <span className="sla-rank-name">Top · {r.name}</span>
-                              <span className="sla-rank-val">{formatPercent(r.p2)}</span>
-                            </li>
-                          ))}
-                          {regionalRankP2.slice(-3).map((r) => (
-                            <li key={`b-${r.name}`}>
-                              <span className="sla-rank-name">Bottom · {r.name}</span>
-                              <span className="sla-rank-val">{formatPercent(r.p2)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
+                  )}
+
+                  <SlaWorkspaceRegionsMap
+                    regions={slaWorkspaceRegionStats}
+                    activeLabel={tableWorkspaceRegion}
+                    onSelectLabel={focusSlaRegion}
+                  />
                 </div>
               )}
 

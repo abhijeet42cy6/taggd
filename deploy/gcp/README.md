@@ -52,30 +52,11 @@ Generated files (gitignored): `deploy/gcp/.generated/`
 | Component | URL |
 |-----------|-----|
 | API | https://tgddata-api-lnucyjw2sa-el.a.run.app |
-| SPA (GCS) | https://storage.googleapis.com/taggd-tgddata-prod-web/index.html#/login |
+| SPA (production) | https://storage.googleapis.com/taggd-tgddata-prod-web/app.html#/login |
 
-`07-deploy-frontend.sh` builds with `GCS_WEB_BASE=./` (relative assets) and `VITE_API_BASE_URL=<Cloud Run URL>` **without** `/api`. It strips a mistaken trailing `/api` from the API URL. Upload uses `gsutil rsync -d`. For a custom domain at `/`, rebuild with `GCS_WEB_BASE=/ ./deploy/gcp/07-deploy-frontend.sh`.
+`07-deploy-frontend.sh` builds with `GCS_WEB_BASE=./` (relative assets), `VITE_STATIC_HOSTING=1`, and `VITE_API_BASE_URL=<Cloud Run URL>` **without** `/api`. It strips a mistaken trailing `/api` from the API URL, uploads hashed assets via `gsutil rsync`, and publishes `index.html` + **`app.html`** (canonical entry; `no-cache`).
 
 Generated copies: `deploy/gcp/.generated/api-url.txt`, `web-url.txt`
-
-## Custom domain (`trops.taggd.in` — single hostname)
-
-**Client DNS only:**
-
-| Type | Host | Value |
-|------|------|--------|
-| A | `trops` | `8.232.241.48` |
-
-No `api.taggd.in`. Same host serves UI (GCS) and API (Cloud Run) via path rules on the load balancer.
-
-| Script | Purpose |
-|--------|---------|
-| `08-setup-trops-lb.sh` | HTTPS LB + CDN backend bucket + Cloud Run NEG + managed SSL |
-| `trops-url-map.yaml` | Path routing (API prefixes → Cloud Run; default → GCS) |
-
-Full guide: [`../../docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md`](../../docs/CUSTOM_DOMAIN_TROPS_TAGGD_IN.md)
-
-After DNS + cert: `VITE_API_BASE_URL=https://trops.taggd.in`, `GCS_WEB_BASE=/`, `VITE_STATIC_HOSTING=0`, redeploy `06` + `07`.
 
 ## SQLite data migration (via GCE VM — recommended)
 
