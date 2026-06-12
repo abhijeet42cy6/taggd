@@ -19,10 +19,13 @@ import {
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronUp,
   GripVertical,
   Plus,
   RefreshCw,
   Settings2,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import {
@@ -47,7 +50,8 @@ import {
   PipelineMixCharts,
   PipelineQualityStrip,
 } from "@/components/tremor-dashboard/ClientPipelineBlocks";
-import { mergePipelineForProjects } from "@/lib/client-pipeline-metrics";
+import { PipelineAnalyticsPanel } from "@/components/tremor-dashboard/ClientPipelineDashboard";
+import { mergePipelineForProjects, type PipelineFilterOptions } from "@/lib/client-pipeline-metrics";
 import "@/styles/client-dashboard.css";
 import "@/styles/exec-dash-premium.css";
 
@@ -63,20 +67,17 @@ const BLOCK_CATALOG_LABELS: Record<BlockType, string> = {
   pipeline_activity_chart: "Pipeline activity trend",
   pipeline_ageing_chart: "WIP ageing distribution",
   pipeline_mix_charts: "Diversity & source mix",
+  pipeline_analytics_panel: "RPO pipeline analytics",
   engagements_table: "Engagements table",
   finance_strip: "Finance snapshot",
 };
 
 const DEFAULT_LAYOUT: LayoutBlock[] = [
-  { id: "pipeline_kpi_strip", type: "pipeline_kpi_strip", variant: "card", order: 0 },
-  { id: "pipeline_quality_strip", type: "pipeline_quality_strip", variant: "card", order: 1 },
-  { id: "pipeline_activity_chart", type: "pipeline_activity_chart", variant: "card", order: 2 },
-  { id: "pipeline_ageing_chart", type: "pipeline_ageing_chart", variant: "card", order: 3 },
-  { id: "pipeline_mix_charts", type: "pipeline_mix_charts", variant: "card", order: 4 },
-  { id: "sla_kpi_strip", type: "sla_kpi_strip", variant: "card", order: 5 },
-  { id: "sla_summary_cards", type: "sla_summary_cards", variant: "card", order: 6 },
-  { id: "sla_table", type: "sla_table", variant: "card", order: 7 },
-  { id: "engagements_table", type: "engagements_table", variant: "card", order: 8 },
+  { id: "pipeline_analytics_panel", type: "pipeline_analytics_panel", variant: "card", order: 0 },
+  { id: "sla_kpi_strip", type: "sla_kpi_strip", variant: "card", order: 1 },
+  { id: "sla_summary_cards", type: "sla_summary_cards", variant: "card", order: 2 },
+  { id: "sla_table", type: "sla_table", variant: "card", order: 3 },
+  { id: "engagements_table", type: "engagements_table", variant: "card", order: 4 },
 ];
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
@@ -404,6 +405,8 @@ function BlockRenderer({
       return <PipelineAgeingChart metrics={tabPipeline} />;
     case "pipeline_mix_charts":
       return <PipelineMixCharts metrics={tabPipeline} />;
+    case "pipeline_analytics_panel":
+      return <PipelineAnalyticsPanel metrics={tabPipeline} />;
     case "engagements_table":
       return <EngagementsTable projects={tabProjects} />;
     case "finance_strip":
@@ -508,7 +511,22 @@ export function ClientDashboard() {
   const [pipelinePeriod, setPipelinePeriod] = useState("");
   const [pipelineGranularity, setPipelineGranularity] = useState<"month" | "quarter">("month");
   const [pipelineCompare, setPipelineCompare] = useState<"mom" | "qoq" | "none">("mom");
+  const [pipelineFilters, setPipelineFilters] = useState({
+    pipeline_division: "",
+    pipeline_sbg: "",
+    pipeline_sbu: "",
+    pipeline_bhr: "",
+    pipeline_band: "",
+    req_created_from: "",
+    req_created_to: "",
+    offer_from: "",
+    offer_to: "",
+    join_from: "",
+    join_to: "",
+  });
   const [saving, setSaving] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [availableClients, setAvailableClients] = useState<Array<{ id: number; official_name: string }>>([]);
 
   // ── Load summary ──────────────────────────────────────────────────────────────
   const load = useCallback(async (opts?: {
@@ -517,6 +535,7 @@ export function ClientDashboard() {
     pipeline_period?: string;
     pipeline_granularity?: string;
     pipeline_compare?: string;
+    pipeline_filters?: typeof pipelineFilters;
   }) => {
     setLoading(true);
     setError(null);
@@ -532,6 +551,17 @@ export function ClientDashboard() {
         pipeline_period?: string;
         pipeline_granularity?: string;
         pipeline_compare?: string;
+        pipeline_division?: string;
+        pipeline_sbg?: string;
+        pipeline_sbu?: string;
+        pipeline_bhr?: string;
+        pipeline_band?: string;
+        req_created_from?: string;
+        req_created_to?: string;
+        offer_from?: string;
+        offer_to?: string;
+        join_from?: string;
+        join_to?: string;
       } = {};
       if (scopeClientId !== "all") params.client_id = scopeClientId;
       const from = (opts?.reporting_month_from ?? reportingMonthFrom).trim();
@@ -544,6 +574,11 @@ export function ClientDashboard() {
       if (pp) params.pipeline_period = pp;
       if (pg) params.pipeline_granularity = pg;
       if (pc) params.pipeline_compare = pc;
+      const pf = opts?.pipeline_filters ?? pipelineFilters;
+      for (const [k, v] of Object.entries(pf)) {
+        const trimmed = String(v).trim();
+        if (trimmed) (params as Record<string, string>)[k] = trimmed;
+      }
       const res = await queries.clientDashboardSummary(params);
       if (isClientUser && res.clients.length > 1 && res.selected_client_id == null) {
         throw new Error("Client dashboard scope could not be resolved. Please refresh or contact your programme owner.");
@@ -557,14 +592,36 @@ export function ClientDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [scopeClientId, reportingMonthFrom, reportingMonthTo, pipelinePeriod, pipelineGranularity, pipelineCompare, isClientUser]);
+  }, [scopeClientId, reportingMonthFrom, reportingMonthTo, pipelinePeriod, pipelineGranularity, pipelineCompare, pipelineFilters, isClientUser]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!data?.clients?.length || isClientUser || data.is_client_user) return;
+    setAvailableClients((prev) => {
+      const merged = new Map(prev.map((c) => [c.id, c]));
+      for (const c of data.clients) merged.set(c.id, c);
+      return [...merged.values()].sort((a, b) => a.official_name.localeCompare(b.official_name));
+    });
+  }, [data?.clients, isClientUser, data?.is_client_user]);
 
   useEffect(() => {
     setReportingMonthFrom("");
     setReportingMonthTo("");
     setPipelinePeriod("");
+    setPipelineFilters({
+      pipeline_division: "",
+      pipeline_sbg: "",
+      pipeline_sbu: "",
+      pipeline_bhr: "",
+      pipeline_band: "",
+      req_created_from: "",
+      req_created_to: "",
+      offer_from: "",
+      offer_to: "",
+      join_from: "",
+      join_to: "",
+    });
   }, [scopeClientId]);
 
   useEffect(() => {
@@ -789,17 +846,28 @@ export function ClientDashboard() {
   };
 
   // ── Computed: active client context ───────────────────────────────────────────
+  const orgPickerClients = useMemo(
+    () => (availableClients.length > 0 ? availableClients : (data?.clients ?? [])),
+    [availableClients, data?.clients],
+  );
+
   const activeClientId = useMemo(() => {
     if (scopeClientId !== "all") return scopeClientId;
+    if (!isClientUser && !data?.is_client_user && orgPickerClients.length > 1) return null;
     if (data?.selected_client_id != null) return data.selected_client_id;
+    if (orgPickerClients.length === 1) return orgPickerClients[0].id;
     if ((data?.clients?.length ?? 0) === 1) return data!.clients[0].id;
     return null;
-  }, [scopeClientId, data]);
+  }, [scopeClientId, data, orgPickerClients, isClientUser, data?.is_client_user]);
 
   const activeClientName = useMemo(() => {
-    if (activeClientId == null || !data) return null;
-    return data.clients.find((c) => c.id === activeClientId)?.official_name ?? null;
-  }, [activeClientId, data]);
+    if (activeClientId == null) return null;
+    return (
+      orgPickerClients.find((c) => c.id === activeClientId)?.official_name
+      ?? data?.clients.find((c) => c.id === activeClientId)?.official_name
+      ?? null
+    );
+  }, [activeClientId, orgPickerClients, data?.clients]);
 
   const layoutTypeCounts = useMemo(() => {
     const counts: Partial<Record<BlockType, number>> = {};
@@ -823,11 +891,44 @@ export function ClientDashboard() {
   );
 
   const showOrgPicker =
-    !isClientUser && !data?.is_client_user && (data?.clients?.length ?? 0) > 1;
+    !isClientUser && !data?.is_client_user && orgPickerClients.length > 1;
   const clientScopeReady =
     !isClientUser || activeClientId != null || (data?.clients?.length ?? 0) <= 1;
   const showDashboardBody = !loading && data && clientScopeReady;
   const hasData = showDashboardBody && data.projects.length > 0;
+
+  const activePipelineFilterCount = useMemo(
+    () => Object.values(pipelineFilters).filter((v) => v.trim()).length,
+    [pipelineFilters],
+  );
+
+  const filterSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (showOrgPicker && scopeClientId !== "all") {
+      const name = orgPickerClients.find((c) => c.id === scopeClientId)?.official_name;
+      if (name) parts.push(name);
+    } else if (activeClientName) {
+      parts.push(activeClientName);
+    }
+    if (pipelinePeriod) {
+      parts.push(pipelineGranularity === "quarter" ? pipelinePeriod : pipelinePeriod.slice(0, 7));
+    }
+    if (reportingMonthFrom || reportingMonthTo) parts.push("SLA range");
+    if (activePipelineFilterCount > 0) {
+      parts.push(`${activePipelineFilterCount} pipeline filter${activePipelineFilterCount > 1 ? "s" : ""}`);
+    }
+    return parts.length ? parts.join(" · ") : "Default scope · click to refine";
+  }, [
+    showOrgPicker,
+    scopeClientId,
+    orgPickerClients,
+    activeClientName,
+    pipelinePeriod,
+    pipelineGranularity,
+    reportingMonthFrom,
+    reportingMonthTo,
+    activePipelineFilterCount,
+  ]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
@@ -841,13 +942,26 @@ export function ClientDashboard() {
         <Title className="client-dash-tremor__title mt-0.5 text-2xl font-bold tracking-tight md:text-3xl">
           {activeClientName ?? "Client dashboard"}
         </Title>
-        {activeClientName ? (
+        {activeClientName && showOrgPicker ? (
           <div className="client-dash-tremor__scope-chip">
             <span className="client-dash-tremor__scope-chip-label">Viewing</span>
             <span className="client-dash-tremor__scope-chip-name">{activeClientName}</span>
-            {!isClientUser && !data?.is_client_user && scopeClientId === "all" && (data?.clients?.length ?? 0) > 1 ? (
-              <span className="client-dash-tremor__scope-chip-hint">Single-client scope</span>
-            ) : null}
+            {scopeClientId !== "all" ? (
+              <button
+                type="button"
+                className="client-dash-tremor__scope-chip-change"
+                onClick={() => setScopeClientId("all")}
+              >
+                View all organisations
+              </button>
+            ) : (
+              <span className="client-dash-tremor__scope-chip-hint">Pick one organisation below</span>
+            )}
+          </div>
+        ) : activeClientName ? (
+          <div className="client-dash-tremor__scope-chip">
+            <span className="client-dash-tremor__scope-chip-label">Viewing</span>
+            <span className="client-dash-tremor__scope-chip-name">{activeClientName}</span>
           </div>
         ) : null}
         <Text className="mt-1.5 max-w-4xl text-xs leading-snug text-tremor-content-emphasis md:text-sm">
@@ -855,32 +969,75 @@ export function ClientDashboard() {
         </Text>
       </div>
 
-      {/* Toolbar */}
-      <div className="client-dash-tremor__toolbar">
-        <div className="flex flex-wrap items-end justify-start gap-3">
-          {/* Org picker — only for non-client users with multiple clients */}
-          {!showOrgPicker ? null : (
-            <div className="min-w-[12rem] max-w-full flex-1 sm:max-w-xs">
-              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Organisation</Text>
-              <SearchSelect
-                value={scopeClientId === "all" ? "all" : String(scopeClientId)}
-                onValueChange={(v) => setScopeClientId(!v || v === "all" ? "all" : Number(v))}
-                placeholder="Type to filter…"
-                enableClear={false}
-              >
-                <SearchSelectItem value="all">All assigned organisations</SearchSelectItem>
-                {(data?.clients ?? []).map((c) => (
-                  <SearchSelectItem key={c.id} value={String(c.id)}>
-                    {c.official_name}
-                  </SearchSelectItem>
-                ))}
-              </SearchSelect>
-              <Text className="mt-1 text-[10px] text-tremor-content-subtle">
-                Click the field, then type to filter.
-              </Text>
-            </div>
-          )}
+      {/* Organisation scope — always visible above filter toolbar */}
+      {showOrgPicker ? (
+        <div className="client-dash-tremor__org-scope">
+          <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">Organisation</Text>
+          <SearchSelect
+            value={scopeClientId === "all" ? "all" : String(scopeClientId)}
+            onValueChange={(v) => setScopeClientId(!v || v === "all" ? "all" : Number(v))}
+            placeholder="Type to filter…"
+            enableClear={false}
+          >
+            <SearchSelectItem value="all">All assigned organisations</SearchSelectItem>
+            {(orgPickerClients).map((c) => (
+              <SearchSelectItem key={c.id} value={String(c.id)}>
+                {c.official_name}
+              </SearchSelectItem>
+            ))}
+          </SearchSelect>
+          <Text className="mt-1 text-[10px] text-tremor-content-subtle">
+            Click the field, then type to filter.
+          </Text>
+        </div>
+      ) : null}
 
+      {/* Toolbar — collapsed by default; click header to expand filters */}
+      <div className={cn("client-dash-tremor__toolbar", filtersExpanded && "client-dash-tremor__toolbar--expanded")}>
+        <div className="client-dash-tremor__toolbar-header">
+          <button
+            type="button"
+            className="client-dash-tremor__toolbar-toggle"
+            onClick={() => setFiltersExpanded((v) => !v)}
+            aria-expanded={filtersExpanded}
+            aria-controls="client-dash-filter-panel"
+          >
+            <SlidersHorizontal size={14} className="shrink-0 text-orange-600" aria-hidden />
+            <span className="client-dash-tremor__toolbar-toggle-label">Filters &amp; scope</span>
+            {!filtersExpanded ? (
+              <span className="client-dash-tremor__toolbar-summary">{filterSummary}</span>
+            ) : null}
+            {filtersExpanded ? (
+              <ChevronUp size={16} className="shrink-0 text-tremor-content-subtle" aria-hidden />
+            ) : (
+              <ChevronDown size={16} className="shrink-0 text-tremor-content-subtle" aria-hidden />
+            )}
+          </button>
+          <div className="client-dash-tremor__toolbar-actions">
+            <Button type="button" size="xs" variant="secondary" onClick={() => void load()}>
+              <RefreshCw size={12} className="mr-1" /> Refresh
+            </Button>
+            {data?.can_edit_config ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="secondary"
+                color="orange"
+                onClick={openBuilder}
+                title={saveClientId == null ? "Select an organisation to customise" : "Customise layout for this client"}
+              >
+                <Settings2 size={12} className="mr-1" /> Customize layout
+              </Button>
+            ) : null}
+            <Text className="text-[10px] font-medium uppercase tracking-wide text-tremor-content-subtle">
+              {loading ? "Loading…" : data ? "Ready" : ""}
+            </Text>
+          </div>
+        </div>
+
+        {filtersExpanded ? (
+          <div id="client-dash-filter-panel" className="client-dash-tremor__toolbar-body">
+            <div className="flex flex-wrap items-end justify-start gap-3">
           <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
             <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">SLA from</Text>
             <input
@@ -972,27 +1129,100 @@ export function ClientDashboard() {
             </datalist>
           </div>
 
-          <Button type="button" size="xs" variant="secondary" onClick={() => void load()}>
-            <RefreshCw size={12} className="mr-1" /> Refresh
-          </Button>
-
-          {data?.can_edit_config ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="secondary"
-              color="orange"
-              onClick={openBuilder}
-              title={saveClientId == null ? "Select an organisation to customise" : "Customise layout for this client"}
-            >
-              <Settings2 size={12} className="mr-1" /> Customize layout
-            </Button>
-          ) : null}
-
-          <Text className="ml-auto text-[10px] font-medium uppercase tracking-wide text-tremor-content-subtle">
-            {loading ? "Loading…" : data ? "Ready" : ""}
-          </Text>
-        </div>
+          <div className="w-full border-t border-tremor-border/60 pt-3 mt-1 flex flex-wrap items-end gap-3">
+            <Text className="w-full text-[10px] font-semibold uppercase tracking-wide text-orange-600">Pipeline filters</Text>
+            {(
+              [
+                ["division", "All Divisions", "pipeline_division"],
+                ["sbg", "All SBGs", "pipeline_sbg"],
+                ["sbu", "All SBUs", "pipeline_sbu"],
+                ["bhr", "All BHRs", "pipeline_bhr"],
+                ["band", "All Bands", "pipeline_band"],
+              ] as const
+            ).map(([optKey, allLabel, filterKey]) => {
+              const opts = (data?.pipeline_filter_options as PipelineFilterOptions | undefined)?.[optKey] ?? [];
+              const hasOptions = opts.length > 0;
+              return (
+                <div key={filterKey} className="min-w-[8rem] flex-1 sm:max-w-[10rem]">
+                  <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">
+                    {allLabel.replace(/^All /, "")}
+                  </Text>
+                  <select
+                    className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs text-tremor-content-strong disabled:cursor-not-allowed disabled:bg-tremor-background-subtle disabled:text-tremor-content-subtle"
+                    value={pipelineFilters[filterKey]}
+                    disabled={!hasOptions}
+                    onChange={(e) => {
+                      const next = { ...pipelineFilters, [filterKey]: e.target.value };
+                      setPipelineFilters(next);
+                      void load({ pipeline_filters: next });
+                    }}
+                  >
+                    <option value="">{allLabel}</option>
+                    {opts.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+            {(
+              [
+                ["req_created_from", "req_created_to", "Req creation"],
+                ["offer_from", "offer_to", "Offer accept"],
+                ["join_from", "join_to", "Joiner date"],
+              ] as const
+            ).map(([fromKey, toKey, label]) => (
+              <div key={fromKey} className="min-w-[11rem]">
+                <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">{label}</Text>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="date"
+                    className="w-full rounded-md border border-tremor-border bg-white px-1.5 py-1.5 text-[11px] text-tremor-content-strong"
+                    value={pipelineFilters[fromKey]}
+                    onChange={(e) => setPipelineFilters((prev) => ({ ...prev, [fromKey]: e.target.value }))}
+                    onBlur={() => void load()}
+                  />
+                  <span className="text-[10px] text-tremor-content-subtle">–</span>
+                  <input
+                    type="date"
+                    className="w-full rounded-md border border-tremor-border bg-white px-1.5 py-1.5 text-[11px] text-tremor-content-strong"
+                    value={pipelineFilters[toKey]}
+                    onChange={(e) => setPipelineFilters((prev) => ({ ...prev, [toKey]: e.target.value }))}
+                    onBlur={() => void load()}
+                  />
+                </div>
+              </div>
+            ))}
+            {Object.values(pipelineFilters).some((v) => v.trim()) ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="light"
+                onClick={() => {
+                  const cleared = {
+                    pipeline_division: "",
+                    pipeline_sbg: "",
+                    pipeline_sbu: "",
+                    pipeline_bhr: "",
+                    pipeline_band: "",
+                    req_created_from: "",
+                    req_created_to: "",
+                    offer_from: "",
+                    offer_to: "",
+                    join_from: "",
+                    join_to: "",
+                  };
+                  setPipelineFilters(cleared);
+                  void load({ pipeline_filters: cleared });
+                }}
+              >
+                Reset filters
+              </Button>
+            ) : null}
+          </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Error */}

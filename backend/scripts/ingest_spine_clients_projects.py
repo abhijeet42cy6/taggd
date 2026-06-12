@@ -73,6 +73,18 @@ def _norm_name(s: str) -> str:
     return " ".join(s.strip().split()).lower()
 
 
+def _strip_geo_sbu_if_matches_subregion(
+    hierarchy_tag_sbu: Any,
+    sub_region: Any,
+) -> None | str:
+    """Drop hierarchy_tag_sbu when it duplicates geographic sub_region."""
+    sbu = _str_cell(hierarchy_tag_sbu)
+    sub = _str_cell(sub_region)
+    if sbu and sub and sbu.lower() == sub.lower():
+        return None
+    return sbu
+
+
 def _coerce_dt(val: Any) -> datetime | None:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return None
@@ -272,6 +284,12 @@ def ingest_spine_clients_projects(
         if "system_created_at" not in c_kw:
             c_kw["system_created_at"] = now
 
+        paired_sub = _str_cell(p_row.get("sub_region"))
+        if "hierarchy_tag_sbu" in c_kw:
+            c_kw["hierarchy_tag_sbu"] = _strip_geo_sbu_if_matches_subregion(
+                c_kw.get("hierarchy_tag_sbu"), paired_sub
+            )
+
         if client is None:
             if dry_run:
                 stats["clients_created"] += 1
@@ -328,6 +346,11 @@ def ingest_spine_clients_projects(
         p_kw["system_updated_at"] = now
         if "system_created_at" not in p_kw:
             p_kw["system_created_at"] = now
+
+        if "hierarchy_tag_sbu" in p_kw or paired_sub:
+            p_kw["hierarchy_tag_sbu"] = _strip_geo_sbu_if_matches_subregion(
+                p_kw.get("hierarchy_tag_sbu"), p_kw.get("sub_region") or paired_sub
+            )
 
         if "project_head_user_id" in p_kw:
             p_kw["project_head_user_id"] = _valid_user_id(db, p_kw.get("project_head_user_id"))

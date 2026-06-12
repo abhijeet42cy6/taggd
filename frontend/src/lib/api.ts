@@ -1188,6 +1188,7 @@ export type BlockType =
   | "pipeline_activity_chart"
   | "pipeline_ageing_chart"
   | "pipeline_mix_charts"
+  | "pipeline_analytics_panel"
   | "engagements_table"
   | "finance_strip";
 
@@ -1284,6 +1285,7 @@ export type ClientDashboardSummary = {
   req_by_project: Record<string, number>;
   pipeline_metrics: ClientPipelineMetrics;
   pipeline_by_project: Record<string, ClientPipelineMetrics>;
+  pipeline_filter_options?: import("@/lib/client-pipeline-metrics").PipelineFilterOptions;
   is_client_user: boolean;
   can_edit_config: boolean;
 };
@@ -2264,6 +2266,17 @@ export const queries = {
     pipeline_period?: string;
     pipeline_granularity?: string;
     pipeline_compare?: string;
+    pipeline_division?: string;
+    pipeline_sbg?: string;
+    pipeline_sbu?: string;
+    pipeline_bhr?: string;
+    pipeline_band?: string;
+    req_created_from?: string;
+    req_created_to?: string;
+    offer_from?: string;
+    offer_to?: string;
+    join_from?: string;
+    join_to?: string;
   }) => {
     const qs = new URLSearchParams();
     if (params?.client_id != null) qs.set("client_id", String(params.client_id));
@@ -2272,6 +2285,14 @@ export const queries = {
     if (params?.pipeline_period?.trim()) qs.set("pipeline_period", params.pipeline_period.trim());
     if (params?.pipeline_granularity?.trim()) qs.set("pipeline_granularity", params.pipeline_granularity.trim());
     if (params?.pipeline_compare?.trim()) qs.set("pipeline_compare", params.pipeline_compare.trim());
+    const pipelineKeys = [
+      "pipeline_division", "pipeline_sbg", "pipeline_sbu", "pipeline_bhr", "pipeline_band",
+      "req_created_from", "req_created_to", "offer_from", "offer_to", "join_from", "join_to",
+    ] as const;
+    for (const k of pipelineKeys) {
+      const v = params?.[k]?.trim();
+      if (v) qs.set(k, v);
+    }
     const q = qs.toString();
     return cachedGet<ClientDashboardSummary>(`client-dashboard/summary${q ? `?${q}` : ""}`, () =>
       api.get(`/client-dashboard/summary${q ? `?${q}` : ""}`).then((r) => r.data)

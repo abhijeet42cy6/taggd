@@ -15,6 +15,9 @@ export type PipelineBucket = {
   ytj: number;
   joiners: number;
   offer_drops: number;
+  cancelled: number;
+  hold: number;
+  total_demand: number;
   avg_ageing_days: number | null;
   median_ageing_days: number | null;
   avg_tto_days: number | null;
@@ -24,16 +27,81 @@ export type PipelineBucket = {
   diversity_pct: number | null;
   rpo_mix_pct: number | null;
   offer_drop_pct: number | null;
+  oar_pct: number | null;
+  jcr_pct: number | null;
   coverage: PipelineCoverage;
 };
 
 export type PipelineSeriesRow = {
   month: string;
   opens_created: number;
+  open_wip: number;
+  cancelled: number;
+  hold: number;
   offered: number;
   joiners: number;
   offer_drops: number;
   ytj_end: number;
+  avg_tto_days: number | null;
+  avg_ttf_days: number | null;
+  female_hire_pct: number | null;
+  aged_over_30: number;
+  oar_pct: number | null;
+  odr_pct: number | null;
+};
+
+export type PipelineQuarterRow = {
+  quarter: string;
+  opens_created: number;
+  open_wip: number;
+  cancelled: number;
+  hold: number;
+  offered: number;
+  joiners: number;
+  offer_drops: number;
+  aged_over_30: number;
+  avg_tto_days: number | null;
+  avg_ttf_days: number | null;
+  female_hire_pct: number | null;
+  oar_pct: number | null;
+  odr_pct: number | null;
+};
+
+export type AccountAgeingRow = {
+  account: string;
+  open: number;
+  b_0_15: number;
+  b_16_30: number;
+  b_31_45: number;
+  b_45_plus: number;
+  oldest_days: number;
+  risk: "low" | "medium" | "high";
+};
+
+export type FunnelQuarterRow = {
+  quarter: string;
+  sourced: number;
+  screened: number;
+  interviewed: number;
+  offered: number;
+  joined: number;
+  req_count: number;
+};
+
+export type SourceEffectivenessRow = {
+  label: string;
+  offers: number;
+  joiners: number;
+  otj_pct: number | null;
+};
+
+export type PipelineFilterOptions = {
+  business_unit: string[];
+  division: string[];
+  sbg: string[];
+  sbu: string[];
+  bhr: string[];
+  band: string[];
 };
 
 export type ClientPipelineMetrics = {
@@ -49,13 +117,22 @@ export type ClientPipelineMetrics = {
   granularity: string;
   compare: string;
   ageing_buckets: Array<{ bucket: string; count: number }>;
+  fine_ageing_buckets: Array<{ bucket: string; count: number }>;
+  account_ageing_rows: AccountAgeingRow[];
   diversity_breakdown: Array<{ label: string; count: number }>;
   source_breakdown: Array<{ label: string; count: number }>;
+  source_breakdown_offers: Array<{ label: string; count: number }>;
+  source_breakdown_pipeline: Array<{ label: string; count: number }>;
+  source_effectiveness: SourceEffectivenessRow[];
+  source_monthly: Array<{ month: string; joiners: Record<string, number>; offers: Record<string, number> }>;
+  funnel_by_quarter: FunnelQuarterRow[];
   series: PipelineSeriesRow[];
+  quarterly_series: PipelineQuarterRow[];
   period_month_options: string[];
+  updated_at?: string;
 };
 
-const BUCKET_KEYS = ["wip", "open", "offered", "ytj", "joiners", "offer_drops"] as const;
+const BUCKET_KEYS = ["wip", "open", "offered", "ytj", "joiners", "offer_drops", "cancelled", "hold", "total_demand"] as const;
 const COV_KEYS = ["joiners", "with_diversity", "with_source", "with_offer_date", "with_creation_date"] as const;
 
 function emptyBucket(): PipelineBucket {
@@ -66,6 +143,9 @@ function emptyBucket(): PipelineBucket {
     ytj: 0,
     joiners: 0,
     offer_drops: 0,
+    cancelled: 0,
+    hold: 0,
+    total_demand: 0,
     avg_ageing_days: null,
     median_ageing_days: null,
     avg_tto_days: null,
@@ -75,6 +155,8 @@ function emptyBucket(): PipelineBucket {
     diversity_pct: null,
     rpo_mix_pct: null,
     offer_drop_pct: null,
+    oar_pct: null,
+    jcr_pct: null,
     coverage: {
       joiners: 0,
       with_diversity: 0,
@@ -139,6 +221,7 @@ function mergeBucketKey(chunks: ClientPipelineMetrics[], key: "snapshot" | "peri
   }
   if (merged.offered > 0) {
     merged.offer_drop_pct = Math.round((merged.offer_drops / merged.offered) * 1000) / 10;
+    merged.oar_pct = Math.round((merged.joiners / merged.offered) * 1000) / 10;
   }
 
   return merged;
@@ -163,36 +246,45 @@ export function mergePipelineForProjects(
   }
 
   const ageingMap: Record<string, number> = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
+  const fineMap: Record<string, number> = { "0-15": 0, "16-30": 0, "31-45": 0, "45+": 0 };
   const divMap: Record<string, number> = {};
   const srcMap: Record<string, number> = {};
   const seriesMap: Record<string, PipelineSeriesRow> = {};
+  const accountMap: Record<string, AccountAgeingRow> = {};
   const monthOpts = new Set<string>();
 
   for (const ch of chunks) {
-    for (const b of ch.ageing_buckets) {
-      ageingMap[b.bucket] = (ageingMap[b.bucket] ?? 0) + b.count;
-    }
-    for (const d of ch.diversity_breakdown) {
-      divMap[d.label] = (divMap[d.label] ?? 0) + d.count;
-    }
-    for (const s of ch.source_breakdown) {
-      srcMap[s.label] = (srcMap[s.label] ?? 0) + s.count;
+    for (const b of ch.ageing_buckets) ageingMap[b.bucket] = (ageingMap[b.bucket] ?? 0) + b.count;
+    for (const b of ch.fine_ageing_buckets ?? []) fineMap[b.bucket] = (fineMap[b.bucket] ?? 0) + b.count;
+    for (const d of ch.diversity_breakdown) divMap[d.label] = (divMap[d.label] ?? 0) + d.count;
+    for (const s of ch.source_breakdown) srcMap[s.label] = (srcMap[s.label] ?? 0) + s.count;
+    for (const ar of ch.account_ageing_rows ?? []) {
+      const ex = accountMap[ar.account];
+      if (!ex) accountMap[ar.account] = { ...ar };
+      else {
+        ex.open += ar.open;
+        ex.b_0_15 += ar.b_0_15;
+        ex.b_16_30 += ar.b_16_30;
+        ex.b_31_45 += ar.b_31_45;
+        ex.b_45_plus += ar.b_45_plus;
+        ex.oldest_days = Math.max(ex.oldest_days, ar.oldest_days);
+      }
     }
     for (const row of ch.series) {
-      if (!seriesMap[row.month]) {
-        seriesMap[row.month] = { month: row.month, opens_created: 0, offered: 0, joiners: 0, offer_drops: 0, ytj_end: 0 };
+      if (!seriesMap[row.month]) seriesMap[row.month] = { ...row };
+      else {
+        const acc = seriesMap[row.month];
+        for (const fk of ["opens_created", "open_wip", "cancelled", "hold", "offered", "joiners", "offer_drops", "ytj_end", "aged_over_30"] as const) {
+          acc[fk] += row[fk] ?? 0;
+        }
       }
-      const acc = seriesMap[row.month];
-      acc.opens_created += row.opens_created;
-      acc.offered += row.offered;
-      acc.joiners += row.joiners;
-      acc.offer_drops += row.offer_drops;
-      acc.ytj_end += row.ytj_end;
     }
     for (const m of ch.period_month_options) monthOpts.add(m);
   }
 
   const meta = chunks[0];
+  const series = Object.values(seriesMap).sort((a, b) => a.month.localeCompare(b.month));
+
   return {
     snapshot,
     period,
@@ -206,13 +298,82 @@ export function mergePipelineForProjects(
     granularity: meta.granularity,
     compare: meta.compare,
     ageing_buckets: Object.entries(ageingMap).map(([bucket, count]) => ({ bucket, count })),
+    fine_ageing_buckets: Object.entries(fineMap).map(([bucket, count]) => ({ bucket, count })),
+    account_ageing_rows: Object.values(accountMap).sort((a, b) => b.oldest_days - a.oldest_days),
     diversity_breakdown: Object.entries(divMap).map(([label, count]) => ({ label, count })),
     source_breakdown: Object.entries(srcMap)
       .map(([label, count]) => ({ label, count }))
       .sort((a, b) => b.count - a.count),
-    series: Object.values(seriesMap).sort((a, b) => a.month.localeCompare(b.month)),
+    source_breakdown_offers: [],
+    source_breakdown_pipeline: [],
+    source_effectiveness: [],
+    source_monthly: [],
+    funnel_by_quarter: [],
+    series,
+    quarterly_series: aggregateQuarterly(series),
     period_month_options: [...monthOpts].sort().reverse(),
+    updated_at: meta.updated_at,
   };
+}
+
+export function aggregateQuarterly(monthly: PipelineSeriesRow[]): PipelineQuarterRow[] {
+  const buckets: Record<string, PipelineQuarterRow & { _tto: number[]; _ttf: number[]; _div: number[] }> = {};
+  for (const row of monthly) {
+    const y = parseInt(row.month.slice(0, 4), 10);
+    const m = parseInt(row.month.slice(5, 7), 10);
+    const q = Math.ceil(m / 3);
+    const key = `${y}-Q${q}`;
+    const acc = buckets[key] ?? {
+      quarter: key,
+      opens_created: 0,
+      open_wip: 0,
+      cancelled: 0,
+      hold: 0,
+      offered: 0,
+      joiners: 0,
+      offer_drops: 0,
+      aged_over_30: 0,
+      avg_tto_days: null,
+      avg_ttf_days: null,
+      female_hire_pct: null,
+      oar_pct: null,
+      odr_pct: null,
+      _tto: [],
+      _ttf: [],
+      _div: [],
+    };
+    for (const fk of ["opens_created", "open_wip", "cancelled", "hold", "offered", "joiners", "offer_drops", "aged_over_30"] as const) {
+      acc[fk] += row[fk] ?? 0;
+    }
+    if (row.avg_tto_days != null) acc._tto.push(row.avg_tto_days);
+    if (row.avg_ttf_days != null) acc._ttf.push(row.avg_ttf_days);
+    if (row.female_hire_pct != null) acc._div.push(row.female_hire_pct);
+    buckets[key] = acc;
+  }
+  return Object.keys(buckets)
+    .sort()
+    .map((key) => {
+      const acc = buckets[key];
+      const offers = acc.offered;
+      const joiners = acc.joiners;
+      const drops = acc.offer_drops;
+      return {
+        quarter: acc.quarter,
+        opens_created: acc.opens_created,
+        open_wip: acc.open_wip,
+        cancelled: acc.cancelled,
+        hold: acc.hold,
+        offered: offers,
+        joiners,
+        offer_drops: drops,
+        aged_over_30: acc.aged_over_30,
+        avg_tto_days: acc._tto.length ? Math.round((acc._tto.reduce((a, c) => a + c, 0) / acc._tto.length) * 10) / 10 : null,
+        avg_ttf_days: acc._ttf.length ? Math.round((acc._ttf.reduce((a, c) => a + c, 0) / acc._ttf.length) * 10) / 10 : null,
+        female_hire_pct: acc._div.length ? Math.round((acc._div.reduce((a, c) => a + c, 0) / acc._div.length) * 10) / 10 : null,
+        oar_pct: offers > 0 ? Math.round((joiners / offers) * 1000) / 10 : null,
+        odr_pct: offers > 0 ? Math.round((drops / offers) * 1000) / 10 : null,
+      };
+    });
 }
 
 export function formatPipelineDelta(
@@ -225,19 +386,18 @@ export function formatPipelineDelta(
   return { label: `${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(1)}% ${cmp}`, cls };
 }
 
-export function ageingBucketsForChart(buckets: Array<{ bucket: string; count: number }>) {
-  const colors: Record<string, string> = {
-    "0-30": "var(--green)",
-    "31-60": "var(--amber)",
-    "61-90": "var(--red)",
-    "90+": "var(--red)",
-  };
-  const labels: Record<string, string> = {
-    "0-30": "0–30 days",
-    "31-60": "31–60 days",
-    "61-90": "61–90 days",
-    "90+": "90+ days",
-  };
+export function formatDeltaPts(delta: number | null | undefined, suffix = "pts"): string | undefined {
+  if (delta == null || Number.isNaN(delta)) return undefined;
+  return `${delta >= 0 ? "+" : ""}${delta}${suffix.startsWith(" ") ? suffix : ` ${suffix}`}`;
+}
+
+export function ageingBucketsForChart(buckets: Array<{ bucket: string; count: number }>, fine = false) {
+  const colors: Record<string, string> = fine
+    ? { "0-15": "#15803d", "16-30": "#0f766e", "31-45": "#f59e0b", "45+": "#b91c1c" }
+    : { "0-30": "var(--green)", "31-60": "var(--amber)", "61-90": "var(--red)", "90+": "var(--red)" };
+  const labels: Record<string, string> = fine
+    ? { "0-15": "0–15 days", "16-30": "16–30 days", "31-45": "31–45 days", "45+": ">45 days" }
+    : { "0-30": "0–30 days", "31-60": "31–60 days", "61-90": "61–90 days", "90+": "90+ days" };
   const max = Math.max(...buckets.map((b) => b.count), 1);
   return buckets.map((b) => ({
     label: labels[b.bucket] ?? b.bucket,
@@ -245,4 +405,14 @@ export function ageingBucketsForChart(buckets: Array<{ bucket: string; count: nu
     max,
     color: colors[b.bucket] ?? "var(--accent)",
   }));
+}
+
+export function monthLabel(iso: string): string {
+  const d = new Date(`${iso.slice(0, 7)}-01T00:00:00`);
+  return d.toLocaleDateString("en-US", { month: "short" });
+}
+
+export function quarterLabel(iso: string): string {
+  const q = iso.split("-Q")[1];
+  return `Q${q}`;
 }

@@ -30,6 +30,22 @@ const VL_TABS: { icon: string; label: string }[] = [
 ];
 
 const FY_NONE = "__fy_none__";
+const FY_COMPARE_NONE = "__fy_compare_none__";
+
+function normalizeVendorKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function priorFyLabel(current: string, options: string[]): string | null {
+  const idx = options.indexOf(current);
+  if (idx >= 0 && idx + 1 < options.length) return options[idx + 1];
+  return null;
+}
+
+function pctDelta(cur: number, prev: number): number | null {
+  if (prev <= 0) return null;
+  return Math.round(((cur - prev) / prev) * 1000) / 10;
+}
 
 function VlSection({
   icon,
@@ -126,6 +142,7 @@ export function VendorLicenses() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [fyFilter, setFyFilter] = useState<string>("all");
+  const [compareFyFilter, setCompareFyFilter] = useState<string>(FY_COMPARE_NONE);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("create");
@@ -196,10 +213,29 @@ export function VendorLicenses() {
     if (drawerOpen) setSheetTab(0);
   }, [drawerOpen, drawerMode]);
 
-  const totalCost = useMemo(
-    () => rows.reduce((s, r) => s + (r.cost_inr != null && Number.isFinite(r.cost_inr) ? r.cost_inr : 0), 0),
-    [rows],
-  );
+  const totalCost = useMemo(() => {
+    const base =
+      fyFilter === "all"
+        ? rows
+        : rows.filter((r) => {
+            const label = (r.fiscal_year_label || "").trim();
+            if (fyFilter === FY_NONE) return !label;
+            return label === fyFilter;
+          });
+    return base.reduce((s, r) => s + (r.cost_inr != null && Number.isFinite(r.cost_inr) ? r.cost_inr : 0), 0);
+  }, [rows, fyFilter]);
+
+  const compareTotalCost = useMemo(() => {
+    if (compareFyFilter === FY_COMPARE_NONE || compareFyFilter === FY_NONE) return 0;
+    return rows
+      .filter((r) => (r.fiscal_year_label || "").trim() === compareFyFilter)
+      .reduce((s, r) => s + (r.cost_inr != null && Number.isFinite(r.cost_inr) ? r.cost_inr : 0), 0);
+  }, [rows, compareFyFilter]);
+
+  const costYoY = useMemo(() => {
+    if (compareFyFilter === FY_COMPARE_NONE || fyFilter === "all" || fyFilter === FY_NONE) return null;
+    return pctDelta(totalCost, compareTotalCost);
+  }, [compareFyFilter, fyFilter, totalCost, compareTotalCost]);
 
   const fyCount = useMemo(() => new Set(rows.map((r) => r.fiscal_year_label).filter(Boolean)).size, [rows]);
 
@@ -209,10 +245,15 @@ export function VendorLicenses() {
       const v = (r.fiscal_year_label || "").trim();
       if (v) s.add(v);
     }
-    return Array.from(s).sort((a, b) => a.localeCompare(b));
+    return Array.from(s).sort((a, b) => b.localeCompare(a));
   }, [rows]);
 
   const hasEmptyFy = useMemo(() => rows.some((r) => !(r.fiscal_year_label || "").trim()), [rows]);
+
+  const compareYearOptions = useMemo(() => {
+    if (fyFilter === "all" || fyFilter === FY_NONE) return distinctFiscalYears;
+    return distinctFiscalYears.filter((y) => y !== fyFilter);
+  }, [distinctFiscalYears, fyFilter]);
 
   const filtered = useMemo(() => {
     let list = rows;
@@ -231,11 +272,57 @@ export function VendorLicenses() {
     });
   }, [rows, search, fyFilter]);
 
-  const filtersActive = fyFilter !== "all" || search.trim() !== "";
+  const yoyByVendor = useMemo(() => {
+    if (compareFyFilter === FY_COMPARE_NONE || fyFilter === "all" || fyFilter === FY_NONE) {
+      return new Map<string, { priorCost: number; delta: number | null; deltaPct: number | null }>();
+    }
+    const priorRows = rows.filter((r) => (r.fiscal_year_label || "").trim() === compareFyFilter);
+    const priorByVendor = new Map<string, number>();
+    for (const r of priorRows) {
+      const key = normalizeVendorKey(r.vendor_name);
+      const cost = r.cost_inr != null && Number.isFinite(r.cost_inr) ? r.cost_inr : 0;
+      priorByVendor.set(key, (priorByVendor.get(key) ?? 0) + cost);
+    }
+    const out = new Map<string, { priorCost: number; delta: number | null; deltaPct: number | null }>();
+    for (const r of filtered) {
+      const key = normalizeVendorKey(r.vendor_name);
+      if (out.has(key)) continue;
+      const cur = r.cost_inr != null && Number.isFinite(r.cost_inr) ? r.cost_inr : 0;
+      const prior = priorByVendor.get(key) ?? 0;
+      out.set(key, {
+        priorCost: prior,
+        delta: prior > 0 || cur > 0 ? cur - prior : null,
+        deltaPct: pctDelta(cur, prior),
+      });
+    }
+    return out;
+  }, [compareFyFilter, fyFilter, rows, filtered]);
+
+  const showYoY = compareFyFilter !== FY_COMPARE_NONE && fyFilter !== "all" && fyFilter !== FY_NONE;
+
+  const filtersActive =
+    fyFilter !== "all" || compareFyFilter !== FY_COMPARE_NONE || search.trim() !== "";
 
   function clearFilters() {
     setSearch("");
     setFyFilter("all");
+    setCompareFyFilter(FY_COMPARE_NONE);
+  }
+
+  function onPrimaryFyChange(next: string) {
+    setFyFilter(next);
+    if (next === "all" || next === FY_NONE) {
+      setCompareFyFilter(FY_COMPARE_NONE);
+      return;
+    }
+    if (compareFyFilter !== FY_COMPARE_NONE && compareFyFilter === next) {
+      setCompareFyFilter(FY_COMPARE_NONE);
+      return;
+    }
+    const prior = priorFyLabel(next, distinctFiscalYears);
+    if (prior && compareFyFilter === FY_COMPARE_NONE) {
+      setCompareFyFilter(prior);
+    }
   }
 
   function resetForm() {
@@ -542,7 +629,13 @@ export function VendorLicenses() {
             label="Σ License cost (INR)"
             value={totalCost > 0 ? formatCurrency(totalCost) : "—"}
             accent="green"
-            subtext="Sum of row amounts"
+            subtext={
+              showYoY && compareTotalCost > 0
+                ? costYoY != null
+                  ? `vs ${compareFyFilter}: ${costYoY >= 0 ? "▲" : "▼"} ${Math.abs(costYoY).toFixed(1)}% YoY`
+                  : `vs ${compareFyFilter}: ${formatCurrency(compareTotalCost)}`
+                : "Sum of row amounts"
+            }
           />
           <PlatformKpi label="FY labels in use" value={fyCount} accent="teal" subtext="Distinct fiscal_year_label" />
         </div>
@@ -566,12 +659,12 @@ export function VendorLicenses() {
             style={{ flex: "1 1 220px", maxWidth: 400, minWidth: 180 }}
           />
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--text-muted)" }}>
-            <span style={{ fontFamily: "var(--mono)", whiteSpace: "nowrap" }}>Financial year</span>
+            <span style={{ fontFamily: "var(--mono)", whiteSpace: "nowrap" }}>Year</span>
             <select
               className="platform-search"
               value={fyFilter}
-              onChange={(e) => setFyFilter(e.target.value)}
-              style={{ width: "auto", minWidth: 148, maxWidth: 220, padding: "8px 10px", cursor: "pointer" }}
+              onChange={(e) => onPrimaryFyChange(e.target.value)}
+              style={{ width: "auto", minWidth: 132, maxWidth: 200, padding: "8px 10px", cursor: "pointer" }}
             >
               <option value="all">All years</option>
               {hasEmptyFy ? <option value={FY_NONE}>No FY set</option> : null}
@@ -582,6 +675,46 @@ export function VendorLicenses() {
               ))}
             </select>
           </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--mono)", whiteSpace: "nowrap" }}>Compare year</span>
+            <select
+              className="platform-search"
+              value={compareFyFilter}
+              onChange={(e) => setCompareFyFilter(e.target.value)}
+              disabled={fyFilter === "all" || fyFilter === FY_NONE}
+              style={{
+                width: "auto",
+                minWidth: 132,
+                maxWidth: 200,
+                padding: "8px 10px",
+                cursor: fyFilter === "all" || fyFilter === FY_NONE ? "not-allowed" : "pointer",
+                opacity: fyFilter === "all" || fyFilter === FY_NONE ? 0.55 : 1,
+              }}
+            >
+              <option value={FY_COMPARE_NONE}>— None —</option>
+              {compareYearOptions.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+          {showYoY ? (
+            <span
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--mono)",
+                color: costYoY != null && costYoY > 0 ? "var(--red)" : costYoY != null && costYoY < 0 ? "var(--green)" : "var(--text-muted)",
+                padding: "4px 8px",
+                borderRadius: 6,
+                background: "var(--bg2)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              YoY cost {formatLargeCurrency(totalCost)} vs {formatLargeCurrency(compareTotalCost)}
+              {costYoY != null ? ` (${costYoY >= 0 ? "+" : ""}${costYoY.toFixed(1)}%)` : ""}
+            </span>
+          ) : null}
           {filtersActive ? (
             <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--text-muted)" }}>
               {filtered.length} of {rows.length} shown
@@ -613,6 +746,7 @@ export function VendorLicenses() {
                 <th>End</th>
                 <th>Mo</th>
                 <th>Cost (INR)</th>
+                {showYoY ? <th>YoY vs {compareFyFilter}</th> : null}
                 <th>Primary contact</th>
                 <th>FY</th>
                 <th />
@@ -621,7 +755,7 @@ export function VendorLicenses() {
             <tbody>
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={14} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
+                  <td colSpan={showYoY ? 15 : 14} style={{ color: "var(--text-muted)", padding: 24, textAlign: "center" }}>
                     {rows.length === 0
                       ? "No rows yet. Add vendors from your JOB BOARD / VENDOR LICENSE TRACKER."
                       : filtersActive
@@ -655,6 +789,23 @@ export function VendorLicenses() {
                   <td style={{ fontFamily: "var(--mono)", fontSize: 10 }}>{r.end_date?.slice(0, 10) ?? "—"}</td>
                   <td style={{ fontFamily: "var(--mono)", fontSize: 10 }}>{r.contract_duration_months ?? "—"}</td>
                   <td style={{ fontSize: 11 }}>{r.cost_inr != null ? formatCurrency(r.cost_inr) : "—"}</td>
+                  {showYoY ? (
+                    <td style={{ fontSize: 10, fontFamily: "var(--mono)", whiteSpace: "nowrap" }}>
+                      {(() => {
+                        const yoy = yoyByVendor.get(normalizeVendorKey(r.vendor_name));
+                        if (!yoy || yoy.delta == null) return "—";
+                        const color =
+                          yoy.delta > 0 ? "var(--red)" : yoy.delta < 0 ? "var(--green)" : "var(--text-muted)";
+                        return (
+                          <span style={{ color }} title={`Prior: ${formatCurrency(yoy.priorCost)}`}>
+                            {yoy.delta >= 0 ? "+" : ""}
+                            {formatLargeCurrency(yoy.delta)}
+                            {yoy.deltaPct != null ? ` (${yoy.deltaPct >= 0 ? "+" : ""}${yoy.deltaPct}%)` : ""}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                  ) : null}
                   <td style={{ fontSize: 10, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.primary_person_name ?? ""}>
                     {r.primary_person_name ?? "—"}
                   </td>

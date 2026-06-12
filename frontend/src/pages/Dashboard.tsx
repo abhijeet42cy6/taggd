@@ -587,8 +587,8 @@ export const Dashboard = () => {
                 <tr>
                   <th>Metric</th>
                   <th>Budget</th>
-                  <th>Forecast</th>
                   <th>Actual</th>
+                  <th>Forecast</th>
                   <th>Var vs Budget</th>
                   <th>Var vs Fcst</th>
                   <th>{compareFyLabel}</th>
@@ -605,8 +605,8 @@ export const Dashboard = () => {
                     <tr key={row.metric}>
                       <td>{row.metric}</td>
                       <td>{row.budget}</td>
-                      <td>{row.forecast}</td>
                       <td style={{ fontWeight: 600, color: "var(--text)" }}>{row.actual}</td>
+                      <td>{row.forecast}</td>
                       <td className={varBudgetPos ? "exec-summary-table__var-pos" : varBudgetNeg ? "exec-summary-table__var-neg" : ""}>
                         {row.varBudget}
                       </td>
