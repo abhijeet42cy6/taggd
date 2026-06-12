@@ -6,6 +6,13 @@ import {
   candidateNameSelectOptions,
   readDiversity,
 } from "@/lib/requisition-form-options";
+import {
+  REQ_ORG_FIELD_LABELS,
+  mergeRpoPatches,
+  orgFieldsToRpoPatch,
+  readReqOrgFields,
+  type ReqOrgFormFields,
+} from "@/lib/requisition-org-fields";
 import { StatusTag } from "@/components/platform/PlatformBlocks";
 import { cn, displayRecordReqId, formatCurrency, formatOfferedCtc, normalizeOfferedCtcInr } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -51,7 +58,7 @@ type ReqEditForm = {
   selection_date_req: string;
   diversity: string;
   additional_json: string;
-};
+} & ReqOrgFormFields;
 
 function recordDateIso(r: RecordRow, key: keyof RecordRpoPatch): string {
   const v = r[key];
@@ -83,6 +90,7 @@ function buildEditForm(r: RecordRow): ReqEditForm {
     selection_date_req: recordDateIso(r, "selection_date_req"),
     diversity: readDiversity(r.additional_attributes),
     additional_json: JSON.stringify(r.additional_attributes ?? {}, null, 2),
+    ...readReqOrgFields(r),
   };
 }
 
@@ -146,7 +154,7 @@ export function RequisitionRecordDrawer({ record, onClose, onSaved, onDeleted }:
     setEditForm(buildEditForm(record));
     setEditing(true);
     setSaveError(null);
-    setTab(2);
+    setTab(1);
   }, [record]);
 
   const discardEdit = useCallback(() => {
@@ -199,7 +207,7 @@ export function RequisitionRecordDrawer({ record, onClose, onSaved, onDeleted }:
       joining_date: editForm.joining_date.trim() || null,
       additional_attributes: parsed,
     };
-    const rpo = pipelineDatesToRpo(editForm);
+    const rpo = mergeRpoPatches(pipelineDatesToRpo(editForm), orgFieldsToRpoPatch(editForm));
     if (rpo) body.rpo = rpo;
     try {
       const updated = await queries.patchRecord(record.id, body);
@@ -481,6 +489,9 @@ export function RequisitionRecordDrawer({ record, onClose, onSaved, onDeleted }:
                         {editTextRow("Hiring manager", "hiring_manager")}
                         {editTextRow("Department", "department")}
                         {editTextRow("Location", "location")}
+                        {REQ_ORG_FIELD_LABELS.map(({ key, label }) =>
+                          editTextRow(label, key),
+                        )}
                       </>
                     ) : (
                       <>
@@ -490,6 +501,9 @@ export function RequisitionRecordDrawer({ record, onClose, onSaved, onDeleted }:
                         {readRow("Hiring manager", record.hiring_manager)}
                         {readRow("Department", record.department)}
                         {readRow("Location", record.location)}
+                        {REQ_ORG_FIELD_LABELS.map(({ key, label }) =>
+                          readRow(label, readReqOrgFields(record)[key] || "—"),
+                        )}
                       </>
                     ),
                   )}

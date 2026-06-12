@@ -10,7 +10,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, or_, not_
+from sqlalchemy import Integer, and_, case, func, literal, not_, or_
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
@@ -2667,16 +2667,65 @@ def get_drilldown_stats(
     )
 
 
+def _scoped_requisition_status_breakdown(db: Session, user: User) -> dict[str, int]:
+    """Global-status counts for the caller's record scope (same buckets as /stats/global/monitor)."""
+    status_rows = (
+        apply_record_access_scope(db.query(Record.global_status, func.count(Record.id)), user, db)
+        .group_by(Record.global_status)
+        .all()
+    )
+    known = {"CLOSED", "ACTIVE", "PIPELINE", "ON HOLD"}
+    status_counts = {"CLOSED": 0, "ACTIVE": 0, "PIPELINE": 0, "ON HOLD": 0, "UNPROCESSED": 0}
+    for status, cnt in status_rows:
+        if status in known:
+            status_counts[status] += int(cnt)
+        else:
+            status_counts["UNPROCESSED"] += int(cnt)
+    return status_counts
+
+
+def _scoped_requisition_ageing_buckets(db: Session, user: User) -> dict[str, int]:
+    """Open-pipeline ageing buckets for scoped records (SQL aggregate — no full-table Python scan)."""
+    from backend.db.engine import is_postgres_url
+
+    if is_postgres_url():
+        age_days = func.greatest(
+            literal(0),
+            func.date(func.timezone("UTC", func.now())) - func.date(Record.creation_date),
+        )
+    else:
+        age_days = func.cast(func.julianday("now") - func.julianday(Record.creation_date), Integer)
+
+    gs_upper = func.upper(func.trim(func.coalesce(Record.global_status, "")))
+    age_q = apply_record_access_scope(db.query(Record.id), user, db).filter(
+        Record.creation_date.isnot(None),
+        gs_upper != "CLOSED",
+    )
+    b0, b1, b2, b3 = age_q.with_entities(
+        func.sum(case((age_days <= 30, 1), else_=0)),
+        func.sum(case((and_(age_days > 30, age_days <= 60), 1), else_=0)),
+        func.sum(case((and_(age_days > 60, age_days <= 90), 1), else_=0)),
+        func.sum(case((age_days > 90, 1), else_=0)),
+    ).one()
+    return {
+        "0-30 days": int(b0 or 0),
+        "31-60 days": int(b1 or 0),
+        "61-90 days": int(b2 or 0),
+        "90+ days": int(b3 or 0),
+    }
+
+
 @app.get("/stats/requisitions/kpis")
 def get_requisition_kpis(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """
-    Portfolio requisition counts from tracker `records` (aligned with hiring pipeline semantics).
+    Requisition counts from tracker `records`, scoped to the caller's project access.
     - open_req: ACTIVE rows without an offer-stage signal in raw status
     - offer_req: PIPELINE, or any non-closed row whose status text suggests Offer/Offered
     - joiners: CLOSED (normalized joiners / closed hires)
+    - status_breakdown / ageing_buckets: scoped pipeline charts for the Requisitions page
     """
     from fastapi.responses import JSONResponse
 
@@ -2703,6 +2752,8 @@ def get_requisition_kpis(
         or 0
     )
     total_records = _rq().scalar() or 0
+    status_breakdown = _scoped_requisition_status_breakdown(db, user)
+    ageing_buckets = _scoped_requisition_ageing_buckets(db, user)
 
     return JSONResponse(
         content={
@@ -2710,6 +2761,8 @@ def get_requisition_kpis(
             "offer_req": int(offer_req),
             "joiners": int(joiners),
             "total_records": int(total_records),
+            "status_breakdown": status_breakdown,
+            "ageing_buckets": ageing_buckets,
         },
         headers={"Cache-Control": "private, max-age=30, stale-while-revalidate=60"},
     )

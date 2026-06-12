@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  ClipboardCheck,
   ClipboardList,
   Database,
   FileText,
@@ -90,6 +91,7 @@ import { IngestionCenter } from "./pages/IngestionCenter";
 import { PortfolioIntelligence } from "./pages/PortfolioIntelligence";
 import { Requisitions } from "./pages/Requisitions";
 import { Candidates } from "./pages/Candidates";
+import { OfferOnboarding } from "./pages/OfferOnboarding";
 import { CandidateStore } from "./pages/CandidateStore";
 import { SLAPerformance } from "./pages/SLAPerformance";
 import { ClientDashboard } from "./pages/ClientDashboard";
@@ -139,6 +141,7 @@ const NAV_PATH_ICONS: Record<string, LucideIcon> = {
   "/transitions": ArrowRightLeft,
   "/requisitions": ClipboardList,
   "/candidates": UserCircle,
+  "/offer-onboarding": ClipboardCheck,
   "/candidate-store": Archive,
   "/finance": Landmark,
   "/projections": Telescope,
@@ -173,6 +176,7 @@ const RECRUITER_NAV_GROUPS: NavGroup[] = [
       { label: "Tasks", path: "/tasks" },
       { label: "Requisitions", path: "/requisitions" },
       { label: "Candidates", path: "/candidates" },
+      { label: "Offer & onboarding", path: "/offer-onboarding" },
       { label: "Candidate store", path: "/candidate-store" },
       { label: "Meetings", path: "/meetings" },
     ],
@@ -232,6 +236,7 @@ const STAFF_MAIN_NAV_ACCORDIONS: MainNavAccordion[] = [
     items: [
       { label: "Requisitions", path: "/requisitions" },
       { label: "Candidates", path: "/candidates" },
+      { label: "Offer & onboarding", path: "/offer-onboarding" },
       { label: "Candidate store", path: "/candidate-store" },
       { label: "Meetings", path: "/meetings" },
       { label: "Clients", path: "/clients" },
@@ -665,6 +670,7 @@ function AppShell({ onOpenMissionVision }: { onOpenMissionVision: () => void }) 
               <Route path="/meetings" element={<Meetings />} />
               <Route path="/requisitions" element={<Requisitions />} />
               <Route path="/candidates" element={<Candidates />} />
+              <Route path="/offer-onboarding" element={<OfferOnboarding />} />
               <Route path="/candidate-store" element={<CandidateStore />} />
               <Route path="/finance" element={<FiscalPerformance />} />
               <Route path="/projections" element={<Projections />} />

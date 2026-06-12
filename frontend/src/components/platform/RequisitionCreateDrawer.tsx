@@ -6,6 +6,12 @@ import {
   DIVERSITY_OPTIONS,
   candidateNameSelectOptions,
 } from "@/lib/requisition-form-options";
+import {
+  REQ_ORG_FIELD_LABELS,
+  mergeRpoPatches,
+  orgFieldsToRpoPatch,
+  type ReqOrgFormFields,
+} from "@/lib/requisition-org-fields";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import "@/styles/new-contract-panel.css";
@@ -51,7 +57,7 @@ type CreateForm = {
   diversity: string;
   additional_json: string;
   source_joiner_type: string;
-};
+} & ReqOrgFormFields;
 
 function emptyForm(): CreateForm {
   return {
@@ -74,6 +80,12 @@ function emptyForm(): CreateForm {
     diversity: "",
     additional_json: "{}",
     source_joiner_type: "",
+    rpo_vertical: "",
+    rpo_division: "",
+    org_sbg: "",
+    rpo_bu_sbu: "",
+    rpo_business_hrbp: "",
+    rpo_grade_band: "",
   };
 }
 
@@ -336,7 +348,8 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
     setRpoDate("offered_accept_date", form.offered_accept_date);
     setRpoDate("req_cancelled_date", form.req_cancelled_date);
     setRpoDate("selection_date_req", form.selection_date_req);
-    if (Object.keys(rpo).length) body.rpo = rpo;
+    const mergedRpo = mergeRpoPatches(Object.keys(rpo).length ? rpo : undefined, orgFieldsToRpoPatch(form));
+    if (mergedRpo) body.rpo = mergedRpo;
 
     setCreating(true);
     setError(null);
@@ -747,6 +760,7 @@ export function RequisitionCreateDrawer({ open, onClose, projects, onCreated }: 
                         {propRow("Hiring manager", "hiring_manager")}
                         {propRow("Department", "department")}
                         {propRow("Location", "location")}
+                        {REQ_ORG_FIELD_LABELS.map(({ key, label }) => propRow(label, key))}
                       </>
                     ))}
                   </div>

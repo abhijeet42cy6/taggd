@@ -1284,6 +1284,80 @@
 .kv-key { color: var(--text3); font-family: 'DM Mono', monospace; font-size: 10.5px; }
 .kv-val { color: var(--text); font-weight: 500; }
 
+/* Account Info tab — readable labels (match .platform-nav-label / sidebar body type) */
+.client-account-info .kv-row {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.client-account-info .kv-key {
+  flex: 0 0 44%;
+  max-width: 44%;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.client-account-info .kv-val {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.client-account-info .platform-section-header {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.client-account-info .client-account-section-label {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.client-account-info .client-account-project-card {
+  font-family: var(--font);
+}
+
+.client-account-info .client-account-project-card .platform-badge {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.client-account-info .ncp-section-label {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.client-account-info .ncp-section-desc {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* MINI STAT ROW — flex:1 1 0 + min-width:0 lets stats shrink inside narrow cards without bleeding */
 .mini-stat-row {
   display: flex;

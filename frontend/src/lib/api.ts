@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { OfferOnboardingSummary } from "./offer-onboarding-extras";
 
 const AUTH_TOKEN_KEY = "tgddata_access_token";
 
@@ -384,12 +385,14 @@ export type GlobalMonitor = {
   }>;
 };
 
-/** Portfolio requisition counts from `records` (tracker pipeline). */
+/** Scoped requisition counts from `records` (tracker pipeline). */
 export type RequisitionKpis = {
   open_req: number;
   offer_req: number;
   joiners: number;
   total_records: number;
+  status_breakdown?: Record<string, number>;
+  ageing_buckets?: Record<string, number>;
 };
 
 export type RequisitionDeptItem = { name: string; value: number };
@@ -969,6 +972,12 @@ export type CandidateRow = {
   experience_role_count?: number | null;
   created_by_user_id?: number | null;
   created_by_email?: string | null;
+  /** From linked requisition when `include_record_context=true`. */
+  client_req_id?: string | null;
+  position_title?: string | null;
+  rpo_client_name?: string | null;
+  /** Excel Cand. ID (CAND-001) when captured during ingest. */
+  excel_candidate_id?: string | null;
 };
 
 /** `GET /candidate-masters` row (light). */
@@ -1736,6 +1745,8 @@ export const queries = {
     project_id?: number;
     record_id?: number;
     search?: string;
+    offer_onboarding_only?: boolean;
+    include_record_context?: boolean;
     limit?: number;
     offset?: number;
   } = {}) => {
@@ -1743,6 +1754,8 @@ export const queries = {
     if (params.project_id != null) qs.set("project_id", String(params.project_id));
     if (params.record_id != null) qs.set("record_id", String(params.record_id));
     if (params.search != null && params.search.trim()) qs.set("search", params.search.trim());
+    if (params.offer_onboarding_only) qs.set("offer_onboarding_only", "true");
+    if (params.include_record_context) qs.set("include_record_context", "true");
     if (params.limit != null) qs.set("limit", String(params.limit));
     if (params.offset != null) qs.set("offset", String(params.offset));
     const q = qs.toString();
@@ -1752,6 +1765,18 @@ export const queries = {
         .get<{ items: CandidateRow[]; total: number; limit: number; offset: number }>(
           `/candidates${q ? `?${q}` : ""}`
         )
+        .then((r) => r.data)
+    );
+  },
+
+  offerOnboardingSummary: (params: { project_id?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.project_id != null) qs.set("project_id", String(params.project_id));
+    const q = qs.toString();
+    const key = `candidates/offer-onboarding/summary?${q || "all"}`;
+    return cachedGet<OfferOnboardingSummary>(key, () =>
+      api
+        .get<OfferOnboardingSummary>(`/candidates/offer-onboarding/summary${q ? `?${q}` : ""}`)
         .then((r) => r.data)
     );
   },

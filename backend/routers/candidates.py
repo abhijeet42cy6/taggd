@@ -24,6 +24,12 @@ from backend.core.activity_log import log_activity
 from backend.core.candidate_master_mgmt import ensure_master_link_for_candidate
 from backend.core.candidate_tracker_ingest import ingest_candidate_tracker
 from backend.core.ingestion_audit import log_ingestion_event
+from backend.core.offer_onboarding_query import (
+    apply_offer_onboarding_filter,
+    enrich_candidate_with_record_context,
+    excel_candidate_id_from_row,
+    summarize_offer_onboarding,
+)
 from backend.db.database import Candidate, CandidateMasterLink, Record, User, get_db
 
 router = APIRouter(
@@ -125,7 +131,13 @@ def _parse_dt(val: Any) -> Optional[datetime.datetime]:
         raise HTTPException(status_code=400, detail=f"Invalid datetime: {val!r}")
 
 
-def _serialize_candidate(c: Candidate, db: Optional[Session] = None) -> dict[str, Any]:
+def _serialize_candidate(
+    c: Candidate,
+    db: Optional[Session] = None,
+    *,
+    record: Optional[Record] = None,
+    include_record_context: bool = False,
+) -> dict[str, Any]:
     def clean(data: Any) -> Any:
         if isinstance(data, dict):
             return {k: clean(v) for k, v in data.items()}
@@ -163,6 +175,11 @@ def _serialize_candidate(c: Candidate, db: Optional[Session] = None) -> dict[str
         d["created_by_email"] = None
     exp = d.get("professional_experience_json")
     d["experience_role_count"] = len(exp) if isinstance(exp, list) else 0
+    d["excel_candidate_id"] = excel_candidate_id_from_row(c)
+    if include_record_context:
+        if record is None and db is not None and c.record_id:
+            record = db.query(Record).filter(Record.id == c.record_id).first()
+        enrich_candidate_with_record_context(d, record)
     return d
 
 
@@ -354,12 +371,16 @@ def list_candidates(
     project_id: Optional[int] = Query(None),
     record_id: Optional[int] = Query(None),
     search: Optional[str] = Query(None, description="Matches name, email, or client candidate id (substring)"),
+    offer_onboarding_only: bool = Query(False, description="Only candidates with offer/joining/onboarding signals"),
+    include_record_context: bool = Query(False, description="Join requisition client req id, role, client name"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     q = db.query(Candidate)
     q = apply_project_scope(q, user, db, Candidate)
     q = apply_recruiter_candidate_scope(q, user, db)
+    if offer_onboarding_only:
+        q = apply_offer_onboarding_filter(q)
     if search and str(search).strip():
         term = f"%{str(search).strip()}%"
         q = q.filter(
@@ -388,7 +409,39 @@ def list_candidates(
         .limit(limit)
         .all()
     )
-    return {"items": [_serialize_candidate(x, db) for x in rows], "total": total, "limit": limit, "offset": offset}
+    records_by_id: dict[int, Record] = {}
+    if include_record_context and rows:
+        record_ids = {c.record_id for c in rows if c.record_id}
+        if record_ids:
+            for rec in db.query(Record).filter(Record.id.in_(record_ids)).all():
+                records_by_id[rec.id] = rec
+    items = [
+        _serialize_candidate(
+            x,
+            db,
+            record=records_by_id.get(x.record_id) if include_record_context else None,
+            include_record_context=include_record_context,
+        )
+        for x in rows
+    ]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/offer-onboarding/summary")
+def offer_onboarding_summary(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    project_id: Optional[int] = Query(None),
+):
+    """KPI strip for Offer & Onboarding tab."""
+    q = db.query(Candidate)
+    q = apply_project_scope(q, user, db, Candidate)
+    q = apply_recruiter_candidate_scope(q, user, db)
+    q = apply_offer_onboarding_filter(q)
+    if project_id is not None:
+        assert_project_access(user, db, project_id)
+        q = q.filter(Candidate.project_id == project_id)
+    return summarize_offer_onboarding(db, q)
 
 
 @router.post("/parse-resume")

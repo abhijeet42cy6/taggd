@@ -8,6 +8,11 @@ export type ClientVm = {
   shortCode: string | null;
   /** prospect | active (from GET /clients) */
   lifecycleState: string | null;
+  /** Org directory tags on the legal client row */
+  hierarchyTagBu?: string | null;
+  hierarchyTagSbu?: string | null;
+  hierarchyTagSbg?: string | null;
+  hierarchyTagSbe?: string | null;
   /** Kept for labels / persona filter compatibility */
   client: string;
   projectIds: number[];
@@ -49,6 +54,10 @@ export function clientGroupsToVm(rows: ClientGroup[]): ClientVm[] {
     officialName: r.official_name,
     shortCode: r.short_code,
     lifecycleState: r.lifecycle_state ?? "active",
+    hierarchyTagBu: r.hierarchy_tag_bu ?? null,
+    hierarchyTagSbu: r.hierarchy_tag_sbu ?? null,
+    hierarchyTagSbg: r.hierarchy_tag_sbg ?? null,
+    hierarchyTagSbe: r.hierarchy_tag_sbe ?? null,
     client: r.official_name,
     projects: r.projects,
     projectIds: r.projects.map((p) => p.id),

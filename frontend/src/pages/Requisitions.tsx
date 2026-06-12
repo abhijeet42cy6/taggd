@@ -35,6 +35,27 @@ import { displayRecordReqId, formatCurrency, formatOfferedCtc } from "@/lib/util
 
 const PER_PAGE = 50;
 const PAGE_WINDOW = 7;
+const RECORDS_FETCH_TIMEOUT_MS = 90_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error("Request timed out")), ms);
+    }),
+  ]);
+}
+
+function statusBreakdownToFunnel(sb: Record<string, number>) {
+  return {
+    [REQUISITION_FUNNEL_UNPROCESSED_LABEL]: sb["UNPROCESSED"] ?? 0,
+    Open: sb["ACTIVE"] ?? 0,
+    Screening: sb["PIPELINE"] ?? 0,
+    Offer: 0,
+    Joined: sb["CLOSED"] ?? 0,
+    Cancelled: sb["ON HOLD"] ?? 0,
+  };
+}
 
 function buildVisiblePageNumbers(current: number, total: number, windowSize = PAGE_WINDOW): number[] {
   if (total <= windowSize) {
@@ -102,6 +123,7 @@ export function Requisitions() {
   }, [scopeKey]);
 
   useEffect(() => {
+    if (portfolioView) return undefined;
     let mounted = true;
     queries
       .globalMonitor()
@@ -118,7 +140,14 @@ export function Requisitions() {
     return () => {
       mounted = false;
     };
-  }, [scopeKey]);
+  }, [scopeKey, portfolioView]);
+
+  useEffect(() => {
+    if (portfolioView) {
+      setGlobalStatusBreakdown({});
+      setMonitor(null);
+    }
+  }, [portfolioView]);
 
   useEffect(() => {
     let mounted = true;
@@ -158,11 +187,27 @@ export function Requisitions() {
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    queries
-      .recordsAll({ page, per_page: PER_PAGE, search: debouncedSearch || undefined })
-      .then((data) => { if (mounted) { setResult(data); setLoading(false); } })
-      .catch(() => { if (mounted) setLoading(false); });
-    return () => { mounted = false; };
+    withTimeout(
+      queries.recordsAll({ page, per_page: PER_PAGE, search: debouncedSearch || undefined }),
+      RECORDS_FETCH_TIMEOUT_MS,
+    )
+      .then((data) => {
+        if (mounted) {
+          setResult(data);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setResult((prev) =>
+            prev ?? { records: [], total: 0, page, per_page: PER_PAGE, pages: 1 },
+          );
+          setLoading(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
   }, [page, debouncedSearch, scopeKey]);
 
   useEffect(() => { setPage(1); }, [debouncedSearch]);
@@ -180,20 +225,20 @@ export function Requisitions() {
       return requisitionFunnelVm(records);
     }
     const sb = globalStatusBreakdown;
-    if (Object.keys(sb).length === 0) return requisitionFunnelVm(records);
-    return {
-      [REQUISITION_FUNNEL_UNPROCESSED_LABEL]: sb["UNPROCESSED"] ?? 0,
-      Open: sb["ACTIVE"] ?? 0,
-      Screening: sb["PIPELINE"] ?? 0,
-      Offer: 0,
-      Joined: sb["CLOSED"] ?? 0,
-      Cancelled: sb["ON HOLD"] ?? 0,
-    };
-  }, [globalStatusBreakdown, records, debouncedSearch]);
+    if (Object.keys(sb).length > 0) {
+      return statusBreakdownToFunnel(sb);
+    }
+    const kpiSb = reqKpis?.status_breakdown;
+    if (kpiSb && Object.keys(kpiSb).length > 0) {
+      return statusBreakdownToFunnel(kpiSb);
+    }
+    return requisitionFunnelVm(records);
+  }, [globalStatusBreakdown, reqKpis?.status_breakdown, records, debouncedSearch]);
 
   const funnelMax = Math.max(...Object.values(funnel), 1);
 
-  const monitorBuckets = monitor?.ageing_summary?.buckets ?? {};
+  const monitorBuckets =
+    monitor?.ageing_summary?.buckets ?? reqKpis?.ageing_buckets ?? {};
   const ageingMax = Math.max(...Object.values(monitorBuckets), 1);
   const ageingBuckets = [
     { label: "0–30 days", count: monitorBuckets["0-30 days"] ?? monitorBuckets["0–30 days"] ?? 0, max: ageingMax, color: "var(--green)" },
@@ -371,7 +416,7 @@ export function Requisitions() {
             <Text className="mt-0.5 block text-xs text-tremor-content-subtle">Click a row to view or edit</Text>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {projects.length > 0 ? (
+            {projects.length > 0 && !readOnlyClient ? (
               <Button type="button" size="xs" variant="primary" color="orange" onClick={() => setAddReqOpen(true)}>
                 Add requisition
               </Button>

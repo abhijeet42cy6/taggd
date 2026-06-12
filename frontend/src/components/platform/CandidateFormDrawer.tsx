@@ -11,6 +11,11 @@ import {
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { UserPickerDropdown, type PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
 import { cn } from "@/lib/utils";
+import {
+  EMPLOYMENT_TYPE_OPTIONS,
+  mergeOfferExtras,
+  readOfferExtra,
+} from "@/lib/offer-onboarding-extras";
 import "@/styles/new-contract-panel.css";
 
 const CANDIDATE_TABS = [
@@ -29,6 +34,10 @@ export type CandidateFormDrawerProps = {
   projects: Project[];
   /** Pre-filled project when opening create from filtered list */
   defaultProjectId?: number | null;
+  /** Initial tab index (0=Mandate … 3=Pipeline). */
+  initialTab?: number;
+  /** When `offer`, opens on Pipeline tab for offer/onboarding edits. */
+  focusMode?: "default" | "offer";
   onSuccess: () => void;
 };
 
@@ -92,6 +101,15 @@ type Form = {
   candidate_extras_json: string;
   revenue_results_json: string;
   offer_onboarding_extras_json: string;
+  employment_type: string;
+  duration: string;
+  deviation: string;
+  deviation_comments: string;
+  letter_sent_date: string;
+  letter_accepted_date: string;
+  document_shared_with_taq_date: string;
+  notice_period_buyout_amount: string;
+  remarks: string;
 };
 
 function emptyForm(projectId: string): Form {
@@ -155,6 +173,15 @@ function emptyForm(projectId: string): Form {
     candidate_extras_json: "{}",
     revenue_results_json: "{}",
     offer_onboarding_extras_json: "{}",
+    employment_type: "",
+    duration: "",
+    deviation: "",
+    deviation_comments: "",
+    letter_sent_date: "",
+    letter_accepted_date: "",
+    document_shared_with_taq_date: "",
+    notice_period_buyout_amount: "",
+    remarks: "",
   };
 }
 
@@ -171,6 +198,7 @@ function isoish(v: unknown): string {
 }
 
 function candidateToForm(c: CandidateRow): Form {
+  const oo = c.offer_onboarding_extras;
   return {
     project_id: String(c.project_id),
     record_id: String(c.record_id),
@@ -231,6 +259,15 @@ function candidateToForm(c: CandidateRow): Form {
     candidate_extras_json: JSON.stringify(c.candidate_extras ?? {}, null, 2),
     revenue_results_json: JSON.stringify(c.revenue_results ?? {}, null, 2),
     offer_onboarding_extras_json: JSON.stringify(c.offer_onboarding_extras ?? {}, null, 2),
+    employment_type: readOfferExtra(oo, "employment_type"),
+    duration: readOfferExtra(oo, "duration"),
+    deviation: readOfferExtra(oo, "deviation"),
+    deviation_comments: readOfferExtra(oo, "deviation_comments"),
+    letter_sent_date: readOfferExtra(oo, "letter_sent_date"),
+    letter_accepted_date: readOfferExtra(oo, "letter_accepted_date"),
+    document_shared_with_taq_date: readOfferExtra(oo, "document_shared_with_taq_date"),
+    notice_period_buyout_amount: readOfferExtra(oo, "notice_period_buyout_amount"),
+    remarks: readOfferExtra(oo, "remarks"),
   };
 }
 
@@ -300,6 +337,17 @@ function buildCreateBody(f: Form): CandidateCreate {
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
   }
+  offer_onboarding_extras = mergeOfferExtras(offer_onboarding_extras, {
+    employment_type: f.employment_type,
+    duration: f.duration,
+    deviation: f.deviation,
+    deviation_comments: f.deviation_comments,
+    letter_sent_date: f.letter_sent_date,
+    letter_accepted_date: f.letter_accepted_date,
+    document_shared_with_taq_date: f.document_shared_with_taq_date,
+    notice_period_buyout_amount: f.notice_period_buyout_amount,
+    remarks: f.remarks,
+  });
 
   const body: CandidateCreate = {
     project_id,
@@ -413,6 +461,8 @@ export function CandidateFormDrawer({
   candidateId,
   projects,
   defaultProjectId,
+  initialTab = 0,
+  focusMode = "default",
   onSuccess,
 }: CandidateFormDrawerProps) {
   const [tab, setTab] = useState(0);
@@ -451,7 +501,7 @@ export function CandidateFormDrawer({
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setTab(0);
+    setTab(focusMode === "offer" ? 3 : initialTab);
     setProjDdOpen(false);
     setProjSearch("");
     setPendingCvFile(null);
@@ -476,7 +526,7 @@ export function CandidateFormDrawer({
         .catch((e) => setError(e instanceof Error ? e.message : "Could not load candidate"))
         .finally(() => setLoadingCandidate(false));
     }
-  }, [open, mode, candidateId, projects, defaultProjectId, loadRecords]);
+  }, [open, mode, candidateId, projects, defaultProjectId, loadRecords, initialTab, focusMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -1178,6 +1228,91 @@ export function CandidateFormDrawer({
                         <div className="ncp-prop-row">
                           <div className="ncp-prop-label">Early exit risk</div>
                           <input className="ncp-prop-input" value={form.early_exit_risk} onChange={(e) => setF("early_exit_risk", e.target.value)} />
+                        </div>
+                      </>
+                    ))}
+                    {section("📋", "ncp-amber", "Extended offer & compliance", "Deviation, letters, employment type, and notes.", (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Employment type</div>
+                            <select
+                              className="ncp-prop-input"
+                              value={form.employment_type}
+                              onChange={(e) => setF("employment_type", e.target.value)}
+                            >
+                              <option value="">—</option>
+                              {EMPLOYMENT_TYPE_OPTIONS.map((o) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Duration</div>
+                            <input className="ncp-prop-input" value={form.duration} onChange={(e) => setF("duration", e.target.value)} />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Deviation</div>
+                            <input className="ncp-prop-input" value={form.deviation} onChange={(e) => setF("deviation", e.target.value)} />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Deviation comments</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.deviation_comments}
+                              onChange={(e) => setF("deviation_comments", e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 12px" }}>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Letter sent</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.letter_sent_date}
+                              onChange={(e) => setF("letter_sent_date", e.target.value)}
+                              placeholder="DD-MMM-YYYY"
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Letter accepted</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.letter_accepted_date}
+                              onChange={(e) => setF("letter_accepted_date", e.target.value)}
+                              placeholder="DD-MMM-YYYY"
+                            />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Doc shared (TAQ)</div>
+                            <input
+                              className="ncp-prop-input"
+                              value={form.document_shared_with_taq_date}
+                              onChange={(e) => setF("document_shared_with_taq_date", e.target.value)}
+                              placeholder="DD-MMM-YYYY"
+                            />
+                          </div>
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Notice buyout (₹)</div>
+                          <input
+                            className="ncp-prop-input"
+                            value={form.notice_period_buyout_amount}
+                            onChange={(e) => setF("notice_period_buyout_amount", e.target.value)}
+                          />
+                        </div>
+                        <div className="ncp-prop-row">
+                          <div className="ncp-prop-label">Remarks</div>
+                          <textarea
+                            className="ncp-prop-input"
+                            value={form.remarks}
+                            onChange={(e) => setF("remarks", e.target.value)}
+                            style={{ minHeight: 56 }}
+                          />
                         </div>
                       </>
                     ))}

@@ -202,6 +202,17 @@ def _str_val(val: Any, max_len: int = 512) -> Optional[str]:
     return s[:max_len]
 
 
+def _extract_excel_candidate_id(row_dict: dict) -> Optional[str]:
+    for k, v in row_dict.items():
+        nh = _norm_header(str(k))
+        if nh in ("cand. id", "cand id", "candidate id"):
+            cid = _str_val(v, 64)
+            if cid and cid.endswith(".0"):
+                cid = cid[:-2]
+            return cid
+    return None
+
+
 def _make_client_candidate_id(
     project_id: int,
     email: Optional[str],
@@ -475,6 +486,9 @@ def ingest_candidate_tracker(
                     stubs_created += 1
 
                 extras = _sanitize_extras(row_dict, mapped)
+                excel_cid = _extract_excel_candidate_id(row_dict)
+                if excel_cid:
+                    extras["excel_candidate_id"] = excel_cid
                 if header_map.get("rpo_bu_sbu"):
                     bu = _str_val(_cell(row_dict, header_map["rpo_bu_sbu"]))
                     if bu:
@@ -549,6 +563,19 @@ def ingest_candidate_tracker(
                 warnings.append(f"Row {int(r_idx) + 2}: {e}")
             logger.exception("Candidate row ingest failed at %s", r_idx)
 
+    from backend.core.offer_onboarding_tracker_ingest import ingest_offer_onboarding_pass
+
+    offer_pass = ingest_offer_onboarding_pass(
+        file_path,
+        db,
+        project_id=resolved_pid,
+        dry_run=dry_run,
+    )
+    logs.extend(offer_pass.get("logs", []))
+    for w in offer_pass.get("warnings") or []:
+        if len(warnings) < 20:
+            warnings.append(w)
+
     if dry_run:
         db.rollback()
         logs.append("Dry run — no changes committed")
@@ -566,6 +593,10 @@ def ingest_candidate_tracker(
         message += f" {errors} row errors — see warnings."
         if total == 0:
             ok = False
+    if offer_pass.get("patched"):
+        message += f" Offer/onboarding pass patched {offer_pass['patched']} row(s)."
+    elif offer_pass.get("skipped") and offer_pass.get("reason") == "no_sheet":
+        message += " (No Offer & Onboarding sheet — pass 3 skipped.)"
 
     logs.append(
         f"Mandate linkage: req_id={match_stats.get('client_req_id', 0)}, "
@@ -590,4 +621,5 @@ def ingest_candidate_tracker(
         "match_stats": match_stats,
         "logs": logs,
         "dry_run": dry_run,
+        "offer_onboarding_pass": offer_pass,
     }

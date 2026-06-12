@@ -3,7 +3,6 @@ import { Info } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   queries,
-  columnMappingEntryCount,
   type RecordRow,
   type RecordsPage,
   type Project,
@@ -42,7 +41,7 @@ import { SkeletonHeroKpiRow, SkeletonTable, Skeleton } from "@/components/platfo
 import "@/styles/exec-dash-premium.css";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReqStatusStackedBar, AgeingBars, LevelDonutChart } from "@/components/platform/Charts";
-import { ColumnMappingDisplay } from "@/components/ColumnMappingDisplay";
+import { ClientAccountInfoTab } from "@/components/platform/ClientAccountInfoTab";
 
 const PER_PAGE = 50;
 
@@ -810,6 +809,10 @@ export function ClientDetail() {
             officialName: g.official_name,
             shortCode: g.short_code,
             lifecycleState: g.lifecycle_state ?? "active",
+            hierarchyTagBu: g.hierarchy_tag_bu ?? null,
+            hierarchyTagSbu: g.hierarchy_tag_sbu ?? null,
+            hierarchyTagSbg: g.hierarchy_tag_sbg ?? null,
+            hierarchyTagSbe: g.hierarchy_tag_sbe ?? null,
             client: g.official_name,
             projects: g.projects,
             projectIds: g.projects.map((p) => p.id),
@@ -848,6 +851,10 @@ export function ClientDetail() {
           officialName: g.official_name,
           shortCode: g.short_code,
           lifecycleState: g.lifecycle_state ?? "active",
+          hierarchyTagBu: g.hierarchy_tag_bu ?? null,
+          hierarchyTagSbu: g.hierarchy_tag_sbu ?? null,
+          hierarchyTagSbg: g.hierarchy_tag_sbg ?? null,
+          hierarchyTagSbe: g.hierarchy_tag_sbe ?? null,
           client: g.official_name,
           projects: g.projects,
           projectIds: g.projects.map((p) => p.id),
@@ -1593,169 +1600,23 @@ export function ClientDetail() {
 
       {/* ── ACCOUNT INFO TAB ─────────────────────────────────────────────── */}
       {activeTab === "Account Info" && (
-        <div style={{ display: "grid", gap: 14 }}>
-          <div className="platform-grid-2">
-            <PlatformSection title="Account Details">
-              {loadingMeta
-                ? <SkeletonTable rows={5} cols={2} />
-                : (
-                  <div>
-                    <KvRow label="Legal client" value={displayClientName} />
-                    {clientVm && clientVm.id >= 0 && (
-                      <KvRow
-                        label="Client lifecycle"
-                        value={
-                          clientVm.lifecycleState === "prospect" ? (
-                            <span className="platform-badge amber">Prospect</span>
-                          ) : (
-                            <span className="platform-badge green">Active</span>
-                          )
-                        }
-                      />
-                    )}
-                    {clientVm && clientVm.id >= 0 && (
-                      <KvRow label="Client ID" value={`CLI-${clientVm.id}`} />
-                    )}
-                    <KvRow label="Charge code" value={clientVm?.projects[0]?.charge_code ?? "—"} />
-                    <KvRow label="Account status" value={clientVm?.projects[0]?.account_status ?? "—"} />
-                    <KvRow label="Region" value={clientVm?.projects[0]?.region ?? "—"} />
-                    <KvRow label="Sub region" value={clientVm?.projects[0]?.sub_region ?? "—"} />
-                    <KvRow label="Vertical" value={clientVm?.projects[0]?.vertical ?? "—"} />
-                    <KvRow label="Category" value={clientVm?.projects[0]?.category ?? "—"} />
-                    <KvRow label="Practice" value={clientVm?.projects[0]?.practice ?? "—"} />
-                    <KvRow label="Function head" value={clientVm?.projects[0]?.function_head ?? "—"} />
-                    <KvRow label="Regional head" value={clientVm?.projects[0]?.regional_head ?? "—"} />
-                    <KvRow label="Practice Head" value={clientVm?.projects[0]?.practice_head ?? "—"} />
-                    <KvRow label="Project Head" value={clientVm?.projects[0]?.project_head ?? "—"} />
-                    <KvRow label="BE SPOC" value={clientVm?.projects[0]?.be_spoc ?? "—"} />
-                    <KvRow label="Tracker Sheet" value={clientVm?.projects[0]?.tracker_sheet ?? "—"} />
-                    <KvRow label="Req ID Column" value={clientVm?.projects[0]?.pos_id_column ?? "—"} />
-                    <KvRow
-                      label="Structure"
-                      value={
-                        !clientVm
-                          ? "—"
-                          : clientVm.id >= 0 && clientVm.split
-                            ? <span className="platform-badge green">Legal client · {projectIds.length} SBUs</span>
-                            : clientVm.id >= 0
-                              ? <span className="platform-badge green">Single SBU</span>
-                              : clientVm.split
-                                ? <span className="platform-badge amber">Inferred · {projectIds.length} project IDs</span>
-                                : <span className="platform-badge green">Single project</span>
-                      }
-                    />
-                  </div>
-                )
-              }
-            </PlatformSection>
-
-            <PlatformSection title="SBU / linked projects">
-              {(clientVm?.projects ?? []).map((p) => (
-                <div key={p.id} style={{
-                  padding: "10px 12px", background: "var(--bg2)", borderRadius: 8,
-                  border: "1px solid var(--border)", marginBottom: 8,
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <span style={{ fontFamily: "'DM Mono',monospace", color: "var(--accent)", fontSize: 10.5 }}>
-                      PRJ-{p.id}
-                      {(p.engagement_name || "").trim()
-                        ? ` · ${(p.engagement_name || "").trim()}`
-                        : ""}
-                    </span>
-                    <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
-                      {p.system_created_at ? new Date(p.system_created_at).toLocaleDateString("en-IN") : "—"}
-                    </span>
-                  </div>
-                  <KvRow label="File" value={p.filename || "—"} />
-                  <KvRow label="Tracker Sheet" value={p.tracker_sheet || "—"} />
-                  <KvRow label="Contract Sheet" value={p.contract_sheet || "—"} />
-                  <KvRow label="Region" value={p.region || "—"} />
-                  <KvRow label="Vertical" value={p.vertical || "—"} />
-                  {numericClientId != null && numericClientId > 0 && (
-                    <ProjectHierarchyEditor project={p} siblingProjects={clientVm?.projects ?? []} onSaved={refreshProjects} />
-                  )}
-                  {p.column_mapping && columnMappingEntryCount(p.column_mapping) > 0 && (
-                    <details style={{ marginTop: 10 }}>
-                      <summary style={{
-                        cursor: "pointer",
-                        fontSize: 10,
-                        fontFamily: "'DM Mono',monospace",
-                        color: "var(--accent)",
-                      }}>
-                        Column mapping ({columnMappingEntryCount(p.column_mapping)} links)
-                      </summary>
-                      <div style={{ marginTop: 10, padding: "10px 8px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
-                        <ColumnMappingDisplay mapping={p.column_mapping} variant="card" scrollMaxClass="max-h-[320px]" />
-                      </div>
-                    </details>
-                  )}
-                </div>
-              ))}
-            </PlatformSection>
-          </div>
-
-          {/* REVENUE LOGIC CARDS — one per project */}
-          {(clientVm?.projects ?? []).map((p) => (
+        <ClientAccountInfoTab
+          clientVm={clientVm}
+          loadingMeta={loadingMeta}
+          loadingContracts={loadingContracts}
+          contractsByProject={contractsByProject}
+          numericClientId={numericClientId}
+          displayClientName={displayClientName}
+          onRefreshProjects={refreshProjects}
+          renderHierarchyEditor={(props) => <ProjectHierarchyEditor {...props} />}
+          renderRevenueLogic={(p) => (
             <RevenueLogicCard
-              key={p.id}
               project={p}
               onProjectsRefresh={refreshProjects}
               onRecordsRefresh={refreshRecords}
             />
-          ))}
-
-          <PlatformSection title="Commercial contracts">
-            {loadingContracts ? (
-              <div style={{ color: "var(--text-muted)", fontSize: 11 }}>Loading contract rows…</div>
-            ) : (
-              <div style={{ display: "grid", gap: 12 }}>
-                {(clientVm?.projects ?? []).map((p) => {
-                  const rows = contractsByProject.get(p.id) ?? [];
-                  return (
-                    <div key={p.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
-                      <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)", marginBottom: 8 }}>
-                        PRJ-{p.id}
-                        {(p.engagement_name || p.account_name) ? ` · ${p.engagement_name || p.account_name}` : ""}
-                      </div>
-                      {rows.length === 0 ? (
-                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No contract record — ingest workbook or POST /contracts.</div>
-                      ) : (
-                        <div className="platform-table-wrap">
-                          <table className="platform-table">
-                            <thead>
-                              <tr>
-                                <th>Customer</th>
-                                <th>Status</th>
-                                <th>Start</th>
-                                <th>End</th>
-                                <th>ACV (INR)</th>
-                                <th>CM%</th>
-                                <th>HC</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rows.map((c) => (
-                                <tr key={c.id}>
-                                  <td>{c.customer_name ?? "—"}</td>
-                                  <td>{c.contract_status ?? "—"}</td>
-                                  <td style={{ fontSize: 10, fontFamily: "'DM Mono',monospace" }}>{c.contract_start_date?.slice(0, 10) ?? "—"}</td>
-                                  <td style={{ fontSize: 10, fontFamily: "'DM Mono',monospace" }}>{c.contract_end_date?.slice(0, 10) ?? "—"}</td>
-                                  <td>{c.signed_acv_inr != null ? formatCurrency(c.signed_acv_inr) : "—"}</td>
-                                  <td>{c.signed_cm_pct != null ? `${Math.round(c.signed_cm_pct * 10000) / 100}%` : "—"}</td>
-                                  <td>{c.headcount_contracted != null ? String(c.headcount_contracted) : "—"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </PlatformSection>
-        </div>
+          )}
+        />
       )}
 
       {/* ── ADD REQUISITION (POST /records) ── */}

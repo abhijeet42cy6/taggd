@@ -37,6 +37,7 @@ _PREFIX_VERTICAL: tuple[tuple[str, str], ...] = (
     ("/clients", "clients"),
     ("/projects", "clients"),
     ("/records", "requisitions"),
+    ("/stats/requisitions", "requisitions"),
     ("/stats", "portfolio"),
     ("/ceo-deck", "ceo_view"),
 )
@@ -52,6 +53,22 @@ def _required_vertical_for_path(path: str) -> str | None:
     return hit[1] if hit else None
 
 
+def _vertical_keys_for_path(path: str) -> list[str] | None:
+    """Vertical keys that may grant read access (client_user allow-list; any match wins)."""
+    primary = _required_vertical_for_path(path)
+    if primary is None:
+        return None
+    keys: list[str] = [primary]
+    if path.startswith("/stats/global/monitor"):
+        for alt in ("requisitions", "executive_dashboard"):
+            if alt not in keys:
+                keys.append(alt)
+    elif path.startswith("/records"):
+        if "candidates" not in keys:
+            keys.append("candidates")
+    return keys
+
+
 class ClientVerticalReadGuardMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method not in _READ_METHODS:
@@ -62,8 +79,8 @@ class ClientVerticalReadGuardMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if any(path == p or path.startswith(p + "/") for p in _SKIP_PATH_PREFIXES):
             return await call_next(request)
-        vkey = _required_vertical_for_path(path)
-        if vkey is None:
+        vertical_keys = _vertical_keys_for_path(path)
+        if vertical_keys is None:
             return await call_next(request)
         db = SessionLocal()
         try:
@@ -71,9 +88,10 @@ class ClientVerticalReadGuardMiddleware(BaseHTTPMiddleware):
             if not u:
                 return JSONResponse({"detail": "User not found"}, status_code=401)
             profile = resolve_user_profile(u, db)
-            if not profile_may_access_vertical(profile, vkey):
+            if not any(profile_may_access_vertical(profile, k) for k in vertical_keys):
+                denied = vertical_keys[0]
                 return JSONResponse(
-                    {"detail": f"Module '{vkey}' is not enabled for this client portal account"},
+                    {"detail": f"Module '{denied}' is not enabled for this client portal account"},
                     status_code=403,
                 )
         finally:

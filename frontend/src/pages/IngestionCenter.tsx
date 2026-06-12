@@ -830,6 +830,15 @@ export function IngestionCenter() {
           candidates.appendLog(line, "info");
         }
       }
+      const pass3 = result?.offer_onboarding_pass as Record<string, unknown> | undefined;
+      if (pass3 && !pass3.skipped) {
+        candidates.appendLog(
+          `[${tsNow()}] Pass 3 — matched ${pass3.matched ?? 0}, patched ${pass3.patched ?? 0}, no match ${pass3.skipped_no_match ?? 0}`,
+          "info",
+        );
+      } else if (pass3?.reason === "no_sheet") {
+        candidates.appendLog(`[${tsNow()}] Pass 3 — no Offer & Onboarding sheet in workbook`, "info");
+      }
       candidates.appendLog(
         `[${tsNow()}] ✓ ${result.message || "Candidate rows committed"}`,
         "success",
@@ -1251,7 +1260,7 @@ export function IngestionCenter() {
       {tab === "Candidates" && (
         <CandidateIngestTab
           title="Candidate tracker"
-          subtitle="Upload client candidate tracker workbooks (sheet: Candidate Tracker). Maps headers heuristically, upserts into Candidates, and creates mandate stubs when Req No is present."
+          subtitle="Upload client candidate tracker workbooks (sheet: Candidate Tracker). Maps headers heuristically, upserts into Candidates, creates mandate stubs when Req No is present, then runs Offer & Onboarding pass 3 from the same file (gap-fill only)."
           icon="👤"
           accent="#7c3aed"
           hint="Files: Ud Trucks.xlsx · Bridgestone Position Tracker*.xlsx"
