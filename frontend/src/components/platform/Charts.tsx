@@ -2,7 +2,7 @@
  * Platform chart wrappers — all styled to match platform.html design tokens.
  * Uses Recharts under the hood.
  */
-import React from "react";
+import React, { useMemo } from "react";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import type { YoYRevPoint, YoYCmPoint, RegionBarDatum } from "@/lib/dashboard-aggregates";
 import {
@@ -140,20 +140,89 @@ export function ReqStatusStackedBar({ data }: { data: StackedBarDatum[] }) {
 // ─── DONUT CHART ──────────────────────────────────────────────────────────────
 type DonutDatum = { name: string; value: number };
 
-export function LevelDonutChart({ data }: { data: DonutDatum[] }) {
-  const DONUT_COLORS = [COLORS.accent, COLORS.accent2, COLORS.amber, COLORS.red];
+const DONUT_SLICE_COLORS = [
+  COLORS.accent,
+  COLORS.accent2,
+  COLORS.amber,
+  COLORS.red,
+  "#1e3a5f",
+  "#0f766e",
+  "#7c3aed",
+  "#be185d",
+  "#64748b",
+  "#0369a1",
+];
+
+function truncateDonutLabel(name: string, max = 36): string {
+  const t = name.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+function prepareDonutSlices(data: DonutDatum[], maxItems: number): DonutDatum[] {
+  const sorted = data.filter((d) => d.value > 0).sort((a, b) => b.value - a.value);
+  if (sorted.length <= maxItems) return sorted;
+  const top = sorted.slice(0, maxItems - 1);
+  const other = sorted.slice(maxItems - 1).reduce((sum, d) => sum + d.value, 0);
+  return [...top, { name: "Other", value: other }];
+}
+
+export function LevelDonutChart({
+  data,
+  maxLegendItems = 8,
+}: {
+  data: DonutDatum[];
+  maxLegendItems?: number;
+}) {
+  const slices = useMemo(() => prepareDonutSlices(data, maxLegendItems), [data, maxLegendItems]);
+
+  if (slices.length === 0) return null;
+
   return (
-    <ResponsiveContainer width="100%" height={110}>
-      <PieChart>
-        <Pie data={data} cx="50%" cy="50%" innerRadius={28} outerRadius={44}
-          dataKey="value" paddingAngle={2}>
-          {data.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
-        </Pie>
-        <Tooltip contentStyle={tooltipStyle} />
-        <Legend iconSize={8} layout="vertical" align="right" verticalAlign="middle"
-          wrapperStyle={{ fontSize: 9, color: COLORS.text2 }} />
-      </PieChart>
-    </ResponsiveContainer>
+    <div className="level-donut-chart">
+      <div className="level-donut-chart__pie">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={slices}
+              cx="50%"
+              cy="50%"
+              innerRadius="52%"
+              outerRadius="82%"
+              dataKey="value"
+              paddingAngle={2}
+            >
+              {slices.map((_, i) => (
+                <Cell key={i} fill={DONUT_SLICE_COLORS[i % DONUT_SLICE_COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={tooltipStyle}
+              formatter={(value: number, _name, item) => [
+                Number(value).toLocaleString(),
+                String(item?.payload?.name ?? ""),
+              ]}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="level-donut-chart__legend">
+        {slices.map((d, i) => (
+          <span
+            key={`${d.name}-${i}`}
+            className="level-donut-chart__leg"
+            title={d.name}
+          >
+            <span
+              className="level-donut-chart__swatch"
+              style={{ backgroundColor: DONUT_SLICE_COLORS[i % DONUT_SLICE_COLORS.length] }}
+            />
+            <span className="level-donut-chart__label">{truncateDonutLabel(d.name)}</span>
+            <span className="level-donut-chart__value">{d.value.toLocaleString()}</span>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 

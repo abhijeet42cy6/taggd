@@ -1,5 +1,157 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Project } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+export type FilterOption = { value: string; label: string };
+
+/** Dashboard-style filter: native select when ≤ threshold options, searchable dropdown when more. */
+export function SearchableFilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+  allLabel = "All",
+  minWidth = 130,
+  searchableThreshold = 5,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: FilterOption[];
+  allLabel?: string;
+  minWidth?: number;
+  searchableThreshold?: number;
+  className?: string;
+}) {
+  const searchable = options.length > searchableThreshold;
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const selectedLabel =
+    value === "all"
+      ? allLabel
+      : options.find((o) => o.value === value)?.label ?? value;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(
+      (o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q),
+    );
+  }, [options, query]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setQuery("");
+      window.setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }, [open]);
+
+  const pick = (v: string) => {
+    onChange(v);
+    setOpen(false);
+    setQuery("");
+  };
+
+  if (!searchable) {
+    return (
+      <label className={cn("dashboard-filter-field", className)} style={{ minWidth }}>
+        <span className="dashboard-filter-label">{label}</span>
+        <select
+          className="dashboard-filter-select"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={label}
+        >
+          <option value="all">{allLabel}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <div
+      ref={wrapRef}
+      className={cn("dashboard-filter-field clients-hub-filter-searchable", className)}
+      style={{ minWidth, position: "relative" }}
+    >
+      <span className="dashboard-filter-label">{label}</span>
+      <button
+        type="button"
+        className={cn("dashboard-filter-select clients-hub-filter-trigger", open && "clients-hub-filter-trigger--open")}
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="clients-hub-filter-trigger__text">{selectedLabel}</span>
+        <span className="clients-hub-filter-trigger__chev" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open ? (
+        <div className="clients-hub-filter-panel" role="listbox">
+          <div className="clients-hub-filter-panel__search">
+            <input
+              ref={searchRef}
+              type="search"
+              className="platform-search"
+              placeholder={`Search ${label.toLowerCase()}…`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+              }}
+            />
+          </div>
+          <div className="clients-hub-filter-panel__list">
+            <button
+              type="button"
+              role="option"
+              aria-selected={value === "all"}
+              className={cn("clients-hub-filter-option", value === "all" && "clients-hub-filter-option--active")}
+              onClick={() => pick("all")}
+            >
+              {allLabel}
+            </button>
+            {filtered.length === 0 ? (
+              <div className="clients-hub-filter-empty">No matches for “{query.trim()}”</div>
+            ) : (
+              filtered.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="option"
+                  aria-selected={value === o.value}
+                  className={cn("clients-hub-filter-option", value === o.value && "clients-hub-filter-option--active")}
+                  onClick={() => pick(o.value)}
+                >
+                  {o.label}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export type MetricOption = { id: number; label: string; account: string };
 

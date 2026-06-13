@@ -29,6 +29,11 @@ import {
   avgPpcSigmaRevMinusCmOverSigmaHc,
   avgTaggdSigmaJoinersOverSigmaWl1,
 } from "@/components/platform/ProductivityAveragesSection";
+import {
+  AccountMetricCard,
+  type AccountMetricDecoration,
+} from "@/components/tremor-dashboard/AccountMetricCard";
+import "@/styles/exec-dash-premium.css";
 import "@/styles/finance-exec-dashboard.css";
 
 ChartJS.register(
@@ -138,28 +143,37 @@ function fyShortLabel(start: number): string {
   return `FY${String(start).slice(2)}–${String(start + 1).slice(2)}`;
 }
 
-function KpiTile(props: {
-  theme: "t-blue" | "t-green" | "t-purple" | "t-teal" | "t-dpurple" | "t-orange" | "t-cyan" | "t-red";
-  icon: string;
+const FIN_KPI_DECORATION: Record<
+  "t-blue" | "t-green" | "t-purple" | "t-teal" | "t-dpurple" | "t-orange" | "t-cyan" | "t-red",
+  AccountMetricDecoration
+> = {
+  "t-blue": "blue",
+  "t-green": "emerald",
+  "t-purple": "blue",
+  "t-teal": "teal",
+  "t-dpurple": "amber",
+  "t-orange": "orange",
+  "t-cyan": "teal",
+  "t-red": "rose",
+};
+
+function FinanceKpiCard(props: {
+  theme: keyof typeof FIN_KPI_DECORATION;
   label: string;
   value: string;
   targetLine: string;
+  hint?: string;
 }) {
-  const { theme, icon, label, value, targetLine } = props;
+  const { theme, label, value, targetLine, hint } = props;
+  const subtext = targetLine && targetLine !== "—" ? targetLine : undefined;
   return (
-    <div className={`kpi-tile ${theme}`}>
-      <div className="kpi-tile-hd">
-        <i className={`fas ${icon}`} aria-hidden />
-        <span>{label}</span>
-      </div>
-      <div className="kpi-tile-body">
-        <div className="kpi-tile-val">{value}</div>
-        <div className="kpi-tile-target">
-          <i className="fas fa-bullseye" aria-hidden />
-          {targetLine}
-        </div>
-      </div>
-    </div>
+    <AccountMetricCard
+      eyebrow={label}
+      decorationColor={FIN_KPI_DECORATION[theme]}
+      value={value}
+      hint={hint}
+      subtext={subtext}
+    />
   );
 }
 
@@ -418,27 +432,29 @@ export function FinanceExecDashboard({
       return (
         <>
           <div className="kpi-grid-8">
-            <KpiTile
+            <FinanceKpiCard
               theme="t-blue"
-              icon="fa-indian-rupee-sign"
               label="Revenue — Actual"
               value={displayStats ? fmtCr(displayStats.revenue_actual_inr) : "—"}
+              hint={
+                displayStats && displayStats.revenue_budget_inr > 0
+                  ? `${displayStats.rev_attainment.toFixed(1)}% of budget`
+                  : undefined
+              }
               targetLine={
                 displayStats
                   ? `Budget: ${fmtCr(displayStats.revenue_budget_inr)}${hasActiveFilters ? " · slice" : " · Live ledger"}`
                   : "—"
               }
             />
-            <KpiTile
+            <FinanceKpiCard
               theme="t-green"
-              icon="fa-percent"
               label="CM % — Actual"
               value={cmPctActual != null ? `${cmPctActual.toFixed(2)}%` : "—"}
               targetLine={displayStats ? `CM: ${formatCurrency(displayStats.total_cm_inr ?? 0)}` : "—"}
             />
-            <KpiTile
+            <FinanceKpiCard
               theme="t-purple"
-              icon="fa-database"
               label="PPC / Person / Month"
               value={ppcPortfolio.value != null ? formatCurrency(ppcPortfolio.value) : "—"}
               targetLine={
@@ -447,9 +463,8 @@ export function FinanceExecDashboard({
                   : "Σ overall HC is 0 in scope"
               }
             />
-            <KpiTile
+            <FinanceKpiCard
               theme="t-teal"
-              icon="fa-arrow-trend-up"
               label="Rev productivity"
               value={revProdMean.mean != null ? formatCurrency(revProdMean.mean) : "—"}
               targetLine={
@@ -458,9 +473,8 @@ export function FinanceExecDashboard({
                   : "No Rev/WL1 values in scope"
               }
             />
-            <KpiTile
+            <FinanceKpiCard
               theme="t-dpurple"
-              icon="fa-user-plus"
               label="Taggd joiner productivity"
               value={taggdProd.value != null ? `${taggdProd.value.toFixed(2)} J/HC` : "—"}
               targetLine={
@@ -471,9 +485,8 @@ export function FinanceExecDashboard({
                     : "Σ WL1 HC is 0 in scope"
               }
             />
-            <KpiTile
+            <FinanceKpiCard
               theme="t-orange"
-              icon="fa-users"
               label="Headcount (WL1 Σ)"
               value={
                 taggdProd.sumWl1 > 0
@@ -482,20 +495,23 @@ export function FinanceExecDashboard({
               }
               targetLine="Same Σ WL1 as Taggd productivity tile"
             />
-            <KpiTile
+            <FinanceKpiCard
               theme="t-cyan"
-              icon="fa-hand-holding-dollar"
               label="Collection — Actual"
               value={displayStats ? fmtCr(displayStats.total_collected_inr) : "—"}
+              hint={
+                displayStats && displayStats.total_collection_target_inr > 0
+                  ? `${formatPercent(displayStats.collection_efficiency ?? 0)} collection efficiency`
+                  : undefined
+              }
               targetLine={
                 displayStats
                   ? `Target: ${fmtCr(displayStats.total_collection_target_inr)} · Eff: ${formatPercent(displayStats.collection_efficiency ?? 0)}`
                   : "—"
               }
             />
-            <KpiTile
+            <FinanceKpiCard
               theme="t-red"
-              icon="fa-file-invoice"
               label="Unbilled & Bad Debt"
               value={
                 displayStats
@@ -765,30 +781,26 @@ export function FinanceExecDashboard({
     if (page === "cashflow") {
       return (
         <div className="kpi-grid">
-          <KpiTile
+          <FinanceKpiCard
             theme="t-green"
-            icon="fa-hand-holding-dollar"
             label="Collected"
             value={displayStats ? formatCurrency(displayStats.total_collected_inr ?? 0) : "—"}
             targetLine={hasActiveFilters ? "Filtered slice" : "From finance stats"}
           />
-          <KpiTile
+          <FinanceKpiCard
             theme="t-blue"
-            icon="fa-bullseye"
             label="Collection target"
             value={displayStats ? formatCurrency(displayStats.total_collection_target_inr ?? 0) : "—"}
             targetLine="—"
           />
-          <KpiTile
+          <FinanceKpiCard
             theme="t-orange"
-            icon="fa-clock"
             label="Collection pending"
             value={displayStats ? formatCurrency(displayStats.collection_pending_inr ?? 0) : "—"}
             targetLine="—"
           />
-          <KpiTile
+          <FinanceKpiCard
             theme="t-red"
-            icon="fa-file-invoice"
             label="Unbilled"
             value={displayStats ? formatCurrency(displayStats.total_unbilled_inr ?? 0) : "—"}
             targetLine="—"

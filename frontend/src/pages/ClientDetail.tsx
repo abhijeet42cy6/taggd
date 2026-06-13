@@ -37,11 +37,14 @@ import {
 } from "@/components/ui/dialog";
 import { RequisitionRecordDrawer } from "@/components/platform/RequisitionRecordDrawer";
 import { RequisitionCreateDrawer } from "@/components/platform/RequisitionCreateDrawer";
+import { DataEmptyPanel } from "@/components/platform/DataEmptyPanel";
 import { SkeletonHeroKpiRow, SkeletonTable, Skeleton } from "@/components/platform/Skeleton";
+import { isReadOnlyClient, useAuth } from "@/lib/auth";
 import "@/styles/exec-dash-premium.css";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ReqStatusStackedBar, AgeingBars, LevelDonutChart } from "@/components/platform/Charts";
 import { ClientAccountInfoTab } from "@/components/platform/ClientAccountInfoTab";
+import { ClientFormDrawer } from "@/components/platform/ClientFormDrawer";
 
 const PER_PAGE = 50;
 
@@ -758,6 +761,8 @@ function aggregateLatestWfm(rows: WfmBenchRow[], projectIds: number[]) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
 export function ClientDetail() {
+  const { user } = useAuth();
+  const readOnlyClient = isReadOnlyClient(user);
   const { clientId: clientIdParam } = useParams<{ clientId: string }>();
   const navigate = useNavigate();
   const rawParam = clientIdParam ?? "";
@@ -786,6 +791,7 @@ export function ClientDetail() {
   const [activeTab, setActiveTab] = useState("Requisitions");
   const [selectedReq, setSelectedReq] = useState<RecordRow | null>(null);
   const [addReqOpen, setAddReqOpen] = useState(false);
+  const [editClientOpen, setEditClientOpen] = useState(false);
 
   const [slaTimeseries, setSlaTimeseries] = useState<SlaTimeseriesAccount[]>([]);
   const [wfmRows, setWfmRows] = useState<WfmBenchRow[]>([]);
@@ -1135,14 +1141,22 @@ export function ClientDetail() {
               />
             </div>
             {clientVm && projectIds.length > 0 && (
-              <button
-                type="button"
-                className="req-drawer-btn-edit"
-                style={{ flexShrink: 0, marginTop: 2 }}
-                onClick={() => setAddReqOpen(true)}
-              >
-                Add requisition
-              </button>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0, marginTop: 2 }}>
+                <button
+                  type="button"
+                  className="req-drawer-btn-edit"
+                  onClick={() => setEditClientOpen(true)}
+                >
+                  Edit account
+                </button>
+                <button
+                  type="button"
+                  className="req-drawer-btn-edit"
+                  onClick={() => setAddReqOpen(true)}
+                >
+                  Add requisition
+                </button>
+              </div>
             )}
           </div>
         )
@@ -1239,9 +1253,21 @@ export function ClientDetail() {
       )}
 
       {/* KPI RIBBON */}
-      {loadingMeta || !allRecords.length
-        ? <SkeletonHeroKpiRow count={6} />
-        : (
+      {loadingMeta || loadingRecords ? (
+        <SkeletonHeroKpiRow count={6} />
+      ) : !projectIds.length ? (
+        <DataEmptyPanel
+          title="No projects linked"
+          message="This client has no SBU projects assigned yet. Link projects or run account ingest before requisition KPIs can appear."
+          showIngestionLink={!readOnlyClient}
+        />
+      ) : !allRecords.length ? (
+        <DataEmptyPanel
+          title="No requisition data"
+          message="Upload a client tracker workbook (Express or Pro ingest) to populate requisitions, KPIs, and analytics for this account."
+          showIngestionLink={!readOnlyClient}
+        />
+      ) : (
           <ClientMetricGrid count={6}>
             <AccountMetricCard
               eyebrow="Total Reqs"
@@ -1306,9 +1332,14 @@ export function ClientDetail() {
               </div>
             )}
           </div>
-          {allRecords.length === 0 && loadingRecords && (
+          {loadingRecords && (
             <div style={{ fontSize: 9.5, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
               Score will update once records are loaded
+            </div>
+          )}
+          {!loadingRecords && allRecords.length === 0 && (
+            <div style={{ fontSize: 9.5, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+              Score is estimated until tracker data is ingested
             </div>
           )}
         </div>
@@ -1458,8 +1489,18 @@ export function ClientDetail() {
                 </thead>
                 <tbody>
                   {records.length === 0 && (
-                    <tr><td colSpan={11} style={{ color: "var(--text-muted)", textAlign: "center", padding: 24 }}>
-                      {allRecords.length === 0 ? "No requisitions found for this client." : "No records match your filters"}
+                    <tr><td colSpan={11} style={{ padding: 0, border: "none" }}>
+                      {allRecords.length === 0 ? (
+                        <DataEmptyPanel
+                          title="No requisitions for this client"
+                          message="Ingest a tracker workbook for this account to populate the requisition table and analytics."
+                          showIngestionLink={!readOnlyClient}
+                        />
+                      ) : (
+                        <div style={{ color: "var(--text-muted)", textAlign: "center", padding: 24 }}>
+                          No records match your filters
+                        </div>
+                      )}
                     </td></tr>
                   )}
                   {records.map((r) => {
@@ -1522,7 +1563,15 @@ export function ClientDetail() {
                   <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "var(--accent)", width: 36, textAlign: "right" }}>{count}</div>
                 </div>
               ))}
-              {allRecords.length === 0 && <div style={{ color: "var(--text-muted)", fontSize: 11 }}>Loading…</div>}
+              {loadingRecords ? (
+                <div style={{ color: "var(--text-muted)", fontSize: 11 }}>Loading…</div>
+              ) : allRecords.length === 0 ? (
+                <DataEmptyPanel
+                  title="No analytics yet"
+                  message="Requisition analytics appear after tracker data is ingested for this client."
+                  showIngestionLink={!readOnlyClient}
+                />
+              ) : null}
             </PlatformSection>
 
             <PlatformSection title="Req by Department (Top 8)">
@@ -1618,6 +1667,16 @@ export function ClientDetail() {
           )}
         />
       )}
+
+      <ClientFormDrawer
+        open={editClientOpen}
+        onClose={() => setEditClientOpen(false)}
+        clientVm={clientVm}
+        numericClientId={numericClientId}
+        onSuccess={async () => {
+          await refreshProjects();
+        }}
+      />
 
       {/* ── ADD REQUISITION (POST /records) ── */}
       <RequisitionCreateDrawer

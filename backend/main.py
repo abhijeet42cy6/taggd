@@ -247,6 +247,9 @@ class ProjectMetadataPatch(BaseModel):
     hierarchy_tag_sbu: Optional[str] = None
     hierarchy_tag_sbg: Optional[str] = None
     hierarchy_tag_sbe: Optional[str] = None
+    tracker_sheet: Optional[str] = None
+    contract_sheet: Optional[str] = None
+    pos_id_column: Optional[str] = None
 
 
 ORG_UNIT_BUSINESS = "business_unit"

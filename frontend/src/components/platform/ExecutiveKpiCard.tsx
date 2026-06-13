@@ -1,15 +1,15 @@
 import React from "react";
+import {
+  AccountMetricCard,
+  platformAccentToDecoration,
+} from "@/components/tremor-dashboard/AccountMetricCard";
+import "@/styles/exec-dash-premium.css";
 
 type Accent = "orange" | "teal" | "red" | "green" | "blue" | "amber";
 
-const HEADER_BG: Record<Accent, string> = {
-  orange: "#e16f3d",
-  teal: "#14b8a6",
-  red: "#ef4444",
-  green: "#2ecc71",
-  blue: "#3884ff",
-  amber: "#f59e0b",
-};
+function formatSubline(line: { label: string; value: React.ReactNode }): string {
+  return `${line.label}: ${line.value ?? "—"}`;
+}
 
 export function ExecutiveKpiCard({
   title,
@@ -27,35 +27,21 @@ export function ExecutiveKpiCard({
   band?: React.ReactNode;
   footer?: { label: string; value: React.ReactNode }[];
 }) {
+  const subtext = sublines[0] ? formatSubline(sublines[0]) : undefined;
+  const extraLines = [
+    ...sublines.slice(1).map(formatSubline),
+    ...footer.map(formatSubline),
+    ...(band ? [String(band)] : []),
+  ];
+  const footnote = extraLines.length > 0 ? extraLines.join(" · ") : undefined;
+
   return (
-    <div className="exec-kpi-card">
-      <div className="exec-kpi-card__header" style={{ background: HEADER_BG[accent] }}>
-        {title}
-      </div>
-      <div className="exec-kpi-card__body">
-        <div className="exec-kpi-card__primary">{primary}</div>
-        {sublines.length > 0 && (
-          <div className="exec-kpi-card__sub">
-            {sublines.map((l, i) => (
-              <div key={i} className={`exec-kpi-card__subline exec-kpi-card__subline--${l.tone ?? "default"}`}>
-                <span>{l.label}</span>
-                <span>{l.value}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {band ? <div className="exec-kpi-card__band">{band}</div> : null}
-        {footer.length > 0 && (
-          <div className="exec-kpi-card__footer">
-            {footer.map((f, i) => (
-              <div key={i} className="exec-kpi-card__footrow">
-                <span>{f.label}</span>
-                <span>{f.value}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+    <AccountMetricCard
+      eyebrow={title}
+      decorationColor={platformAccentToDecoration(accent)}
+      value={primary}
+      subtext={subtext}
+      footnote={footnote}
+    />
   );
 }

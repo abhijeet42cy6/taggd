@@ -47,6 +47,24 @@ export function projectForestForClient(projects: Project[]): ProjectTreeNode[] {
   return roots.map(walk);
 }
 
+function dashField(v: unknown): string {
+  if (v == null) return "—";
+  const s = String(v).trim();
+  return s && s.toLowerCase() !== "nan" ? s : "—";
+}
+
+/** When all projects share the same value, show it; otherwise summarize variance. */
+export function projectRollupText(
+  projects: { region?: string | null; sub_region?: string | null; practice?: string | null; vertical?: string | null; account_status?: string | null; practice_head?: string | null; category?: string | null }[],
+  pick: (p: (typeof projects)[number]) => string | null | undefined,
+): string {
+  if (!projects.length) return "—";
+  const vals = [...new Set(projects.map((p) => dashField(pick(p))).filter((v) => v !== "—"))];
+  if (vals.length === 0) return "—";
+  if (vals.length === 1) return vals[0];
+  return `${vals.length} values`;
+}
+
 /** Preferred: server-grouped clients from GET /clients. */
 export function clientGroupsToVm(rows: ClientGroup[]): ClientVm[] {
   return (rows || []).map((r) => ({

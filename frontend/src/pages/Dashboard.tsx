@@ -28,6 +28,7 @@ import {
   filterFinanceRows,
   buildYoYRevenueSeries,
   buildRegionalRevenue,
+  filterFinanceRowsToActiveClientProjects,
   buildExecutiveSummary,
   aggregateFinanceFromRows,
   emptyFinanceAggregate,
@@ -227,7 +228,10 @@ export const Dashboard = () => {
   );
   const cmQuarters = useMemo(() => quarterlyCmForFy(kpiRows, selectedFyStart), [kpiRows, selectedFyStart]);
 
-  const regional = useMemo(() => buildRegionalRevenue(filteredRows, projects), [filteredRows, projects]);
+  const regional = useMemo(
+    () => buildRegionalRevenue(filterFinanceRowsToActiveClientProjects(filteredRows, projects), projects),
+    [filteredRows, projects],
+  );
 
   const execRows = useMemo(() => {
     if (!displayFinance) return [];
@@ -571,7 +575,7 @@ export const Dashboard = () => {
         fyLabel={fyShortLabel(selectedFyStart)}
       />
 
-      <TremorDashboardSection tag="Geography" title="Revenue by region — Actual vs Budget" noPad>
+      <TremorDashboardSection tag="Geography" title="Revenue by region — Actual vs Budget (active clients)" noPad>
         <div className="bg-white px-5 py-4">
           <RegionalRevenueBarChart data={regional} />
         </div>

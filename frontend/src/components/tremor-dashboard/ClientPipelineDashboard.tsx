@@ -47,6 +47,12 @@ function fmtDays(v: number | null | undefined): string {
   return `${Math.round(v)}d`;
 }
 
+function truncateChannelLabel(name: string, max = 28): string {
+  const t = name.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
 function PeriodToggle({ value, onChange }: { value: PeriodMode; onChange: (v: PeriodMode) => void }) {
   return (
     <div className="cd-period-toggle">
@@ -562,28 +568,44 @@ function DiversityTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipel
           {srcMonthly.length === 0 ? (
             <Text className="text-xs text-tremor-content-subtle">No monthly source breakdown available.</Text>
           ) : (
-            <div className="cd-chart-h-240">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={srcMonthly}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                  <YAxis tick={{ fontSize: 10 }} width={32} />
-                  <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 10 }} />
+            <div className="cd-chart-stacked-bar">
+              <div className="cd-chart-stacked-bar__plot">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={srcMonthly} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} width={32} />
+                    <Tooltip />
+                    {channels.map((ch, i) => (
+                      <Bar key={ch} dataKey={ch} stackId="a" fill={SRC_PALETTE[i % SRC_PALETTE.length]} name={ch} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {channels.length > 0 ? (
+                <div className="cd-legend-row cd-chart-stacked-bar__legend">
                   {channels.map((ch, i) => (
-                    <Bar key={ch} dataKey={ch} stackId="a" fill={SRC_PALETTE[i % SRC_PALETTE.length]} />
+                    <span key={ch} className="cd-leg" title={ch}>
+                      <span className="cd-leg-sq" style={{ background: SRC_PALETTE[i % SRC_PALETTE.length] }} />
+                      {truncateChannelLabel(ch)}
+                    </span>
                   ))}
-                </BarChart>
-              </ResponsiveContainer>
+                </div>
+              ) : null}
             </div>
           )}
         </ChartCard>
         <ChartCard title="Source mix — offer wise" subtitle="Offers extended by source channel">
-          {(metrics.source_breakdown_offers ?? []).length === 0 ? (
+          {(metrics.source_breakdown_offers ?? []).filter((d) => d.count > 0).length === 0 ? (
             <Text className="text-xs text-tremor-content-subtle">No offer source data.</Text>
           ) : (
-            <div className="cd-chart-h-200">
-              <LevelDonutChart data={(metrics.source_breakdown_offers ?? []).map((d) => ({ name: d.label, value: d.count }))} />
+            <div className="cd-chart-h-260">
+              <LevelDonutChart
+                maxLegendItems={10}
+                data={(metrics.source_breakdown_offers ?? [])
+                  .filter((d) => d.count > 0)
+                  .map((d) => ({ name: d.label, value: d.count }))}
+              />
             </div>
           )}
         </ChartCard>

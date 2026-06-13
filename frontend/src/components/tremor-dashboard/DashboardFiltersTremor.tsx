@@ -9,6 +9,7 @@ import {
   FY_MONTH_ORDER,
 } from "@/lib/dashboard-aggregates";
 import { Button, Grid, Select, SelectItem, Text } from "@tremor/react";
+import { SearchableTremorFilterSelect } from "@/components/tremor-dashboard/SearchableTremorFilterSelect";
 
 function uniqSorted(vals: (string | undefined)[]): string[] {
   const s = new Set<string>();
@@ -84,17 +85,13 @@ export function DashboardFiltersTremor({
         : String(fyYears[0]);
 
   const filterSelect = (label: string, key: keyof DF, opts: string[]) => (
-    <div className="min-w-[10rem]">
-      <Text className="mb-1 font-semibold text-tremor-content-emphasis">{label}</Text>
-      <Select value={String(value[key])} onValueChange={(v) => sel(key, v)}>
-        <SelectItem value="all">All</SelectItem>
-        {opts.map((o) => (
-          <SelectItem key={o} value={o}>
-            {o}
-          </SelectItem>
-        ))}
-      </Select>
-    </div>
+    <SearchableTremorFilterSelect
+      key={key}
+      label={label}
+      value={String(value[key])}
+      onValueChange={(v) => sel(key, v)}
+      options={opts}
+    />
   );
 
   return (

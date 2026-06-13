@@ -127,6 +127,22 @@ export function isRegionalRollupProject(p: Project): boolean {
   return account === region;
 }
 
+/** Finance rows for active client mandates only (excludes prospect/inactive directory rows and regional roll-ups). */
+export function filterFinanceRowsToActiveClientProjects(
+  rows: FinanceRowVm[],
+  projects: Project[],
+): FinanceRowVm[] {
+  const pmap = new Map(projects.map((p) => [p.id, p]));
+  return rows.filter((row) => {
+    if (row.project_id == null) return false;
+    const p = pmap.get(row.project_id);
+    if (!p) return false;
+    if (!isProjectEligibleForFinanceAccountList(p)) return false;
+    if (isRegionalRollupProject(p)) return false;
+    return true;
+  });
+}
+
 export function filterFinanceRows(
   rows: FinanceRowVm[],
   projects: Project[],

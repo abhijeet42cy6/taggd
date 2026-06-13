@@ -52,24 +52,6 @@ router = APIRouter(
 
 BLOCK_CATALOG: list[dict[str, str]] = [
     {
-        "type": "sla_kpi_strip",
-        "label": "SLA KPI strip",
-        "desc": "Hero metrics: SLA met %, total tracked, portfolio health",
-        "category": "SLA",
-    },
-    {
-        "type": "sla_summary_cards",
-        "label": "SLA summary cards",
-        "desc": "Cards showing met / not-met / not-reported counts",
-        "category": "SLA",
-    },
-    {
-        "type": "sla_table",
-        "label": "SLA KPI table",
-        "desc": "Detailed contractual KPI rows with score, target, status",
-        "category": "SLA",
-    },
-    {
         "type": "req_kpi",
         "label": "Requisitions KPI",
         "desc": "Total requisition count for allocated projects",
@@ -112,12 +94,6 @@ BLOCK_CATALOG: list[dict[str, str]] = [
         "category": "Requisitions",
     },
     {
-        "type": "engagements_table",
-        "label": "Engagements table",
-        "desc": "Roster of allocated project engagements",
-        "category": "Engagements",
-    },
-    {
         "type": "finance_strip",
         "label": "Finance snapshot",
         "desc": "Revenue, collections, unbilled tiles (visibility controlled per flag)",
@@ -136,12 +112,16 @@ LEGACY_PIPELINE_BLOCK_TYPES = frozenset({
     "pipeline_mix_charts",
 })
 
+# Retired SLA / engagements blocks — stripped from stored layouts on load.
+RETIRED_BLOCK_TYPES = frozenset({
+    "sla_kpi_strip",
+    "sla_summary_cards",
+    "sla_table",
+    "engagements_table",
+})
+
 DEFAULT_LAYOUT: list[dict[str, Any]] = [
     {"id": "pipeline_analytics_panel", "type": "pipeline_analytics_panel", "variant": "card", "order": 0},
-    {"id": "sla_kpi_strip", "type": "sla_kpi_strip", "variant": "card", "order": 1},
-    {"id": "sla_summary_cards", "type": "sla_summary_cards", "variant": "card", "order": 2},
-    {"id": "sla_table", "type": "sla_table", "variant": "card", "order": 3},
-    {"id": "engagements_table", "type": "engagements_table", "variant": "card", "order": 4},
 ]
 
 DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
@@ -167,10 +147,6 @@ DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
 def _widgets_to_layout(widgets: dict[str, Any]) -> list[dict[str, Any]]:
     """Convert v1 widget flags to v2 layout array."""
     mapping = [
-        ("kpi_row", "sla_kpi_strip"),
-        ("sla_summary", "sla_summary_cards"),
-        ("sla_metrics_table", "sla_table"),
-        ("projects_table", "engagements_table"),
         ("finance_summary", "finance_strip"),
     ]
     layout = []
@@ -208,6 +184,14 @@ def _ensure_pipeline_blocks_in_layout(layout: list[dict[str, Any]]) -> list[dict
     return [panel, *shifted]
 
 
+def _strip_retired_blocks(layout: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove retired block types and re-index order."""
+    filtered = [b for b in layout if b.get("type") not in RETIRED_BLOCK_TYPES]
+    if not filtered:
+        return copy.deepcopy(DEFAULT_LAYOUT)
+    return [{**b, "order": i} for i, b in enumerate(filtered)]
+
+
 def _validate_layout(layout: list[Any]) -> list[dict[str, Any]]:
     """Strip unknown block types and ensure required fields."""
     out = []
@@ -238,9 +222,9 @@ def _deep_merge_config(stored: Optional[dict[str, Any]]) -> dict[str, Any]:
     if "layout" in stored and isinstance(stored["layout"], list):
         validated = _validate_layout(stored["layout"])
         base_layout = validated if validated else copy.deepcopy(DEFAULT_LAYOUT)
-        out["layout"] = _ensure_pipeline_blocks_in_layout(base_layout)
+        out["layout"] = _ensure_pipeline_blocks_in_layout(_strip_retired_blocks(base_layout))
     elif "widgets" in stored and isinstance(stored.get("widgets"), dict):
-        out["layout"] = _ensure_pipeline_blocks_in_layout(_widgets_to_layout(stored["widgets"]))
+        out["layout"] = _ensure_pipeline_blocks_in_layout(_strip_retired_blocks(_widgets_to_layout(stored["widgets"])))
 
     # scalar pass-through fields
     for k in (

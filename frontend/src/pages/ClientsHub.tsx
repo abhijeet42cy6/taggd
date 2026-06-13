@@ -2,11 +2,20 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { queries } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { usePersona } from "@/lib/persona";
-import { PlatformSection, PageHeader, MiniStatRow, Tabs, StatusTag } from "@/components/platform/PlatformBlocks";
+import { PlatformSection, PageHeader, Tabs, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
-import { clientGroupsToVm, clientsVm, projectForestForClient, type ClientVm, type ProjectTreeNode } from "@/lib/view-models/clients";
-import { formatCurrency } from "@/lib/utils";
+import { clientGroupsToVm, clientsVm, projectForestForClient, projectRollupText, type ClientVm, type ProjectTreeNode } from "@/lib/view-models/clients";
 import { isRecruiterUser, useAuth } from "@/lib/auth";
+import {
+  buildClientsHubFilterOptions,
+  clientMatchesHubFilters,
+  clientMatchesSearch,
+  countActiveHubFilters,
+  DEFAULT_CLIENTS_HUB_FILTERS,
+  type ClientsHubFilters,
+} from "@/lib/clients-hub-filters";
+import { ACCOUNT_STATUS_OPTIONS } from "@/lib/project-directory-options";
+import { SearchableFilterSelect } from "@/components/platform/searchable-pickers";
 
 // Real composite from projectStats — same formula as ClientDetail & PortfolioIntelligence
 // Falls back to a neutral 50 when no stats are available yet.
@@ -48,6 +57,21 @@ function goToClient(id: number, navigate: ReturnType<typeof useNavigate>) {
   navigate(`/clients/${id}`);
 }
 
+function ClientHubMetaItem({ label, value }: { label: string; value: string }) {
+  const empty = !value || value === "—";
+  return (
+    <div className="clients-hub-card__meta-item">
+      <div className="clients-hub-card__meta-label">{label}</div>
+      <div
+        className={empty ? "clients-hub-card__meta-value clients-hub-card__meta-value--muted" : "clients-hub-card__meta-value"}
+        title={value}
+      >
+        {empty ? "—" : value}
+      </div>
+    </div>
+  );
+}
+
 // projectId → per-project stats from the monitor endpoint
 type ProjectStat = { positions: number; revenue: number; closed?: number; active?: number; on_hold?: number };
 
@@ -59,8 +83,8 @@ export function ClientsHub() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("Overview");
   const [search, setSearch] = useState("");
-  /** Default: active only (excludes prospect legal clients from GET /clients). */
-  const [lifecycleFilter, setLifecycleFilter] = useState<"active" | "all">("active");
+  const [filters, setFilters] = useState<ClientsHubFilters>(DEFAULT_CLIENTS_HUB_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const { persona, scopedClients } = usePersona();
   const navigate = useNavigate();
 
@@ -138,27 +162,21 @@ export function ClientsHub() {
     return all;
   }, [clientsList, persona, scopedClients]);
 
-  const clientsLifecycle = useMemo(() => {
-    if (lifecycleFilter === "all") return clients;
-    return clients.filter((c) => c.lifecycleState !== "prospect");
-  }, [clients, lifecycleFilter]);
+  const filterOptions = useMemo(() => buildClientsHubFilterOptions(clients), [clients]);
+
+  const activeFilterCount = useMemo(() => countActiveHubFilters(filters), [filters]);
 
   const filteredClients = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return clientsLifecycle;
-    return clientsLifecycle.filter((c) => {
-      if (c.officialName.toLowerCase().includes(q) || c.client.toLowerCase().includes(q)) return true;
-      for (const p of c.projects) {
-        const sbu = (p.engagement_name || p.account_name || "").toLowerCase();
-        if (sbu.includes(q)) return true;
-      }
-      for (const id of c.projectIds) {
-        if (String(id).includes(q)) return true;
-        if (`p${id}`.includes(q) || `p${String(id).padStart(2, "0")}`.toLowerCase().includes(q)) return true;
-      }
-      return false;
-    });
-  }, [clientsLifecycle, search]);
+    return clients.filter((c) => clientMatchesHubFilters(c, filters) && clientMatchesSearch(c, search));
+  }, [clients, filters, search]);
+
+  const setFilter = <K extends keyof ClientsHubFilters>(key: K, value: ClientsHubFilters[K]) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
+
+  function clearFilters() {
+    setFilters(DEFAULT_CLIENTS_HUB_FILTERS);
+    setSearch("");
+  }
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -188,55 +206,147 @@ export function ClientsHub() {
 
       <Tabs tabs={["Overview", "Hierarchy", "Table"]} active={tab} onChange={setTab} />
 
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+      <div className="clients-hub-filters">
         <input
-          className="platform-search"
+          className="platform-search clients-hub-filters__search"
           type="search"
           placeholder="Search by legal client, SBU, or project ID…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Filter clients"
-          style={{ flex: "1 1 240px", maxWidth: 420, minWidth: 180 }}
         />
-        <label className="sr-only" htmlFor="clients-lifecycle-filter">
-          Show clients
-        </label>
-        <select
-          id="clients-lifecycle-filter"
-          className="platform-search"
-          value={lifecycleFilter}
-          onChange={(e) => setLifecycleFilter(e.target.value as "active" | "all")}
-          aria-label="Show active clients or all clients"
-          style={{ flex: "0 0 auto", maxWidth: 200, minWidth: 150, cursor: "pointer" }}
-        >
-          <option value="active">Active only</option>
-          <option value="all">All clients</option>
-        </select>
-        {!loading && clients.length > 0 && (
-          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'DM Mono',monospace" }}>
-            {filteredClients.length === clientsLifecycle.length
-              ? `${clientsLifecycle.length} client${clientsLifecycle.length !== 1 ? "s" : ""}${
-                  lifecycleFilter === "active" && clients.length > clientsLifecycle.length
-                    ? ` (active; ${clients.length} incl. prospects)`
-                    : ""
-                }`
-              : `Showing ${filteredClients.length} of ${clientsLifecycle.length}`}
-          </span>
+
+        <div className="clients-hub-filters__grid">
+          <SearchableFilterSelect
+            label="Client lifecycle"
+            value={filters.lifecycle}
+            onChange={(v) => setFilter("lifecycle", v as ClientsHubFilters["lifecycle"])}
+            allLabel="All clients"
+            options={[
+              { value: "active", label: "Active only" },
+              { value: "prospect", label: "Prospects only" },
+            ]}
+          />
+          <SearchableFilterSelect
+            label="Account status"
+            value={filters.accountStatus}
+            onChange={(v) => setFilter("accountStatus", v as ClientsHubFilters["accountStatus"])}
+            options={ACCOUNT_STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
+          />
+          <SearchableFilterSelect
+            label="Region"
+            value={filters.region}
+            onChange={(v) => setFilter("region", v)}
+            options={filterOptions.regions.map((r) => ({ value: r, label: r }))}
+          />
+          <SearchableFilterSelect
+            label="Practice head"
+            value={filters.practiceHead}
+            onChange={(v) => setFilter("practiceHead", v)}
+            options={filterOptions.practiceHeads.map((h) => ({ value: h, label: h }))}
+          />
+        </div>
+
+        <div className="clients-hub-filters__toolbar">
+          <button
+            type="button"
+            className={`clients-hub-filters__toggle${filtersOpen ? " clients-hub-filters__toggle--open" : ""}${activeFilterCount > 0 ? " clients-hub-filters__toggle--active" : ""}`}
+            onClick={() => setFiltersOpen((o) => !o)}
+            aria-expanded={filtersOpen}
+          >
+            {filtersOpen ? "Hide filters" : "More filters"}
+            {activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </button>
+          {(activeFilterCount > 0 || search.trim()) && (
+            <button type="button" className="dashboard-filter-reset" onClick={clearFilters}>
+              Clear
+            </button>
+          )}
+          {!loading && clients.length > 0 && (
+            <span className="clients-hub-filters__count">
+              {filteredClients.length === clients.length && !search.trim() && activeFilterCount === 0
+                ? `${clients.length} client${clients.length !== 1 ? "s" : ""}`
+                : `Showing ${filteredClients.length} of ${clients.length}`}
+              {filters.lifecycle === "active" &&
+                clients.some((c) => c.lifecycleState === "prospect") &&
+                activeFilterCount <= 1 &&
+                !search.trim() &&
+                ` (${clients.filter((c) => c.lifecycleState !== "prospect").length} active; ${clients.length} incl. prospects)`}
+            </span>
+          )}
+        </div>
+
+        {filtersOpen && (
+          <div className="clients-hub-filters__extended">
+            <div className="clients-hub-filters__grid">
+              <SearchableFilterSelect
+                label="Sub region"
+                value={filters.subRegion}
+                onChange={(v) => setFilter("subRegion", v)}
+                options={filterOptions.subRegions.map((r) => ({ value: r, label: r }))}
+              />
+              <SearchableFilterSelect
+                label="Regional head"
+                value={filters.regionalHead}
+                onChange={(v) => setFilter("regionalHead", v)}
+                options={filterOptions.regionalHeads.map((h) => ({ value: h, label: h }))}
+              />
+              <SearchableFilterSelect
+                label="Function head"
+                value={filters.functionHead}
+                onChange={(v) => setFilter("functionHead", v)}
+                options={filterOptions.functionHeads.map((h) => ({ value: h, label: h }))}
+              />
+              <SearchableFilterSelect
+                label="Category (TARA)"
+                value={filters.category}
+                onChange={(v) => setFilter("category", v)}
+                options={filterOptions.categories.map((c) => ({ value: c, label: c }))}
+              />
+              <SearchableFilterSelect
+                label="Vertical"
+                value={filters.vertical}
+                onChange={(v) => setFilter("vertical", v)}
+                options={filterOptions.verticals.map((v) => ({ value: v, label: v }))}
+              />
+              <SearchableFilterSelect
+                label="Practice type"
+                value={filters.practice}
+                onChange={(v) => setFilter("practice", v)}
+                options={filterOptions.practices.map((p) => ({ value: p, label: p }))}
+              />
+              <SearchableFilterSelect
+                label="Missing data"
+                value={filters.missingData}
+                onChange={(v) => setFilter("missingData", v as ClientsHubFilters["missingData"])}
+                allLabel="Any completeness"
+                options={[
+                  { value: "region", label: "Missing region" },
+                  { value: "sub_region", label: "Missing sub region" },
+                  { value: "practice_head", label: "Missing practice head" },
+                  { value: "regional_head", label: "Missing regional head" },
+                  { value: "charge_code", label: "Missing charge code" },
+                  { value: "category", label: "Missing category" },
+                ]}
+              />
+            </div>
+          </div>
         )}
       </div>
 
       {tab === "Overview" && (
         <div className="platform-grid-3">
           {loading && Array(6).fill(0).map((_, i) => (
-            <div key={i} className="platform-card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <Skeleton height={14} width="60%" />
-              <Skeleton height={10} width="40%" />
-              <div style={{ display: "flex", gap: 6 }}>
-                <Skeleton height={32} />
-                <Skeleton height={32} />
-                <Skeleton height={32} />
+            <div key={i} className="platform-card clients-hub-card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+              <Skeleton height={18} width="55%" />
+              <Skeleton height={10} width="35%" />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <Skeleton height={36} />
+                <Skeleton height={36} />
+                <Skeleton height={36} />
+                <Skeleton height={36} />
               </div>
-              <Skeleton height={4} />
+              <Skeleton height={5} />
             </div>
           ))}
           {!loading && clients.length === 0 && (
@@ -246,10 +356,10 @@ export function ClientsHub() {
           )}
           {!loading && clients.length > 0 && filteredClients.length === 0 && (
             <div className="platform-card" style={{ gridColumn: "1/-1", textAlign: "center", color: "var(--text-muted)", padding: 32 }}>
-              {search.trim()
-                ? <>No clients match &quot;{search.trim()}&quot;. Try another name or project ID.</>
-                : lifecycleFilter === "active"
-                  ? <>No active clients — use the filter above to show <strong>All clients</strong> (includes prospects).</>
+              {search.trim() || activeFilterCount > 0
+                ? <>No clients match the current search and filters.</>
+                : filters.lifecycle === "active"
+                  ? <>No active clients — use <strong>All clients</strong> under Client lifecycle or <strong>More filters</strong>.</>
                   : <>No clients to show.</>}
             </div>
           )}
@@ -257,77 +367,81 @@ export function ClientsHub() {
             const score = compositeScore(c.projectIds, projectStats);
             const status = scoreStatus(score);
             const color = scoreColor(score);
-
-            // Aggregate real data across all project IDs for this client
-            let totalReqs = 0, totalRevenue = 0, totalClosed = 0;
-            for (const pid of c.projectIds) {
-              const s = projectStats.get(pid);
-              if (s) {
-                totalReqs    += s.positions;
-                totalRevenue += s.revenue;
-                totalClosed  += s.closed ?? 0;
-              }
-            }
-            const revenueDisplay = totalRevenue > 0 ? formatCurrency(totalRevenue) : "—";
-            const reqsDisplay = totalReqs > 0 ? totalReqs : "—";
-            // Real fill % = closed / total positions
-            const fillDisplay = totalReqs > 0
-              ? `${totalClosed}/${totalReqs} (${Math.round((totalClosed / totalReqs) * 100)}%)`
-              : "—";
+            const projects = c.projects;
+            const region = projectRollupText(projects, (p) => p.region);
+            const subRegion = projectRollupText(projects, (p) => p.sub_region);
+            const accountType = projectRollupText(projects, (p) => p.practice);
+            const vertical = projectRollupText(projects, (p) => p.vertical);
+            const accountStatus = projectRollupText(projects, (p) => p.account_status);
+            const practiceHead = projectRollupText(projects, (p) => p.practice_head);
+            const category = projectRollupText(projects, (p) => p.category);
 
             return (
-              <div key={c.id} className="platform-card" onClick={() => goToClient(c.id, navigate)}
+              <div
+                key={c.id}
+                className="platform-card clients-hub-card"
+                onClick={() => goToClient(c.id, navigate)}
                 style={{
-                  cursor: "pointer", transition: "border-color .2s, transform .15s",
+                  cursor: "pointer",
+                  transition: "border-color .2s, transform .15s, box-shadow .2s",
                   borderColor: c.split && c.id < 0 ? "rgba(255,79,107,.25)" : undefined,
+                  ["--clients-hub-accent" as string]: color,
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
-                onMouseLeave={(e) => (e.currentTarget.style.transform = "")}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "";
+                }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      fontSize: 14,
-                      minWidth: 0,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                    title={c.officialName}
-                  >
+                <div className="clients-hub-card__head">
+                  <div className="clients-hub-card__title" title={c.officialName}>
                     {c.officialName}
                     {c.lifecycleState === "prospect" && c.id >= 0 ? (
-                      <span className="platform-badge amber" style={{ marginLeft: 8, fontSize: 9 }}>
+                      <span className="platform-badge amber" style={{ marginLeft: 8, fontSize: 9, verticalAlign: "middle" }}>
                         Prospect
                       </span>
                     ) : null}
                   </div>
                   <StatusTag status={status} />
                 </div>
-                <div
-                  style={{
-                    fontSize: 9.5,
-                    color: "var(--text-muted)",
-                    fontFamily: "'DM Mono',monospace",
-                    marginBottom: 10,
-                    wordBreak: "break-word",
-                  }}
-                >
+                <div className="clients-hub-card__sub">
                   {c.projectIds.map((id) => `P${String(id).padStart(2, "0")}`).join(" · ")}
                   {c.split ? (c.id >= 0 ? " · Multi-SBU" : " · Merged") : ""}
                 </div>
-                <MiniStatRow stats={[
-                  { label: "Reqs",    value: reqsDisplay },
-                  { label: "Revenue", value: revenueDisplay, color: totalRevenue > 0 ? "var(--green)" : undefined },
-                  { label: "Fill %",  value: fillDisplay },
-                ]} />
-                <div className="prog-bar" style={{ marginTop: 8, height: 4 }}>
+                <div className="clients-hub-card__meta">
+                  <ClientHubMetaItem label="Region" value={region} />
+                  <ClientHubMetaItem label="Account type" value={accountType} />
+                  <ClientHubMetaItem label="Sub region" value={subRegion} />
+                  <ClientHubMetaItem label="Vertical" value={vertical} />
+                  <ClientHubMetaItem label="Status" value={accountStatus} />
+                  <ClientHubMetaItem label="Category" value={category} />
+                </div>
+                <div className="clients-hub-card__score-row">
+                  <span className="clients-hub-card__score-label">Composite health</span>
+                  <span className="clients-hub-card__score-value" style={{ color }}>
+                    {score}/100
+                  </span>
+                </div>
+                <div className="prog-bar" style={{ marginTop: 6 }}>
                   <div className="prog-fill" style={{ width: `${score}%`, background: color }} />
                 </div>
-                <div style={{ fontSize: 9.5, color: "var(--text-muted)", marginTop: 4, fontFamily: "'DM Mono',monospace" }}>
-                  Composite Score: {score}/100
-                </div>
+                {practiceHead !== "—" ? (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      fontSize: 10,
+                      color: "var(--text-muted)",
+                      fontFamily: "var(--mono)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={practiceHead}
+                  >
+                    Practice head · {practiceHead}
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -343,10 +457,10 @@ export function ClientsHub() {
           {loading && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Loading…</div>}
           {!loading && clients.length > 0 && filteredClients.length === 0 && (
             <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-              {search.trim()
-                ? <>No clients match your search.</>
-                : lifecycleFilter === "active"
-                  ? <>No active clients — switch the filter to <strong>All clients</strong> to include prospects.</>
+              {search.trim() || activeFilterCount > 0
+                ? <>No clients match your search or filters.</>
+                : filters.lifecycle === "active"
+                  ? <>No active clients — switch Client lifecycle to <strong>All clients</strong>.</>
                   : <>No clients to show.</>}
             </div>
           )}
@@ -392,10 +506,10 @@ export function ClientsHub() {
                 {filteredClients.length === 0 && clients.length > 0 && (
                   <tr>
                     <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: 24 }}>
-                      {search.trim()
-                        ? "No clients match your search."
-                        : lifecycleFilter === "active"
-                          ? 'No active clients — choose "All clients" in the filter above to include prospects.'
+                      {search.trim() || activeFilterCount > 0
+                        ? "No clients match your search or filters."
+                        : filters.lifecycle === "active"
+                          ? 'No active clients — set Client lifecycle to "All clients".'
                           : "No clients to show."}
                     </td>
                   </tr>

@@ -1188,9 +1188,6 @@ export function clearApiCache() {
 
 /** Layout block types available in the block catalog. */
 export type BlockType =
-  | "sla_kpi_strip"
-  | "sla_summary_cards"
-  | "sla_table"
   | "req_kpi"
   | "pipeline_kpi_strip"
   | "pipeline_quality_strip"
@@ -1198,7 +1195,6 @@ export type BlockType =
   | "pipeline_ageing_chart"
   | "pipeline_mix_charts"
   | "pipeline_analytics_panel"
-  | "engagements_table"
   | "finance_strip";
 
 /** A single block in the v2 layout array. */
@@ -1404,6 +1400,9 @@ export const queries = {
         | "hierarchy_tag_sbg"
         | "hierarchy_tag_sbe"
         | "project_head_user_id"
+        | "tracker_sheet"
+        | "contract_sheet"
+        | "pos_id_column"
       >
     >
   ) =>

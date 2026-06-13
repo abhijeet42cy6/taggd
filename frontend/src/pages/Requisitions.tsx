@@ -30,6 +30,7 @@ import { RequisitionCreateDrawer } from "@/components/platform/RequisitionCreate
 import { RequisitionRecordDrawer } from "@/components/platform/RequisitionRecordDrawer";
 import { LevelDonutChart, AgeingBars } from "@/components/platform/Charts";
 import { SkeletonTable, SkeletonKpiRow, Skeleton } from "@/components/platform/Skeleton";
+import { DataEmptyPanel } from "@/components/platform/DataEmptyPanel";
 import { REQUISITION_FUNNEL_UNPROCESSED_LABEL, requisitionFunnelVm } from "@/lib/view-models/requisitions";
 import { displayRecordReqId, formatCurrency, formatOfferedCtc } from "@/lib/utils";
 
@@ -97,6 +98,13 @@ const funnelBarColor: Record<string, React.ComponentProps<typeof ProgressBar>["c
   Cancelled: "rose",
 };
 
+const EMPTY_REQ_KPIS: RequisitionKpis = {
+  open_req: 0,
+  offer_req: 0,
+  joiners: 0,
+  total_records: 0,
+};
+
 export function Requisitions() {
   const { user, projectIds } = useAuth();
   const recruiterView = isRecruiterUser(user);
@@ -114,6 +122,7 @@ export function Requisitions() {
   const [globalStatusBreakdown, setGlobalStatusBreakdown] = useState<Record<string, number>>({});
   const [monitor, setMonitor] = useState<import("@/lib/api").GlobalMonitor | null>(null);
   const [reqKpis, setReqKpis] = useState<RequisitionKpis | null>(null);
+  const [reqKpisLoading, setReqKpisLoading] = useState(true);
   const [deptBreakdown, setDeptBreakdown] = useState<Array<{ name: string; value: number }>>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [addReqOpen, setAddReqOpen] = useState(false);
@@ -151,13 +160,17 @@ export function Requisitions() {
 
   useEffect(() => {
     let mounted = true;
+    setReqKpisLoading(true);
     queries
       .requisitionKpis()
       .then((k) => {
         if (mounted) setReqKpis(k);
       })
       .catch(() => {
-        if (mounted) setReqKpis(null);
+        if (mounted) setReqKpis(EMPTY_REQ_KPIS);
+      })
+      .finally(() => {
+        if (mounted) setReqKpisLoading(false);
       });
     return () => {
       mounted = false;
@@ -260,13 +273,17 @@ export function Requisitions() {
     return "your assigned projects";
   }, [portfolioView, scopedView, projectIds, readOnlyClient, recruiterView]);
 
-  const subtitle = reqKpis
-    ? recruiterView
-      ? `${reqKpis.total_records.toLocaleString()} visible to you — ${scopeLabel} (same scope as the table below)`
+  const kpis = reqKpis ?? EMPTY_REQ_KPIS;
+  const showReqEmptyState =
+    !reqKpisLoading && !loading && totalRecords === 0 && !debouncedSearch;
+
+  const subtitle = reqKpisLoading
+    ? `${totalRecords.toLocaleString()} on this view · loading KPIs…`
+    : recruiterView
+      ? `${kpis.total_records.toLocaleString()} visible to you — ${scopeLabel} (same scope as the table below)`
       : scopedView
-        ? `${reqKpis.total_records.toLocaleString()} in tracker — scoped to ${scopeLabel}`
-        : `${reqKpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are ${scopeLabel}`
-    : `${totalRecords.toLocaleString()} on this view · loading KPIs…`;
+        ? `${kpis.total_records.toLocaleString()} in tracker — scoped to ${scopeLabel}`
+        : `${kpis.total_records.toLocaleString()} in tracker · Open / Offer / Joiner counts are ${scopeLabel}`;
 
   const funnelSubtitle = debouncedSearch
     ? "Counts from filtered rows on this page"
@@ -298,7 +315,7 @@ export function Requisitions() {
       const pages = Math.max(1, Math.ceil(total / prev.per_page));
       return { ...prev, records: nextRecords, total, pages };
     });
-    queries.requisitionKpis().then(setReqKpis).catch(() => {});
+    queries.requisitionKpis().then(setReqKpis).catch(() => setReqKpis(EMPTY_REQ_KPIS));
     queries.globalMonitor().then((m) => {
       setGlobalStatusBreakdown(m.status_breakdown ?? {});
       setMonitor(m);
@@ -320,32 +337,45 @@ export function Requisitions() {
         </Text>
       </div>
 
-      {reqKpis ? (
+      {reqKpisLoading || (loading && !result) ? (
+        <SkeletonKpiRow count={3} />
+      ) : showReqEmptyState ? (
+        <DataEmptyPanel
+          title="No requisitions yet"
+          message={
+            readOnlyClient
+              ? "Your account does not have tracker rows yet. Pipeline KPIs and charts will appear once your programme owner ingests a requisition workbook."
+              : scopedView && (projectIds?.length ?? 0) === 0
+                ? "No projects are assigned to your scope yet. Assign projects or upload a tracker via Ingestion Center."
+                : "Upload a client tracker workbook (Express or Pro ingest) to populate requisitions and pipeline analytics."
+          }
+          showIngestionLink={!readOnlyClient}
+        />
+      ) : (
         <Grid numItems={1} numItemsSm={3} className="gap-2 md:gap-3">
           <Card decoration="top" decorationColor="blue" className="p-3">
             <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Open reqs</Text>
-            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{reqKpis.open_req.toLocaleString()}</Metric>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.open_req.toLocaleString()}</Metric>
             <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">
               ACTIVE (no offer signal in status)
             </Text>
           </Card>
           <Card decoration="top" decorationColor="amber" className="p-3">
             <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">Offer reqs</Text>
-            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{reqKpis.offer_req.toLocaleString()}</Metric>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.offer_req.toLocaleString()}</Metric>
             <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">
               PIPELINE or status contains &quot;offer&quot;
             </Text>
           </Card>
           <Card decoration="top" decorationColor="emerald" className="p-3">
             <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Joiners</Text>
-            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{reqKpis.joiners.toLocaleString()}</Metric>
+            <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.joiners.toLocaleString()}</Metric>
             <Text className="mt-0.5 text-[11px] text-tremor-content-subtle md:text-xs">CLOSED (joined / closed hires)</Text>
           </Card>
         </Grid>
-      ) : (
-        <SkeletonKpiRow count={3} />
       )}
 
+      {!showReqEmptyState ? (
       <Grid numItems={1} numItemsLg={2} className="gap-3">
         <Card className={flatCard}>
           <div className="border-b border-tremor-border px-4 py-3 dark:border-dark-tremor-border">
@@ -406,6 +436,7 @@ export function Requisitions() {
           </div>
         </Card>
       </Grid>
+      ) : null}
 
       <Card className={flatCard}>
         <div className="flex w-full min-w-0 flex-col gap-3 border-b border-tremor-border px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 dark:border-dark-tremor-border">
@@ -572,7 +603,7 @@ export function Requisitions() {
             .recordsAll({ page: 1, per_page: PER_PAGE, search: debouncedSearch || undefined })
             .then(setResult)
             .catch(() => {});
-          queries.requisitionKpis().then(setReqKpis).catch(() => setReqKpis(null));
+          queries.requisitionKpis().then(setReqKpis).catch(() => setReqKpis(EMPTY_REQ_KPIS));
           queries.globalMonitor().then((m) => {
             setGlobalStatusBreakdown(m.status_breakdown ?? {});
             setMonitor(m);

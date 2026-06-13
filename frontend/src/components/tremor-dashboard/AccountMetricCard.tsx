@@ -99,7 +99,7 @@ export function ClientMetricGrid({
   return (
     <div
       className={cn(
-        "exec-dash-tremor client-metric-grid",
+        "client-metric-grid",
         count === 6 ? "client-metric-grid--6" : "client-metric-grid--4",
         className,
       )}

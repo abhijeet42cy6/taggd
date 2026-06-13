@@ -475,6 +475,8 @@
   border-radius: 0.65rem;
   padding: 1rem 1.1rem;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .cd-chart-card__header {
@@ -542,10 +544,61 @@
   display: inline-block;
 }
 
-.cd-chart-h-200 { height: 200px; width: 100%; min-width: 0; }
-.cd-chart-h-220 { height: 220px; width: 100%; min-width: 0; }
-.cd-chart-h-240 { height: 240px; width: 100%; min-width: 0; }
-.cd-chart-h-260 { height: 260px; width: 100%; min-width: 0; }
+.cd-chart-h-200 {
+  height: 200px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cd-chart-h-220 {
+  height: 220px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cd-chart-h-240 {
+  height: 240px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cd-chart-h-260 {
+  height: 260px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cd-chart-stacked-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 240px;
+  min-width: 0;
+}
+
+.cd-chart-stacked-bar__plot {
+  height: 200px;
+  width: 100%;
+  min-width: 0;
+}
+
+.cd-chart-stacked-bar__legend {
+  margin-bottom: 0;
+  max-height: 4.5rem;
+  overflow-y: auto;
+}
 
 .cd-ageing-table-wrap {
   margin-bottom: 1rem;

@@ -26,6 +26,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Download, RefreshCw, Plus, PencilLine, Trash2, FilterX, Maximize2 } from "lucide-react";
 import { BillingRowsExpandDialog } from "@/components/platform/BillingRowsExpandDialog";
+import { BillingSummaryVisuals } from "@/components/platform/BillingSummaryVisuals";
 import "@/styles/new-contract-panel.css";
 import "@/styles/billing-ds-table.css";
 
@@ -1736,6 +1737,7 @@ export function Billing() {
                 <div className="billing-ds-summary-value">{billingSummary.otherJoiner.toLocaleString()}</div>
               </div>
             </div>
+            <BillingSummaryVisuals summary={billingSummary} />
           </div>
         </div>
       </PlatformSection>

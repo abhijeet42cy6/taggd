@@ -29,6 +29,7 @@ import {
   filterFinanceRows,
   buildYoYRevenueSeries,
   buildRegionalRevenue,
+  filterFinanceRowsToActiveClientProjects,
   buildExecutiveSummary,
   aggregateFinanceFromRows,
   emptyFinanceAggregate,
@@ -200,7 +201,10 @@ export const CeoView = () => {
   const revQuarters = useMemo(() => quarterlyPlanActualForFy(fyRows, selectedFyStart), [fyRows, selectedFyStart]);
   const collQuarters = useMemo(() => quarterlyCollectionForFy(fyRows, selectedFyStart), [fyRows, selectedFyStart]);
   const cmQuarters = useMemo(() => quarterlyCmForFy(fyRows, selectedFyStart), [fyRows, selectedFyStart]);
-  const regional = useMemo(() => buildRegionalRevenue(allRows, projects), [allRows, projects]);
+  const regional = useMemo(
+    () => buildRegionalRevenue(filterFinanceRowsToActiveClientProjects(allRows, projects), projects),
+    [allRows, projects],
+  );
   const execRows = useMemo(() => {
     if (!fin) return [];
     return buildExecutiveSummary(
@@ -709,7 +713,7 @@ export const CeoView = () => {
           </Grid>
         </TremorDashboardSection>
 
-        <TremorDashboardSection tag="Geography" title="Revenue by region" noPad>
+        <TremorDashboardSection tag="Geography" title="Revenue by region (active clients)" noPad>
           <div className="bg-white px-5 py-4">
             {regional.length > 0 ? (
               <CeoRegionalRevenueTremorChart data={regional} />

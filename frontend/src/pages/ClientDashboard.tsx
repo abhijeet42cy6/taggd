@@ -1,18 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Badge,
   Button,
   Card,
   Grid,
   Metric,
   SearchSelect,
   SearchSelectItem,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeaderCell,
-  TableRow,
   Text,
   Title,
 } from "@tremor/react";
@@ -39,7 +32,6 @@ import {
   type LayoutBlock,
 } from "@/lib/api";
 import { cn, formatLargeCurrency, formatPercent } from "@/lib/utils";
-import { slaRagDisplayLabel, slaRagUiBucket } from "@/lib/sla-rag";
 import { isReadOnlyClient, useAuth } from "@/lib/auth";
 import { PlatformDrawer } from "@/components/platform/PlatformDrawer";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
@@ -58,9 +50,6 @@ import "@/styles/exec-dash-premium.css";
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
 const BLOCK_CATALOG_LABELS: Record<BlockType, string> = {
-  sla_kpi_strip: "SLA KPI strip",
-  sla_summary_cards: "SLA summary cards",
-  sla_table: "SLA KPI table",
   req_kpi: "Requisitions KPI",
   pipeline_kpi_strip: "Pipeline KPI strip",
   pipeline_quality_strip: "Pipeline quality strip",
@@ -68,210 +57,34 @@ const BLOCK_CATALOG_LABELS: Record<BlockType, string> = {
   pipeline_ageing_chart: "WIP ageing distribution",
   pipeline_mix_charts: "Diversity & source mix",
   pipeline_analytics_panel: "RPO pipeline analytics",
-  engagements_table: "Engagements table",
   finance_strip: "Finance snapshot",
 };
 
+/** Retired block types — stripped from saved layouts on load. */
+const RETIRED_BLOCK_TYPES = new Set<string>([
+  "sla_kpi_strip",
+  "sla_summary_cards",
+  "sla_table",
+  "engagements_table",
+]);
+
 const DEFAULT_LAYOUT: LayoutBlock[] = [
   { id: "pipeline_analytics_panel", type: "pipeline_analytics_panel", variant: "card", order: 0 },
-  { id: "sla_kpi_strip", type: "sla_kpi_strip", variant: "card", order: 1 },
-  { id: "sla_summary_cards", type: "sla_summary_cards", variant: "card", order: 2 },
-  { id: "sla_table", type: "sla_table", variant: "card", order: 3 },
-  { id: "engagements_table", type: "engagements_table", variant: "card", order: 4 },
 ];
 
 // ─── Utilities ──────────────────────────────────────────────────────────────────
-
-type SlaRow = ClientDashboardSummary["sla_metrics"][number];
-
-function slaBadgeColor(raw: unknown): "emerald" | "rose" | "slate" {
-  const b = slaRagUiBucket(raw);
-  if (b === "met") return "emerald";
-  if (b === "breached") return "rose";
-  return "slate";
-}
-
-function kpiNatureLabel(raw: string | null | undefined): string {
-  if (!raw) return "—";
-  const s = raw.toLowerCase();
-  if (s.includes("contract")) return "Contractual";
-  if (s.includes("internal")) return "Internal";
-  return raw;
-}
-
-type TabKpis = {
-  met_count: number;
-  not_met_count: number;
-  not_reported_count: number;
-  total_metrics: number;
-  portfolio_health: number | null;
-};
-
-function computeTabKpis(metrics: SlaRow[]): TabKpis {
-  let met = 0, notMet = 0, nr = 0;
-  for (const m of metrics) {
-    const b = slaRagUiBucket(m.status);
-    if (b === "met") met++;
-    else if (b === "breached") notMet++;
-    else nr++;
-  }
-  const denom = met + notMet;
-  return {
-    met_count: met,
-    not_met_count: notMet,
-    not_reported_count: nr,
-    total_metrics: metrics.length,
-    portfolio_health: denom > 0 ? Math.round((met / denom) * 1000) / 10 : null,
-  };
-}
 
 function deepCloneLayout(layout: LayoutBlock[]): LayoutBlock[] {
   return JSON.parse(JSON.stringify(layout)) as LayoutBlock[];
 }
 
+function sanitizeLayout(layout: LayoutBlock[]): LayoutBlock[] {
+  const filtered = layout.filter((b) => !RETIRED_BLOCK_TYPES.has(b.type));
+  if (filtered.length === 0) return DEFAULT_LAYOUT;
+  return filtered.map((b, i) => ({ ...b, order: i }));
+}
+
 // ─── Block sub-components ───────────────────────────────────────────────────────
-
-function formatReportingRange(from: string, to: string): string {
-  const f = from.trim();
-  const t = to.trim();
-  if (f && t) return f === t ? f : `${f} – ${t}`;
-  if (f) return `from ${f}`;
-  if (t) return `through ${t}`;
-  return "Latest period";
-}
-
-function SlaKpiStrip({
-  kpis,
-  variant,
-  periodLabel,
-}: {
-  kpis: TabKpis;
-  variant: LayoutBlock["variant"];
-  periodLabel: string;
-}) {
-  const health = kpis.portfolio_health;
-  const label = `${kpis.met_count} met · ${kpis.not_met_count} not met`;
-  if (variant === "dense") {
-    return (
-      <div className="flex flex-wrap gap-4 rounded-tremor-default border border-tremor-border bg-white px-4 py-3">
-        <div>
-          <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">SLA met %</Text>
-          <Text className="mt-0.5 text-lg font-bold tabular-nums text-tremor-content-strong">
-            {health == null ? "—" : formatPercent(health)}
-          </Text>
-        </div>
-        <div>
-          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Breakdown</Text>
-          <Text className="mt-0.5 text-sm tabular-nums text-tremor-content-emphasis">{label}</Text>
-        </div>
-        <div>
-          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Tracked</Text>
-          <Text className="mt-0.5 text-lg font-bold tabular-nums text-tremor-content-strong">{kpis.total_metrics}</Text>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <Grid numItems={2} numItemsSm={3} className="gap-2 md:gap-3">
-      <Card decoration="top" decorationColor="emerald" className="p-3">
-        <Text className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">SLA met %</Text>
-        <Metric className="mt-1 text-xl tabular-nums md:text-2xl">
-          {health == null ? "—" : formatPercent(health)}
-        </Metric>
-        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">{label}</Text>
-      </Card>
-      <Card decoration="top" decorationColor="blue" className="p-3">
-        <Text className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Not reported</Text>
-        <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.not_reported_count}</Metric>
-        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">KPIs with no score</Text>
-      </Card>
-      <Card decoration="top" decorationColor="amber" className="p-3">
-        <Text className="text-[10px] font-semibold uppercase tracking-wide text-amber-600">KPIs tracked</Text>
-        <Metric className="mt-1 text-xl tabular-nums md:text-2xl">{kpis.total_metrics}</Metric>
-        <Text className="mt-0.5 text-[11px] text-tremor-content-subtle">{periodLabel}</Text>
-      </Card>
-    </Grid>
-  );
-}
-
-function SlaSummaryCards({ kpis }: { kpis: TabKpis }) {
-  return (
-    <TremorDashboardSection tag="SLA" title="SLA summary">
-      <Grid numItems={1} numItemsSm={3} className="gap-3">
-        <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4">
-          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Portfolio health</Text>
-          <Metric className="mt-1 text-lg tabular-nums md:text-xl">
-            {kpis.portfolio_health == null ? "—" : formatPercent(kpis.portfolio_health)}
-          </Metric>
-          <Text className="mt-0.5 text-[10px] text-tremor-content-subtle">Met / (Met + Breached)</Text>
-        </Card>
-        <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4">
-          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Met / Breached</Text>
-          <Metric className="mt-1 text-base tabular-nums md:text-lg">
-            <span className="text-emerald-600">{kpis.met_count}</span>
-            <span className="mx-1 text-tremor-content-subtle">·</span>
-            <span className="text-rose-600">{kpis.not_met_count}</span>
-          </Metric>
-        </Card>
-        <Card className="border border-tremor-border bg-tremor-background-muted/35 p-4">
-          <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Not reported</Text>
-          <Metric className="mt-1 text-base tabular-nums md:text-lg">{kpis.not_reported_count}</Metric>
-        </Card>
-      </Grid>
-    </TremorDashboardSection>
-  );
-}
-
-function SlaTable({ metrics }: { metrics: SlaRow[] }) {
-  if (metrics.length === 0) {
-    return (
-      <TremorDashboardSection tag="Operations" title="SLA KPIs">
-        <Text className="p-4 text-sm text-tremor-content-subtle">No SLA KPI rows in scope.</Text>
-      </TremorDashboardSection>
-    );
-  }
-  return (
-    <TremorDashboardSection tag="Operations" title="SLA KPIs (latest reported)" noPad>
-      <div className="overflow-x-auto px-2 pb-3 pt-1 md:px-4">
-        <Table className="min-w-[720px]">
-          <TableHead>
-            <TableRow>
-              <TableHeaderCell className="text-xs">Account</TableHeaderCell>
-              <TableHeaderCell className="text-xs">KPI</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Type</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Target</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Score</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Reported</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Status</TableHeaderCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {metrics.map((row) => {
-              const label = slaRagDisplayLabel(row.status);
-              return (
-                <TableRow key={row.id}>
-                  <TableCell className="whitespace-nowrap text-xs font-medium text-orange-600">{row.account_name}</TableCell>
-                  <TableCell className="text-xs text-tremor-content-emphasis">{row.metric_label}</TableCell>
-                  <TableCell className="text-[10px] text-tremor-content-subtle">{kpiNatureLabel(row.metric_nature)}</TableCell>
-                  <TableCell className="text-xs tabular-nums">{row.target ?? "—"}</TableCell>
-                  <TableCell className="text-xs tabular-nums">
-                    {row.latest_score != null && String(row.latest_score) !== "N/A" ? String(row.latest_score) : "—"}
-                  </TableCell>
-                  <TableCell className="text-[10px] tabular-nums text-tremor-content-subtle">
-                    {row.reporting_month && row.reporting_month !== "N/A" ? String(row.reporting_month).slice(0, 7) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge color={slaBadgeColor(row.status)} size="xs">{label}</Badge>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    </TremorDashboardSection>
-  );
-}
 
 function ReqKpi({ total, variant }: { total: number; variant: LayoutBlock["variant"] }) {
   if (variant === "dense") {
@@ -292,37 +105,6 @@ function ReqKpi({ total, variant }: { total: number; variant: LayoutBlock["varia
         <Metric className="mt-1 text-2xl tabular-nums">{total}</Metric>
         <Text className="mt-0.5 text-xs text-tremor-content-subtle">Records across allocated projects</Text>
       </Card>
-    </TremorDashboardSection>
-  );
-}
-
-function EngagementsTable({ projects }: { projects: ClientDashboardSummary["projects"] }) {
-  return (
-    <TremorDashboardSection tag="Engagements" title="Your engagements" noPad>
-      <div className="overflow-x-auto px-2 pb-3 pt-1 md:px-4">
-        <Table className="min-w-[640px]">
-          <TableHead>
-            <TableRow>
-              <TableHeaderCell className="text-xs">Account</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Engagement</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Region</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Vertical</TableHeaderCell>
-              <TableHeaderCell className="text-xs">Practice head</TableHeaderCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {projects.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell className="text-xs font-medium text-tremor-content-strong">{p.account_name}</TableCell>
-                <TableCell className="text-xs text-tremor-content-emphasis">{p.engagement_name}</TableCell>
-                <TableCell className="text-xs text-tremor-content-emphasis">{p.region}</TableCell>
-                <TableCell className="text-xs text-tremor-content-emphasis">{p.vertical}</TableCell>
-                <TableCell className="text-xs text-tremor-content-emphasis">{p.practice_head}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
     </TremorDashboardSection>
   );
 }
@@ -367,32 +149,18 @@ function FinanceStrip({ finance, isClientUser }: { finance: Record<string, numbe
 
 function BlockRenderer({
   block,
-  tabKpis,
-  tabMetrics,
-  tabProjects,
   tabReqTotal,
   tabPipeline,
   finance,
   isClientUser,
-  slaPeriodLabel,
 }: {
   block: LayoutBlock;
-  tabKpis: TabKpis;
-  tabMetrics: SlaRow[];
-  tabProjects: ClientDashboardSummary["projects"];
   tabReqTotal: number;
   tabPipeline: ReturnType<typeof mergePipelineForProjects>;
   finance: Record<string, number>;
   isClientUser: boolean;
-  slaPeriodLabel: string;
 }) {
   switch (block.type) {
-    case "sla_kpi_strip":
-      return <SlaKpiStrip kpis={tabKpis} variant={block.variant} periodLabel={slaPeriodLabel} />;
-    case "sla_summary_cards":
-      return <SlaSummaryCards kpis={tabKpis} />;
-    case "sla_table":
-      return <SlaTable metrics={tabMetrics} />;
     case "req_kpi":
       return <ReqKpi total={tabReqTotal} variant={block.variant} />;
     case "pipeline_kpi_strip":
@@ -407,8 +175,6 @@ function BlockRenderer({
       return <PipelineMixCharts metrics={tabPipeline} />;
     case "pipeline_analytics_panel":
       return <PipelineAnalyticsPanel metrics={tabPipeline} />;
-    case "engagements_table":
-      return <EngagementsTable projects={tabProjects} />;
     case "finance_strip":
       return <FinanceStrip finance={finance} isClientUser={isClientUser} />;
     default:
@@ -679,34 +445,6 @@ export function ClientDashboard() {
   }, [activeBuTab, data]);
 
   // ── Derived: tab-scoped data ──────────────────────────────────────────────────
-  const tabMetrics = useMemo(
-    () => (data?.sla_metrics ?? []).filter((m) => tabPidSet.has(m.project_id)),
-    [data, tabPidSet],
-  );
-  const tabProjects = useMemo(
-    () => (data?.projects ?? []).filter((p) => tabPidSet.has(p.id)),
-    [data, tabPidSet],
-  );
-  const tabKpis = useMemo(() => computeTabKpis(tabMetrics), [tabMetrics]);
-
-  const slaPeriodLabel = useMemo(() => {
-    if (reportingMonthFrom.trim() || reportingMonthTo.trim()) {
-      return formatReportingRange(reportingMonthFrom, reportingMonthTo);
-    }
-    if (data?.active_reporting_month_from || data?.active_reporting_month_to) {
-      return formatReportingRange(
-        data.active_reporting_month_from ?? "",
-        data.active_reporting_month_to ?? "",
-      );
-    }
-    const months = tabMetrics
-      .map((m) => (m.reporting_month && m.reporting_month !== "N/A" ? String(m.reporting_month).slice(0, 7) : ""))
-      .filter(Boolean)
-      .sort();
-    if (months.length === 0) return "Latest reported period";
-    return months[months.length - 1];
-  }, [reportingMonthFrom, reportingMonthTo, data, tabMetrics]);
-
   const tabReqTotal = useMemo(() => {
     let total = 0;
     const rq = data?.req_by_project ?? {};
@@ -728,7 +466,8 @@ export function ClientDashboard() {
   // ── Layout (from config or default) ──────────────────────────────────────────
   const layout = useMemo<LayoutBlock[]>(() => {
     const l = data?.config?.layout;
-    return Array.isArray(l) && l.length > 0 ? l : DEFAULT_LAYOUT;
+    const raw = Array.isArray(l) && l.length > 0 ? l : DEFAULT_LAYOUT;
+    return sanitizeLayout(raw);
   }, [data]);
 
   const sortedLayout = useMemo(
@@ -1281,14 +1020,10 @@ export function ClientDashboard() {
             <BlockRenderer
               key={block.id}
               block={block}
-              tabKpis={tabKpis}
-              tabMetrics={tabMetrics}
-              tabProjects={tabProjects}
               tabReqTotal={tabReqTotal}
               tabPipeline={tabPipeline}
               finance={data!.finance}
               isClientUser={isClientUser || data!.is_client_user}
-              slaPeriodLabel={slaPeriodLabel}
             />
           ))}
         </div>
