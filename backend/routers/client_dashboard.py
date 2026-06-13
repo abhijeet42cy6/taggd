@@ -127,6 +127,15 @@ BLOCK_CATALOG: list[dict[str, str]] = [
 
 ALLOWED_BLOCK_TYPES = {b["type"] for b in BLOCK_CATALOG}
 
+# Legacy per-block pipeline widgets superseded by pipeline_analytics_panel (ClientPipelineDashboard).
+LEGACY_PIPELINE_BLOCK_TYPES = frozenset({
+    "pipeline_kpi_strip",
+    "pipeline_quality_strip",
+    "pipeline_activity_chart",
+    "pipeline_ageing_chart",
+    "pipeline_mix_charts",
+})
+
 DEFAULT_LAYOUT: list[dict[str, Any]] = [
     {"id": "pipeline_analytics_panel", "type": "pipeline_analytics_panel", "variant": "card", "order": 0},
     {"id": "sla_kpi_strip", "type": "sla_kpi_strip", "variant": "card", "order": 1},
@@ -170,29 +179,33 @@ def _widgets_to_layout(widgets: dict[str, Any]) -> list[dict[str, Any]]:
         if widgets.get(old_key, True):
             layout.append({"id": new_type, "type": new_type, "variant": "card", "order": order})
             order += 1
-    pipeline_defaults = [
-        ("pipeline_kpi_strip", "card"),
-        ("pipeline_quality_strip", "card"),
-        ("pipeline_activity_chart", "card"),
-    ]
-    for ptype, variant in pipeline_defaults:
-        if not any(b["type"] == ptype for b in layout):
-            layout.append({"id": ptype, "type": ptype, "variant": variant, "order": order})
-            order += 1
-    return layout
+    return _ensure_pipeline_blocks_in_layout(layout)
 
 
 def _ensure_pipeline_blocks_in_layout(layout: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Prepend pipeline blocks when upgrading older v2 layouts."""
-    if any(b.get("type") == "pipeline_kpi_strip" for b in layout):
-        return layout
-    if any(b.get("type") == "pipeline_analytics_panel" for b in layout):
-        return layout
-    prepend = [
-        {"id": "pipeline_analytics_panel", "type": "pipeline_analytics_panel", "variant": "card", "order": 0},
-    ]
-    shifted = [{**b, "order": int(b.get("order", 0)) + len(prepend)} for b in layout]
-    return prepend + shifted
+    """Ensure unified RPO pipeline panel; upgrade legacy strip/chart blocks."""
+    sorted_layout = sorted(layout, key=lambda b: int(b.get("order", 0)))
+    has_panel = any(b.get("type") == "pipeline_analytics_panel" for b in sorted_layout)
+    if has_panel:
+        filtered = [b for b in sorted_layout if b.get("type") not in LEGACY_PIPELINE_BLOCK_TYPES]
+        if len(filtered) == len(sorted_layout):
+            return sorted_layout
+        return [{**b, "order": i} for i, b in enumerate(filtered)]
+
+    has_legacy = any(b.get("type") in LEGACY_PIPELINE_BLOCK_TYPES for b in sorted_layout)
+    non_pipeline = [b for b in sorted_layout if b.get("type") not in LEGACY_PIPELINE_BLOCK_TYPES]
+    panel = {
+        "id": "pipeline_analytics_panel",
+        "type": "pipeline_analytics_panel",
+        "variant": "card",
+        "order": 0,
+    }
+    if has_legacy or not non_pipeline:
+        rest = [{**b, "order": i + 1} for i, b in enumerate(non_pipeline)]
+        return [panel, *rest]
+
+    shifted = [{**b, "order": int(b.get("order", 0)) + 1} for b in sorted_layout]
+    return [panel, *shifted]
 
 
 def _validate_layout(layout: list[Any]) -> list[dict[str, Any]]:
@@ -227,7 +240,7 @@ def _deep_merge_config(stored: Optional[dict[str, Any]]) -> dict[str, Any]:
         base_layout = validated if validated else copy.deepcopy(DEFAULT_LAYOUT)
         out["layout"] = _ensure_pipeline_blocks_in_layout(base_layout)
     elif "widgets" in stored and isinstance(stored.get("widgets"), dict):
-        out["layout"] = _widgets_to_layout(stored["widgets"])
+        out["layout"] = _ensure_pipeline_blocks_in_layout(_widgets_to_layout(stored["widgets"]))
 
     # scalar pass-through fields
     for k in (
