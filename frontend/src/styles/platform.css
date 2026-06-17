@@ -57,6 +57,18 @@
   --bg3: var(--surface-sunken);
   --text2: var(--text-muted);
   --text3: var(--text-subtle);
+  --chart-axis: #94a3b8;
+  --chart-grid: #f0f0f0;
+  --chart-text: #334155;
+  --chart-border: #e2e8f0;
+  --chart-tooltip-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  --chart-card-radius: 12px;
+  --chart-card-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+@keyframes chartSkeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .platform-app {

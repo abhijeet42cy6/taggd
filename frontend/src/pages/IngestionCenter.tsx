@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, invalidateCache, queries, columnMappingEntryCount, type IngestionEventRow, type Project } from "@/lib/api";
 import { isPlatformAdminRole, isRecruiterUser, useAuth } from "@/lib/auth";
 import { PlatformSection, Tabs } from "@/components/platform/PlatformBlocks";
@@ -9,7 +10,7 @@ import "@/styles/ingestion-center.css";
 
 type LogLevel = "info" | "success" | "warning" | "error";
 type LogEntry = { id: string; message: string; level: LogLevel; ts: string };
-type JobStatus = "idle" | "running" | "done" | "error" | "review";
+type JobStatus = "idle" | "running" | "done" | "error" | "review" | "preview";
 
 type Step = { label: string; status: "pending" | "running" | "done" | "error" };
 
@@ -459,6 +460,7 @@ function InfoCallout({ title, children }: { title: string; children: React.React
 
 const KIND_LABEL: Record<string, string> = {
   express: "Express",
+  direct: "Direct Upload",
   pro_inspect: "Pro · inspect",
   pro_confirm: "Pro · run",
   sla: "SLA",
@@ -469,6 +471,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 const INGESTION_TABS = [
+  "Direct Upload",
   "Express",
   "Pro Path",
   "SLA",
@@ -573,7 +576,7 @@ function IngestionActivitySection({
 export function IngestionCenter() {
   const { user } = useAuth();
   const recruiterView = isRecruiterUser(user);
-  const [tab, setTab] = useState<IngestionTab>("Express");
+  const [tab, setTab] = useState<IngestionTab>("Direct Upload");
 
   const [ingestionEvents, setIngestionEvents] = useState<IngestionEventRow[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
@@ -896,7 +899,7 @@ export function IngestionCenter() {
         <p className="ingestion-center__lede">
           {recruiterView
             ? "Run uploads for your assigned projects. The activity feed shows ingestion you triggered; project scope still applies to matching and commits."
-            : "Bring workbooks into the live database — AI-assisted column mapping, validation gates, and clear paths for trackers, revenue templates, SLA, WFM, and finance."}
+            : "Upload client trackers using the standard template (recommended), or use Express / Pro Path for other workbook formats."}
         </p>
       </header>
 
@@ -906,12 +909,17 @@ export function IngestionCenter() {
         </div>
       </div>
 
+      {/* ── DIRECT UPLOAD TAB ────────────────────────────────────────────────── */}
+      {tab === "Direct Upload" && (
+        <DirectUploadTab onUploadDone={refreshIngestionEvents} />
+      )}
+
       {/* ── EXPRESS TAB ──────────────────────────────────────────────────────── */}
       {tab === "Express" && (
         <PlatformSection title="Express">
           <p className="ingestion-center__tabIntro">
-            Upload requisition or placement trackers. AI identifies sheets, maps columns, and prepares revenue logic before you
-            commit.
+            For client-specific Excel formats that don&apos;t use the standard template. If you have the Taggd template,
+            use <strong>Direct Upload</strong> instead — it is faster and more reliable.
           </p>
           {express.job === "idle" && (
             <div className="ingestion-center__grid2">
@@ -1544,6 +1552,1083 @@ function SpecializedIngestTab({
           </button>
         </div>
       )}
+    </PlatformSection>
+  );
+}
+
+// ─── DIRECT UPLOAD TAB ────────────────────────────────────────────────────────
+
+const DIRECT_STEPS: string[] = [
+  "Saving your file",
+  "Reading Position Tracker & Contractual sheets",
+  "Matching columns to the system",
+  "Calculating fee rules from your contract",
+  "Previewing rows (no database write)",
+  "Finishing validation",
+];
+
+const DIRECT_COMMIT_STEPS: string[] = [
+  "Saving your file",
+  "Reading Position Tracker & Contractual sheets",
+  "Matching columns to the system",
+  "Calculating fee rules from your contract",
+  "Loading rows into the database",
+  "Finishing up",
+];
+
+type ValidationRowDetail = {
+  row: number;
+  req_id?: string | null;
+  position_title?: string | null;
+  candidate_name?: string | null;
+  status?: string | null;
+  global_status?: string | null;
+  reason?: string;
+  issue?: string;
+  fix?: string;
+  kept_row?: number;
+  kept_req_id?: string | null;
+  field?: string;
+  field_label?: string;
+  raw?: string;
+  resolved?: string;
+};
+
+type ValidationPreview = {
+  rows_total?: number;
+  rows_valid?: number;
+  rows_skipped?: number;
+  warnings?: ValidationRowDetail[];
+  errors?: ValidationRowDetail[];
+  skipped_rows?: ValidationRowDetail[];
+  valid_rows?: ValidationRowDetail[];
+  global_status_preview?: Record<string, number>;
+  pipeline_status_preview?: Record<string, number>;
+  field_coverage?: Record<string, number>;
+  position_id_column?: string | null;
+  project_id?: number | null;
+  project_will_be_created?: boolean;
+};
+
+type ValidationDetailTab = "total" | "valid" | "skipped" | "warnings" | "errors";
+
+function defaultValidationDetailTab(preview: ValidationPreview): ValidationDetailTab {
+  const errorCount = preview.errors?.length ?? 0;
+  const skippedCount = preview.skipped_rows?.length ?? preview.rows_skipped ?? 0;
+  const warningCount = preview.warnings?.length ?? 0;
+  if (errorCount > 0) return "errors";
+  if (skippedCount > 0) return "skipped";
+  if (warningCount > 0) return "warnings";
+  return "valid";
+}
+
+function groupSkippedByReason(
+  items: ValidationRowDetail[],
+): Array<{ label: string; count: number; reason: string }> {
+  const counts = new Map<string, { label: string; count: number }>();
+  for (const item of items) {
+    const reason = item.reason ?? "other";
+    const label = item.issue ?? reason.replace(/_/g, " ");
+    const existing = counts.get(reason);
+    if (existing) existing.count += 1;
+    else counts.set(reason, { label, count: 1 });
+  }
+  return [...counts.entries()]
+    .map(([reason, { label, count }]) => ({ reason, label, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+const PIPELINE_STATUS_ORDER = ["Open", "Offered", "Joined", "On Hold", "Cancelled", "Interview", "Screening"];
+
+function pipelineStatusChipClass(label: string): string {
+  const key = label.toLowerCase();
+  if (key.includes("open")) return "direct-upload__status-chip--open";
+  if (key.includes("offer")) return "direct-upload__status-chip--offer";
+  if (key.includes("join")) return "direct-upload__status-chip--joined";
+  if (key.includes("hold")) return "direct-upload__status-chip--hold";
+  if (key.includes("cancel")) return "direct-upload__status-chip--cancelled";
+  return "";
+}
+
+function validationRowHint(row: number): string | null {
+  if (row <= 3) {
+    return "This looks like a template or header row in Excel (rows 1–3 are instructions). Delete example/hint rows and keep data from row 4 onward with a real Req ID.";
+  }
+  return null;
+}
+
+function validationIssueFixHint(
+  item: { field?: string; issue?: string; fix?: string },
+  kind: "error" | "warning",
+): string {
+  if (item.fix?.trim()) return item.fix.trim();
+  const field = (item.field ?? "").toLowerCase();
+  const issue = (item.issue ?? "").toLowerCase();
+  if (kind === "error") {
+    if (field === "joining_date" || issue.includes("joining"))
+      return "Fill Joining Date on this row, or remove joining_date from Required fields in Clients → Edit account → Config.";
+    if (field === "offered_ctc" || issue.includes("ctc"))
+      return "Enter Offered CTC (Lakhs), or remove offered_ctc from Required fields in project Config.";
+    if (field === "status" || issue.includes("status"))
+      return "Set Current Status from the dropdown on this row.";
+    if (field === "candidate_name" || issue.includes("candidate_name"))
+      return "Fill Candidate Name (use 'Open — REQ-ID' for vacant positions), or remove candidate_name from Required fields in project Config.";
+  }
+  if (issue.includes("valid_bands"))
+    return "Use a Band / Grade from your project Config, or add this value under Config → Valid bands.";
+  if (issue.includes("valid_departments"))
+    return "Use a Department from your project Config, or add it under Config → Valid departments.";
+  if (issue.includes("valid_locations"))
+    return "Use a Location from your project Config, or add it under Config → Valid locations.";
+  if (issue.includes("source joiner"))
+    return "Pick a Source Joiner Type allowed in your project Config.";
+  if (issue.includes("tto") || issue.includes("joining_date"))
+    return "Fill Joining Date for joined candidates so time-to-offer metrics work.";
+  if (issue.includes("ctc"))
+    return "Enter a positive Offered CTC (Lakhs) on joined rows for revenue calculation.";
+  return kind === "error"
+    ? "Fix this row in Excel or relax validation under Clients → Edit account → Config."
+    : "Review this value in Excel or update project Config if the value is correct.";
+}
+
+function groupIssuesByField(
+  items: Array<{ field?: string; field_label?: string }>,
+): Array<{ label: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const label = item.field_label || item.field || "other";
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+function ValidationPreviewPanel({
+  preview,
+  onConfirm,
+  onCancel,
+  confirming,
+}: {
+  preview: ValidationPreview;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirming: boolean;
+}) {
+  const warnings = preview.warnings ?? [];
+  const errors = preview.errors ?? [];
+  const skippedRows = preview.skipped_rows ?? [];
+  const validRows = preview.valid_rows ?? [];
+  const statusPreview = preview.global_status_preview ?? {};
+  const pipelinePreview = preview.pipeline_status_preview ?? {};
+  const totalStatus = Object.values(statusPreview).reduce((a, b) => a + b, 0);
+  const totalPipeline = Object.values(pipelinePreview).reduce((a, b) => a + b, 0);
+  const errorGroups = groupIssuesByField(errors);
+  const templateRowErrors = errors.filter((e) => e.row <= 3).length;
+  const skipGroups = groupSkippedByReason(skippedRows);
+  const [detailTab, setDetailTab] = useState<ValidationDetailTab>(() => defaultValidationDetailTab(preview));
+
+  const statItems: Array<{
+    key: ValidationDetailTab;
+    label: string;
+    value: number | string;
+    tone?: "neutral" | "good" | "warn" | "skip" | "bad";
+    hint?: string;
+  }> = [
+    {
+      key: "total",
+      label: "Total rows",
+      value: preview.rows_total ?? "—",
+      tone: "neutral",
+      hint: "Every data row read from Position Tracker before filtering.",
+    },
+    {
+      key: "valid",
+      label: "Valid rows",
+      value: preview.rows_valid ?? validRows.length ?? "—",
+      tone: "good",
+      hint: "Rows that will be written or updated on upload.",
+    },
+    {
+      key: "skipped",
+      label: "Skipped",
+      value: preview.rows_skipped ?? skippedRows.length,
+      tone: (preview.rows_skipped ?? skippedRows.length) > 0 ? "skip" : "neutral",
+      hint: "Rows ignored — template junk, blanks, totals, or duplicates in the file.",
+    },
+    {
+      key: "warnings",
+      label: "Warnings",
+      value: warnings.length,
+      tone: warnings.length > 0 ? "warn" : "neutral",
+      hint: "Non-blocking issues — upload is allowed but metrics may be affected.",
+    },
+    {
+      key: "errors",
+      label: "Errors",
+      value: errors.length,
+      tone: errors.length > 0 ? "bad" : "neutral",
+      hint: "Blocking issues — fix in Excel or project Config before uploading.",
+    },
+  ];
+
+  const detailTitle: Record<ValidationDetailTab, string> = {
+    total: "Row breakdown",
+    valid: "Valid rows — will be uploaded",
+    skipped: "Skipped rows — not uploaded",
+    warnings: "Warnings — review before upload",
+    errors: "Errors — upload blocked",
+  };
+
+  const detailDescription: Record<ValidationDetailTab, string> = {
+    total: "Click any summary number above to inspect that category. Skipped and error rows never reach the database.",
+    valid: "These rows passed validation and will be created or updated when you proceed.",
+    skipped: "Each skipped row is listed with the reason and how to fix it in Excel or project Config.",
+    warnings: "Warnings do not block upload. Fix them when you can so dashboards and revenue stay accurate.",
+    errors: "Fix every blocking error below, then re-validate the file.",
+  };
+
+  return (
+    <div className="direct-upload__preview">
+      <div className="direct-upload__preview-title">Validation preview</div>
+      <p className="direct-upload__preview-note">
+        Review the summary below. Nothing is written to the database until you confirm.
+        {errors.length > 0 && (
+          <> <strong>Upload is blocked</strong> until all blocking errors are fixed in the Excel file (or in project Config).</>
+        )}
+        {errors.length === 0 && warnings.length > 0 && (
+          <> You can upload with warnings, but metrics may be affected — review them before proceeding.</>
+        )}
+        {preview.project_will_be_created && (
+          <> A <strong>new client project</strong> will be created on upload.</>
+        )}
+      </p>
+
+      <div className="direct-upload__success-stats direct-upload__success-stats--interactive">
+        {statItems.map(({ key, label, value, tone, hint }) => (
+          <button
+            key={key}
+            type="button"
+            className={[
+              "direct-upload__stat",
+              "direct-upload__stat--clickable",
+              detailTab === key ? "direct-upload__stat--active" : "",
+              tone ? `direct-upload__stat--${tone}` : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            onClick={() => setDetailTab(key)}
+            title={hint}
+            aria-pressed={detailTab === key}
+          >
+            <div className="direct-upload__stat-value">{value}</div>
+            <div className="direct-upload__stat-label">{label}</div>
+          </button>
+        ))}
+      </div>
+
+      {totalPipeline > 0 && (
+        <div className="direct-upload__status-bar">
+          <div className="direct-upload__status-bar-label">Pipeline status (from Current Status column)</div>
+          <div className="direct-upload__status-chips">
+            {[...PIPELINE_STATUS_ORDER, ...Object.keys(pipelinePreview).filter((k) => !PIPELINE_STATUS_ORDER.includes(k))]
+              .filter((status, idx, arr) => arr.indexOf(status) === idx && (pipelinePreview[status] ?? 0) > 0)
+              .map((status) => (
+                <span
+                  key={status}
+                  className={["direct-upload__status-chip", pipelineStatusChipClass(status)].filter(Boolean).join(" ")}
+                >
+                  {status}: {pipelinePreview[status]}
+                </span>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {totalStatus > 0 && (
+        <div className="direct-upload__status-bar">
+          <div className="direct-upload__status-bar-label">Global status preview (valid rows only)</div>
+          <div className="direct-upload__status-chips">
+            {Object.entries(statusPreview).map(([status, count]) => (
+              <span key={status} className="direct-upload__status-chip">
+                {status}: {count}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview.field_coverage && Object.keys(preview.field_coverage).length > 0 && (
+        <details className="direct-upload__details" style={{ marginTop: 10 }}>
+          <summary className="direct-upload__summary">Field coverage (mapped columns filled)</summary>
+          <div className="direct-upload__coverage">
+            {Object.entries(preview.field_coverage)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 12)
+              .map(([field, pct]) => (
+                <div key={field} className="direct-upload__coverage-row">
+                  <span className="direct-upload__coverage-label">{field}</span>
+                  <div className="direct-upload__coverage-bar">
+                    <div className="direct-upload__coverage-fill" style={{ width: `${Math.round(pct * 100)}%` }} />
+                  </div>
+                  <span className="direct-upload__coverage-pct">{Math.round(pct * 100)}%</span>
+                </div>
+              ))}
+          </div>
+        </details>
+      )}
+
+      <div className="direct-upload__detail-panel">
+        <div className="direct-upload__detail-head">
+          <div className="direct-upload__detail-title">{detailTitle[detailTab]}</div>
+          <p className="direct-upload__detail-desc">{detailDescription[detailTab]}</p>
+        </div>
+
+        {detailTab === "total" && (
+          <div className="direct-upload__breakdown">
+            <div className="direct-upload__breakdown-grid">
+              {statItems
+                .filter((s) => s.key !== "total")
+                .map(({ key, label, value, tone }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={[
+                      "direct-upload__breakdown-card",
+                      tone ? `direct-upload__breakdown-card--${tone}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    onClick={() => setDetailTab(key)}
+                  >
+                    <span className="direct-upload__breakdown-value">{value}</span>
+                    <span className="direct-upload__breakdown-label">{label}</span>
+                  </button>
+                ))}
+            </div>
+            {preview.position_id_column && (
+              <p className="direct-upload__detail-meta">
+                Position identity column: <strong>{preview.position_id_column}</strong>
+                {preview.position_id_column.trim().toLowerCase() !== "req id" && (
+                  <> — duplicate open roles with the same title may be skipped unless each has a unique Req ID.</>
+                )}
+              </p>
+            )}
+            {skipGroups.length > 0 && (
+              <div className="direct-upload__issue-summary">
+                {skipGroups.map(({ reason, label, count }) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    className="direct-upload__issue-chip direct-upload__issue-chip--skip"
+                    onClick={() => setDetailTab("skipped")}
+                  >
+                    {label}: {count}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {detailTab === "valid" && (
+          <>
+            {validRows.length === 0 ? (
+              <p className="direct-upload__detail-empty">No valid row details returned. Re-validate the file to refresh.</p>
+            ) : (
+              <div className="direct-upload__table-wrap">
+                <table className="direct-upload__warnings-table direct-upload__detail-table direct-upload__detail-table--valid">
+                  <thead>
+                    <tr>
+                      <th>Excel row</th>
+                      <th>Req ID</th>
+                      <th>Position</th>
+                      <th>Candidate</th>
+                      <th>Status</th>
+                      <th>Global</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {validRows.slice(0, 100).map((row) => (
+                      <tr key={`valid-${row.row}`}>
+                        <td>{row.row}</td>
+                        <td>{row.req_id ?? "—"}</td>
+                        <td>{row.position_title ?? "—"}</td>
+                        <td>{row.candidate_name ?? "—"}</td>
+                        <td>{row.status ?? "—"}</td>
+                        <td>
+                          <span className="direct-upload__pill direct-upload__pill--valid">{row.global_status ?? "—"}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {validRows.length > 100 && (
+                  <p className="direct-upload__detail-more">Showing first 100 of {validRows.length} valid rows.</p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {detailTab === "skipped" && (
+          <>
+            {skippedRows.length === 0 ? (
+              <p className="direct-upload__detail-empty">No rows were skipped.</p>
+            ) : (
+              <>
+                {skipGroups.length > 0 && (
+                  <div className="direct-upload__issue-summary">
+                    {skipGroups.map(({ reason, label, count }) => (
+                      <span key={reason} className="direct-upload__issue-chip direct-upload__issue-chip--skip">
+                        {label}: {count}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {preview.position_id_column &&
+                  skipGroups.some((g) => g.reason === "duplicate_fingerprint") &&
+                  preview.position_id_column.trim().toLowerCase() !== "req id" && (
+                    <div className="direct-upload__fix-callout direct-upload__fix-callout--skip">
+                      <strong>Many duplicates detected:</strong> this project identifies positions by «
+                      {preview.position_id_column}». Open roles that share the same title look identical — set Config →
+                      Position ID column to <strong>Req ID</strong> if each requisition has its own ID.
+                    </div>
+                  )}
+                <div className="direct-upload__table-wrap">
+                  <table className="direct-upload__warnings-table direct-upload__detail-table direct-upload__detail-table--skip">
+                    <thead>
+                      <tr>
+                        <th>Excel row</th>
+                        <th>Req ID</th>
+                        <th>Position</th>
+                        <th>Candidate</th>
+                        <th>Why skipped</th>
+                        <th>How to fix</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {skippedRows.slice(0, 80).map((row, i) => {
+                        const rowHint = validationRowHint(row.row);
+                        return (
+                          <tr key={`skip-${row.row}-${i}`} className="direct-upload__row--skip">
+                            <td>{row.row}</td>
+                            <td>{row.req_id ?? "—"}</td>
+                            <td>{row.position_title ?? "—"}</td>
+                            <td>{row.candidate_name ?? "—"}</td>
+                            <td>
+                              {row.issue ?? row.reason ?? "—"}
+                              {row.kept_row ? (
+                                <div className="direct-upload__row-hint">First seen on row {row.kept_row}</div>
+                              ) : null}
+                              {rowHint ? <div className="direct-upload__row-hint">{rowHint}</div> : null}
+                            </td>
+                            <td className="direct-upload__fix-cell">{row.fix ?? "Review this row in Excel."}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {skippedRows.length > 80 && (
+                    <p className="direct-upload__detail-more">Showing first 80 of {skippedRows.length} skipped rows.</p>
+                  )}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {detailTab === "warnings" && (
+          <>
+            {warnings.length === 0 ? (
+              <p className="direct-upload__detail-empty">No warnings.</p>
+            ) : (
+              <div className="direct-upload__table-wrap">
+                <table className="direct-upload__warnings-table direct-upload__detail-table direct-upload__detail-table--warn">
+                  <thead>
+                    <tr>
+                      <th>Excel row</th>
+                      <th>Column</th>
+                      <th>Raw value</th>
+                      <th>Issue</th>
+                      <th>How to fix</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {warnings.slice(0, 50).map((w, i) => (
+                      <tr key={`${w.row}-${w.field}-${i}`} className="direct-upload__row--warn">
+                        <td>{w.row}</td>
+                        <td>{w.field}</td>
+                        <td>{w.raw ?? w.resolved ?? "—"}</td>
+                        <td>{w.issue ?? (w.resolved ? `→ ${w.resolved}` : "—")}</td>
+                        <td className="direct-upload__fix-cell">{validationIssueFixHint(w, "warning")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+
+        {detailTab === "errors" && (
+          <>
+            {errors.length === 0 ? (
+              <p className="direct-upload__detail-empty">No blocking errors.</p>
+            ) : (
+              <div className="direct-upload__errors">
+                <div className="alert-banner red" style={{ margin: "0 0 10px" }}>
+                  {errors.length} blocking error{errors.length === 1 ? "" : "s"} — fix these in Excel before uploading.
+                </div>
+
+                {templateRowErrors > 0 && (
+                  <div className="direct-upload__fix-callout direct-upload__fix-callout--error">
+                    <strong>Template rows detected:</strong> {templateRowErrors} error{templateRowErrors === 1 ? "" : "s"} on Excel rows 1–3.
+                    Delete the grey example/instruction rows in Position Tracker and keep real data from row 4 with real Req IDs (e.g. REQ-001).
+                  </div>
+                )}
+
+                {errorGroups.length > 0 && (
+                  <div className="direct-upload__issue-summary">
+                    {errorGroups.map(({ label, count }) => (
+                      <span key={label} className="direct-upload__issue-chip direct-upload__issue-chip--error">
+                        {label}: {count}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="direct-upload__table-wrap">
+                  <table className="direct-upload__warnings-table direct-upload__errors-table direct-upload__detail-table direct-upload__detail-table--error">
+                    <thead>
+                      <tr>
+                        <th>Excel row</th>
+                        <th>Column</th>
+                        <th>Problem</th>
+                        <th>How to fix</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {errors.slice(0, 80).map((e, i) => {
+                        const rowHint = validationRowHint(e.row);
+                        const fix = validationIssueFixHint(e, "error");
+                        return (
+                          <tr key={`${e.row}-${e.field}-${i}`} className="direct-upload__row--error">
+                            <td>{e.row}</td>
+                            <td>{e.field_label ?? e.field}</td>
+                            <td>
+                              {e.issue ?? "—"}
+                              {rowHint ? <div className="direct-upload__row-hint">{rowHint}</div> : null}
+                            </td>
+                            <td className="direct-upload__fix-cell">{fix}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="direct-upload__fix-callout">
+                  <strong>Quick paths:</strong>
+                  <ul className="direct-upload__fix-list">
+                    <li>Fix values in the Excel file, then drop the file here again to re-validate.</li>
+                    <li>Or open <strong>Clients → Edit account → Config</strong> to change allowed bands/departments/locations or Required fields.</li>
+                    <li>Download the client template from Direct Upload to get pre-filled dropdowns matching your Config.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="direct-upload__preview-actions">
+        <button type="button" className="direct-upload__resetBtn" onClick={onCancel} disabled={confirming}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="direct-upload__download-btn"
+          onClick={onConfirm}
+          disabled={confirming || errors.length > 0}
+        >
+          {confirming ? "Uploading…" : "Proceed to upload"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type DirectGuideSection = {
+  title: string;
+  color: string;
+  why: string;
+  fields: { name: string; required?: boolean; note: string }[];
+};
+
+const DIRECT_GUIDE_SECTIONS: DirectGuideSection[] = [
+  {
+    title: "Must fill on every row",
+    color: "#EF5350",
+    why: "Without these, the row is skipped. Req ID links the same position across monthly uploads.",
+    fields: [
+      { name: "Req ID", required: true, note: "Client reference number — e.g. REQ-001 or 35525" },
+      { name: "Position Title", required: true, note: "Job title — e.g. Senior Manager – Finance" },
+      { name: "Current Status", required: true, note: "Open · Interview · Offered · Joined · On Hold · Cancelled" },
+      { name: "Candidate Name", note: "Leave blank for open positions with no candidate yet" },
+    ],
+  },
+  {
+    title: "Key dates (drive ageing & time-to-fill)",
+    color: "#4CAF50",
+    why: "Joining Date is the most important — it marks the hire as complete and calculates the closing fee.",
+    fields: [
+      { name: "Req Created Date", note: "When the position was opened — start of ageing" },
+      { name: "Offered Date", note: "When the offer was released — used for Time-to-Offer" },
+      { name: "Joining Date", required: true, note: "Day 1 on the job — triggers closing fee & joiner count" },
+      { name: "First CV Share Date", note: "First CV sent to client — used in SLA reports" },
+    ],
+  },
+  {
+    title: "Salary & revenue",
+    color: "#FF9800",
+    why: "Offered CTC × fee % from your Contractual sheet = Taggd fee in the revenue dashboard.",
+    fields: [
+      { name: "Offered CTC (Lakhs)", required: true, note: "Always in Lakhs — enter 45 for ₹45 Lakh. NOT full rupees." },
+      { name: "CTC Budget (LPA)", note: "Max budget for the role in Lakhs" },
+    ],
+  },
+  {
+    title: "Who found the candidate",
+    color: "#9C27B0",
+    why: "Taggd RPO/Direct = % of CTC fee. ER / IJP = flat fee from Contractual sheet.",
+    fields: [
+      { name: "Source Joiner Type", note: "Taggd RPO · Taggd Direct · ER – Employee Referral · IJP · Campus" },
+      { name: "Source of Hire", note: "e.g. LinkedIn, Naukri, Employee Referral" },
+    ],
+  },
+  {
+    title: "Recruitment funnel counts",
+    color: "#FF7043",
+    why: "Powers Hit Ratio, Offer Drop Rate, and Offer Acceptance Rate in client dashboards.",
+    fields: [
+      { name: "Profiles Sourced", note: "Total CVs collected" },
+      { name: "Profiles Submitted", note: "CVs shared with the client" },
+      { name: "Offers Released", note: "Offers made" },
+      { name: "Offers Accepted", note: "Offers accepted by candidates" },
+    ],
+  },
+];
+
+const DIRECT_MISTAKES = [
+  { title: "CTC entered in full rupees", fix: "Enter 45 for ₹45 Lakhs — not 4500000. Wrong unit makes revenue 100,000× too high." },
+  { title: "Joining Date missing for joiners", fix: "Even if Status = Joined, without Joining Date the closing fee is not calculated." },
+  { title: "Wrong file name", fix: "Name the file after the client — e.g. Maruti Suzuki Tracker.xlsx — not Tracker.xlsx." },
+  { title: "Example rows left in the file", fix: "Delete rows 4–8 (the grey example rows) before uploading your real data." },
+  { title: "Adding Revenue or Global Status columns", fix: "These are calculated by the system — do not add them to your Excel." },
+];
+
+function DirectUploadTab({ onUploadDone }: { onUploadDone: () => void }) {
+  const [searchParams] = useSearchParams();
+  const [job, setJob] = useState<JobStatus>("idle");
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const [result, setResult] = useState<Record<string, any> | null>(null);
+  const [validationPreview, setValidationPreview] = useState<ValidationPreview | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [steps, setSteps] = useState<Step[]>(DIRECT_STEPS.map((l) => ({ label: l, status: "pending" })));
+
+  // Project selection
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | "">("");
+  const [loadingProjects, setLoadingProjects] = useState(false);
+
+  const selectedProject = allProjects.find((p) => p.id === selectedProjectId) ?? null;
+  const trackerConfig = selectedProject?.tracker_config ?? null;
+
+  useEffect(() => {
+    setLoadingProjects(true);
+    queries.projects()
+      .then((ps) => {
+        setAllProjects(ps);
+        const fromUrl = Number(searchParams.get("project_id"));
+        if (Number.isFinite(fromUrl) && fromUrl > 0 && ps.some((p) => p.id === fromUrl)) {
+          setSelectedProjectId(fromUrl);
+        }
+      })
+      .catch(() => setAllProjects([]))
+      .finally(() => setLoadingProjects(false));
+  }, [searchParams]);
+
+  const appendLog = (message: string, level: LogLevel = "info") => {
+    setLog((prev) => [...prev, { id: Math.random().toString(36).slice(2), message, level, ts: tsNow() }]);
+  };
+
+  const reset = () => {
+    setJob("idle"); setLog([]); setResult(null);
+    setValidationPreview(null);
+    setPendingFile(null);
+    setSteps(DIRECT_STEPS.map((l) => ({ label: l, status: "pending" })));
+  };
+
+  async function runValidate(f: File) {
+    setJob("running");
+    setSteps(DIRECT_STEPS.map((l) => ({ label: l, status: "pending" })));
+    setValidationPreview(null);
+    setResult(null);
+    setPendingFile(f);
+    appendLog(`Validating ${f.name}${selectedProject ? ` against ${selectedProject.account_name || selectedProject.engagement_name}` : ""}…`);
+    try {
+      let stepIdx = 0;
+      const advance = () => {
+        setSteps((prev) => prev.map((s, i) =>
+          i < stepIdx ? { ...s, status: "done" } : i === stepIdx ? { ...s, status: "running" } : s
+        ));
+        stepIdx++;
+      };
+      advance();
+      await delay(400); advance();
+      const pid = selectedProjectId !== "" ? selectedProjectId : undefined;
+      const promise = queries.validateTrackerUpload(f, pid);
+      await delay(600); advance();
+      await delay(500); advance();
+      await delay(400); advance();
+      const data = await promise;
+      advance();
+      setSteps(DIRECT_STEPS.map((l) => ({ label: l, status: "done" })));
+      setValidationPreview(data);
+      setJob("preview");
+      appendLog(
+        `Validation complete — ${data.rows_valid ?? 0} valid, ${data.rows_skipped ?? 0} skipped, ${(data.warnings ?? []).length} warnings`,
+        "success",
+      );
+    } catch (err: any) {
+      setJob("error");
+      setPendingFile(null);
+      setSteps((prev) => prev.map((s) => s.status === "running" ? { ...s, status: "error" } : s));
+      appendLog(`Validation failed: ${err?.response?.data?.detail || err?.message}`, "error");
+    }
+  }
+
+  async function runCommit() {
+    if (!pendingFile) return;
+    setJob("running");
+    setSteps(DIRECT_COMMIT_STEPS.map((l) => ({ label: l, status: "pending" })));
+    appendLog(`Uploading ${pendingFile.name}…`);
+    try {
+      let stepIdx = 0;
+      const advance = () => {
+        setSteps((prev) => prev.map((s, i) =>
+          i < stepIdx ? { ...s, status: "done" } : i === stepIdx ? { ...s, status: "running" } : s
+        ));
+        stepIdx++;
+      };
+      advance();
+      await delay(400); advance();
+      const pid = selectedProjectId !== "" ? selectedProjectId : undefined;
+      const promise = queries.commitTrackerUpload(pendingFile, pid);
+      await delay(600); advance();
+      await delay(500); advance();
+      await delay(400); advance();
+      const data = await promise;
+      advance();
+      setSteps(DIRECT_COMMIT_STEPS.map((l) => ({ label: l, status: "done" })));
+      setResult(data);
+      setValidationPreview(null);
+      setPendingFile(null);
+      setJob("done");
+      appendLog(`Upload complete — ${columnMappingEntryCount(data.mapping)} columns matched`, "success");
+      onUploadDone();
+    } catch (err: any) {
+      setJob("error");
+      setSteps((prev) => prev.map((s) => s.status === "running" ? { ...s, status: "error" } : s));
+      appendLog(`Upload failed: ${err?.response?.data?.detail || err?.message}`, "error");
+    }
+  }
+
+  return (
+    <PlatformSection title="Direct Upload — Standard Tracker">
+      <p className="ingestion-center__tabIntro">
+        Download the template, fill in your client&apos;s positions, and upload here.
+        The template includes step-by-step instructions inside the Excel file — start with the <strong>READ ME FIRST</strong> sheet.
+      </p>
+
+      {/* ── CLIENT / PROJECT SELECTOR ─────────────────────────────────────────── */}
+      <div className="direct-upload__project-selector">
+        <div className="direct-upload__project-selector-label">
+          Target client project
+          <span className="direct-upload__project-selector-badge">Recommended — loads validation rules</span>
+        </div>
+        <div className="direct-upload__project-selector-row">
+          <select
+            className="direct-upload__project-select"
+            value={selectedProjectId === "" ? "" : String(selectedProjectId)}
+            onChange={(e) => setSelectedProjectId(e.target.value === "" ? "" : Number(e.target.value))}
+            disabled={loadingProjects || job !== "idle"}
+          >
+            <option value="">— Auto-detect from filename —</option>
+            {allProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                PRJ-{p.id} · {p.account_name || p.engagement_name || p.filename}
+              </option>
+            ))}
+          </select>
+          {selectedProject && (
+            <button
+              type="button"
+              className="direct-upload__project-download-btn"
+              title="Download client-specific template for this project"
+              onClick={() => void queries.downloadProjectTrackerTemplate(
+                selectedProject.id,
+                `${(selectedProject.account_name || selectedProject.engagement_name || "tracker").trim()} Tracker.xlsx`
+              )}
+            >
+              📥 Client template
+            </button>
+          )}
+        </div>
+
+        {/* Config summary pill row */}
+        {selectedProject && trackerConfig && (
+          <div className="direct-upload__config-summary">
+            {(trackerConfig.valid_bands ?? []).length > 0 && (
+              <span className="direct-upload__config-pill">
+                <strong>{(trackerConfig.valid_bands!).length}</strong> bands
+              </span>
+            )}
+            {(trackerConfig.valid_departments ?? []).length > 0 && (
+              <span className="direct-upload__config-pill">
+                <strong>{(trackerConfig.valid_departments!).length}</strong> depts
+              </span>
+            )}
+            {(trackerConfig.valid_locations ?? []).length > 0 && (
+              <span className="direct-upload__config-pill">
+                <strong>{(trackerConfig.valid_locations!).length}</strong> locations
+              </span>
+            )}
+            {(trackerConfig.valid_source_joiner_types ?? []).length > 0 && (
+              <span className="direct-upload__config-pill">
+                <strong>{(trackerConfig.valid_source_joiner_types!).length}</strong> SJT types
+              </span>
+            )}
+            {trackerConfig.ctc_unit && (
+              <span className="direct-upload__config-pill direct-upload__config-pill--accent">
+                CTC in {trackerConfig.ctc_unit === "lakhs" ? "Lakhs" : "INR"}
+              </span>
+            )}
+            {(trackerConfig.required_fields ?? []).length > 0 && (
+              <span className="direct-upload__config-pill direct-upload__config-pill--warn">
+                {(trackerConfig.required_fields!).length} required fields
+              </span>
+            )}
+          </div>
+        )}
+        {selectedProject && !trackerConfig && (
+          <div className="direct-upload__config-summary">
+            <span className="direct-upload__config-pill direct-upload__config-pill--muted">
+              No config yet — open Clients → Edit to set up validation rules
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Step-by-step for non-technical users */}
+      <ol className="direct-upload__steps">
+        <li><strong>Select</strong> the target project above (or let the system auto-detect from filename)</li>
+        <li><strong>Download</strong> the client template below (or click <em>Client template</em> above for a project-specific version)</li>
+        <li><strong>Open READ ME FIRST</strong> inside the Excel — it explains every section</li>
+        <li><strong>Fill Position Tracker</strong> — one row per open position or candidate (start at row 9; delete the 5 grey example rows first)</li>
+        <li><strong>Fill Contractual</strong> — your fee percentages (one row per CTC band)</li>
+        <li><strong>Save as</strong> <em>Client Name Tracker.xlsx</em> — e.g. Maruti Suzuki Tracker.xlsx</li>
+        <li><strong>Upload</strong> the file using the box below</li>
+      </ol>
+
+      {/* Download card */}
+      <div className="direct-upload__download">
+        <div className="direct-upload__download-icon" aria-hidden>📥</div>
+        <div className="direct-upload__download-body">
+          <div className="direct-upload__download-title">
+            {selectedProject
+              ? `${selectedProject.account_name || selectedProject.engagement_name} — Client Tracker Template`
+              : "Taggd Standard Tracker Template"}
+          </div>
+          <div className="direct-upload__download-desc">
+            {selectedProject
+              ? "Client-specific template with pre-configured dropdowns for bands, departments, locations, and source joiner types."
+              : "4 sheets: READ ME FIRST · Position Tracker (colour-coded sections + 5 examples) · Contractual · Reference"}
+          </div>
+        </div>
+        {selectedProject ? (
+          <button
+            type="button"
+            className="direct-upload__download-btn"
+            onClick={() => void queries.downloadProjectTrackerTemplate(
+              selectedProject.id,
+              `${(selectedProject.account_name || selectedProject.engagement_name || "tracker").trim()} Tracker.xlsx`
+            )}
+          >
+            Download client template
+          </button>
+        ) : (
+          <a
+            className="direct-upload__download-btn"
+            href="/static/taggd_standard_tracker_template.xlsx"
+            download="taggd_standard_tracker_template.xlsx"
+          >
+            Download template
+          </a>
+        )}
+      </div>
+
+      {/* What each section drives */}
+      <details className="direct-upload__details" open>
+        <summary className="direct-upload__summary">What to fill and why it matters</summary>
+        <div className="direct-upload__guide">
+          {DIRECT_GUIDE_SECTIONS.map(({ title, color, why, fields }) => (
+            <div key={title} className="direct-upload__guide-section">
+              <div className="direct-upload__guide-header" style={{ borderLeftColor: color }}>
+                <span className="direct-upload__guide-title">{title}</span>
+                <span className="direct-upload__guide-why">{why}</span>
+              </div>
+              <ul className="direct-upload__guide-fields">
+                {fields.map(({ name, required, note }) => (
+                  <li key={name}>
+                    <span className="direct-upload__field-name">
+                      {name}
+                      {required && <span className="direct-upload__required">Required</span>}
+                    </span>
+                    <span className="direct-upload__field-note">{note}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </details>
+
+      {/* Common mistakes */}
+      <details className="direct-upload__details">
+        <summary className="direct-upload__summary">Common mistakes to avoid</summary>
+        <ul className="direct-upload__mistakes">
+          {DIRECT_MISTAKES.map(({ title, fix }) => (
+            <li key={title}>
+              <strong>{title}</strong> — {fix}
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      {/* Upload zone */}
+      {job === "idle" && (
+        <DropZone
+          title="Drop your completed tracker here"
+          subtitle={"File must be named after the client — e.g. 'Maruti Suzuki Tracker.xlsx'\nMust include Position Tracker + Contractual sheets"}
+          icon="📋"
+          accent="var(--accent)"
+          onFile={runValidate}
+        />
+      )}
+
+      {/* Progress */}
+      {(job === "running" || job === "done" || job === "error" || job === "preview") && (
+        <div className="direct-upload__progress">
+          <div className="direct-upload__stepList">
+            {steps.map((s, i) => {
+              const icon = s.status === "done" ? "✓" : s.status === "running" ? "⟳" : s.status === "error" ? "✗" : "○";
+              const col = s.status === "done" ? "var(--green)" : s.status === "running" ? "var(--accent)" : s.status === "error" ? "var(--red)" : "var(--text-muted)";
+              return (
+                <div key={i} className="direct-upload__stepRow" style={{ opacity: s.status === "pending" ? 0.4 : 1 }}>
+                  <span style={{ color: col, minWidth: 16, textAlign: "center" }}>{icon}</span>
+                  <span style={{ color: col, fontSize: 12 }}>{s.label}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {validationPreview && job === "preview" && (
+            <ValidationPreviewPanel
+              preview={validationPreview}
+              onConfirm={() => void runCommit()}
+              onCancel={reset}
+              confirming={false}
+            />
+          )}
+
+          {result && job === "done" && (
+            <div className="direct-upload__success">
+              <div className="direct-upload__success-title">Upload complete</div>
+              <p className="direct-upload__success-note">
+                Your data is now in the system. Check <strong>Requisitions</strong> and the client dashboard to verify pipeline counts and revenue.
+              </p>
+              <div className="direct-upload__success-stats">
+                {[
+                  { label: "Client project", value: result.project_id },
+                  { label: "Rows loaded", value: result.records_upserted ?? result.records_processed ?? "—" },
+                  { label: "Skipped", value: result.rows_skipped ?? "—" },
+                  { label: "Columns matched", value: columnMappingEntryCount(result.mapping) },
+                ].map(({ label, value }) => (
+                  <div key={label} className="direct-upload__stat">
+                    <div className="direct-upload__stat-value">{value}</div>
+                    <div className="direct-upload__stat-label">{label}</div>
+                  </div>
+                ))}
+              </div>
+              {(result.warnings ?? []).length > 0 && (
+                <details className="direct-upload__warnings" open={false}>
+                  <summary className="direct-upload__warnings-toggle">
+                    {(result.warnings ?? []).length} post-upload warning{(result.warnings ?? []).length === 1 ? "" : "s"}
+                  </summary>
+                  <table className="direct-upload__warnings-table">
+                    <thead>
+                      <tr>
+                        <th>Row</th>
+                        <th>Field</th>
+                        <th>Raw</th>
+                        <th>Issue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(result.warnings ?? []).slice(0, 30).map((w: any, i: number) => (
+                        <tr key={`${w.row}-${w.field}-${i}`}>
+                          <td>{w.row}</td>
+                          <td>{w.field}</td>
+                          <td>{w.raw ?? w.resolved ?? "—"}</td>
+                          <td>{w.issue ?? (w.resolved ? `→ ${w.resolved}` : "—")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              )}
+            </div>
+          )}
+
+          {log.length > 0 && (
+            <div className="direct-upload__log">
+              {log.map((e) => (
+                <div key={e.id} className="direct-upload__logLine">
+                  <span className="direct-upload__logTs">{e.ts}</span>
+                  <span style={{ color: TAG_COLOR[e.level] }}>{e.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {(job === "done" || job === "error") && (
+            <button type="button" className="direct-upload__resetBtn" onClick={reset}>
+              Upload another file
+            </button>
+          )}
+        </div>
+      )}
+
+      <InfoCallout title="Updating data later">
+        <ul>
+          <li>When a candidate joins or status changes, update the row in Excel and upload the same file again.</li>
+          <li>Only changed rows are updated — nothing is deleted automatically.</li>
+          <li>The <strong>Contractual</strong> sheet is read once per client. Re-upload if fee terms change.</li>
+          <li>For non-standard Excel formats (old client trackers), use the <strong>Express</strong> or <strong>Pro Path</strong> tabs instead.</li>
+        </ul>
+      </InfoCallout>
     </PlatformSection>
   );
 }

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import re
 import shutil
@@ -7,8 +8,9 @@ import time
 import uuid
 import datetime
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request, Query
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, BackgroundTasks, Request, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import Integer, and_, case, func, literal, not_, or_
 from typing import List, Dict, Any, Optional
@@ -40,6 +42,12 @@ from .agents.column_mapper import ColumnMapperAgent
 from .agents.logic_generator import LogicGeneratorAgent
 from .agents.matchmaker import MatchmakerAgent
 from .core.processor import ExcelProcessor
+from .core.tracker_config import (
+    build_mapping_from_aliases,
+    merge_status_vocabulary_into_mapping,
+    merge_tracker_config,
+    synthesize_logic_from_fee_model,
+)
 from .core.revenue_logic_loader import RevenueLogicCompileError, load_calculate_from_source
 from .core.ingestion_audit import log_ingestion_event, list_ingestion_events_for_user
 from .core.activity_log import activity_log_to_dict, list_activity_for_user, log_activity
@@ -110,6 +118,19 @@ def _matchmaker_project_id_in_scope(
     return matched_raw if matched_raw in allowed else None
 
 
+logger = logging.getLogger(__name__)
+
+_DEFAULT_JWT_SECRET = "change-me-in-production-use-long-random-string"
+
+
+def _app_env() -> str:
+    return (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower()
+
+
+def _is_production_env() -> bool:
+    return _app_env() in ("production", "prod")
+
+
 def _cors_allow_origins() -> list[str]:
     raw = (os.getenv("CORS_ALLOW_ORIGINS") or "*").strip()
     if raw == "*":
@@ -118,21 +139,37 @@ def _cors_allow_origins() -> list[str]:
 
 
 def _validate_production_config() -> None:
-    if (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower() in (
-        "production",
-        "prod",
-    ):
+    jwt_secret = (os.getenv("JWT_SECRET") or _DEFAULT_JWT_SECRET).strip()
+    if jwt_secret == _DEFAULT_JWT_SECRET and _app_env() not in ("", "development", "dev", "local"):
+        raise RuntimeError(
+            "JWT_SECRET is the default placeholder — set a strong secret in the environment.",
+        )
+
+    if _is_production_env():
         from backend.db.engine import is_sqlite_url
 
         if is_sqlite_url():
             raise RuntimeError(
                 "SQLite DATABASE_URL is not allowed when APP_ENV=production. Use PostgreSQL.",
             )
+        if (os.getenv("CORS_ALLOW_ORIGINS") or "*").strip() == "*":
+            raise RuntimeError(
+                "CORS_ALLOW_ORIGINS must be explicitly set in production (not '*').",
+            )
+        if not (os.getenv("COMPOSIO_WEBHOOK_SECRET") or "").strip():
+            logger.warning(
+                "COMPOSIO_WEBHOOK_SECRET is unset — webhook endpoint accepts unsigned requests",
+            )
 
 
 _validate_production_config()
 
-app = FastAPI(title="Agentic Revenue Generator API")
+app = FastAPI(
+    title="Agentic Revenue Generator API",
+    docs_url=None if _is_production_env() else "/docs",
+    redoc_url=None if _is_production_env() else "/redoc",
+    openapi_url=None if _is_production_env() else "/openapi.json",
+)
 
 from .auth.middleware import AuthMiddleware
 from .auth.client_write_guard import ClientWriteGuardMiddleware
@@ -250,6 +287,7 @@ class ProjectMetadataPatch(BaseModel):
     tracker_sheet: Optional[str] = None
     contract_sheet: Optional[str] = None
     pos_id_column: Optional[str] = None
+    tracker_config: Optional[dict] = None
 
 
 ORG_UNIT_BUSINESS = "business_unit"
@@ -534,13 +572,7 @@ def ready(db: Session = Depends(get_db)):
     from sqlalchemy import text
 
     db.execute(text("SELECT 1"))
-    return {
-        "status": "ready",
-        "database": "ok",
-        "projects": int(db.query(func.count(Project.id)).scalar() or 0),
-        "records": int(db.query(func.count(Record.id)).scalar() or 0),
-        "users": int(db.query(func.count(User.id)).scalar() or 0),
-    }
+    return {"status": "ready"}
 
 
 @app.get("/ingestion/events")
@@ -580,24 +612,337 @@ def get_activity_log(
     )
 
 
-@app.post("/upload")
-async def upload_file(
+def _resolve_express_upload_project(
+    db: Session,
+    user: User,
+    safe_name: str,
+    *,
+    allow_create: bool,
+):
+    """Match filename to an existing project or optionally create a new one."""
+    from .auth.deps import can_create_unmatched_project
+    from .core.debug_agent_log import debug_agent_log
+    from .auth.profile import effective_role as profile_effective_role
+
+    matcher = MatchmakerAgent()
+    all_projects = apply_project_scope(db.query(Project), user, db, Project).all()
+    db_projects_list = [
+        {"id": p.id, "account_name": p.account_name, "filename": p.filename} for p in all_projects
+    ]
+
+    match_result = matcher.match_clients([safe_name], db_projects_list)
+    matched_raw = match_result.matches[0].matched_project_id if match_result.matches else None
+    matched_id = _matchmaker_project_id_in_scope(matched_raw, db_projects_list)
+    if matched_raw is not None and matched_id is None:
+        print(
+            f"WARN: Matchmaker returned project_id={matched_raw} outside user {user.id} scope; ignoring."
+        )
+
+    project = None
+    if matched_id:
+        project = db.query(Project).filter(Project.id == matched_id).first()
+        if project:
+            print(
+                f"INFO: Auto-linking {safe_name} to existing Project ID {matched_id} ({project.account_name})"
+            )
+    else:
+        project = (
+            apply_project_scope(db.query(Project), user, db, Project)
+            .filter(Project.filename == safe_name)
+            .first()
+        )
+
+    if not project:
+        if not allow_create or not can_create_unmatched_project(user):
+            debug_agent_log(
+                hypothesis_id="H3",
+                location="main._resolve_express_upload_project",
+                message="forbidden_no_project_cannot_create",
+                data={
+                    "user_id": user.id,
+                    "effective_role": profile_effective_role(user),
+                    "safe_name": safe_name,
+                    "scoped_projects_n": len(db_projects_list),
+                },
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot create a new project; contact an administrator.",
+            )
+        project = Project(filename=safe_name)
+        suggested_match = matcher.match_clients([safe_name], [])
+        if suggested_match.matches:
+            project.account_name = suggested_match.matches[0].excel_name
+        db.add(project)
+        db.flush()
+        ensure_project_client(db, project)
+        db.commit()
+        db.refresh(project)
+    else:
+        assert_project_access(user, db, project.id)
+
+    if not project.account_name:
+        project.account_name = safe_name.split(".")[0].replace("_", " ").replace("-", " ")
+        db.commit()
+
+    return project
+
+
+def _upload_rate_limit_pause(*, dry_run: bool) -> None:
+    """Gemini rate-limit guard; skipped for validate dry-runs and when explicitly disabled."""
+    if dry_run:
+        return
+    if os.getenv("SKIP_UPLOAD_RATE_LIMIT", "").strip().lower() in ("1", "true", "yes"):
+        return
+    time.sleep(3)
+
+
+def _run_express_upload_pipeline(
+    db: Session,
+    user: User,
+    file_path: str,
+    safe_name: str,
+    *,
+    dry_run: bool = False,
+    allow_create_project: bool = True,
+    persist_project_metadata: bool = True,
+    project: Optional[Project] = None,
+) -> dict:
+    """Shared express/direct upload pipeline. Returns response payload + ProcessorReport fields."""
+    if project is None:
+        if dry_run and not allow_create_project:
+            matcher = MatchmakerAgent()
+            all_projects = apply_project_scope(db.query(Project), user, db, Project).all()
+            db_projects_list = [
+                {"id": p.id, "account_name": p.account_name, "filename": p.filename} for p in all_projects
+            ]
+            match_result = matcher.match_clients([safe_name], db_projects_list)
+            matched_raw = match_result.matches[0].matched_project_id if match_result.matches else None
+            matched_id = _matchmaker_project_id_in_scope(matched_raw, db_projects_list)
+            if matched_id:
+                project = db.query(Project).filter(Project.id == matched_id).first()
+                assert_project_access(user, db, project.id)
+            else:
+                project = (
+                    apply_project_scope(db.query(Project), user, db, Project)
+                    .filter(Project.filename == safe_name)
+                    .first()
+                )
+                if project:
+                    assert_project_access(user, db, project.id)
+        else:
+            project = _resolve_express_upload_project(
+                db, user, safe_name, allow_create=allow_create_project
+            )
+
+    preview_only = project is None
+    process_project_id = project.id if project else 0
+    tracker_config = (project.tracker_config if project else None) or None
+
+    identity_agent = SheetIdentifierAgent()
+    xl = pd.ExcelFile(file_path)
+    sheets = xl.sheet_names
+    classification = identity_agent.identify_sheets(sheets)
+
+    if project and persist_project_metadata:
+        project.tracker_sheet = classification.tracker_sheet
+        project.contract_sheet = classification.contract_sheet
+        db.commit()
+
+    _upload_rate_limit_pause(dry_run=dry_run)
+    from .core.tracker_sheet_io import read_tracker_sheet_dataframe
+
+    df_tracker, _data_start = read_tracker_sheet_dataframe(file_path, classification.tracker_sheet)
+    headers = list(df_tracker.columns)
+    sample_rows = df_tracker.head(10).to_dict(orient="records")
+
+    aliases = (tracker_config or {}).get("column_aliases") or {}
+    status_vocabulary = (tracker_config or {}).get("status_vocabulary") or {}
+    fee_model = (tracker_config or {}).get("fee_model") or {}
+    use_alias_mapping = bool(aliases) and project and (
+        project.column_mapping or all(
+            isinstance(v, str) and str(v).strip() in {str(h).strip() for h in headers}
+            for v in aliases.values()
+        )
+    )
+
+    mapping_result = None
+    if use_alias_mapping:
+        column_mapping_payload = build_mapping_from_aliases(
+            aliases,
+            headers,
+            project.column_mapping if project else None,
+        )
+        column_mapping_payload = attach_status_lexicon_to_mapping(
+            column_mapping_payload,
+            file_path,
+            [classification.tracker_sheet],
+        )
+    else:
+        mapper_agent = ColumnMapperAgent()
+        mapping_result = mapper_agent.map_columns(headers, sample_rows)
+        column_mapping_payload = finalize_ingest_column_mapping(mapping_result, headers)
+        column_mapping_payload = attach_status_lexicon_to_mapping(
+            column_mapping_payload,
+            file_path,
+            [classification.tracker_sheet],
+        )
+
+    if status_vocabulary:
+        column_mapping_payload = merge_status_vocabulary_into_mapping(
+            column_mapping_payload,
+            status_vocabulary,
+        )
+
+    from .core.pos_id_column import resolve_pos_id_column
+
+    pos_id_col = resolve_pos_id_column(headers)
+    if aliases.get("req_id") and str(aliases["req_id"]).strip() in {str(h).strip() for h in headers}:
+        resolved_pos_id = str(aliases["req_id"]).strip()
+    else:
+        resolved_pos_id = (
+            pos_id_col
+            or (mapping_result.mapping.get("position_title") if mapping_result else None)
+            or headers[0]
+        )
+
+    if project and persist_project_metadata:
+        project.column_mapping = column_mapping_payload
+        project.pos_id_column = resolved_pos_id
+        db.commit()
+
+    _upload_rate_limit_pause(dry_run=dry_run)
+    logic_code = None
+    logic_explanation = None
+    if project and project.revenue_logic_code:
+        print(f"INFO: Using Pinned Logic for Project {project.id}")
+        logic_code = project.revenue_logic_code
+        logic_explanation = project.logic_explanation
+    elif fee_model:
+        print(f"INFO: Using fee_model config for {'preview' if preview_only else f'Project {process_project_id}'}")
+        logic_code = synthesize_logic_from_fee_model(fee_model)
+        logic_explanation = f"Generated from tracker_config.fee_model: {fee_model}"
+        if project and persist_project_metadata and not project.revenue_logic_code:
+            project.revenue_logic_code = logic_code
+            project.logic_explanation = logic_explanation
+            db.commit()
+    else:
+        print(f"INFO: Synthesizing Logic for {'preview' if preview_only else f'Project {process_project_id}'}")
+        df_contract = pd.read_excel(file_path, sheet_name=classification.contract_sheet)
+        contract_text = df_contract.to_string()
+        logic_agent = LogicGeneratorAgent()
+        logic_res = logic_agent.generate_logic(contract_text, headers, sample_rows)
+        logic_code = logic_res.python_code
+        logic_explanation = logic_res.explanation
+        if project and persist_project_metadata and not project.revenue_logic_code:
+            project.revenue_logic_code = logic_code
+            project.logic_explanation = logic_explanation
+            db.commit()
+
+    try:
+        calc_func = load_calculate_from_source(logic_code)
+    except RevenueLogicCompileError as e:
+        raise Exception(f"Failed to compile revenue logic: {e}") from e
+
+    processor = ExcelProcessor(db)
+    report = processor.process_file_into_db(
+        process_project_id,
+        file_path,
+        classification.tracker_sheet,
+        column_mapping_payload,
+        calc_func,
+        dry_run=dry_run,
+        tracker_config=tracker_config,
+    )
+
+    payload = {
+        "status": "success",
+        "project_id": project.id if project else None,
+        "project_will_be_created": preview_only,
+        "sheets": {"tracker": classification.tracker_sheet, "contract": classification.contract_sheet},
+        "mapping": column_mapping_payload,
+        "logic_explanation": logic_explanation,
+        "python_code": logic_code,
+        "headers_found": headers,
+        **report.to_dict(),
+        "records_processed": report.rows_valid,
+    }
+    return payload
+
+
+async def _save_upload_temp_file(file: UploadFile, prefix: str = "express") -> tuple[str, str]:
+    temp_dir = tempfile.gettempdir()
+    safe_name = os.path.basename(file.filename or "upload.xlsx") or "upload.xlsx"
+    file_path = os.path.join(temp_dir, f"{prefix}_{int(time.time())}_{safe_name}")
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return file_path, safe_name
+
+
+@app.post("/upload/validate")
+async def validate_upload_file(
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    project_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Dry-run upload — preview row counts, warnings, and global_status without writing records."""
+    file_path, safe_name = await _save_upload_temp_file(file, prefix="validate")
+    project = None
+    if project_id is not None:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        assert_project_access(user, db, project.id)
+
+    try:
+        payload = _run_express_upload_pipeline(
+            db,
+            user,
+            file_path,
+            safe_name,
+            dry_run=True,
+            allow_create_project=False,
+            persist_project_metadata=False,
+            project=project,
+        )
+        payload["status"] = "validated"
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+
+        print(f"Validate failed: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/upload/commit")
+async def commit_upload_file(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    project_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Commit upload — full express pipeline with DB writes.
+
+    When ``project_id`` is supplied (Direct Upload tab) the file is committed
+    directly to that project, bypassing Matchmaker filename resolution and
+    ensuring the project's ``tracker_config`` validation rules are applied
+    consistently with the preceding validate dry-run.
+    """
     from .auth.deps import allowed_project_ids, can_create_unmatched_project
     from .auth.profile import stored_role_normalized, effective_role as profile_effective_role
     from .core.debug_agent_log import debug_agent_log
 
     aids = allowed_project_ids(user, db)
-    # #region agent log
     debug_agent_log(
         hypothesis_id="H1",
-        location="main.upload_file:entry",
-        message="express_upload_start",
+        location="main.commit_upload_file:entry",
+        message="express_upload_commit",
         data={
             "user_id": user.id,
             "stored_role": stored_role_normalized(user),
@@ -608,151 +953,31 @@ async def upload_file(
             "ua_head": (request.headers.get("user-agent") or "")[:240],
             "has_bearer": (request.headers.get("authorization") or "").lower().startswith("bearer "),
             "filename_tail": (os.path.basename(file.filename or "") or "")[-120:],
+            "direct_project_id": project_id,
         },
     )
-    # #endregion
+
     project = None
-    # 1. Save file locally — unique name + basename only (avoid overwrite / path tricks)
-    temp_dir = tempfile.gettempdir()
-    safe_name = os.path.basename(file.filename or "upload.xlsx") or "upload.xlsx"
-    file_path = os.path.join(temp_dir, f"express_{int(time.time())}_{safe_name}")
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    if project_id is not None:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        assert_project_access(user, db, project.id)
+
+    file_path, safe_name = await _save_upload_temp_file(file, prefix="express")
 
     try:
-        # Extract Clean Account Name from filename using Matchmaker intelligence
-        from .agents.matchmaker import MatchmakerAgent
-        matcher = MatchmakerAgent()
-        # Create a single-item match request (managers only see assigned projects for matching)
-        all_projects = apply_project_scope(db.query(Project), user, db, Project).all()
-        db_projects_list = [{"id": p.id, "account_name": p.account_name, "filename": p.filename} for p in all_projects]
-        
-        match_result = matcher.match_clients([safe_name], db_projects_list)
-        matched_raw = match_result.matches[0].matched_project_id if match_result.matches else None
-        matched_id = _matchmaker_project_id_in_scope(matched_raw, db_projects_list)
-        if matched_raw is not None and matched_id is None:
-            print(
-                f"WARN: Matchmaker returned project_id={matched_raw} outside user {user.id} scope; ignoring."
-            )
-        
-        if matched_id:
-            project = db.query(Project).filter(Project.id == matched_id).first()
-            if project:
-                print(
-                    f"INFO: Auto-linking {safe_name} to existing Project ID {matched_id} ({project.account_name})"
-                )
-        else:
-            # Fallback to filename search if no clear entity match
-            project = apply_project_scope(db.query(Project), user, db, Project).filter(Project.filename == safe_name).first()
-            
-        if not project:
-            if not can_create_unmatched_project(user):
-                # #region agent log
-                debug_agent_log(
-                    hypothesis_id="H3",
-                    location="main.upload_file",
-                    message="forbidden_no_project_cannot_create",
-                    data={
-                        "user_id": user.id,
-                        "effective_role": profile_effective_role(user),
-                        "safe_name": safe_name,
-                        "scoped_projects_n": len(db_projects_list),
-                    },
-                )
-                # #endregion
-                raise HTTPException(status_code=403, detail="Cannot create a new project; contact an administrator.")
-            # If still not found, create a new one but try to suggest an account name
-            project = Project(filename=safe_name)
-            # Quick name extraction for the new project
-            suggested_match = matcher.match_clients([safe_name], []) # No DB projects to match, just extract
-            if suggested_match.matches:
-                project.account_name = suggested_match.matches[0].excel_name # Placeholder for name
-            db.add(project)
-            db.flush()
-            ensure_project_client(db, project)
-            db.commit()
-            db.refresh(project)
-        else:
-            assert_project_access(user, db, project.id)
-        
-        # Ensure account name is set if we just created it or if it was missing
-        if not project.account_name:
-            # Final attempt to set account name from filename
-            project.account_name = safe_name.split(".")[0].replace("_", " ").replace("-", " ")
-            db.commit()
-        
-        # Start the Agentic Pipeline
-        # Step 1: Identify Sheets
-        identity_agent = SheetIdentifierAgent()
-        xl = pd.ExcelFile(file_path)
-        sheets = xl.sheet_names
-        classification = identity_agent.identify_sheets(sheets)
-        
-        project.tracker_sheet = classification.tracker_sheet
-        project.contract_sheet = classification.contract_sheet
-        db.commit()
-
-        # Step 2: Map Columns
-        time.sleep(3) # Rate limit guard
-        df_tracker = pd.read_excel(file_path, sheet_name=classification.tracker_sheet)
-        headers = list(df_tracker.columns)
-        sample_rows = df_tracker.head(10).to_dict(orient='records')
-        
-        mapper_agent = ColumnMapperAgent()
-        mapping_result = mapper_agent.map_columns(headers, sample_rows)
-        column_mapping_payload = finalize_ingest_column_mapping(mapping_result, headers)
-        column_mapping_payload = attach_status_lexicon_to_mapping(
-            column_mapping_payload,
+        payload = _run_express_upload_pipeline(
+            db,
+            user,
             file_path,
-            [classification.tracker_sheet],
+            safe_name,
+            dry_run=False,
+            allow_create_project=(project is None),
+            persist_project_metadata=True,
+            project=project,
         )
-        project.column_mapping = column_mapping_payload
-
-        from .core.pos_id_column import resolve_pos_id_column
-
-        pos_id_col = resolve_pos_id_column(headers)
-        project.pos_id_column = (
-            pos_id_col
-            or mapping_result.mapping.get("position_title")
-            or headers[0]
-        )
-        db.commit()
-
-        # Step 3: Logic Synthesis
-        time.sleep(3) # Rate limit guard        # --- LOGIC PINNING: Reuse existing logic if present ---
-        if project.revenue_logic_code:
-            print(f"INFO: Using Pinned Logic for Project {project.id}")
-            logic_code = project.revenue_logic_code
-            logic_explanation = project.logic_explanation
-        else:
-            print(f"INFO: Synthesizing New Logic for Project {project.id}")
-            df_contract = pd.read_excel(file_path, sheet_name=classification.contract_sheet)
-            contract_text = df_contract.to_string()
-            
-            logic_agent = LogicGeneratorAgent()
-            logic_res = logic_agent.generate_logic(contract_text, headers, sample_rows)
-            project.revenue_logic_code = logic_res.python_code
-            project.logic_explanation = logic_res.explanation
-            db.commit()
-            logic_code = logic_res.python_code
-            logic_explanation = logic_res.explanation
-
-        # Step 4: Process Records (RestrictedPython — no unrestricted exec)
-        try:
-            calc_func = load_calculate_from_source(logic_code)
-        except RevenueLogicCompileError as e:
-            raise Exception(f"Failed to compile revenue logic: {e}") from e
-        
-        processor = ExcelProcessor(db)
-        
-        processor.process_file_into_db(
-            project.id, 
-            file_path, 
-            classification.tracker_sheet, 
-            column_mapping_payload,
-            calc_func,
-        )
-
+        project_id = payload.get("project_id")
         log_ingestion_event(
             db,
             user=user,
@@ -760,22 +985,14 @@ async def upload_file(
             filename=safe_name,
             status="success",
             label="Complete",
-            project_id=project.id,
+            project_id=project_id,
         )
-        return {
-            "status": "success",
-            "project_id": project.id,
-            "sheets": {"tracker": classification.tracker_sheet, "contract": classification.contract_sheet},
-            "mapping": column_mapping_payload,
-            "logic_explanation": logic_explanation,
-            "python_code": logic_code,
-            "headers_found": headers
-        }
-
+        return payload
     except HTTPException:
         raise
     except Exception as e:
         import traceback
+
         label = getattr(project, "filename", None) if project else safe_name
         error_detail = f"Error during {label} processing: {str(e)}\n{traceback.format_exc()}"
         print(error_detail)
@@ -788,7 +1005,21 @@ async def upload_file(
             label="Failed",
             project_id=project.id if project else None,
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/upload")
+async def upload_file(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    project_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Backward-compatible alias for POST /upload/commit."""
+    return await commit_upload_file(request, background_tasks, file, project_id, db, user)
+
 
 @app.post("/upload/pro/inspect")
 async def pro_inspect_file(
@@ -968,22 +1199,55 @@ async def pro_confirm_upload(
                 print(f"Warning: Could not sample sheet {s}: {e}")
 
         mapper_agent = ColumnMapperAgent()
-        mapping_result = mapper_agent.map_columns(all_headers, all_samples)
-        column_mapping_payload = finalize_ingest_column_mapping(mapping_result, all_headers)
-        column_mapping_payload = attach_status_lexicon_to_mapping(
-            column_mapping_payload,
-            file_path,
-            data_sheets,
+        tracker_config = project.tracker_config if isinstance(project.tracker_config, dict) else None
+        aliases = (tracker_config or {}).get("column_aliases") or {}
+        status_vocabulary = (tracker_config or {}).get("status_vocabulary") or {}
+        fee_model = (tracker_config or {}).get("fee_model") or {}
+        use_alias_mapping = bool(aliases) and (
+            project.column_mapping or all(
+                isinstance(v, str) and str(v).strip() in {str(h).strip() for h in all_headers}
+                for v in aliases.values()
+            )
         )
+
+        mapping_result = None
+        if use_alias_mapping:
+            column_mapping_payload = build_mapping_from_aliases(
+                aliases,
+                all_headers,
+                project.column_mapping,
+            )
+            column_mapping_payload = attach_status_lexicon_to_mapping(
+                column_mapping_payload,
+                file_path,
+                data_sheets,
+            )
+        else:
+            mapping_result = mapper_agent.map_columns(all_headers, all_samples)
+            column_mapping_payload = finalize_ingest_column_mapping(mapping_result, all_headers)
+            column_mapping_payload = attach_status_lexicon_to_mapping(
+                column_mapping_payload,
+                file_path,
+                data_sheets,
+            )
+
+        if status_vocabulary:
+            column_mapping_payload = merge_status_vocabulary_into_mapping(
+                column_mapping_payload,
+                status_vocabulary,
+            )
         project.column_mapping = column_mapping_payload
 
         from .core.pos_id_column import resolve_pos_id_column
 
-        project.pos_id_column = (
-            resolve_pos_id_column(all_headers)
-            or mapping_result.mapping.get("position_title")
-            or all_headers[0]
-        )
+        if aliases.get("req_id") and str(aliases["req_id"]).strip() in {str(h).strip() for h in all_headers}:
+            project.pos_id_column = str(aliases["req_id"]).strip()
+        else:
+            project.pos_id_column = (
+                resolve_pos_id_column(all_headers)
+                or (mapping_result.mapping.get("position_title") if mapping_result else None)
+                or all_headers[0]
+            )
         project.tracker_sheet = ",".join(data_sheets)
         project.contract_sheet = contract_sheet
         db.commit()
@@ -994,6 +1258,13 @@ async def pro_confirm_upload(
             print(f"INFO: Using Pinned Logic for Project {project.id}")
             logic_code = project.revenue_logic_code
             logic_explanation = project.logic_explanation
+        elif fee_model:
+            print(f"INFO: Using fee_model config for Project {project.id}")
+            logic_code = synthesize_logic_from_fee_model(fee_model)
+            logic_explanation = f"Generated from tracker_config.fee_model: {fee_model}"
+            project.revenue_logic_code = logic_code
+            project.logic_explanation = logic_explanation
+            db.commit()
         else:
             print(f"INFO: Synthesizing New Logic for Project {project.id}")
             df_contract = pd.read_excel(file_path, sheet_name=contract_sheet)
@@ -1012,9 +1283,13 @@ async def pro_confirm_upload(
             calc_func = load_calculate_from_source(logic_code)
         except RevenueLogicCompileError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        
+
+        tracker_config = project.tracker_config if isinstance(project.tracker_config, dict) else None
         processor = ExcelProcessor(db)
-        processor.process_file_into_db(project.id, file_path, data_sheets, column_mapping_payload, calc_func)
+        processor.process_file_into_db(
+            project.id, file_path, data_sheets, column_mapping_payload, calc_func,
+            tracker_config=tracker_config,
+        )
 
         log_ingestion_event(
             db,
@@ -1345,6 +1620,14 @@ def patch_project_metadata(
         data["parent_project_id"] = None
     elif "parent_project_id" in data:
         _validate_project_parent(db, project, data["parent_project_id"])
+    if "tracker_config" in data:
+        incoming = data.pop("tracker_config")
+        if incoming is None:
+            project.tracker_config = None
+        elif isinstance(incoming, dict):
+            project.tracker_config = merge_tracker_config(project.tracker_config, incoming)
+        else:
+            raise HTTPException(status_code=400, detail="tracker_config must be an object or null")
     for key, val in data.items():
         if hasattr(project, key):
             setattr(project, key, val)
@@ -1751,6 +2034,43 @@ def create_project_under_client(
     else:
         d["client_official_name"] = None
     return d
+
+@app.get("/projects/{project_id}/template")
+def download_project_tracker_template(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Download a client-specific tracker template with configured dropdown validations."""
+    assert_project_access(user, db, project_id)
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    import io
+
+    from .core.tracker_template import generate_project_tracker_bytes
+
+    try:
+        config = project.tracker_config if isinstance(project.tracker_config, dict) else {}
+        xlsx_bytes = generate_project_tracker_bytes(config)
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Tracker template generator is not available on this server. Rebuild the API image with excel_upload_masters included.",
+        ) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate tracker template: {e}") from e
+
+    account = (project.account_name or project.engagement_name or f"project_{project_id}").strip()
+    safe_account = re.sub(r"[^\w\s-]", "", account).strip().replace(" ", "_") or f"project_{project_id}"
+    filename = f"{safe_account}_tracker_template.xlsx"
+
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 @app.get("/projects/{project_id}")
 def get_project(
@@ -2515,8 +2835,8 @@ def get_global_monitoring(
         .group_by(Record.global_status)
         .all()
     )
-    known = {"CLOSED", "ACTIVE", "PIPELINE", "ON HOLD"}
-    status_counts = {"CLOSED": 0, "ACTIVE": 0, "PIPELINE": 0, "ON HOLD": 0, "UNPROCESSED": 0}
+    known = {"CLOSED", "ACTIVE", "PIPELINE", "ON HOLD", "CANCELLED"}
+    status_counts = {"CLOSED": 0, "ACTIVE": 0, "PIPELINE": 0, "ON HOLD": 0, "CANCELLED": 0, "UNPROCESSED": 0}
     for status, cnt in status_rows:
         if status in known:
             status_counts[status] += cnt
@@ -2677,8 +2997,8 @@ def _scoped_requisition_status_breakdown(db: Session, user: User) -> dict[str, i
         .group_by(Record.global_status)
         .all()
     )
-    known = {"CLOSED", "ACTIVE", "PIPELINE", "ON HOLD"}
-    status_counts = {"CLOSED": 0, "ACTIVE": 0, "PIPELINE": 0, "ON HOLD": 0, "UNPROCESSED": 0}
+    known = {"CLOSED", "ACTIVE", "PIPELINE", "ON HOLD", "CANCELLED"}
+    status_counts = {"CLOSED": 0, "ACTIVE": 0, "PIPELINE": 0, "ON HOLD": 0, "CANCELLED": 0, "UNPROCESSED": 0}
     for status, cnt in status_rows:
         if status in known:
             status_counts[status] += int(cnt)
@@ -2702,7 +3022,7 @@ def _scoped_requisition_ageing_buckets(db: Session, user: User) -> dict[str, int
     gs_upper = func.upper(func.trim(func.coalesce(Record.global_status, "")))
     age_q = apply_record_access_scope(db.query(Record.id), user, db).filter(
         Record.creation_date.isnot(None),
-        gs_upper != "CLOSED",
+        gs_upper.notin_(["CLOSED", "CANCELLED"]),
     )
     b0, b1, b2, b3 = age_q.with_entities(
         func.sum(case((age_days <= 30, 1), else_=0)),

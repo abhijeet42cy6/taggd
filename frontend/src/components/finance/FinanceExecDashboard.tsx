@@ -1,18 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  type TooltipItem,
-} from "chart.js";
-import ChartDataLabels from "chartjs-plugin-datalabels";
-import { Bar } from "react-chartjs-2";
+import { FinanceOverviewBarChart, FinanceCmBarChart } from "@/components/charts/components/FinanceOverviewBarChart";
 import { Menu } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import type { Project } from "@/lib/api";
@@ -35,18 +22,6 @@ import {
 } from "@/components/tremor-dashboard/AccountMetricCard";
 import "@/styles/exec-dash-premium.css";
 import "@/styles/finance-exec-dashboard.css";
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  ChartDataLabels
-);
 
 type FinPage =
   | "overview"
@@ -375,49 +350,6 @@ export function FinanceExecDashboard({
     return { mean: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length };
   }, [filteredRows]);
 
-  const barData = useMemo(() => {
-    const labels = chartTrendData.map((d) => d.month);
-    return {
-      labels,
-      datasets: [
-        {
-          label: "Budget (₹ L)",
-          data: chartTrendData.map((d) => d.budget),
-          backgroundColor: "rgba(59,130,246,0.45)",
-          borderRadius: 4,
-        },
-        {
-          label: "Actual (₹ L)",
-          data: chartTrendData.map((d) => d.actual),
-          backgroundColor: "rgba(234,88,12,0.65)",
-          borderRadius: 4,
-        },
-        {
-          label: "Forecast (₹ L)",
-          data: chartTrendData.map((d) => d.forecast),
-          backgroundColor: "rgba(217,119,6,0.45)",
-          borderRadius: 4,
-        },
-      ],
-    };
-  }, [chartTrendData]);
-
-  const barOpts = useMemo(
-    () => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: true, position: "bottom" as const },
-        datalabels: { display: false },
-      },
-      scales: {
-        x: { grid: { display: false } },
-        y: { grid: { color: "rgba(0,0,0,0.06)" } },
-      },
-    }),
-    []
-  );
-
   const renderContent = () => {
     if (loading) {
       return (
@@ -537,7 +469,13 @@ export function FinanceExecDashboard({
             </div>
             <div className="card-body" style={{ height: 280 }}>
               {chartTrendData.length ? (
-                <Bar data={barData} options={barOpts} />
+                <FinanceOverviewBarChart
+                  months={chartTrendData.map((d) => d.month)}
+                  budget={chartTrendData.map((d) => d.budget)}
+                  actual={chartTrendData.map((d) => d.actual)}
+                  forecast={chartTrendData.map((d) => d.forecast)}
+                  height={280}
+                />
               ) : (
                 <div className="kpi-tile-no-data">
                   {rows.length ? "No rows match these filters." : "No monthly rows — upload Finance Excel."}
@@ -652,43 +590,6 @@ export function FinanceExecDashboard({
         ? monthData.map((p) => p.label)
         : accountData.map((p) => (p.name.length > 16 ? `${p.name.slice(0, 14)}…` : p.name));
       const values = showMonth ? monthData.map((p) => p.pct) : accountData.map((p) => p.pct);
-      const datasetLabel = showMonth ? "CM % (revenue-weighted by month)" : "CM % (revenue-weighted, top accounts)";
-      const cmBarOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: true, position: "top" as const, labels: { boxWidth: 10, font: { size: 11 } } },
-          datalabels: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (item: TooltipItem<"bar">) => {
-                const y = item.parsed.y;
-                if (y == null || Number.isNaN(y)) return "";
-                return ` ${Number(y).toFixed(2)}% CM`;
-              },
-            },
-          },
-        },
-        scales: {
-          y: {
-            min: 0,
-            max: 100,
-            title: { display: true, text: "CM %" },
-            ticks: { font: { size: 10 } },
-            grid: { color: "rgba(0,0,0,0.06)" },
-          },
-          x: {
-            ticks: {
-              maxRotation: showMonth ? 0 : 35,
-              minRotation: 0,
-              autoSkip: true,
-              maxTicksLimit: showMonth ? 14 : 12,
-              font: { size: 10 },
-            },
-            grid: { display: false },
-          },
-        },
-      };
 
       return (
         <div className="card g1">
@@ -724,22 +625,7 @@ export function FinanceExecDashboard({
             ) : labels.length === 0 ? (
               <div className="kpi-tile-no-data">No CM / revenue totals to chart for this slice.</div>
             ) : (
-              <Bar
-                data={{
-                  labels,
-                  datasets: [
-                    {
-                      label: datasetLabel,
-                      data: values,
-                      backgroundColor: "rgba(16,185,129,0.55)",
-                      borderColor: "#059669",
-                      borderWidth: 1,
-                      borderRadius: 5,
-                    },
-                  ],
-                }}
-                options={cmBarOptions}
-              />
+              <FinanceCmBarChart labels={labels} values={values} height={320} />
             )}
           </div>
         </div>

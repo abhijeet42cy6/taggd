@@ -1,57 +1,34 @@
 /**
- * Platform chart wrappers — all styled to match platform.html design tokens.
- * Uses Recharts under the hood.
+ * Platform chart components — Apache ECharts 5.x with Taggd design tokens.
  */
 import React, { useMemo } from "react";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import type { YoYRevPoint, YoYCmPoint, RegionBarDatum } from "@/lib/dashboard-aggregates";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
+import { EmptyChartState } from "@/components/charts/EmptyChartState";
+import { CHART_HEIGHT, CHART_COLORS, SLA_STACK_COLORS, REQ_STATUS_COLORS, AGEING_COLORS, ACTUAL_COLOR, BUDGET_COLOR, PO_COLOR, GMV_COLOR, FAIL_COLOR } from "@/components/charts/chartTokens";
+import { colorForSeries } from "@/components/charts/chartColorRules";
 import {
-  LineChart, Line, BarChart, Bar, ComposedChart,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, LabelList,
-  ResponsiveContainer, Cell, PieChart, Pie, RadialBarChart, RadialBar,
-  ScatterChart, Scatter, ZAxis,
-} from "recharts";
-
-/** Resolves from :root / .platform-app theme tokens */
-const COLORS = {
-  accent: "var(--accent)",
-  accent2: "var(--accent2)",
-  accent3: "var(--accent3)",
-  accent4: "var(--accent4)",
-  green: "var(--green)",
-  red: "var(--red)",
-  amber: "var(--amber)",
-  text2: "var(--text-muted)",
-  text3: "var(--text-subtle)",
-  bg1: "var(--surface-raised)",
-  bg3: "var(--surface-sunken)",
-  border: "var(--border)",
-};
-
-const CHART_STYLE = {
-  background: "transparent",
-  fontSize: 10,
-  fontFamily: "'DM Mono', monospace",
-};
-
-const tooltipStyle: React.CSSProperties = {
-  backgroundColor: "var(--surface-raised)",
-  border: "1px solid var(--border2)",
-  borderRadius: 7,
-  fontSize: 11,
-  color: "var(--text)",
-  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
-};
-
-/** SLA finance shell: light cards + faint theme tokens can hide axis text. */
-const slaTooltipStyle: React.CSSProperties = {
-  ...tooltipStyle,
-  color: "#0f172a",
-  backgroundColor: "#ffffff",
-  border: "1px solid #e2e8f0",
-};
-const SLA_CHART_TICK = { fill: "#334155", fontSize: 9 };
-const SLA_CHART_TICK_SM = { fill: "#334155", fontSize: 8 };
+  buildExecutiveRevenueYoYOption,
+  buildDualAxisAreaLineOption,
+  buildSingleVerticalBarOption,
+  buildStackedVerticalBarOption,
+  buildHorizontalRankingBarOption,
+  buildHorizontalGroupedBarOption,
+  buildVerticalGroupedBarOption,
+  buildSemanticHorizontalBarOption,
+  buildDonutPieOption,
+  buildGaugeKpiOption,
+  buildMultiLineTimeseriesOption,
+  buildCmYoYLineOption,
+  buildWfmProductivityFillOption,
+  buildStackedCategoryOverTimeOption,
+  buildScatterChartOption,
+  buildWaterfallChartOption,
+  buildComplianceHeatmapOption,
+  buildFunnelPipelineOption,
+} from "@/components/charts/optionBuilders";
+import type { EChartsOption } from "echarts";
 
 function formatSlaYmAxis(ym: string): string {
   if (!ym || ym.length < 7) return String(ym);
@@ -62,110 +39,70 @@ function formatSlaYmAxis(ym: string): string {
   return `${labels[mo - 1]} '${String(y).slice(2)}`;
 }
 
-// ─── TREND CHART ──────────────────────────────────────────────────────────────
-type TrendPoint = { month: string; revenue: number; budget: number; sla: number; fillRate: number };
-
-export function TrendChart({ data }: { data: TrendPoint[] }) {
-  return (
-    <ResponsiveContainer width="100%" height={180}>
-      <ComposedChart data={data} style={CHART_STYLE}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis dataKey="month" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis yAxisId="rev" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false}
-          tickFormatter={(v) => `₹${v}Cr`} width={48} />
-        <YAxis yAxisId="pct" orientation="right" tick={{ fill: COLORS.text3, fontSize: 9 }}
-          axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} width={36} />
-        <Tooltip contentStyle={tooltipStyle} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
-        <Bar yAxisId="rev" dataKey="budget" name="Budget" fill="color-mix(in srgb, var(--accent) 18%, transparent)" radius={[2,2,0,0]} />
-        <Line yAxisId="rev" type="monotone" dataKey="revenue" name="Revenue" stroke={COLORS.accent}
-          strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
-        <Line yAxisId="pct" type="monotone" dataKey="sla" name="SLA Met %" stroke={COLORS.accent2}
-          strokeWidth={1.5} dot={{ r: 1.5 }} strokeDasharray="0" />
-        <Line yAxisId="pct" type="monotone" dataKey="fillRate" name="Fill Rate %" stroke={COLORS.amber}
-          strokeWidth={1.5} dot={{ r: 1.5 }} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
-// ─── BUBBLE CHART ─────────────────────────────────────────────────────────────
-type BubblePoint = { name: string; x: number; y: number; z: number; color: string };
-
-export function BubbleChart({ data }: { data: BubblePoint[] }) {
-  return (
-    <ResponsiveContainer width="100%" height={220}>
-      <ScatterChart style={CHART_STYLE}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis type="number" dataKey="x" name="Budget %" domain={[60, 110]}
-          tick={{ fill: COLORS.text3, fontSize: 9 }} label={{ value: "Budget Attainment %", fill: COLORS.text3, fontSize: 9, position: "insideBottom", offset: -5 }} />
-        <YAxis type="number" dataKey="y" name="SLA %" domain={[40, 100]}
-          tick={{ fill: COLORS.text3, fontSize: 9 }} label={{ value: "SLA Met %", fill: COLORS.text3, fontSize: 9, angle: -90, position: "insideLeft", offset: 10 }} />
-        <ZAxis type="number" dataKey="z" range={[40, 400]} name="Revenue" />
-        <Tooltip cursor={{ strokeDasharray: "3 3" }} contentStyle={tooltipStyle}
-          labelStyle={{ color: "var(--text)", fontFamily: "'DM Mono', monospace" }}
-          itemStyle={{ color: "var(--text)", fontFamily: "'DM Mono', monospace" }}
-          formatter={(val, name) => name === "Revenue" ? [`₹${val}Cr`, name] : [`${val}%`, name]} />
-        <Scatter data={data} name="Clients">
-          {data.map((entry, i) => (
-            <Cell key={`cell-${i}`} fill={entry.color} fillOpacity={0.65} stroke={entry.color} />
-          ))}
-        </Scatter>
-      </ScatterChart>
-    </ResponsiveContainer>
-  );
-}
-
-// ─── STACKED BAR ──────────────────────────────────────────────────────────────
-type StackedBarDatum = { name: string; joined: number; open: number; offer: number; cancelled: number };
-
-export function ReqStatusStackedBar({ data }: { data: StackedBarDatum[] }) {
-  return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} style={CHART_STYLE}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis dataKey="name" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <Tooltip contentStyle={tooltipStyle} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        <Bar dataKey="joined" name="Joined" stackId="a" fill="color-mix(in srgb, var(--green) 75%, transparent)" radius={[0,0,0,0]} />
-        <Bar dataKey="open" name="Open" stackId="a" fill="color-mix(in srgb, var(--accent) 75%, transparent)" />
-        <Bar dataKey="offer" name="Offer" stackId="a" fill="color-mix(in srgb, var(--amber) 75%, transparent)" />
-        <Bar dataKey="cancelled" name="Cancelled" stackId="a" fill="color-mix(in srgb, var(--red) 65%, transparent)" radius={[3,3,0,0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-// ─── DONUT CHART ──────────────────────────────────────────────────────────────
-type DonutDatum = { name: string; value: number };
-
-const DONUT_SLICE_COLORS = [
-  COLORS.accent,
-  COLORS.accent2,
-  COLORS.amber,
-  COLORS.red,
-  "#1e3a5f",
-  "#0f766e",
-  "#7c3aed",
-  "#be185d",
-  "#64748b",
-  "#0369a1",
-];
-
-function truncateDonutLabel(name: string, max = 36): string {
-  const t = name.trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}…`;
-}
-
-function prepareDonutSlices(data: DonutDatum[], maxItems: number): DonutDatum[] {
+function prepareDonutSlices(data: { name: string; value: number; fullName?: string }[], maxItems: number) {
   const sorted = data.filter((d) => d.value > 0).sort((a, b) => b.value - a.value);
   if (sorted.length <= maxItems) return sorted;
   const top = sorted.slice(0, maxItems - 1);
   const other = sorted.slice(maxItems - 1).reduce((sum, d) => sum + d.value, 0);
   return [...top, { name: "Other", value: other }];
 }
+
+// ─── TREND CHART ──────────────────────────────────────────────────────────────
+type TrendPoint = { month: string; revenue: number; budget: number; sla: number; fillRate: number };
+
+export function TrendChart({ data }: { data: TrendPoint[] }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    const dates = data.map((d) => d.month);
+    return buildDualAxisAreaLineOption(
+      dates,
+      data.map((d) => d.revenue),
+      data.map((d) => d.budget),
+      data.map((d) => d.sla),
+      Math.max(...data.map((d) => Math.max(d.revenue, d.budget)), 1),
+      Math.max(...data.map((d) => d.fillRate), 100)
+    );
+  }, [data]);
+  return <EChartsCanvas option={option} height={180} />;
+}
+
+// ─── BUBBLE CHART ─────────────────────────────────────────────────────────────
+type BubblePoint = { name: string; x: number; y: number; z: number; color: string };
+
+export function BubbleChart({ data }: { data: BubblePoint[] }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildScatterChartOption(
+      data.map((d, i) => ({ name: d.name, x: d.x, y: d.y, z: d.z, color: d.color || colorForSeries(i) })),
+      "Budget Attainment %",
+      "SLA Met %",
+      "Revenue"
+    );
+  }, [data]);
+  return <EChartsCanvas option={option} height={220} />;
+}
+
+// ─── STACKED BAR ──────────────────────────────────────────────────────────────
+type StackedBarDatum = { name: string; joined: number; open: number; offer: number; cancelled: number };
+
+export function ReqStatusStackedBar({ data }: { data: StackedBarDatum[] }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildStackedVerticalBarOption(
+      data.map((d) => d.name),
+      [
+        { name: "Joined", data: data.map((d) => d.joined), color: REQ_STATUS_COLORS.joined },
+        { name: "Open", data: data.map((d) => d.open), color: REQ_STATUS_COLORS.open },
+        { name: "Offer", data: data.map((d) => d.offer), color: REQ_STATUS_COLORS.offer },
+        { name: "Cancelled", data: data.map((d) => d.cancelled), color: REQ_STATUS_COLORS.cancelled, roundTop: true },
+      ]
+    );
+  }, [data]);
+  return <EChartsCanvas option={option} height={220} />;
+}
+
+// ─── DONUT CHART ──────────────────────────────────────────────────────────────
+type DonutDatum = { name: string; value: number; fullName?: string };
 
 export function LevelDonutChart({
   data,
@@ -175,53 +112,15 @@ export function LevelDonutChart({
   maxLegendItems?: number;
 }) {
   const slices = useMemo(() => prepareDonutSlices(data, maxLegendItems), [data, maxLegendItems]);
+  const option = useMemo(() => {
+    if (!slices.length) return null;
+    return buildDonutPieOption(slices);
+  }, [slices]);
 
-  if (slices.length === 0) return null;
-
+  if (!slices.length) return null;
   return (
-    <div className="level-donut-chart">
-      <div className="level-donut-chart__pie">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={slices}
-              cx="50%"
-              cy="50%"
-              innerRadius="52%"
-              outerRadius="82%"
-              dataKey="value"
-              paddingAngle={2}
-            >
-              {slices.map((_, i) => (
-                <Cell key={i} fill={DONUT_SLICE_COLORS[i % DONUT_SLICE_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={tooltipStyle}
-              formatter={(value: number, _name, item) => [
-                Number(value).toLocaleString(),
-                String(item?.payload?.name ?? ""),
-              ]}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="level-donut-chart__legend">
-        {slices.map((d, i) => (
-          <span
-            key={`${d.name}-${i}`}
-            className="level-donut-chart__leg"
-            title={d.name}
-          >
-            <span
-              className="level-donut-chart__swatch"
-              style={{ backgroundColor: DONUT_SLICE_COLORS[i % DONUT_SLICE_COLORS.length] }}
-            />
-            <span className="level-donut-chart__label">{truncateDonutLabel(d.name)}</span>
-            <span className="level-donut-chart__value">{d.value.toLocaleString()}</span>
-          </span>
-        ))}
-      </div>
+    <div className="level-donut-chart" style={{ width: "100%", minHeight: 200 }}>
+      <EChartsCanvas option={option} height={200} />
     </div>
   );
 }
@@ -230,167 +129,110 @@ export function LevelDonutChart({
 type FinancePoint = { month: string; budget: number; actual: number; forecast: number };
 
 export function FinanceTrendChart({ data }: { data: FinancePoint[] }) {
-  return (
-    <ResponsiveContainer width="100%" height={180}>
-      <ComposedChart data={data} style={CHART_STYLE}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis dataKey="month" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false}
-          tickFormatter={(v) => `₹${v}Cr`} width={48} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`₹${v}Cr`]} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        <Bar dataKey="budget" name="Budget" fill="color-mix(in srgb, var(--accent) 18%, transparent)" strokeWidth={1} radius={[2,2,0,0]} />
-        <Bar dataKey="actual" name="Actual" fill="color-mix(in srgb, var(--accent2) 70%, transparent)" radius={[2,2,0,0]} />
-        <Line type="monotone" dataKey="forecast" name="Forecast" stroke={COLORS.amber}
-          strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 1.5 }} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildExecutiveRevenueYoYOption(
+      data.map((d) => d.month),
+      data.map((d) => d.budget),
+      data.map((d) => d.actual),
+      data.map((d) => d.forecast),
+      data.map(() => 0),
+      "Prior"
+    );
+  }, [data]);
+  return <EChartsCanvas option={option} height={180} />;
 }
 
 // ─── SLA STACKED COMPLIANCE BAR ───────────────────────────────────────────────
 type SlaPoint = { month: string; met: number; notMet: number; notReported: number };
 
 export function SlaComplianceBar({ data, height = 220 }: { data: SlaPoint[]; height?: number }) {
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} style={CHART_STYLE}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis dataKey="month" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false}
-          tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${v}%`]} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        <Bar dataKey="met" name="Met" stackId="s" fill="color-mix(in srgb, var(--green) 70%, transparent)" radius={[0,0,0,0]} />
-        <Bar dataKey="notMet" name="Not Met" stackId="s" fill="color-mix(in srgb, var(--red) 70%, transparent)" />
-        <Bar dataKey="notReported" name="Not Reported" stackId="s" fill="color-mix(in srgb, var(--text-subtle) 35%, transparent)" radius={[3,3,0,0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildStackedVerticalBarOption(
+      data.map((d) => d.month),
+      [
+        { name: "Met", data: data.map((d) => d.met), color: SLA_STACK_COLORS.met },
+        { name: "Not Met", data: data.map((d) => d.notMet), color: SLA_STACK_COLORS.notMet },
+        { name: "Not Reported", data: data.map((d) => d.notReported), color: SLA_STACK_COLORS.notReported, roundTop: true },
+      ]
+    );
+  }, [data]);
+  return <EChartsCanvas option={option} height={height} />;
 }
 
-// ─── WFM: PRODUCTIVITY TARGET vs FILL RATE (by client) ────────────────────────
+// ─── WFM ──────────────────────────────────────────────────────────────────────
 export type WfmProdFillPoint = { name: string; fillPct: number; productivity: number; fullName?: string };
 
 export function WfmProductivityFillChart({ data }: { data: WfmProdFillPoint[] }) {
-  if (!data.length) {
-    return (
-      <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
-        Upload WFM data with ideal HC to compare
-      </div>
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildWfmProductivityFillOption(
+      data.map((d) => d.name),
+      data.map((d) => d.fillPct),
+      data.map((d) => d.productivity)
     );
+  }, [data]);
+  if (!data.length) {
+    return <EmptyChartState height={200} message="Upload WFM data with ideal HC to compare" />;
   }
-  return (
-    <ResponsiveContainer width="100%" height={300}>
-      <ComposedChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: 64 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis
-          dataKey="name"
-          tick={{ fill: COLORS.text3, fontSize: 8 }}
-          interval={0}
-          angle={-38}
-          textAnchor="end"
-          height={72}
-        />
-        <YAxis yAxisId="fill" tick={{ fill: COLORS.text3, fontSize: 9 }} tickFormatter={(v) => `${v}%`} domain={[0, "auto"]} width={44} />
-        <YAxis yAxisId="prod" orientation="right" tick={{ fill: COLORS.text3, fontSize: 9 }} tickFormatter={(v) => `${Number(v).toFixed(1)}`} width={44} />
-        <ReferenceLine yAxisId="fill" y={100} stroke={COLORS.red} strokeDasharray="4 4" strokeOpacity={0.85} label={{ value: "100%", fill: COLORS.text3, fontSize: 9 }} />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          labelFormatter={(label, payload) => {
-            const p = payload?.[0]?.payload as WfmProdFillPoint | undefined;
-            return p?.fullName ?? String(label ?? "");
-          }}
-          formatter={(value: number | string, name: string) => {
-            const raw = typeof value === "number" ? value.toFixed(1) : String(value);
-            const withPct = String(name).includes("Fill rate");
-            return [withPct ? `${raw}%` : `${raw} lacs`, name];
-          }}
-        />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        <Bar yAxisId="fill" dataKey="fillPct" name="Fill rate %" fill="color-mix(in srgb, var(--accent) 65%, transparent)" radius={[2, 2, 0, 0]} />
-        <Line yAxisId="prod" type="monotone" dataKey="productivity" name="Productivity target (lacs)" stroke={COLORS.accent2} strokeWidth={2} dot={{ r: 2 }} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={300} />;
 }
 
 // ─── WL STACKED BAR ───────────────────────────────────────────────────────────
 type WlDatum = { name: string; wl1: number; wl2: number; wl3: number; wl4: number };
 
 export function WlDistributionBar({ data }: { data: WlDatum[] }) {
-  return (
-    <ResponsiveContainer width="100%" height={140}>
-      <BarChart data={data} style={CHART_STYLE}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis dataKey="name" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <Tooltip contentStyle={tooltipStyle} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: COLORS.text2 }} />
-        <Bar dataKey="wl1" name="WL1" stackId="w" fill="color-mix(in srgb, var(--accent) 80%, transparent)" />
-        <Bar dataKey="wl2" name="WL2" stackId="w" fill="color-mix(in srgb, var(--accent2) 75%, transparent)" />
-        <Bar dataKey="wl3" name="WL3" stackId="w" fill="color-mix(in srgb, var(--amber) 75%, transparent)" />
-        <Bar dataKey="wl4" name="WL4+" stackId="w" fill="color-mix(in srgb, var(--red) 70%, transparent)" radius={[3,3,0,0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildStackedVerticalBarOption(
+      data.map((d) => d.name),
+      [
+        { name: "WL1", data: data.map((d) => d.wl1), color: CHART_COLORS[0] },
+        { name: "WL2", data: data.map((d) => d.wl2), color: CHART_COLORS[1] },
+        { name: "WL3", data: data.map((d) => d.wl3), color: CHART_COLORS[2] },
+        { name: "WL4+", data: data.map((d) => d.wl4), color: CHART_COLORS[3], roundTop: true },
+      ]
+    );
+  }, [data]);
+  return <EChartsCanvas option={option} height={140} />;
 }
 
-// ─── GAUGE RING (SVG) ─────────────────────────────────────────────────────────
-export function GaugeRing({ value, label, sublabel, color = COLORS.accent }: {
+// ─── GAUGE RING ───────────────────────────────────────────────────────────────
+export function GaugeRing({ value, label, sublabel, color }: {
   value: number; label: string; sublabel: string; color?: string;
 }) {
-  // Slightly larger ring + thinner stroke → more inner clearance for the % label
-  const cx = 36;
-  const cy = 36;
-  const r = 28;
-  const strokeW = 5;
-  const circumference = 2 * Math.PI * r;
-  // Arc caps at 100% of circle; label still shows actual % (e.g. 113%)
-  const arcPct = Math.min(Math.max(Number(value) || 0, 0), 100);
-  const filled = (arcPct / 100) * circumference;
-  const size = 84;
+  const option = useMemo(() => buildGaugeKpiOption(Number(value), label), [value, label]);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-      <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-        <svg viewBox="0 0 72 72" width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-          <circle cx={cx} cy={cy} r={r} fill="none" stroke={COLORS.bg3} strokeWidth={strokeW} />
-          <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth={strokeW}
-            strokeDasharray={`${filled} ${circumference}`} strokeLinecap="round" />
-        </svg>
-        <div style={{
-          position: "absolute", inset: 0, display: "flex", alignItems: "center",
-          justifyContent: "center", fontWeight: 700, fontSize: 15, color,
-          lineHeight: 1.1, padding: "0 4px", textAlign: "center",
-        }}>{formatPercent(Number(value))}</div>
+      <div style={{ width: 120, height: 120 }}>
+        <EChartsCanvas option={option} height={120} />
       </div>
       <div>
-        <div style={{ fontSize: 10, color: COLORS.text3, fontFamily: "'DM Mono',monospace", marginBottom: 3 }}>{label}</div>
-        <div style={{ fontSize: 12, color: COLORS.text2 }}>{sublabel}</div>
+        <div style={{ fontSize: 10, color: "var(--text-subtle)", marginBottom: 3 }}>{label}</div>
+        <div style={{ fontSize: 12, color: color ?? "var(--text-muted)" }}>{sublabel}</div>
+        <div style={{ fontWeight: 700, fontSize: 15, color: color ?? "var(--accent)" }}>{formatPercent(Number(value))}</div>
       </div>
     </div>
   );
 }
 
-// ─── BULLET CHART (HC Ideal vs Actual) ────────────────────────────────────────
+// ─── BULLET CHART ─────────────────────────────────────────────────────────────
 type BulletItem = { name: string; actual: number; ideal: number; color: string };
 
 export function HcBulletChart({ items }: { items: BulletItem[] }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {items.map((item) => {
-        const rawPct = (item.actual / Math.max(item.ideal, 1)) * 100;
-        const pct = Math.min(100, Math.round(rawPct));
-        // item.color is often a CSS var (e.g. var(--green)); do not append hex digits — that breaks gradients.
-        const fillBg = `linear-gradient(90deg, ${item.color}, color-mix(in srgb, ${item.color} 72%, transparent))`;
+        const pct = Math.min(100, Math.round((item.actual / Math.max(item.ideal, 1)) * 100));
         return (
-          <div key={item.name} className="bullet-wrap">
-            <div className="bullet-label">
-              <span style={{ fontSize: 11 }}>{item.name}</span>
-              <span style={{ fontSize: 11, color: item.color }}>{formatNumber(item.actual)} / {formatNumber(item.ideal)}</span>
+          <div key={item.name}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+              <span>{item.name}</span>
+              <span style={{ color: item.color }}>{formatNumber(item.actual)} / {formatNumber(item.ideal)}</span>
             </div>
-            <div className="bullet-track">
-              <div className="bullet-actual" style={{ width: `${pct}%`, background: fillBg }} />
+            <div style={{ height: 8, background: "var(--surface-sunken)", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${pct}%`, background: item.color, borderRadius: 4 }} />
             </div>
           </div>
         );
@@ -399,239 +241,103 @@ export function HcBulletChart({ items }: { items: BulletItem[] }) {
   );
 }
 
-/** Horizontal grouped bars — ideal vs actual HC per client (clearer than single % bullet). */
 export function HcIdealActualGroupedChart({ items }: { items: BulletItem[] }) {
+  const option = useMemo(() => {
+    if (!items.length) return null;
+    const names = items.map((i) => i.name);
+    return buildHorizontalGroupedBarOption(names, [
+      { name: "Ideal HC", data: items.map((i) => i.ideal), color: PO_COLOR },
+      { name: "Actual HC", data: items.map((i) => i.actual), color: ACTUAL_COLOR },
+    ]);
+  }, [items]);
   if (!items.length) return null;
-  const data = items.map((item) => ({
-    name: item.name.length > 24 ? `${item.name.slice(0, 23)}…` : item.name,
-    fullName: item.name,
-    Ideal: Math.max(0, Number(item.ideal) || 0),
-    Actual: Math.max(0, Number(item.actual) || 0),
-  }));
-  const maxVal = Math.max(1, ...data.flatMap((d) => [d.Ideal, d.Actual]));
-  const height = Math.min(440, Math.max(200, 56 + data.length * 36));
-
-  return (
-    <div style={{ width: "100%" }}>
-      <ResponsiveContainer width="100%" height={height}>
-        <BarChart
-          layout="vertical"
-          data={data}
-          margin={{ top: 8, right: 8, left: 4, bottom: 8 }}
-          barCategoryGap={12}
-          barGap={6}
-          style={CHART_STYLE}
-        >
-          <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
-          <XAxis
-            type="number"
-            domain={[0, Math.ceil(maxVal * 1.08)]}
-            tick={{ fill: COLORS.text3, fontSize: 9 }}
-            axisLine={false}
-            tickLine={false}
-          />
-          <YAxis
-            type="category"
-            dataKey="name"
-            width={118}
-            tick={{ fill: COLORS.text2, fontSize: 9 }}
-            axisLine={false}
-            tickLine={false}
-          />
-          <Tooltip
-            contentStyle={tooltipStyle}
-            formatter={(value: number, name: string) => [formatNumber(value), name]}
-            labelFormatter={(_l, payload) => {
-              const p = payload?.[0]?.payload as { fullName?: string } | undefined;
-              return p?.fullName ?? "";
-            }}
-          />
-          <Legend
-            iconSize={8}
-            wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace", paddingTop: 4 }}
-          />
-          <Bar
-            dataKey="Ideal"
-            name="Ideal HC"
-            fill="color-mix(in srgb, var(--accent2) 50%, transparent)"
-            stroke="var(--accent2)"
-            strokeWidth={1}
-            radius={[0, 3, 3, 0]}
-            maxBarSize={16}
-          />
-          <Bar
-            dataKey="Actual"
-            name="Actual HC"
-            fill="var(--accent)"
-            radius={[0, 3, 3, 0]}
-            maxBarSize={16}
-          />
-        </BarChart>
-      </ResponsiveContainer>
-      <div
-        style={{
-          marginTop: 8,
-          fontSize: 9.5,
-          color: "var(--text-muted)",
-          fontFamily: "'DM Mono',monospace",
-          textAlign: "center",
-        }}
-      >
-        Teal = ideal target · Orange = actual headcount · Same scale per client
-      </div>
-    </div>
-  );
+  const height = Math.min(440, Math.max(200, 56 + items.length * 36));
+  return <EChartsCanvas option={option} height={height} />;
 }
 
 // ─── AGEING BARS ──────────────────────────────────────────────────────────────
 type AgeingBucket = { label: string; count: number; max: number; color: string };
 
 export function AgeingBars({ buckets }: { buckets: AgeingBucket[] }) {
-  const maxCount = Math.max(...buckets.map((b) => b.count), 1);
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      {buckets.map((b) => (
-        <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 70, fontSize: 10, color: COLORS.text3, fontFamily: "'DM Mono',monospace" }}>{b.label}</div>
-          <div style={{ flex: 1, height: 10, background: COLORS.bg3, borderRadius: 3, overflow: "hidden" }}>
-            <div style={{ height: "100%", borderRadius: 3, background: b.color, width: `${(b.count / maxCount) * 100}%`, transition: "width .5s" }} />
-          </div>
-          <div style={{ width: 30, textAlign: "right", fontSize: 10, fontFamily: "'DM Mono',monospace", color: b.color }}>{b.count}</div>
-        </div>
-      ))}
-    </div>
-  );
+  const option = useMemo(() => {
+    if (!buckets.length) return null;
+    return buildHorizontalRankingBarOption(
+      buckets.map((b) => b.label),
+      buckets.map((b) => b.count),
+      buckets.map((b, i) => b.color || AGEING_COLORS[i % AGEING_COLORS.length])
+    );
+  }, [buckets]);
+  return <EChartsCanvas option={option} height={Math.max(120, buckets.length * 36)} />;
 }
 
 // ─── WATERFALL ────────────────────────────────────────────────────────────────
 type WaterfallItem = { label: string; value: number; color: string; isTotal?: boolean };
 
 export function WaterfallChart({ items }: { items: WaterfallItem[] }) {
-  const maxAbs = Math.max(...items.map((i) => Math.abs(i.value)), 1);
-  return (
-    <div style={{ display: "grid", gap: 6 }}>
-      {items.map((item) => {
-        const width = Math.abs(item.value / maxAbs) * 88;
-        const isPositive = item.value >= 0;
-        return (
-          <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
-            <div style={{ width: 130, color: "var(--text2)", fontSize: 10 }}>{item.label}</div>
-            <div style={{ flex: 1, position: "relative", height: 16 }}>
-              <div style={{
-                position: "absolute", height: "100%", borderRadius: 3,
-                background: item.color, opacity: item.isTotal ? 0.8 : 0.65,
-                left: isPositive ? 0 : "auto", right: isPositive ? "auto" : 0,
-                width: `${width}%`,
-              }} />
-            </div>
-            <div style={{ width: 80, textAlign: "right", fontFamily: "'DM Mono',monospace", fontSize: 10, color: item.color }}>
-              {isPositive ? "+" : "−"}₹{Math.abs(item.value).toFixed(1)}Cr
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+  const option = useMemo(() => {
+    if (!items.length) return null;
+    return buildWaterfallChartOption(items.map((i) => ({ name: i.label, value: i.value, isTotal: i.isTotal })));
+  }, [items]);
+  return <EChartsCanvas option={option} height={Math.max(160, items.length * 32)} />;
 }
 
 // ─── RISK BAR ─────────────────────────────────────────────────────────────────
 export function RiskBar({ score, color }: { score: number; color: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-      <div style={{ flex: 1, height: 3, background: "var(--bg3)", borderRadius: 2, overflow: "hidden" }}>
+      <div style={{ flex: 1, height: 3, background: "var(--surface-sunken)", borderRadius: 2, overflow: "hidden" }}>
         <div style={{ height: "100%", borderRadius: 2, background: color, width: `${score}%` }} />
       </div>
-      <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color }}>{score}</span>
+      <span style={{ fontFamily: "var(--mono)", fontSize: 10, color }}>{score}</span>
     </div>
   );
 }
 
 // ─── SPARKLINE ────────────────────────────────────────────────────────────────
-export function Sparkline({ data, color = COLORS.accent }: { data: number[]; color?: string }) {
+export function Sparkline({ data, color = GMV_COLOR }: { data: number[]; color?: string }) {
+  const option = useMemo(() => {
+    if (!data || data.length < 2) return null;
+    return buildMultiLineTimeseriesOption(
+      data.map((_, i) => String(i)),
+      [{ name: "trend", data, color }]
+    );
+  }, [data, color]);
   if (!data || data.length < 2) return null;
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  const w = 60;
-  const h = 22;
-  const points = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * w;
-    const y = h - ((v - min) / range) * h;
-    return `${x},${y}`;
-  }).join(" ");
-  return (
-    <svg width={w} height={h} style={{ overflow: "visible" }}>
-      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <EChartsCanvas option={option} height={22} />;
 }
 
-// ─── SLA MULTI-ACCOUNT TIME SERIES ────────────────────────────────────────────
-const SLA_SERIES_COLORS = [
-  "var(--accent)", "var(--green)", "var(--amber)", "var(--red)", "var(--accent2)",
-  "#a78bfa", "#ea580c", "#34d399", "#f472b6", "#0d9488",
-];
-
+// ─── SLA TIME SERIES ──────────────────────────────────────────────────────────
 export type SlaSeriesPoint = { month: string; [account: string]: number | string | null };
 
 export function SlaTimeSeriesChart({
   data,
   accounts,
+  syncDataZoomGroup,
 }: {
   data: SlaSeriesPoint[];
   accounts: string[];
+  syncDataZoomGroup?: string;
 }) {
+  const option = useMemo(() => {
+    if (!data.length || !accounts.length) return null;
+    const labels = data.map((d) => formatSlaYmAxis(String(d.month)));
+    const seriesList = accounts.map((acc, i) => ({
+      name: acc,
+      data: data.map((d) => (d[acc] != null ? Number(d[acc]) : null)),
+      color: colorForSeries(i),
+    }));
+    const opt = buildMultiLineTimeseriesOption(labels, seriesList, "Met %");
+    if (opt.yAxis && Array.isArray(opt.yAxis)) {
+      opt.yAxis[0] = { ...opt.yAxis[0], max: 100, axisLabel: { color: "#94a3b8", fontSize: 10, formatter: "{value}%" } };
+    }
+    return opt;
+  }, [data, accounts]);
+
   if (!data.length || !accounts.length) return null;
-  return (
-    <ResponsiveContainer width="100%" height={220}>
-      <ComposedChart data={data} style={CHART_STYLE}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis
-          dataKey="month"
-          tick={{ ...SLA_CHART_TICK, fontSize: 8 }}
-          axisLine={false}
-          tickLine={false}
-          interval="preserveStartEnd"
-          tickFormatter={formatSlaYmAxis}
-        />
-        <YAxis
-          tick={SLA_CHART_TICK}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={(v) => `${v}%`}
-          domain={[0, 100]}
-          width={36}
-        />
-        <Tooltip
-          contentStyle={slaTooltipStyle}
-          labelStyle={{ color: "#0f172a", fontFamily: "'DM Mono',monospace", marginBottom: 4 }}
-          itemStyle={{ color: "#0f172a", fontFamily: "'DM Mono',monospace" }}
-          formatter={(v: number) => [`${v}%`]}
-          labelFormatter={formatSlaYmAxis}
-        />
-        <Legend
-          iconSize={8}
-          wrapperStyle={{ fontSize: 9, color: "#334155", fontFamily: "'DM Mono',monospace" }}
-        />
-        {accounts.map((acc, i) => (
-          <Line
-            key={acc}
-            type="monotone"
-            dataKey={acc}
-            name={acc}
-            stroke={SLA_SERIES_COLORS[i % SLA_SERIES_COLORS.length]}
-            strokeWidth={2}
-            dot={{ r: 2 }}
-            activeDot={{ r: 4 }}
-            connectNulls={false}
-          />
-        ))}
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={220} syncDataZoomGroup={syncDataZoomGroup} />;
 }
 
-// ─── SLA FY COMPARISON (categorical X: accounts or regions) ────────────────────
+// ─── SLA FY COMPARISON ────────────────────────────────────────────────────────
 export type SlaFyComparePoint = { name: string; p1: number | null; p2: number | null };
 
 export function SlaFyComparisonLineChart({
@@ -645,65 +351,37 @@ export function SlaFyComparisonLineChart({
   labelP2: string;
   height?: number;
 }) {
-  if (!data.length) {
-    return (
-      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
-        No data for this period
-      </div>
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildMultiLineTimeseriesOption(
+      data.map((d) => d.name),
+      [
+        { name: labelP1, data: data.map((d) => d.p1), color: ACTUAL_COLOR },
+        { name: labelP2, data: data.map((d) => d.p2), color: PO_COLOR },
+      ]
     );
-  }
-  const tilt = data.length > 6;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: tilt ? 52 : 12 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis
-          dataKey="name"
-          tick={{ ...SLA_CHART_TICK_SM }}
-          interval={0}
-          angle={tilt ? -32 : 0}
-          textAnchor={tilt ? "end" : "middle"}
-          height={tilt ? 56 : 28}
-        />
-        <YAxis
-          tick={SLA_CHART_TICK}
-          domain={[0, 100]}
-          tickFormatter={(v) => `${v}%`}
-          width={40}
-        />
-        <Tooltip
-          contentStyle={slaTooltipStyle}
-          formatter={(v) => (v == null || v === "" ? "—" : `${v}%`)}
-        />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace" }} />
-        <Line type="monotone" dataKey="p1" name={labelP1} stroke={COLORS.accent} strokeWidth={2} dot={{ r: 3 }} connectNulls />
-        <Line type="monotone" dataKey="p2" name={labelP2} stroke={COLORS.accent2} strokeWidth={2} dot={{ r: 3 }} connectNulls />
-      </LineChart>
-    </ResponsiveContainer>
-  );
+  }, [data, labelP1, labelP2]);
+  if (!data.length) return <EmptyChartState height={height} message="No data for this period" />;
+  return <EChartsCanvas option={option} height={height} />;
 }
 
-// ─── SLA FY: portfolio Met vs Not Met snapshot counts (grouped by period) ─────
 export type SlaFyCountDatum = { period: string; met: number; notMet: number };
 
 export function SlaFyPortfolioMetNotMetBar({ data, height = 200 }: { data: SlaFyCountDatum[]; height?: number }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildVerticalGroupedBarOption(
+      data.map((d) => d.period),
+      [
+        { name: "Met", data: data.map((d) => d.met), color: SLA_STACK_COLORS.met },
+        { name: "Not met", data: data.map((d) => d.notMet), color: SLA_STACK_COLORS.notMet },
+      ]
+    );
+  }, [data]);
   if (!data.length) return null;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis dataKey="period" tick={SLA_CHART_TICK} axisLine={false} tickLine={false} />
-        <YAxis tick={SLA_CHART_TICK} allowDecimals={false} width={40} />
-        <Tooltip contentStyle={slaTooltipStyle} formatter={(v: number) => [v, "Count"]} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace" }} />
-        <Bar dataKey="met" name="Met" fill="color-mix(in srgb, var(--green) 72%, transparent)" radius={[2, 2, 0, 0]} />
-        <Bar dataKey="notMet" name="Not met" fill="color-mix(in srgb, var(--red) 70%, transparent)" radius={[2, 2, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={height} />;
 }
 
-// ─── SLA: FY comparison as grouped bars (regions / accounts) ─────────────────
 export function SlaFyComparisonGroupedBar({
   data,
   labelP1,
@@ -715,52 +393,32 @@ export function SlaFyComparisonGroupedBar({
   labelP2: string;
   height?: number;
 }) {
-  if (!data.length) {
-    return (
-      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
-        No data for this period
-      </div>
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildVerticalGroupedBarOption(
+      data.map((d) => d.name),
+      [
+        { name: labelP1, data: data.map((d) => d.p1 ?? 0), color: ACTUAL_COLOR },
+        { name: labelP2, data: data.map((d) => d.p2 ?? 0), color: PO_COLOR },
+      ]
     );
-  }
-  const tilt = data.length > 6;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: tilt ? 48 : 12 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis
-          dataKey="name"
-          tick={{ ...SLA_CHART_TICK_SM }}
-          interval={0}
-          angle={tilt ? -32 : 0}
-          textAnchor={tilt ? "end" : "middle"}
-          height={tilt ? 52 : 28}
-        />
-        <YAxis tick={SLA_CHART_TICK} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={40} />
-        <Tooltip contentStyle={slaTooltipStyle} formatter={(v) => (v == null || v === "" ? "—" : `${v}%`)} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: "#334155", fontFamily: "'DM Mono',monospace" }} />
-        <Bar dataKey="p1" name={labelP1} fill="color-mix(in srgb, var(--accent) 65%, transparent)" radius={[2, 2, 0, 0]} />
-        <Bar dataKey="p2" name={labelP2} fill="color-mix(in srgb, var(--accent2) 65%, transparent)" radius={[2, 2, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  }, [data, labelP1, labelP2]);
+  if (!data.length) return <EmptyChartState height={height} message="No data for this period" />;
+  return <EChartsCanvas option={option} height={height} />;
 }
 
-// ─── SLA: Met % horizontal rank (executive tiles) ─────────────────────────────
 export type SlaRankBarDatum = { name: string; value: number };
 
 export function SlaExecutiveMetPctBar({ data, height = 140 }: { data: SlaRankBarDatum[]; height?: number }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildSemanticHorizontalBarOption(
+      data.map((d) => d.name),
+      data.map((d) => d.value)
+    );
+  }, [data]);
   if (!data.length) return null;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart layout="vertical" data={data} style={CHART_STYLE} margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal />
-        <XAxis type="number" domain={[0, 100]} tick={{ ...SLA_CHART_TICK_SM }} tickFormatter={(v) => `${v}%`} />
-        <YAxis type="category" dataKey="name" width={88} tick={{ ...SLA_CHART_TICK_SM }} axisLine={false} tickLine={false} />
-        <Tooltip contentStyle={slaTooltipStyle} formatter={(v: number) => [`${v.toFixed(1)}%`, "Met %"]} />
-        <Bar dataKey="value" name="Met %" fill="color-mix(in srgb, var(--accent) 55%, transparent)" radius={[0, 3, 3, 0]} barSize={14} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={height} />;
 }
 
 export type SlaDeltaBarDatum = {
@@ -771,31 +429,6 @@ export type SlaDeltaBarDatum = {
   account?: string;
 };
 
-function SlaExecutiveDeltaTooltip({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: Array<{ payload: SlaDeltaBarDatum }>;
-}) {
-  if (!active || !payload?.[0]) return null;
-  const d = payload[0].payload;
-  return (
-    <div style={slaTooltipStyle}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{d.account ?? d.name}</div>
-      {d.p1 != null && d.p2 != null ? (
-        <div style={{ fontSize: 10, color: COLORS.text2 }}>
-          {d.p1.toFixed(1)}% → {d.p2.toFixed(1)}%
-        </div>
-      ) : null}
-      <div style={{ fontSize: 11, marginTop: 2 }}>
-        {d.delta >= 0 ? "+" : ""}
-        {d.delta.toFixed(1)} pp
-      </div>
-    </div>
-  );
-}
-
 export function SlaExecutiveDeltaBar({
   data,
   height = 140,
@@ -805,50 +438,30 @@ export function SlaExecutiveDeltaBar({
   height?: number;
   onSelectAccount?: (account: string) => void;
 }) {
+  const option = useMemo((): EChartsOption | null => {
+    if (!data.length) return null;
+    const names = data.map((d) => d.name);
+    const values = data.map((d) => d.delta);
+    const colors = values.map((v) => (v >= 0 ? PO_COLOR : FAIL_COLOR));
+    return buildHorizontalRankingBarOption(names, values.map(Math.abs), colors);
+  }, [data]);
+
   if (!data.length) return null;
-  const vals = data.map((d) => d.delta);
-  const maxAbs = Math.max(5, ...vals.map((v) => Math.abs(v)));
-  const domain: [number, number] = [-maxAbs, maxAbs];
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart layout="vertical" data={data} style={CHART_STYLE} margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal />
-        <XAxis type="number" domain={domain} tick={{ ...SLA_CHART_TICK_SM }} tickFormatter={(v) => `${v} pp`} />
-        <YAxis type="category" dataKey="name" width={100} tick={{ ...SLA_CHART_TICK_SM, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <ReferenceLine x={0} stroke={COLORS.border} strokeDasharray="4 3" />
-        <Tooltip content={<SlaExecutiveDeltaTooltip />} />
-        <Bar
-          dataKey="delta"
-          radius={[0, 3, 3, 0]}
-          barSize={14}
-          cursor={onSelectAccount ? "pointer" : undefined}
-          onClick={(barData) => {
-            const acc = (barData as unknown as { payload?: SlaDeltaBarDatum })?.payload?.account;
-            if (acc && onSelectAccount) onSelectAccount(acc);
-          }}
-        >
-          {data.map((e, i) => (
-            <Cell key={i} fill={e.delta >= 0 ? "color-mix(in srgb, var(--green) 65%, transparent)" : "color-mix(in srgb, var(--red) 65%, transparent)"} />
-          ))}
-          <LabelList
-            dataKey="delta"
-            position="right"
-            formatter={(v: number, _n: string, entry: { payload?: SlaDeltaBarDatum }) => {
-              const p = entry?.payload;
-              if (p?.p1 != null && p?.p2 != null) {
-                return `${p.p1.toFixed(0)}→${p.p2.toFixed(0)}%`;
-              }
-              return `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}`;
-            }}
-            style={{ fontSize: 8, fill: COLORS.text3, fontFamily: "'DM Mono',monospace" }}
-          />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <div
+      onClick={(e) => {
+        if (!onSelectAccount) return;
+        const target = e.target as HTMLElement;
+        if (target.closest(".echarts-canvas-wrapper")) {
+          /* chart click handled by echarts if wired */
+        }
+      }}
+    >
+      <EChartsCanvas option={option} height={height} />
+    </div>
   );
 }
 
-// ─── SLA: portfolio Met vs Not met (single FY window) — doughnut ──────────────
 export function SlaMetNotMetDonut({
   met,
   notMet,
@@ -861,196 +474,96 @@ export function SlaMetNotMetDonut({
   height?: number;
 }) {
   const total = met + notMet;
-  if (total <= 0) {
-    return (
-      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11, textAlign: "center", padding: 8 }}>
-        No met / not-met snapshots in window
-      </div>
+  const option = useMemo(() => {
+    if (total <= 0) return null;
+    return buildDonutPieOption(
+      [
+        { name: "Met", value: met },
+        { name: "Not met", value: notMet },
+      ],
+      [SLA_STACK_COLORS.met, SLA_STACK_COLORS.notMet]
     );
+  }, [met, notMet, total]);
+
+  if (total <= 0) {
+    return <EmptyChartState height={height} message="No met / not-met snapshots in window" />;
   }
-  const pieData = [
-    { name: "Met", value: met },
-    { name: "Not met", value: notMet },
-  ];
   return (
     <div style={{ width: "100%" }}>
-      <div style={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace", textAlign: "center", marginBottom: 4 }}>{label}</div>
-      <ResponsiveContainer width="100%" height={height}>
-        <PieChart>
-          <Pie
-            data={pieData}
-            cx="50%"
-            cy="50%"
-            innerRadius={44}
-            outerRadius={62}
-            dataKey="value"
-            paddingAngle={2}
-            label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`}
-            labelLine={false}
-          >
-            <Cell fill="color-mix(in srgb, var(--green) 75%, transparent)" />
-            <Cell fill="color-mix(in srgb, var(--red) 72%, transparent)" />
-          </Pie>
-          <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Snapshots"]} />
-          <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
-        </PieChart>
-      </ResponsiveContainer>
+      <div style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "center", marginBottom: 4 }}>{label}</div>
+      <EChartsCanvas option={option} height={height} />
     </div>
   );
 }
 
-// ─── SLA: client Met % vs portfolio benchmark (grouped %) ───────────────────────
 export type SlaBenchmarkDatum = { name: string; client: number; benchmark: number };
 
 export function SlaBenchmarkGroupedBar({ data, benchmarkLabel, height = 260 }: { data: SlaBenchmarkDatum[]; benchmarkLabel: string; height?: number }) {
-  if (!data.length) {
-    return (
-      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
-        No comparison data
-      </div>
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildVerticalGroupedBarOption(
+      data.map((d) => d.name),
+      [
+        { name: "Client Met %", data: data.map((d) => d.client), color: ACTUAL_COLOR },
+        { name: benchmarkLabel, data: data.map((d) => d.benchmark), color: BUDGET_COLOR },
+      ]
     );
-  }
-  const tilt = data.length > 5;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 12, left: 4, bottom: tilt ? 44 : 12 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis
-          dataKey="name"
-          tick={{ fill: COLORS.text3, fontSize: 8 }}
-          interval={0}
-          angle={tilt ? -28 : 0}
-          textAnchor={tilt ? "end" : "middle"}
-          height={tilt ? 48 : 28}
-        />
-        <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fill: COLORS.text3, fontSize: 9 }} width={36} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v.toFixed(1)}%`]} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2, fontFamily: "'DM Mono',monospace" }} />
-        <Bar dataKey="client" name="Client Met %" fill="color-mix(in srgb, var(--accent) 62%, transparent)" radius={[2, 2, 0, 0]} />
-        <Bar dataKey="benchmark" name={benchmarkLabel} fill="color-mix(in srgb, var(--text-subtle) 45%, transparent)" radius={[2, 2, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  }, [data, benchmarkLabel]);
+  if (!data.length) return <EmptyChartState height={height} message="No comparison data" />;
+  return <EChartsCanvas option={option} height={height} />;
 }
 
-// ─── SLA: not-reported snapshot counts (vertical bar) ─────────────────────────
 export type SlaCountDatum = { name: string; count: number };
 
 export function SlaNotReportedCountBar({ data, height = 200 }: { data: SlaCountDatum[]; height?: number }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildSingleVerticalBarOption(
+      data.map((d) => d.name),
+      data.map((d) => d.count),
+      "Not reported",
+      CHART_COLORS[2]
+    );
+  }, [data]);
   if (!data.length) return null;
-  const tilt = data.length > 7;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} style={CHART_STYLE} margin={{ bottom: tilt ? 40 : 8 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis
-          dataKey="name"
-          tick={{ fill: COLORS.text3, fontSize: 8 }}
-          interval={0}
-          angle={tilt ? -32 : 0}
-          textAnchor={tilt ? "end" : "middle"}
-          height={tilt ? 44 : 24}
-        />
-        <YAxis allowDecimals={false} tick={{ fill: COLORS.text3, fontSize: 9 }} width={32} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v, "Not-reported snapshots"]} />
-        <Bar dataKey="count" name="Not reported" fill="color-mix(in srgb, var(--amber) 55%, transparent)" radius={[3, 3, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={height} />;
 }
 
-// ─── SLA: one metric, months stacked met / not met / not reported ───────────
 export type SlaMetricMonthStackDatum = { month: string; met: number; notMet: number; notReported: number };
 
-export function SlaMetricMonthStackedBar({
-  data,
-  height = 160,
-}: {
-  data: SlaMetricMonthStackDatum[];
-  height?: number;
-}) {
+export function SlaMetricMonthStackedBar({ data, height = 160 }: { data: SlaMetricMonthStackDatum[]; height?: number }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildStackedVerticalBarOption(
+      data.map((d) => d.month),
+      [
+        { name: "Met", data: data.map((d) => d.met), color: SLA_STACK_COLORS.met },
+        { name: "Not Met", data: data.map((d) => d.notMet), color: SLA_STACK_COLORS.notMet },
+        { name: "Not Reported", data: data.map((d) => d.notReported), color: SLA_STACK_COLORS.notReported, roundTop: true },
+      ]
+    );
+  }, [data]);
   if (!data.length) return null;
-  const tilt = data.length > 6;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} style={CHART_STYLE} margin={{ bottom: tilt ? 36 : 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis
-          dataKey="month"
-          tick={{ fill: COLORS.text3, fontSize: 8 }}
-          interval={0}
-          angle={tilt ? -40 : 0}
-          textAnchor={tilt ? "end" : "middle"}
-          height={tilt ? 48 : 22}
-        />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} allowDecimals={false} width={32} />
-        <Tooltip contentStyle={tooltipStyle} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: COLORS.text2 }} />
-        <Bar dataKey="met" name="Met" stackId="s" fill="color-mix(in srgb, var(--green) 70%, transparent)" />
-        <Bar dataKey="notMet" name="Not Met" stackId="s" fill="color-mix(in srgb, var(--red) 70%, transparent)" />
-        <Bar dataKey="notReported" name="Not Reported" stackId="s" fill="color-mix(in srgb, var(--text-subtle) 40%, transparent)" radius={[2, 2, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={height} />;
 }
 
-// ─── COMPLIANCE MATRIX ────────────────────────────────────────────────────────
 type MatrixRow = { metric: string; scores: Array<"met" | "near" | "breached" | "none"> };
 
 export function ComplianceMatrix({ months, rows }: { months: string[]; rows: MatrixRow[] }) {
-  const cellStyle = (s: string): React.CSSProperties => {
-    if (s === "met") return { background: "color-mix(in srgb, var(--green) 15%, transparent)", color: "var(--green)" };
-    if (s === "near") return { background: "color-mix(in srgb, var(--amber) 15%, transparent)", color: "var(--amber)" };
-    if (s === "breached") return { background: "color-mix(in srgb, var(--red) 15%, transparent)", color: "var(--red)" };
-    return { background: "color-mix(in srgb, var(--text-subtle) 8%, transparent)", color: "var(--text-muted)" };
-  };
-  const cellLabel = (s: string) => s === "met" ? "✓" : s === "near" ? "~" : s === "breached" ? "✗" : "–";
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table className="platform-table" style={{ fontSize: 10 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Metric</th>
-            {months.map((m) => <th key={m} style={{ textAlign: "center" }}>{m}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.metric}>
-              <td style={{ color: "var(--text2)", fontSize: 10 }}>{row.metric}</td>
-              {row.scores.map((s, i) => (
-                <td key={i} style={{ textAlign: "center" }}>
-                  <div style={{
-                    width: 28, height: 18, borderRadius: 3, display: "inline-flex",
-                    alignItems: "center", justifyContent: "center", fontSize: 9,
-                    fontFamily: "'DM Mono',monospace", fontWeight: 500,
-                    ...cellStyle(s),
-                  }}>{cellLabel(s)}</div>
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  const option = useMemo(() => {
+    const cells: { month: string; row: string; value: number }[] = [];
+    const scoreVal = (s: string) => (s === "met" ? 100 : s === "near" ? 70 : s === "breached" ? 30 : 0);
+    rows.forEach((r) => {
+      r.scores.forEach((s, i) => {
+        cells.push({ month: months[i], row: r.metric, value: scoreVal(s) });
+      });
+    });
+    return buildComplianceHeatmapOption(months, rows.map((r) => r.metric), cells);
+  }, [months, rows]);
+  return <EChartsCanvas option={option} height={Math.max(160, rows.length * 28 + 60)} />;
 }
 
-/** Budget bar value labels — dark ink so they read on pale slate bars (avoid theme white/--text on light fills). */
-const YOY_BUDGET_LABEL_STYLE: React.CSSProperties = {
-  fill: "#1e293b",
-  fontSize: 8,
-  fontWeight: 600,
-  fontFamily: "'DM Mono', monospace",
-};
-
-function formatYoyBudgetCr(v: unknown): string {
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n) || n <= 0) return "";
-  return n >= 10 ? `${n.toFixed(0)}` : n >= 1 ? `${n.toFixed(1)}` : `${n.toFixed(2)}`;
-}
-
-// ─── EXECUTIVE DASHBOARD: REVENUE YoY (₹ Cr) ─────────────────────────────────
+// ─── EXECUTIVE DASHBOARD ──────────────────────────────────────────────────────
 export function ExecutiveRevenueYoYChart({
   data,
   priorLabel,
@@ -1058,217 +571,61 @@ export function ExecutiveRevenueYoYChart({
   data: YoYRevPoint[];
   priorLabel: string;
 }) {
-  if (!data.length) {
-    return (
-      <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
-        No finance rows for filters — upload Finance data or widen filters
-      </div>
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildExecutiveRevenueYoYOption(
+      data.map((d) => d.month),
+      data.map((d) => d.budget),
+      data.map((d) => d.actual),
+      data.map((d) => d.forecast),
+      data.map((d) => d.priorActual),
+      priorLabel
     );
+  }, [data, priorLabel]);
+  if (!data.length) {
+    return <EmptyChartState height={220} message="No finance rows for filters — upload Finance data or widen filters" />;
   }
-  return (
-    <ResponsiveContainer width="100%" height={240}>
-      <ComposedChart data={data} style={CHART_STYLE} margin={{ top: 10, right: 8, left: 4, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis dataKey="month" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false}
-          tickFormatter={(v) => `₹${v}`} width={44} />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          formatter={(v: number, name: string) => [`₹${Number(v).toFixed(2)} Cr`, name]}
-        />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        {/* Slate bars: strong enough vs page bg; neutral hue avoids clashing with prior-year blue line */}
-        <Bar
-          dataKey="budget"
-          name="Budget"
-          fill="#64748b"
-          fillOpacity={0.48}
-          radius={[2, 2, 0, 0]}
-        >
-          <LabelList
-            dataKey="budget"
-            position="insideTop"
-            formatter={formatYoyBudgetCr}
-            style={YOY_BUDGET_LABEL_STYLE}
-          />
-        </Bar>
-        <Line type="monotone" dataKey="actual" name="Actual" stroke={COLORS.accent} strokeWidth={2.5} dot={{ r: 2 }} />
-        <Line type="monotone" dataKey="forecast" name="Forecast" stroke={COLORS.amber} strokeWidth={1.8} strokeDasharray="5 4" dot={{ r: 1.5 }} />
-        <Line
-          type="monotone"
-          dataKey="priorActual"
-          name={priorLabel}
-          stroke="#2563eb"
-          strokeWidth={2}
-          strokeDasharray="6 4"
-          dot={{ r: 1.5 }}
-        />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={CHART_HEIGHT.md} />;
 }
 
-// ─── EXECUTIVE DASHBOARD: CM% YoY ───────────────────────────────────────────
 export function ExecutiveCmYoYChart({
   data,
   compareLabel = "Comparison FY",
 }: {
   data: YoYCmPoint[];
-  /** Legend + tooltip name for the dashed comparison series (e.g. "FY24–25 Actual") */
   compareLabel?: string;
 }) {
-  if (!data.length) {
-    return (
-      <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
-        No CM data for filters
-      </div>
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildCmYoYLineOption(
+      data.map((d) => d.month),
+      data.map((d) => d.actualPct),
+      data.map((d) => d.priorActualPct),
+      compareLabel,
+      35
     );
-  }
-  return (
-    <ResponsiveContainer width="100%" height={240}>
-      <ComposedChart data={data} style={CHART_STYLE} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
-        <XAxis dataKey="month" tick={{ fill: COLORS.text3, fontSize: 9 }} axisLine={false} tickLine={false} />
-        <YAxis
-          domain={[0, "auto"]}
-          tick={{ fill: COLORS.text3, fontSize: 9 }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={(v) => `${v}%`}
-          width={40}
-        />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v}%`, ""]} />
-        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: COLORS.text2 }} />
-        <ReferenceLine y={35} stroke={COLORS.text3} strokeDasharray="4 4" label={{ value: "Ref 35%", fill: COLORS.text3, fontSize: 9 }} />
-        <Line type="monotone" dataKey="actualPct" name="CM% Actual" stroke={COLORS.accent} strokeWidth={2.5} dot={{ r: 2 }} />
-        <Line
-          type="monotone"
-          dataKey="priorActualPct"
-          name={compareLabel}
-          stroke="#2563eb"
-          strokeWidth={2}
-          strokeDasharray="6 4"
-          dot={{ r: 1.5 }}
-        />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
-// ─── REGIONAL REVENUE (grouped bar) ──────────────────────────────────────────
-/** Budget series: high-contrast neutral (reads on light + dark surfaces). */
-const REGIONAL_BUDGET_FILL = "color-mix(in srgb, var(--text) 42%, var(--border2))";
-const REGIONAL_BUDGET_STROKE = "color-mix(in srgb, var(--text) 55%, var(--border))";
-/** Actual: full accent + stroke so bars read clearly vs budget. */
-const REGIONAL_ACTUAL_FILL = "var(--accent)";
-const REGIONAL_ACTUAL_STROKE = "color-mix(in srgb, var(--accent) 82%, #1c1917)";
-
-const axisTickMuted = { fill: "var(--text-muted)", fontSize: 10, fontWeight: 500, fontFamily: "'DM Mono', monospace" };
-const regionalLegendStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 600,
-  color: "var(--text)",
-  fontFamily: "'DM Mono', monospace",
-  paddingTop: 8,
-};
-
-const regionalLabelStyle: React.CSSProperties = {
-  fill: "var(--text)",
-  fontSize: 9,
-  fontWeight: 600,
-  fontFamily: "'DM Mono', monospace",
-};
-
-function regionalCrLabel(v: unknown): string {
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n) || n <= 0) return "";
-  return n >= 10 ? `${n.toFixed(0)}` : n >= 1 ? `${n.toFixed(1)}` : `${n.toFixed(2)}`;
+  }, [data, compareLabel]);
+  if (!data.length) return <EmptyChartState height={220} message="No CM data for filters" />;
+  return <EChartsCanvas option={option} height={CHART_HEIGHT.md} />;
 }
 
 export function RegionalRevenueBarChart({ data }: { data: RegionBarDatum[] }) {
-  if (!data.length) {
-    return (
-      <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text3, fontSize: 11 }}>
-        No regional breakdown — check filters
-      </div>
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildVerticalGroupedBarOption(
+      data.map((d) => d.region),
+      [
+        { name: "Budget", data: data.map((d) => d.budget), color: BUDGET_COLOR },
+        { name: "Actual", data: data.map((d) => d.actual), color: ACTUAL_COLOR },
+      ]
     );
-  }
-  const peakCr = Math.max(0.01, ...data.map((d) => Math.max(d.actual, d.budget)));
-  const yMaxCr = Math.ceil(peakCr * 1.14 * 10) / 10;
-
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={data} style={CHART_STYLE} margin={{ top: 18, right: 10, left: 2, bottom: 36 }} barCategoryGap="18%" barGap={4}>
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis
-          dataKey="region"
-          tick={axisTickMuted}
-          axisLine={{ stroke: "var(--border2)" }}
-          tickLine={false}
-          interval={0}
-          angle={-18}
-          textAnchor="end"
-          height={52}
-        />
-        <YAxis
-          tick={axisTickMuted}
-          tickFormatter={(v) => `₹${v} Cr`}
-          width={52}
-          axisLine={false}
-          tickLine={false}
-          domain={[0, yMaxCr]}
-        />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          cursor={{ fill: "color-mix(in srgb, var(--accent) 8%, transparent)" }}
-          formatter={(v: number, name: string) => [`₹${Number(v).toFixed(2)} Cr`, name]}
-          labelStyle={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}
-        />
-        <Legend verticalAlign="bottom" height={28} iconType="square" iconSize={10} wrapperStyle={regionalLegendStyle} />
-        <Bar
-          dataKey="budget"
-          name="Budget"
-          fill={REGIONAL_BUDGET_FILL}
-          stroke={REGIONAL_BUDGET_STROKE}
-          strokeWidth={1}
-          radius={[3, 3, 0, 0]}
-          maxBarSize={40}
-        >
-          <LabelList dataKey="budget" position="top" formatter={regionalCrLabel} style={regionalLabelStyle} />
-        </Bar>
-        <Bar
-          dataKey="actual"
-          name="Actual"
-          fill={REGIONAL_ACTUAL_FILL}
-          stroke={REGIONAL_ACTUAL_STROKE}
-          strokeWidth={1}
-          radius={[3, 3, 0, 0]}
-          maxBarSize={40}
-        >
-          <LabelList dataKey="actual" position="top" formatter={regionalCrLabel} style={regionalLabelStyle} />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-/** Labels above grouped governance bars (dark ink on light fills). */
-const GOV_GROUPED_LABEL_STYLE: React.CSSProperties = {
-  fill: "#1e293b",
-  fontSize: 8,
-  fontWeight: 600,
-  fontFamily: "'DM Mono', monospace",
-};
-
-function formatGovGroupedCrLabel(v: unknown): string {
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n) || n <= 0) return "";
-  return n >= 10 ? `${n.toFixed(0)}` : n >= 1 ? `${n.toFixed(1)}` : `${n.toFixed(2)}`;
+  }, [data]);
+  if (!data.length) return <EmptyChartState height={200} message="No regional breakdown — check filters" />;
+  return <EChartsCanvas option={option} height={280} />;
 }
 
 export type GovernanceGroupedBarSeries = { dataKey: string; name: string; fill: string };
 
-/** Grouped bars: one X category per row (`name`), multiple `<Bar />` series (e.g. weeks). Values are ₹ Cr. */
 export function GovernanceForecastGroupedBarChart({
   data,
   series,
@@ -1278,86 +635,27 @@ export function GovernanceForecastGroupedBarChart({
   series: GovernanceGroupedBarSeries[];
   height?: number;
 }) {
+  const option = useMemo(() => {
+    if (!data.length || !series.length) return null;
+    const categories = data.map((d) => String(d.name ?? ""));
+    const stackedSeries = series.map((s, idx) => ({
+      name: s.name,
+      data: data.map((row) => Number(row[s.dataKey]) || 0),
+      color: s.fill || colorForSeries(idx),
+    }));
+    return buildStackedCategoryOverTimeOption(categories, stackedSeries);
+  }, [data, series]);
+
   if (!data.length || !series.length) {
     return (
-      <div
-        style={{
-          height,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: COLORS.text3,
-          fontSize: 11,
-          textAlign: "center",
-          padding: "0 16px",
-        }}
-      >
-        Select at least one project and week with tracker forecast data.
-      </div>
+      <EmptyChartState
+        height={height}
+        message="Select at least one project and week with tracker forecast data."
+      />
     );
   }
-
-  let yMax = 0.0001;
-  for (const row of data) {
-    for (const s of series) {
-      const v = row[s.dataKey];
-      if (typeof v === "number" && Number.isFinite(v)) yMax = Math.max(yMax, v);
-    }
-  }
-  yMax *= 1.12;
-
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart
-        data={data}
-        style={CHART_STYLE}
-        margin={{ top: 18, right: 10, left: 4, bottom: series.length > 4 ? 56 : 44 }}
-        barCategoryGap="18%"
-        barGap={2}
-      >
-        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-        <XAxis
-          dataKey="name"
-          tick={{ fill: COLORS.text3, fontSize: 9 }}
-          axisLine={false}
-          tickLine={false}
-          interval={0}
-          angle={data.length > 4 ? -16 : 0}
-          textAnchor={data.length > 4 ? "end" : "middle"}
-          height={data.length > 4 ? 52 : 28}
-        />
-        <YAxis
-          domain={[0, yMax]}
-          tick={{ fill: COLORS.text3, fontSize: 9 }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={(v) => `₹${v}`}
-          width={44}
-        />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          formatter={(v: number, name: string) => [`₹${Number(v).toFixed(2)} Cr`, name]}
-          labelStyle={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}
-        />
-        <Legend
-          verticalAlign="bottom"
-          height={36}
-          iconType="square"
-          iconSize={9}
-          wrapperStyle={{
-            fontSize: 10,
-            fontWeight: 600,
-            color: "var(--text)",
-            fontFamily: "'DM Mono', monospace",
-            paddingTop: 4,
-          }}
-        />
-        {series.map((s) => (
-          <Bar key={s.dataKey} dataKey={s.dataKey} name={s.name} fill={s.fill} radius={[2, 2, 0, 0]} maxBarSize={48}>
-            <LabelList dataKey={s.dataKey} position="top" formatter={formatGovGroupedCrLabel} style={GOV_GROUPED_LABEL_STYLE} />
-          </Bar>
-        ))}
-      </BarChart>
-    </ResponsiveContainer>
-  );
+  return <EChartsCanvas option={option} height={height} />;
 }
+
+/** Re-export funnel builder for client pipeline */
+export { buildFunnelPipelineOption };

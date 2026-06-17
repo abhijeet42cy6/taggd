@@ -1,0 +1,42 @@
+# Local dev against Cloud SQL clone ONLY (tgddata_dev on tgddata-pg-prod-dev).
+# Started by: ./scripts/start-dev-cloudsql.sh (writes deploy/gcp/.generated/dev-cloudsql.runtime.env)
+
+services:
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.3
+    command:
+      - --structured-logs
+      - --address=0.0.0.0
+      - --port=5432
+      - --token
+      - ${CLOUDSQL_PROXY_TOKEN}
+      - ${CLOUDSQL_CONNECTION_NAME_DEV:-taggd-491107:asia-south1:tgddata-pg-prod-dev}
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    depends_on:
+      - cloud-sql-proxy
+    volumes:
+      - ./excel_files_imp:/app/excel_files_imp
+    environment:
+      PORT: 8000
+      DATABASE_URL: ${DATABASE_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-long-random-string}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
+      AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-}
+      AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD:-}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

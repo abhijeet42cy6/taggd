@@ -1,17 +1,11 @@
-import { BarChart, LineChart, Text } from "@tremor/react";
 import type { YoYCmPoint, YoYRevPoint, RegionBarDatum } from "@/lib/dashboard-aggregates";
+import {
+  ExecutiveRevenueYoYChart,
+  ExecutiveCmYoYChart,
+  RegionalRevenueBarChart,
+} from "@/components/platform/Charts";
 
-function revenueRows(data: YoYRevPoint[], priorLabel: string): Record<string, string | number>[] {
-  return data.map((d) => ({
-    month: d.month,
-    Budget: d.budget,
-    Actual: d.actual,
-    Forecast: d.forecast,
-    [priorLabel]: d.priorActual,
-  }));
-}
-
-/** Monthly revenue vs budget / forecast / prior FY — Tremor grouped bars (₹ Cr). */
+/** Monthly revenue vs budget / forecast / prior FY — ECharts grouped bars (₹ Cr). */
 export function CeoRevenueYoYTremorChart({
   data,
   priorLabel,
@@ -19,43 +13,10 @@ export function CeoRevenueYoYTremorChart({
   data: YoYRevPoint[];
   priorLabel: string;
 }) {
-  if (!data.length) {
-    return (
-      <div className="flex min-h-[220px] items-center justify-center px-4 text-center">
-        <Text className="font-medium text-tremor-content-emphasis">
-          No finance rows for filters — upload Finance data or widen filters
-        </Text>
-      </div>
-    );
-  }
-  const chartData = revenueRows(data, priorLabel);
-  const categories = ["Budget", "Actual", "Forecast", priorLabel];
-  return (
-    <BarChart
-      className="h-[260px]"
-      data={chartData}
-      index="month"
-      categories={categories}
-      colors={["slate", "orange", "amber", "blue"]}
-      valueFormatter={(v) => `₹${Number(v).toFixed(2)} Cr`}
-      yAxisWidth={52}
-      intervalType="preserveStartEnd"
-      barCategoryGap="12%"
-      enableLegendSlider={categories.length > 3}
-    />
-  );
+  return <ExecutiveRevenueYoYChart data={data} priorLabel={priorLabel} />;
 }
 
-function cmRows(data: YoYCmPoint[], compareLabel: string): Record<string, string | number>[] {
-  return data.map((d) => ({
-    month: d.month,
-    "CM% Actual": d.actualPct,
-    [compareLabel]: d.priorActualPct,
-    "Target 35%": d.budgetRefPct,
-  }));
-}
-
-/** CM% actual vs comparison FY + flat 35% target — Tremor LineChart. */
+/** CM% actual vs comparison FY + flat 35% target — ECharts multi-line. */
 export function CeoCmYoYTremorChart({
   data,
   compareLabel = "Comparison FY",
@@ -63,57 +24,10 @@ export function CeoCmYoYTremorChart({
   data: YoYCmPoint[];
   compareLabel?: string;
 }) {
-  if (!data.length) {
-    return (
-      <div className="flex min-h-[220px] items-center justify-center px-4 text-center">
-        <Text className="font-medium text-tremor-content-emphasis">No CM data for filters</Text>
-      </div>
-    );
-  }
-  const chartData = cmRows(data, compareLabel);
-  const categories = ["CM% Actual", compareLabel, "Target 35%"];
-  return (
-    <LineChart
-      className="h-[260px]"
-      data={chartData}
-      index="month"
-      categories={categories}
-      colors={["orange", "blue", "slate"]}
-      valueFormatter={(v) => `${Number(v).toFixed(1)}%`}
-      yAxisWidth={44}
-      minValue={0}
-      curveType="monotone"
-      connectNulls
-      intervalType="preserveStartEnd"
-    />
-  );
+  return <ExecutiveCmYoYChart data={data} compareLabel={compareLabel} />;
 }
 
-/** Regional actual vs budget — horizontal bars for scan-friendly region labels. */
+/** Regional actual vs budget — ECharts grouped vertical bars. */
 export function CeoRegionalRevenueTremorChart({ data }: { data: RegionBarDatum[] }) {
-  if (!data.length) {
-    return (
-      <div className="flex min-h-[200px] items-center justify-center px-4 text-center">
-        <Text className="font-medium text-tremor-content-emphasis">No regional breakdown — check filters</Text>
-      </div>
-    );
-  }
-  const chartData = data.map((d) => ({
-    region: d.region,
-    Budget: d.budget,
-    Actual: d.actual,
-  }));
-  return (
-    <BarChart
-      className="h-[min(420px,70vh)]"
-      data={chartData}
-      index="region"
-      categories={["Budget", "Actual"]}
-      colors={["slate", "orange"]}
-      layout="vertical"
-      valueFormatter={(v) => `₹${Number(v).toFixed(2)} Cr`}
-      yAxisWidth={96}
-      barCategoryGap="16%"
-    />
-  );
+  return <RegionalRevenueBarChart data={data} />;
 }

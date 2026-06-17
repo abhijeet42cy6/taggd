@@ -2,23 +2,18 @@
  * Board narrative slides — reference deck (config-driven).
  * Styling: design_style_guide + ceo-board-slides.css
  */
-import React from "react";
+import React, { useMemo } from "react";
+import type { EChartsOption } from "echarts";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
 import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  ComposedChart,
-} from "recharts";
+  buildDonutPieOption,
+  buildMultiLineTimeseriesOption,
+  buildSingleVerticalBarOption,
+  buildStackedVerticalBarOption,
+} from "@/components/charts/optionBuilders";
+import { BAR, GRID, LINE } from "@/components/charts/chartTokens";
+import { categoryXAxis, percentYAxis, valueYAxis } from "@/components/charts/chartAxis";
+import { mergeTooltipBase, seriesEmphasisCartesian } from "@/components/charts/chartUtils";
 import {
   Building2,
   Crown,
@@ -35,6 +30,112 @@ const BLUE = "#3884ff";
 const ORANGE = "#e16f3d";
 const RAMP = "#f59e0b";
 const NEWC = "#14b8a6";
+
+function CeoChart({ option, height }: { option: EChartsOption | null; height: number }) {
+  return <EChartsCanvas option={option} height={height} />;
+}
+
+function buildColoredBarOption(
+  categories: string[],
+  values: number[],
+  colors: string[],
+  yMax?: number,
+): EChartsOption {
+  return {
+    grid: GRID.vBar,
+    tooltip: mergeTooltipBase({
+      trigger: "axis",
+      formatter: (params) => {
+        const p = Array.isArray(params) ? params[0] : params;
+        return `<b>${p?.name ?? ""}</b><br/>${p?.value ?? ""}`;
+      },
+    }),
+    xAxis: categoryXAxis(categories),
+    yAxis: valueYAxis(undefined, yMax != null ? { max: yMax } : {}),
+    series: [
+      {
+        type: "bar",
+        data: values.map((v, i) => ({
+          value: v,
+          itemStyle: { color: colors[i], borderRadius: BAR.radiusV },
+        })),
+        barMaxWidth: BAR.maxWidthV,
+        label: { show: true, position: "top", fontSize: 11, color: "#334155" },
+        ...seriesEmphasisCartesian(),
+      },
+    ],
+  };
+}
+
+function buildBridgeWaterfallOption(
+  chartData: { name: string; base: number; val: number; color: string }[],
+  yMax: number,
+): EChartsOption {
+  return {
+    grid: { left: 8, right: 44, top: 16, bottom: 48, containLabel: true },
+    tooltip: mergeTooltipBase({ trigger: "axis", axisPointer: { type: "shadow" } }),
+    xAxis: categoryXAxis(
+      chartData.map((d) => d.name),
+      { rotate: -12 },
+    ),
+    yAxis: valueYAxis(undefined, { max: yMax }),
+    series: [
+      {
+        name: "Base",
+        type: "bar",
+        stack: "w",
+        itemStyle: { borderColor: "transparent", color: "transparent" },
+        emphasis: { itemStyle: { borderColor: "transparent", color: "transparent" } },
+        data: chartData.map((d) => d.base),
+      },
+      {
+        name: "Value",
+        type: "bar",
+        stack: "w",
+        data: chartData.map((d) => ({
+          value: d.val,
+          itemStyle: { color: d.color, borderRadius: BAR.radiusV },
+        })),
+      },
+    ],
+  };
+}
+
+function buildDualAxisBarLineOption(
+  categories: string[],
+  barValues: number[],
+  barColors: string[],
+  lineValues: number[],
+  lineColor: string,
+): EChartsOption {
+  return {
+    grid: GRID.vBar,
+    tooltip: mergeTooltipBase({ trigger: "axis" }),
+    xAxis: categoryXAxis(categories),
+    yAxis: [valueYAxis(), percentYAxis(0, 40)],
+    series: [
+      {
+        type: "bar",
+        yAxisIndex: 0,
+        data: barValues.map((v, i) => ({
+          value: v,
+          itemStyle: { color: barColors[i], borderRadius: BAR.radiusV },
+        })),
+        barMaxWidth: BAR.maxWidthV,
+        ...seriesEmphasisCartesian(),
+      },
+      {
+        type: "line",
+        yAxisIndex: 1,
+        data: lineValues,
+        smooth: LINE.smooth,
+        symbolSize: LINE.symbolSize,
+        lineStyle: { width: LINE.width, color: lineColor },
+        ...seriesEmphasisCartesian(),
+      },
+    ],
+  };
+}
 
 function SlideShell({
   title,
@@ -74,6 +175,24 @@ function SlideFinancial({ d }: { d: CeoSlideDeckConfig["financialPerformance"] }
     New: c.anew,
   }));
 
+  const totalOption = useMemo(
+    () => buildSingleVerticalBarOption(totalData.map((x) => x.name), totalData.map((x) => x.total), "Total", BLUE),
+    [totalData],
+  );
+
+  const stackOption = useMemo(
+    () =>
+      buildStackedVerticalBarOption(
+        stackData.map((x) => x.name),
+        [
+          { name: "Existing", data: stackData.map((x) => x.Existing), color: BLUE },
+          { name: "Ramp-Up", data: stackData.map((x) => x["Ramp-Up"]), color: RAMP },
+          { name: "New", data: stackData.map((x) => x.New), color: NEWC, roundTop: true },
+        ],
+      ),
+    [stackData],
+  );
+
   return (
     <SlideShell title={d.title} imageRef="slide-01-financial-performance" deckKey="financialPerformance">
       <div className="ceo-slide__grid-3">
@@ -81,15 +200,7 @@ function SlideFinancial({ d }: { d: CeoSlideDeckConfig["financialPerformance"] }
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">Total revenue</div>
             <div className="ceo-slide__chart-h">
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={totalData} margin={{ top: 28, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 10 }} />
-                  <Tooltip contentStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="total" fill={BLUE} radius={[4, 4, 0, 0]} label={{ position: "top", fontSize: 11 }} />
-                </BarChart>
-              </ResponsiveContainer>
+              <CeoChart option={totalOption} height={220} />
             </div>
           </div>
         </DeckSelectableRegion>
@@ -97,18 +208,7 @@ function SlideFinancial({ d }: { d: CeoSlideDeckConfig["financialPerformance"] }
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">Revenue composition</div>
             <div className="ceo-slide__chart-h">
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={stackData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 10 }} />
-                  <Tooltip contentStyle={{ fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="Existing" stackId="a" fill={BLUE} />
-                  <Bar dataKey="Ramp-Up" stackId="a" fill={RAMP} />
-                  <Bar dataKey="New" stackId="a" fill={NEWC} />
-                </BarChart>
-              </ResponsiveContainer>
+              <CeoChart option={stackOption} height={220} />
             </div>
           </div>
         </DeckSelectableRegion>
@@ -146,21 +246,27 @@ function SlideScale({ d }: { d: CeoSlideDeckConfig["scaleEfficiency"] }) {
   const hireData = d.hiringVolume.map((h) => ({ name: h.year, vol: h.volume, rph: h.rphSub }));
   const rpeData = d.revenuePerEmployee.map((r) => ({ name: r.year, rev: r.value }));
 
+  const hireOption = useMemo(
+    () => buildSingleVerticalBarOption(hireData.map((h) => h.name), hireData.map((h) => h.vol), "Volume", BLUE),
+    [hireData],
+  );
+
+  const rpeOption = useMemo(
+    () =>
+      buildMultiLineTimeseriesOption(
+        rpeData.map((r) => r.name),
+        [{ name: "Revenue / Employee", data: rpeData.map((r) => r.rev), color: BLUE }],
+      ),
+    [rpeData],
+  );
+
   return (
     <SlideShell title={d.title} imageRef="slide-02-scale-efficiency" deckKey="scaleEfficiency">
       <div className="ceo-slide__grid-3 ceo-slide__grid-3--split">
         <DeckSelectableRegion deckPath="scaleEfficiency.hiringVolume" label="Hiring volume & RPH">
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">Hiring volume</div>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={hireData} margin={{ top: 28, right: 8, left: 0, bottom: 32 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip />
-                <Bar dataKey="vol" fill={BLUE} radius={[4, 4, 0, 0]} label={{ position: "top", fontSize: 10 }} />
-              </BarChart>
-            </ResponsiveContainer>
+            <CeoChart option={hireOption} height={200} />
             <div className="ceo-slide__axis-sub">
               {d.hiringVolume.map((h) => (
                 <span key={h.year} className="ceo-slide__axis-sub-i">
@@ -173,15 +279,7 @@ function SlideScale({ d }: { d: CeoSlideDeckConfig["scaleEfficiency"] }) {
         <DeckSelectableRegion deckPath="scaleEfficiency.revenuePerEmployee" label="Revenue / employee">
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">Revenue / Employee</div>
-            <ResponsiveContainer width="100%" height={232}>
-              <LineChart data={rpeData} margin={{ top: 28, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="rev" stroke={BLUE} strokeWidth={2} dot={{ r: 5, fill: BLUE }} label={{ position: "top", fontSize: 10 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            <CeoChart option={rpeOption} height={232} />
           </div>
         </DeckSelectableRegion>
         <DeckSelectableRegion deckPath="scaleEfficiency.kpiTable" label="KPI table">
@@ -233,6 +331,14 @@ function SlideScale({ d }: { d: CeoSlideDeckConfig["scaleEfficiency"] }) {
 function SlideIndustry({ d }: { d: CeoSlideDeckConfig["industryDiversification"] }) {
   const pieData = d.donutSegments.map((s) => ({ name: s.name, value: s.pct, color: s.color }));
 
+  const donutOption = useMemo(
+    () => buildDonutPieOption(
+      pieData.map((s) => ({ name: s.name, value: s.value })),
+      pieData.map((s) => s.color),
+    ),
+    [pieData],
+  );
+
   return (
     <SlideShell title={d.title} imageRef="slide-03-industry-mix" deckKey="industryDiversification">
       <div className="ceo-slide__grid-2">
@@ -240,16 +346,7 @@ function SlideIndustry({ d }: { d: CeoSlideDeckConfig["industryDiversification"]
           <div className="ceo-slide__chart-card ceo-slide__donut-card">
             <div className="ceo-slide__chart-title">{d.donutLabel}</div>
             <div className="ceo-slide__donut-row">
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={68} outerRadius={100} paddingAngle={1}>
-                    {pieData.map((entry, i) => (
-                      <Cell key={i} fill={entry.color} stroke="var(--surface-raised)" />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(v: number) => `${v}%`} />
-                </PieChart>
-              </ResponsiveContainer>
+              <CeoChart option={donutOption} height={260} />
             </div>
           </div>
         </DeckSelectableRegion>
@@ -298,6 +395,11 @@ function SlideIndustry({ d }: { d: CeoSlideDeckConfig["industryDiversification"]
 function SlideNewBusiness({ d }: { d: CeoSlideDeckConfig["newBusinessRetention"] }) {
   const barData = d.acvBar.map((b) => ({ name: b.year, acv: b.value }));
 
+  const acvOption = useMemo(
+    () => buildSingleVerticalBarOption(barData.map((b) => b.name), barData.map((b) => b.acv), "New ACV", BLUE),
+    [barData],
+  );
+
   return (
     <SlideShell title={d.title} imageRef="slide-04-acv-retention" deckKey="newBusinessRetention">
       <DeckSelectableRegion deckPath="newBusinessRetention.kpiRow1" label="Top KPI tiles">
@@ -326,15 +428,7 @@ function SlideNewBusiness({ d }: { d: CeoSlideDeckConfig["newBusinessRetention"]
         <DeckSelectableRegion deckPath="newBusinessRetention.acvBar" label="New ACV chart">
         <div className="ceo-slide__chart-card">
           <div className="ceo-slide__chart-title">New ACV</div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={barData} margin={{ top: 28, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip />
-              <Bar dataKey="acv" fill={BLUE} radius={[4, 4, 0, 0]} label={{ position: "top" }} />
-            </BarChart>
-          </ResponsiveContainer>
+          <CeoChart option={acvOption} height={220} />
         </div>
         </DeckSelectableRegion>
         <DeckSelectableRegion deckPath="newBusinessRetention.strengths" label="Growth strengths bullets">
@@ -365,6 +459,49 @@ function SlideGrowth({ d }: { d: CeoSlideDeckConfig["growthJourney"] }) {
   const histIdx = d.revenueYoY.findIndex((r) => r.year.trim() === d.highlightYear.trim());
   const isHist = (i: number) => (histIdx >= 0 ? i <= histIdx : i <= 1);
 
+  const revenueOption = useMemo(
+    () =>
+      buildColoredBarOption(
+        d.revenueYoY.map((r) => r.year),
+        d.revenueYoY.map((r) => r.value),
+        d.revenueYoY.map((_, i) => (isHist(i) ? BLUE : ORANGE)),
+      ),
+    [d.revenueYoY, histIdx],
+  );
+
+  const ebitdaOption = useMemo(
+    () =>
+      buildDualAxisBarLineOption(
+        d.ebitdaYoY.map((e) => e.year),
+        d.ebitdaYoY.map((e) => e.bar),
+        d.ebitdaYoY.map((_, i) => (isHist(i) ? BLUE : ORANGE)),
+        d.ebitdaYoY.map((e) => e.marginPct),
+        "#22c55e",
+      ),
+    [d.ebitdaYoY, histIdx],
+  );
+
+  const newAcvOption = useMemo(
+    () =>
+      buildColoredBarOption(
+        d.newAcv.map((r) => r.year),
+        d.newAcv.map((r) => r.value),
+        d.newAcv.map((_, i) => (isHist(i) ? BLUE : ORANGE)),
+      ),
+    [d.newAcv, histIdx],
+  );
+
+  const grossMarginOption = useMemo(
+    () =>
+      buildColoredBarOption(
+        d.grossMarginPct.map((r) => r.year),
+        d.grossMarginPct.map((r) => r.value),
+        d.grossMarginPct.map((_, i) => (isHist(i) ? BLUE : ORANGE)),
+        100,
+      ),
+    [d.grossMarginPct, histIdx],
+  );
+
   return (
     <SlideShell title={d.title} imageRef="slide-05-growth-journey" deckKey="growthJourney">
       <DeckSelectableRegion deckPath="growthJourney" label="Growth journey (charts & sidebar)">
@@ -372,77 +509,21 @@ function SlideGrowth({ d }: { d: CeoSlideDeckConfig["growthJourney"] }) {
         <div className="ceo-slide__growth-grid">
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">Revenue (Y-o-Y) (INR Cr.)</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={d.revenueYoY.map((r, i) => ({ ...r, i }))} margin={{ top: 28, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="year" tick={{ fontSize: 9 }} />
-                <YAxis tick={{ fontSize: 9 }} />
-                <Tooltip />
-                <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-                  {d.revenueYoY.map((r, i) => (
-                    <Cell
-                      key={i}
-                      fill={isHist(i) ? BLUE : ORANGE}
-                      stroke={r.year.trim() === d.highlightYear.trim() ? "#111" : "none"}
-                      strokeWidth={2}
-                      strokeDasharray={r.year.trim() === d.highlightYear.trim() ? "4 2" : undefined}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <CeoChart option={revenueOption} height={180} />
             <div className="ceo-slide__growth-tag">{d.revenueGrowthTag}</div>
           </div>
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">Contribution margin (Y-o-Y) (INR Cr.)</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <ComposedChart data={d.ebitdaYoY.map((e, i) => ({ ...e, i }))} margin={{ top: 28, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="year" tick={{ fontSize: 9 }} />
-                <YAxis yAxisId="l" tick={{ fontSize: 9 }} />
-                <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 9 }} domain={[0, 40]} />
-                <Tooltip />
-                <Bar yAxisId="l" dataKey="bar" radius={[3, 3, 0, 0]}>
-                  {d.ebitdaYoY.map((_, i) => (
-                    <Cell key={i} fill={isHist(i) ? BLUE : ORANGE} />
-                  ))}
-                </Bar>
-                <Line yAxisId="r" type="monotone" dataKey="marginPct" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
+            <CeoChart option={ebitdaOption} height={180} />
             <div className="ceo-slide__growth-tag">{d.ebitdaGrowthTag}</div>
           </div>
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">New ACV Growth (INR CR)</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={d.newAcv.map((r, i) => ({ ...r, i }))} margin={{ top: 28, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="year" tick={{ fontSize: 9 }} />
-                <YAxis tick={{ fontSize: 9 }} />
-                <Tooltip />
-                <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-                  {d.newAcv.map((_, i) => (
-                    <Cell key={i} fill={isHist(i) ? BLUE : ORANGE} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <CeoChart option={newAcvOption} height={180} />
           </div>
           <div className="ceo-slide__chart-card">
             <div className="ceo-slide__chart-title">Gross Margin</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={d.grossMarginPct.map((r, i) => ({ ...r, i }))} margin={{ top: 28, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="year" tick={{ fontSize: 9 }} />
-                <YAxis tick={{ fontSize: 9 }} domain={[0, 100]} />
-                <Tooltip formatter={(v) => [`${v}%`, ""]} />
-                <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-                  {d.grossMarginPct.map((_, i) => (
-                    <Cell key={i} fill={isHist(i) ? BLUE : ORANGE} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <CeoChart option={grossMarginOption} height={180} />
           </div>
         </div>
         <aside className="ceo-slide__growth-rail">
@@ -491,25 +572,16 @@ function buildWaterfallChartData(steps: CeoSlideDeckConfig["revenueBridge"]["ste
 
 function SlideBridge({ d }: { d: CeoSlideDeckConfig["revenueBridge"] }) {
   const chartData = buildWaterfallChartData(d.steps);
+  const bridgeOption = useMemo(
+    () => buildBridgeWaterfallOption(chartData, d.yMax),
+    [chartData, d.yMax],
+  );
 
   return (
     <SlideShell title={d.title} imageRef="slide-06-revenue-bridge" deckKey="revenueBridge">
       <DeckSelectableRegion deckPath="revenueBridge.steps" label="Waterfall / bridge series">
       <div className="ceo-slide__chart-card">
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart data={chartData} margin={{ top: 16, right: 16, left: 8, bottom: 48 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-12} textAnchor="end" height={60} />
-            <YAxis domain={[0, d.yMax]} tick={{ fontSize: 10 }} />
-            <Tooltip formatter={(v: number) => v} />
-            <Bar dataKey="base" stackId="w" fill="transparent" />
-            <Bar dataKey="val" stackId="w">
-              {chartData.map((b, i) => (
-                <Cell key={i} fill={b.color} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        <CeoChart option={bridgeOption} height={320} />
       </div>
       </DeckSelectableRegion>
       <p className="ceo-slide__bridge-legend">Blue: start &amp; increases · Orange: decrease · Mint: ending total</p>
@@ -563,23 +635,22 @@ function SlideHiring({ d }: { d: CeoSlideDeckConfig["hiringSourceMix"] }) {
   const donut = d.donut.map((x) => ({ ...x, name: x.name, value: x.pct }));
   const seriesKeys = Object.keys(d.seriesColors);
 
+  const hiringDonutOption = useMemo(
+    () =>
+      buildDonutPieOption(
+        donut.map((x) => ({ name: x.name, value: x.value })),
+        donut.map((x) => x.color),
+      ),
+    [donut],
+  );
+
   return (
     <SlideShell title={d.title} imageRef="slide-08-hiring-mix" deckKey="hiringSourceMix">
       <div className="ceo-slide__grid-2">
         <DeckSelectableRegion deckPath="hiringSourceMix.donut" label="Hiring mix donut">
         <div className="ceo-slide__chart-card">
           <div className="ceo-slide__chart-title">Overall hiring mix</div>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie data={donut} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95}>
-                {donut.map((e, i) => (
-                  <Cell key={i} fill={e.color} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(v: number) => `${v}%`} />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          <CeoChart option={hiringDonutOption} height={280} />
         </div>
         </DeckSelectableRegion>
         <DeckSelectableRegion deckPath="hiringSourceMix.stackedSectors" label="Sector stack bars">
@@ -637,6 +708,15 @@ const ICONS = {
 } as const;
 
 function SlidePeople({ d }: { d: CeoSlideDeckConfig["peopleCapability"] }) {
+  const wlOption = useMemo(
+    () =>
+      buildDonutPieOption(
+        d.wlDistribution.map((e) => ({ name: e.level, value: e.pct })),
+        d.wlDistribution.map((e) => e.color),
+      ),
+    [d.wlDistribution],
+  );
+
   return (
     <SlideShell title={d.title} imageRef="slide-09-people" deckKey="peopleCapability">
       <DeckSelectableRegion deckPath="peopleCapability" label="People & capability slide">
@@ -689,17 +769,7 @@ function SlidePeople({ d }: { d: CeoSlideDeckConfig["peopleCapability"] }) {
         </div>
         <div className="ceo-slide__chart-card">
           <div className="ceo-slide__chart-title">{d.distributionTitle}</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={d.wlDistribution} dataKey="pct" nameKey="level" cx="50%" cy="50%" outerRadius={80}>
-                {d.wlDistribution.map((e, i) => (
-                  <Cell key={i} fill={e.color} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(v: number) => `${v}%`} />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          <CeoChart option={wlOption} height={200} />
         </div>
       </div>
       <p className="ceo-slide__footer-brand">{d.footerLine}</p>

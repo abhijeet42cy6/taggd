@@ -7,6 +7,7 @@ import statistics
 from typing import Any, Optional
 
 from backend.db.database import Project, Record
+from backend.core.indian_business_days import business_days_between
 
 _WIP_STATUSES = frozenset({"ACTIVE", "PIPELINE", "ON HOLD", "UNPROCESSED"})
 _TERMINAL_STATUSES = frozenset({"CLOSED", "CANCELLED"})
@@ -97,9 +98,7 @@ def _as_date(val: Any) -> Optional[dt.date]:
 
 
 def _days_between(start: Optional[dt.date], end: Optional[dt.date]) -> Optional[int]:
-    if start is None or end is None:
-        return None
-    return (end - start).days
+    return business_days_between(start, end)
 
 
 def _median(vals: list[int]) -> Optional[float]:
@@ -203,6 +202,75 @@ def _is_hold(r: Record) -> bool:
         return True
     st = _norm_status(r.status)
     return "hold" in st or st == "on hold"
+
+
+def _existed_at(r: Record, as_of: dt.date) -> bool:
+    created = _as_date(r.creation_date)
+    return created is not None and created <= as_of
+
+
+def _terminal_before(r: Record, as_of: dt.date) -> bool:
+    """Joined or cancelled on or before as_of (requisition no longer open)."""
+    join_dt = _as_date(r.joining_date)
+    if join_dt is not None and join_dt <= as_of:
+        return True
+    cancel_dt = _as_date(r.req_cancelled_date)
+    if cancel_dt is not None and cancel_dt <= as_of:
+        return True
+    return False
+
+
+def _req_open_at(r: Record, as_of: dt.date) -> bool:
+    """Open requisition stock at end of period (ACTIVE open mandates only)."""
+    if not _existed_at(r, as_of):
+        return False
+    if _terminal_before(r, as_of):
+        return False
+    if _is_hold(r):
+        return False
+    return _is_open_req(r)
+
+
+def _req_hold_at(r: Record, as_of: dt.date) -> bool:
+    """On-hold stock at end of period."""
+    if not _existed_at(r, as_of):
+        return False
+    if _terminal_before(r, as_of):
+        return False
+    return _is_hold(r)
+
+
+def _cumulative_rates_at(
+    records: list[Record],
+    as_of: dt.date,
+) -> tuple[Optional[float], Optional[float]]:
+    """Cumulative OAR / JCR as-of a date (for stock charts, not in-period flow)."""
+    joiners = 0
+    offered_total = 0
+    accepted = 0
+    for r in records:
+        if not _existed_at(r, as_of):
+            continue
+        cancel = _as_date(r.req_cancelled_date)
+        jd = _as_date(r.joining_date)
+        if cancel and cancel <= as_of and _is_cancelled(r) and (jd is None or jd > as_of):
+            continue
+        if jd and jd <= as_of and _is_joiner(r, as_of):
+            joiners += 1
+        if _is_offer_signal(r):
+            od = _as_date(r.req_offered_date) or _as_date(getattr(r, "offered_accept_date", None))
+            if (od and od <= as_of) or (jd and jd <= as_of):
+                offered_total += 1
+        acc = _as_date(getattr(r, "offered_accept_date", None))
+        if acc and acc <= as_of:
+            accepted += 1
+        elif (getattr(r, "offers_accepted", 0) or 0) > 0:
+            od = _as_date(r.req_offered_date)
+            if od and od <= as_of:
+                accepted += int(r.offers_accepted or 0)
+    oar = round(joiners / offered_total * 100, 1) if offered_total else None
+    jcr = round(joiners / accepted * 100, 1) if accepted else None
+    return oar, jcr
 
 
 def _source_label(raw: Optional[str]) -> str:
@@ -413,6 +481,7 @@ def _empty_bucket() -> dict[str, Any]:
         "total_demand": 0,
         "oar_pct": None,
         "jcr_pct": None,
+        "offered_total": 0,
         "coverage": {
             "joiners": 0,
             "with_diversity": 0,
@@ -465,8 +534,8 @@ def _compute_snapshot(records: list[Record], today: dt.date) -> dict[str, Any]:
             out["offer_drops"] += 1
 
         if gs != "CLOSED" and created is not None:
-            days = (today - created).days
-            if days >= 0:
+            days = _days_between(created, today)
+            if days is not None and days >= 0:
                 ageing_vals.append(days)
 
         offered_dt = _as_date(r.req_offered_date)
@@ -517,6 +586,7 @@ def _compute_snapshot(records: list[Record], today: dt.date) -> dict[str, Any]:
     out["cancelled"] = cancelled
     out["hold"] = hold
     out["total_demand"] = out["open"] + cancelled + hold
+    out["offered_total"] = offered_count
     if offered_count > 0:
         out["oar_pct"] = round(total_joiners / offered_count * 100, 1)
     if accepted_offers > 0:
@@ -632,26 +702,35 @@ def _compute_activity(
     return out
 
 
+def _wip_ageing_bucket(days: int) -> str:
+    """Fine WIP ageing bucket key for days open (non-overlapping)."""
+    if days <= 30:
+        return "0-30"
+    if days <= 45:
+        return "31-45"
+    if days <= 60:
+        return "46-60"
+    if days <= 90:
+        return "61-90"
+    return "90+"
+
+
 def _fine_ageing_buckets(records: list[Record], today: dt.date) -> list[dict[str, Any]]:
-    buckets = {"0-15": 0, "16-30": 0, "31-45": 0, "45+": 0}
+    """WIP ageing distribution for open requisitions by days in pipeline."""
+    buckets = {"0-30": 0, "31-45": 0, "46-60": 0, "61-90": 0, "90+": 0}
     for r in records:
         if _norm_gs(r.global_status) == "CLOSED":
+            continue
+        if not _is_wip(r) and not _is_open_req(r):
             continue
         created = _as_date(r.creation_date)
         if not created:
             continue
-        days = (today - created).days
-        if days < 0:
+        days = _days_between(created, today)
+        if days is None or days < 0:
             continue
-        if days <= 15:
-            buckets["0-15"] += 1
-        elif days <= 30:
-            buckets["16-30"] += 1
-        elif days <= 45:
-            buckets["31-45"] += 1
-        else:
-            buckets["45+"] += 1
-    return [{"bucket": k, "count": buckets[k]} for k in ("0-15", "16-30", "31-45", "45+")]
+        buckets[_wip_ageing_bucket(days)] += 1
+    return [{"bucket": k, "count": buckets[k]} for k in ("0-30", "31-45", "46-60", "61-90", "90+")]
 
 
 def _account_ageing_rows(
@@ -670,8 +749,8 @@ def _account_ageing_rows(
         created = _as_date(r.creation_date)
         if not created:
             continue
-        days = (today - created).days
-        if days < 0:
+        days = _days_between(created, today)
+        if days is None or days < 0:
             continue
 
         account = (
@@ -682,25 +761,37 @@ def _account_ageing_rows(
         )
         row = groups.setdefault(
             account,
-            {"account": account, "open": 0, "b_0_15": 0, "b_16_30": 0, "b_31_45": 0, "b_45_plus": 0, "oldest_days": 0},
+            {
+                "account": account,
+                "open": 0,
+                "b_0_30": 0,
+                "b_31_45": 0,
+                "b_46_60": 0,
+                "b_61_90": 0,
+                "b_90_plus": 0,
+                "oldest_days": 0,
+            },
         )
         row["open"] += 1
         row["oldest_days"] = max(row["oldest_days"], days)
-        if days <= 15:
-            row["b_0_15"] += 1
-        elif days <= 30:
-            row["b_16_30"] += 1
-        elif days <= 45:
+        bk = _wip_ageing_bucket(days)
+        if bk == "0-30":
+            row["b_0_30"] += 1
+        elif bk == "31-45":
             row["b_31_45"] += 1
+        elif bk == "46-60":
+            row["b_46_60"] += 1
+        elif bk == "61-90":
+            row["b_61_90"] += 1
         else:
-            row["b_45_plus"] += 1
+            row["b_90_plus"] += 1
 
     out: list[dict[str, Any]] = []
     for row in groups.values():
-        pct_old = (row["b_45_plus"] / row["open"] * 100) if row["open"] else 0
-        if row["oldest_days"] > 60 or pct_old >= 30:
+        pct_old = (row["b_90_plus"] / row["open"] * 100) if row["open"] else 0
+        if row["oldest_days"] > 90 or pct_old >= 30:
             risk = "high"
-        elif row["oldest_days"] > 45 or pct_old >= 15:
+        elif row["oldest_days"] > 60 or pct_old >= 15:
             risk = "medium"
         else:
             risk = "low"
@@ -802,8 +893,8 @@ def _ageing_buckets(records: list[Record], today: dt.date) -> list[dict[str, Any
         created = _as_date(r.creation_date)
         if not created:
             continue
-        days = (today - created).days
-        if days < 0:
+        days = _days_between(created, today)
+        if days is None or days < 0:
             continue
         if days <= 30:
             buckets["0-30"] += 1
@@ -877,13 +968,15 @@ def _monthly_series(records: list[Record], today: dt.date, months: int = 12) -> 
                 opens += 1
             if cancel_dt and _in_range(cancel_dt, start, end):
                 cancelled += 1
-            if _is_hold(r) and _norm_gs(r.global_status) != "CLOSED":
+            elif _is_cancelled(r) and created and _in_range(created, start, end):
+                cancelled += 1
+            if _req_hold_at(r, end):
                 hold += 1
-            if _is_open_req(r) or (_is_wip(r) and not _is_cancelled(r)):
+            if _req_open_at(r, end):
                 open_wip += 1
                 if created:
-                    days_open = (end - created).days
-                    if days_open > 30:
+                    days_open = _days_between(created, end)
+                    if days_open is not None and days_open > 30:
                         aged_over_30 += 1
 
             if _in_range(offered_dt, start, end):
@@ -911,9 +1004,10 @@ def _monthly_series(records: list[Record], today: dt.date, months: int = 12) -> 
             if _is_ytj(r, end):
                 ytj_end += 1
 
-        oar_pct = round(joiners / offers * 100, 1) if offers > 0 else None
+        oar_flow_pct = round(joiners / offers * 100, 1) if offers > 0 else None
         odr_pct = round(drops / offers * 100, 1) if offers > 0 else None
         div_pct = round(female_joiners / joiner_count * 100, 1) if joiner_count > 0 else None
+        oar_stock_pct, jcr_stock_pct = _cumulative_rates_at(records, end)
 
         series.append({
             "month": key,
@@ -929,8 +1023,10 @@ def _monthly_series(records: list[Record], today: dt.date, months: int = 12) -> 
             "avg_ttf_days": _mean(ttf_vals),
             "female_hire_pct": div_pct,
             "aged_over_30": aged_over_30,
-            "oar_pct": oar_pct,
+            "oar_pct": oar_flow_pct,
             "odr_pct": odr_pct,
+            "oar_stock_pct": oar_stock_pct,
+            "jcr_stock_pct": jcr_stock_pct,
         })
         m -= 1
         if m == 0:
@@ -976,6 +1072,72 @@ def resolve_period(
     return start, end, label
 
 
+def _normalize_month_key(raw: Optional[str]) -> Optional[str]:
+    if not raw or not str(raw).strip():
+        return None
+    s = str(raw).strip()[:7]
+    if len(s) < 7 or s[4] != "-":
+        return None
+    try:
+        y, m = int(s[:4]), int(s[5:7])
+        if m < 1 or m > 12:
+            return None
+        dt.date(y, m, 1)
+    except ValueError:
+        return None
+    return s
+
+
+def _prior_period_for_range(start: dt.date, end: dt.date) -> tuple[dt.date, dt.date]:
+    """Prior window of equal month span immediately before *start*."""
+    months_span = (end.year - start.year) * 12 + (end.month - start.month) + 1
+    end_m = start.month - 1
+    end_y = start.year
+    while end_m <= 0:
+        end_m += 12
+        end_y -= 1
+    prior_end = dt.date(end_y, end_m, calendar.monthrange(end_y, end_m)[1])
+    start_m = end_m - months_span + 1
+    start_y = end_y
+    while start_m <= 0:
+        start_m += 12
+        start_y -= 1
+    prior_start = dt.date(start_y, start_m, 1)
+    return prior_start, prior_end
+
+
+def resolve_period_range(
+    *,
+    period_from: Optional[str],
+    period_to: Optional[str],
+    anchor: Optional[str] = None,
+    granularity: str = "month",
+    today: dt.date,
+) -> tuple[dt.date, dt.date, str]:
+    """Resolve inclusive month range (YYYY-MM) for pipeline activity KPIs."""
+    pf = _normalize_month_key(period_from)
+    pt = _normalize_month_key(period_to)
+
+    if not pf and not pt:
+        if anchor and str(anchor).strip():
+            return resolve_period(anchor=anchor, granularity=granularity, today=today)
+        pf = f"{today.year:04d}-{today.month:02d}"
+        pt = pf
+
+    if pf and not pt:
+        pt = pf
+    if pt and not pf:
+        pf = pt
+    assert pf and pt
+    if pf > pt:
+        pf, pt = pt, pf
+
+    start, _ = _month_bounds(pf)
+    _, end = _month_bounds(pt)
+    label = pf if pf == pt else f"{pf} – {pt}"
+    return start, end, label
+
+
 def _quarterly_from_monthly(monthly: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Roll monthly series rows into calendar quarters (sum counts, avg timings)."""
     buckets: dict[str, dict[str, Any]] = {}
@@ -995,13 +1157,22 @@ def _quarterly_from_monthly(monthly: list[dict[str, Any]]) -> list[dict[str, Any
                 "joiners": 0,
                 "offer_drops": 0,
                 "aged_over_30": 0,
+                "oar_stock_pct": None,
+                "jcr_stock_pct": None,
                 "_tto": [],
                 "_ttf": [],
                 "_div": [],
             },
         )
-        for fk in ("opens_created", "open_wip", "cancelled", "hold", "offered", "joiners", "offer_drops", "aged_over_30"):
+        flow_keys = ("opens_created", "cancelled", "offered", "joiners", "offer_drops", "aged_over_30")
+        stock_keys = ("open_wip", "hold", "oar_stock_pct", "jcr_stock_pct")
+        for fk in flow_keys:
             acc[fk] += int(row.get(fk) or 0)
+        for fk in stock_keys:
+            if fk.endswith("_pct"):
+                acc[fk] = row.get(fk)
+            else:
+                acc[fk] = int(row.get(fk) or 0)
         if row.get("avg_tto_days") is not None:
             acc["_tto"].append(float(row["avg_tto_days"]))
         if row.get("avg_ttf_days") is not None:
@@ -1021,6 +1192,8 @@ def _quarterly_from_monthly(monthly: list[dict[str, Any]]) -> list[dict[str, Any
         row["female_hire_pct"] = round(sum(acc["_div"]) / len(acc["_div"]), 1) if acc["_div"] else None
         row["oar_pct"] = round(joiners / offers * 100, 1) if offers > 0 else None
         row["odr_pct"] = round(drops / offers * 100, 1) if offers > 0 else None
+        row["oar_stock_pct"] = acc.get("oar_stock_pct")
+        row["jcr_stock_pct"] = acc.get("jcr_stock_pct")
         out.append(row)
     return out
 
@@ -1057,6 +1230,8 @@ def compute_pipeline_metrics(
     records: list[Record],
     *,
     today: Optional[dt.date] = None,
+    period_from: Optional[str] = None,
+    period_to: Optional[str] = None,
     period_anchor: Optional[str] = None,
     granularity: str = "month",
     compare: str = "mom",
@@ -1064,18 +1239,29 @@ def compute_pipeline_metrics(
 ) -> dict[str, Any]:
     """Full pipeline payload for client dashboard."""
     today = today or dt.date.today()
-    period_start, period_end, period_label = resolve_period(
-        anchor=period_anchor, granularity=granularity, today=today,
+    using_range = bool(_normalize_month_key(period_from) or _normalize_month_key(period_to))
+    period_start, period_end, period_label = resolve_period_range(
+        period_from=period_from,
+        period_to=period_to,
+        anchor=period_anchor,
+        granularity=granularity,
+        today=today,
     )
-    prior_start, prior_end = _prior_period(period_start, period_end, granularity)
+    if using_range or not (
+        period_anchor and str(period_anchor).strip() and (granularity or "month").strip().lower() == "quarter"
+    ):
+        prior_start, prior_end = _prior_period_for_range(period_start, period_end)
+        cmp = "prior"
+    else:
+        prior_start, prior_end = _prior_period(period_start, period_end, granularity)
+        cmp = (compare or "mom").strip().lower()
 
     snapshot = _compute_snapshot(records, today)
     period = _compute_activity(records, today, period_start, period_end)
     prior = _compute_activity(records, today, prior_start, prior_end)
 
-    cmp = (compare or "mom").strip().lower()
     deltas: dict[str, Optional[float]] = {}
-    if cmp in ("mom", "qoq"):
+    if cmp in ("mom", "qoq", "prior"):
         for key in ("wip", "open", "offered", "ytj", "joiners", "offer_drops", "cancelled", "hold", "total_demand"):
             cur = float(period.get(key) or 0)
             prev = float(prior.get(key) or 0)
@@ -1213,7 +1399,7 @@ def merge_pipeline_for_projects(
             deltas[f"{key}_delta"] = round(float(cur) - float(prev), 1)
 
     series_by_month: dict[str, dict[str, Any]] = {}
-    fine_ageing: dict[str, int] = {"0-15": 0, "16-30": 0, "31-45": 0, "45+": 0}
+    fine_ageing: dict[str, int] = {"0-30": 0, "31-45": 0, "46-60": 0, "61-90": 0, "90+": 0}
     account_rows: dict[str, dict[str, Any]] = {}
     src_offers: dict[str, int] = {}
     src_pipeline: dict[str, int] = {}
@@ -1247,7 +1433,7 @@ def merge_pipeline_for_projects(
                 account_rows[k] = dict(ar)
             else:
                 ex = account_rows[k]
-                for fk in ("open", "b_0_15", "b_16_30", "b_31_45", "b_45_plus"):
+                for fk in ("open", "b_0_30", "b_31_45", "b_46_60", "b_61_90", "b_90_plus"):
                     ex[fk] = int(ex.get(fk) or 0) + int(ar.get(fk) or 0)
                 ex["oldest_days"] = max(int(ex.get("oldest_days") or 0), int(ar.get("oldest_days") or 0))
         for s in ch.get("source_breakdown_offers") or []:
@@ -1300,7 +1486,7 @@ def merge_pipeline_for_projects(
         "granularity": meta.get("granularity"),
         "compare": meta.get("compare"),
         "ageing_buckets": [{"bucket": k, "count": ageing_buckets[k]} for k in ("0-30", "31-60", "61-90", "90+")],
-        "fine_ageing_buckets": [{"bucket": k, "count": fine_ageing[k]} for k in ("0-15", "16-30", "31-45", "45+")],
+        "fine_ageing_buckets": [{"bucket": k, "count": fine_ageing[k]} for k in ("0-30", "31-45", "46-60", "61-90", "90+")],
         "account_ageing_rows": sorted(account_rows.values(), key=lambda x: (-x.get("oldest_days", 0), -x.get("open", 0))),
         "diversity_breakdown": [{"label": k, "count": v} for k, v in div_counts.items()],
         "source_breakdown": [{"label": k, "count": v} for k, v in sorted(src_counts.items(), key=lambda x: -x[1])],

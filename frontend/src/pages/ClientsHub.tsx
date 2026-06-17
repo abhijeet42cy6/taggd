@@ -5,7 +5,7 @@ import { usePersona } from "@/lib/persona";
 import { PlatformSection, PageHeader, Tabs, StatusTag } from "@/components/platform/PlatformBlocks";
 import { Skeleton } from "@/components/platform/Skeleton";
 import { clientGroupsToVm, clientsVm, projectForestForClient, projectRollupText, type ClientVm, type ProjectTreeNode } from "@/lib/view-models/clients";
-import { isRecruiterUser, useAuth } from "@/lib/auth";
+import { isRecruiterUser, isPlatformAdminRole, useAuth } from "@/lib/auth";
 import {
   buildClientsHubFilterOptions,
   clientMatchesHubFilters,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/clients-hub-filters";
 import { ACCOUNT_STATUS_OPTIONS } from "@/lib/project-directory-options";
 import { SearchableFilterSelect } from "@/components/platform/searchable-pickers";
+import { ClientOnboardingDrawer } from "@/components/platform/ClientOnboardingDrawer";
 
 // Real composite from projectStats — same formula as ClientDetail & PortfolioIntelligence
 // Falls back to a neutral 50 when no stats are available yet.
@@ -85,6 +86,7 @@ export function ClientsHub() {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<ClientsHubFilters>(DEFAULT_CLIENTS_HUB_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const { persona, scopedClients } = usePersona();
   const navigate = useNavigate();
 
@@ -180,20 +182,32 @@ export function ClientsHub() {
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <PageHeader
-        title={
-          recruiterView
-            ? "My clients & projects"
-            : persona.id === "client_manager"
-              ? "My Accounts"
-              : "Client 360 Hub"
-        }
-        subtitle={
-          recruiterView
-            ? "Clients and SBUs tied to projects you are assigned to — same access as requisitions and tasks."
-            : "Unified client intelligence across Finance · SLA · Hiring · Workforce"
-        }
-      />
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <PageHeader
+          title={
+            recruiterView
+              ? "My clients & projects"
+              : persona.id === "client_manager"
+                ? "My Accounts"
+                : "Client 360 Hub"
+          }
+          subtitle={
+            recruiterView
+              ? "Clients and SBUs tied to projects you are assigned to — same access as requisitions and tasks."
+              : "Unified client intelligence across Finance · SLA · Hiring · Workforce"
+          }
+        />
+        {isPlatformAdminRole(user?.role) && (
+          <button
+            type="button"
+            className="platform-dialog__btn platform-dialog__btn--primary"
+            style={{ fontSize: 11, fontFamily: "'DM Mono',monospace", marginTop: 4, flexShrink: 0 }}
+            onClick={() => setOnboardingOpen(true)}
+          >
+            + New client setup
+          </button>
+        )}
+      </div>
 
       {/* Legacy-only: inferred merge from duplicate account_name */}
       {clients.some((c) => c.split && c.id < 0) && (
@@ -351,7 +365,23 @@ export function ClientsHub() {
           ))}
           {!loading && clients.length === 0 && (
             <div className="platform-card" style={{ gridColumn: "1/-1", textAlign: "center", color: "var(--text-muted)", padding: 32 }}>
-              No client data yet — upload a project Excel file via Ingestion Center.
+              {isPlatformAdminRole(user?.role) ? (
+                <div style={{ display: "grid", gap: 12, justifyItems: "center" }}>
+                  <p style={{ margin: 0, maxWidth: 420 }}>
+                    No clients yet. Create the legal client and tracker config first, then upload data in Ingestion Center — so filenames and validation rules match from day one.
+                  </p>
+                  <button
+                    type="button"
+                    className="platform-dialog__btn platform-dialog__btn--primary"
+                    style={{ fontSize: 11, fontFamily: "'DM Mono',monospace" }}
+                    onClick={() => setOnboardingOpen(true)}
+                  >
+                    New client setup
+                  </button>
+                </div>
+              ) : (
+                <>No client data yet — ask an admin to set up the client, or upload via Ingestion Center once a project exists.</>
+              )}
             </div>
           )}
           {!loading && clients.length > 0 && filteredClients.length === 0 && (
@@ -540,6 +570,14 @@ export function ClientsHub() {
         </PlatformSection>
       )}
 
+      <ClientOnboardingDrawer
+        open={onboardingOpen}
+        onClose={() => setOnboardingOpen(false)}
+        onSuccess={async (_clientId, projectId) => {
+          await loadClients();
+          navigate(`/ingestion?project_id=${projectId}`);
+        }}
+      />
     </div>
   );
 }

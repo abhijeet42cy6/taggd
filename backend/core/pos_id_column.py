@@ -65,6 +65,25 @@ def normalize_pos_id_value(val) -> str:
     return s
 
 
+def resolve_req_id_from_row(row_dict: dict, pos_id_col_name: Optional[str] = None) -> str:
+    """
+    Best requisition ID for row identity / deduplication.
+
+    Always prefers a true Req-ID-style column (e.g. ``Req ID``, ``ABG Req ID``) even when
+    the project's ``pos_id_column`` is misconfigured to something like Position Title.
+    Hyphenated suffix IDs such as ``31964-1`` are preserved as-is.
+    """
+    if row_dict:
+        resolved_col = resolve_pos_id_column(list(row_dict.keys()))
+        if resolved_col:
+            rid = normalize_pos_id_value(row_dict.get(resolved_col))
+            if rid:
+                return rid
+    if pos_id_col_name:
+        return normalize_pos_id_value(row_dict.get(pos_id_col_name))
+    return ""
+
+
 def resolve_pos_id_column(headers: list[str]) -> Optional[str]:
     """
     Pick the tracker column used for requisition / position deduplication.

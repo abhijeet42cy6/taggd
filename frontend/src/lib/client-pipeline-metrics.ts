@@ -29,6 +29,7 @@ export type PipelineBucket = {
   offer_drop_pct: number | null;
   oar_pct: number | null;
   jcr_pct: number | null;
+  offered_total: number;
   coverage: PipelineCoverage;
 };
 
@@ -48,6 +49,8 @@ export type PipelineSeriesRow = {
   aged_over_30: number;
   oar_pct: number | null;
   odr_pct: number | null;
+  oar_stock_pct: number | null;
+  jcr_stock_pct: number | null;
 };
 
 export type PipelineQuarterRow = {
@@ -65,15 +68,18 @@ export type PipelineQuarterRow = {
   female_hire_pct: number | null;
   oar_pct: number | null;
   odr_pct: number | null;
+  oar_stock_pct: number | null;
+  jcr_stock_pct: number | null;
 };
 
 export type AccountAgeingRow = {
   account: string;
   open: number;
-  b_0_15: number;
-  b_16_30: number;
+  b_0_30: number;
   b_31_45: number;
-  b_45_plus: number;
+  b_46_60: number;
+  b_61_90: number;
+  b_90_plus: number;
   oldest_days: number;
   risk: "low" | "medium" | "high";
 };
@@ -157,6 +163,7 @@ function emptyBucket(): PipelineBucket {
     offer_drop_pct: null,
     oar_pct: null,
     jcr_pct: null,
+    offered_total: 0,
     coverage: {
       joiners: 0,
       with_diversity: 0,
@@ -246,7 +253,7 @@ export function mergePipelineForProjects(
   }
 
   const ageingMap: Record<string, number> = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
-  const fineMap: Record<string, number> = { "0-15": 0, "16-30": 0, "31-45": 0, "45+": 0 };
+  const fineMap: Record<string, number> = { "0-30": 0, "31-45": 0, "46-60": 0, "61-90": 0, "90+": 0 };
   const divMap: Record<string, number> = {};
   const srcMap: Record<string, number> = {};
   const seriesMap: Record<string, PipelineSeriesRow> = {};
@@ -263,10 +270,11 @@ export function mergePipelineForProjects(
       if (!ex) accountMap[ar.account] = { ...ar };
       else {
         ex.open += ar.open;
-        ex.b_0_15 += ar.b_0_15;
-        ex.b_16_30 += ar.b_16_30;
+        ex.b_0_30 += ar.b_0_30;
         ex.b_31_45 += ar.b_31_45;
-        ex.b_45_plus += ar.b_45_plus;
+        ex.b_46_60 += ar.b_46_60;
+        ex.b_61_90 += ar.b_61_90;
+        ex.b_90_plus += ar.b_90_plus;
         ex.oldest_days = Math.max(ex.oldest_days, ar.oldest_days);
       }
     }
@@ -338,13 +346,20 @@ export function aggregateQuarterly(monthly: PipelineSeriesRow[]): PipelineQuarte
       female_hire_pct: null,
       oar_pct: null,
       odr_pct: null,
+      oar_stock_pct: null,
+      jcr_stock_pct: null,
       _tto: [],
       _ttf: [],
       _div: [],
     };
-    for (const fk of ["opens_created", "open_wip", "cancelled", "hold", "offered", "joiners", "offer_drops", "aged_over_30"] as const) {
+    const flowKeys = ["opens_created", "cancelled", "offered", "joiners", "offer_drops", "aged_over_30"] as const;
+    for (const fk of flowKeys) {
       acc[fk] += row[fk] ?? 0;
     }
+    acc.open_wip = row.open_wip ?? 0;
+    acc.hold = row.hold ?? 0;
+    acc.oar_stock_pct = row.oar_stock_pct ?? null;
+    acc.jcr_stock_pct = row.jcr_stock_pct ?? null;
     if (row.avg_tto_days != null) acc._tto.push(row.avg_tto_days);
     if (row.avg_ttf_days != null) acc._ttf.push(row.avg_ttf_days);
     if (row.female_hire_pct != null) acc._div.push(row.female_hire_pct);
@@ -372,6 +387,8 @@ export function aggregateQuarterly(monthly: PipelineSeriesRow[]): PipelineQuarte
         female_hire_pct: acc._div.length ? Math.round((acc._div.reduce((a, c) => a + c, 0) / acc._div.length) * 10) / 10 : null,
         oar_pct: offers > 0 ? Math.round((joiners / offers) * 1000) / 10 : null,
         odr_pct: offers > 0 ? Math.round((drops / offers) * 1000) / 10 : null,
+        oar_stock_pct: acc.oar_stock_pct ?? null,
+        jcr_stock_pct: acc.jcr_stock_pct ?? null,
       };
     });
 }
@@ -381,7 +398,7 @@ export function formatPipelineDelta(
   compare: string,
 ): { label: string; cls: string } | null {
   if (delta == null || Number.isNaN(delta)) return null;
-  const cmp = compare === "qoq" ? "QoQ" : "MoM";
+  const cmp = compare === "qoq" ? "QoQ" : compare === "prior" ? "vs prior" : "MoM";
   const cls = delta > 0.5 ? "text-emerald-600" : delta < -0.5 ? "text-rose-600" : "text-tremor-content-subtle";
   return { label: `${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(1)}% ${cmp}`, cls };
 }
@@ -393,10 +410,22 @@ export function formatDeltaPts(delta: number | null | undefined, suffix = "pts")
 
 export function ageingBucketsForChart(buckets: Array<{ bucket: string; count: number }>, fine = false) {
   const colors: Record<string, string> = fine
-    ? { "0-15": "#15803d", "16-30": "#0f766e", "31-45": "#f59e0b", "45+": "#b91c1c" }
+    ? {
+        "0-30": "#15803d",
+        "31-45": "#0f766e",
+        "46-60": "#f59e0b",
+        "61-90": "#ea580c",
+        "90+": "#b91c1c",
+      }
     : { "0-30": "var(--green)", "31-60": "var(--amber)", "61-90": "var(--red)", "90+": "var(--red)" };
   const labels: Record<string, string> = fine
-    ? { "0-15": "0–15 days", "16-30": "16–30 days", "31-45": "31–45 days", "45+": ">45 days" }
+    ? {
+        "0-30": "0–30 days",
+        "31-45": "30–45 days",
+        "46-60": "45–60 days",
+        "61-90": "60–90 days",
+        "90+": ">90 days",
+      }
     : { "0-30": "0–30 days", "31-60": "31–60 days", "61-90": "61–90 days", "90+": "90+ days" };
   const max = Math.max(...buckets.map((b) => b.count), 1);
   return buckets.map((b) => ({
@@ -415,4 +444,53 @@ export function monthLabel(iso: string): string {
 export function quarterLabel(iso: string): string {
   const q = iso.split("-Q")[1];
   return `Q${q}`;
+}
+
+const SOURCE_SHORT_ALIASES: Record<string, string> = {
+  "taggd rpo": "Taggd RPO",
+  "taggd direct": "Direct",
+  "non-taggd employee referral": "ER",
+  "non-taggd internal job portal": "IJP",
+  "non-taggd internal job posting": "IJP",
+  "non-taggd campus": "Campus",
+  "non-taggd transferred": "Transfer",
+  "non-taggd internal transfer": "Transfer",
+  taggd_rpo: "Taggd RPO",
+  taggd_direct: "Direct",
+  nontaggd_employee_referral: "ER",
+  nontaggd_internal_job_portal: "IJP",
+  nontaggd_campus: "Campus",
+  nontaggd_transferred: "Transfer",
+};
+
+/** Compact label for source-mix charts (donut legends / slice labels). */
+export function shortSourceChannelLabel(raw: string): string {
+  const t = (raw || "").trim();
+  if (!t) return "Unknown";
+  const key = t.toLowerCase();
+  if (SOURCE_SHORT_ALIASES[key]) return SOURCE_SHORT_ALIASES[key];
+  if (key.startsWith("nontaggd_")) {
+    if (key.includes("employee") || key.includes("referral")) return "ER";
+    if (key.includes("internal") || key.includes("job")) return "IJP";
+    if (key.includes("campus")) return "Campus";
+    if (key.includes("transfer")) return "Transfer";
+  }
+  if (key.startsWith("non-taggd ")) {
+    const sub = key.slice("non-taggd ".length);
+    if (sub.includes("employee") || sub.includes("referral")) return "ER";
+    if (sub.includes("internal") || sub.includes("job")) return "IJP";
+    if (sub.includes("campus")) return "Campus";
+    if (sub.includes("transfer")) return "Transfer";
+  }
+  return t;
+}
+
+export function sourceDonutRows(items: Array<{ label: string; count: number }>) {
+  return items
+    .filter((d) => d.count > 0)
+    .map((d) => ({
+      name: shortSourceChannelLabel(d.label),
+      value: d.count,
+      fullName: d.label,
+    }));
 }

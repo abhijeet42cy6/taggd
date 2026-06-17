@@ -272,11 +272,6 @@ export function ClientDashboard() {
   const [draftRegions, setDraftRegions] = useState<string[]>([]);
   const [draftReportingFrom, setDraftReportingFrom] = useState("");
   const [draftReportingTo, setDraftReportingTo] = useState("");
-  const [reportingMonthFrom, setReportingMonthFrom] = useState("");
-  const [reportingMonthTo, setReportingMonthTo] = useState("");
-  const [pipelinePeriod, setPipelinePeriod] = useState("");
-  const [pipelineGranularity, setPipelineGranularity] = useState<"month" | "quarter">("month");
-  const [pipelineCompare, setPipelineCompare] = useState<"mom" | "qoq" | "none">("mom");
   const [pipelineFilters, setPipelineFilters] = useState({
     pipeline_division: "",
     pipeline_sbg: "",
@@ -296,11 +291,6 @@ export function ClientDashboard() {
 
   // ── Load summary ──────────────────────────────────────────────────────────────
   const load = useCallback(async (opts?: {
-    reporting_month_from?: string;
-    reporting_month_to?: string;
-    pipeline_period?: string;
-    pipeline_granularity?: string;
-    pipeline_compare?: string;
     pipeline_filters?: typeof pipelineFilters;
   }) => {
     setLoading(true);
@@ -312,11 +302,6 @@ export function ClientDashboard() {
       invalidateCache("client-dashboard/summary");
       const params: {
         client_id?: number;
-        reporting_month_from?: string;
-        reporting_month_to?: string;
-        pipeline_period?: string;
-        pipeline_granularity?: string;
-        pipeline_compare?: string;
         pipeline_division?: string;
         pipeline_sbg?: string;
         pipeline_sbu?: string;
@@ -330,18 +315,8 @@ export function ClientDashboard() {
         join_to?: string;
       } = {};
       if (scopeClientId !== "all") params.client_id = scopeClientId;
-      const from = (opts?.reporting_month_from ?? reportingMonthFrom).trim();
-      const to = (opts?.reporting_month_to ?? reportingMonthTo).trim();
-      if (from) params.reporting_month_from = from;
-      if (to) params.reporting_month_to = to;
-      const pp = (opts?.pipeline_period ?? pipelinePeriod).trim();
-      const pg = opts?.pipeline_granularity ?? pipelineGranularity;
-      const pc = opts?.pipeline_compare ?? pipelineCompare;
-      if (pp) params.pipeline_period = pp;
-      if (pg) params.pipeline_granularity = pg;
-      if (pc) params.pipeline_compare = pc;
-      const pf = opts?.pipeline_filters ?? pipelineFilters;
-      for (const [k, v] of Object.entries(pf)) {
+      const filters = opts?.pipeline_filters ?? pipelineFilters;
+      for (const [k, v] of Object.entries(filters)) {
         const trimmed = String(v).trim();
         if (trimmed) (params as Record<string, string>)[k] = trimmed;
       }
@@ -358,7 +333,7 @@ export function ClientDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [scopeClientId, reportingMonthFrom, reportingMonthTo, pipelinePeriod, pipelineGranularity, pipelineCompare, pipelineFilters, isClientUser]);
+  }, [scopeClientId, pipelineFilters, isClientUser]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -372,9 +347,6 @@ export function ClientDashboard() {
   }, [data?.clients, isClientUser, data?.is_client_user]);
 
   useEffect(() => {
-    setReportingMonthFrom("");
-    setReportingMonthTo("");
-    setPipelinePeriod("");
     setPipelineFilters({
       pipeline_division: "",
       pipeline_sbg: "",
@@ -389,37 +361,6 @@ export function ClientDashboard() {
       join_to: "",
     });
   }, [scopeClientId]);
-
-  useEffect(() => {
-    if (!data) return;
-    if (reportingMonthFrom || reportingMonthTo) return;
-    const from = data.config?.sla_reporting_month_from ?? "";
-    const to = data.config?.sla_reporting_month_to ?? "";
-    if (from || to) {
-      setReportingMonthFrom(String(from).slice(0, 7));
-      setReportingMonthTo(String(to).slice(0, 7));
-    }
-  }, [data, reportingMonthFrom, reportingMonthTo]);
-
-  useEffect(() => {
-    if (!data) return;
-    if (pipelinePeriod) return;
-    const anchor = data.config?.pipeline_period_anchor;
-    if (anchor) {
-      setPipelinePeriod(String(anchor));
-      return;
-    }
-    const opts = data.pipeline_metrics?.period_month_options ?? [];
-    if (opts.length > 0) setPipelinePeriod(opts[0]);
-  }, [data, pipelinePeriod]);
-
-  useEffect(() => {
-    if (!data?.config) return;
-    const g = data.config.pipeline_granularity;
-    if (g === "month" || g === "quarter") setPipelineGranularity(g);
-    const c = data.config.pipeline_compare;
-    if (c === "mom" || c === "qoq" || c === "none") setPipelineCompare(c);
-  }, [data?.config?.pipeline_granularity, data?.config?.pipeline_compare]);
 
   // Load block catalog once
   useEffect(() => {
@@ -559,9 +500,11 @@ export function ClientDashboard() {
         project_region_filter: draftRegions,
         sla_reporting_month_from: draftReportingFrom.trim() || null,
         sla_reporting_month_to: draftReportingTo.trim() || null,
-        pipeline_period_anchor: pipelinePeriod.trim() || null,
-        pipeline_granularity: pipelineGranularity,
-        pipeline_compare: pipelineCompare,
+        pipeline_period_from: data?.config?.pipeline_period_from ?? null,
+        pipeline_period_to: data?.config?.pipeline_period_to ?? null,
+        pipeline_period_anchor: data?.config?.pipeline_period_anchor ?? null,
+        pipeline_granularity: data?.config?.pipeline_granularity,
+        pipeline_compare: data?.config?.pipeline_compare,
         // Carry forward finance flags from current config
         finance_show_revenue: data?.config?.finance_show_revenue ?? true,
         finance_show_collections: data?.config?.finance_show_collections ?? true,
@@ -571,12 +514,7 @@ export function ClientDashboard() {
       await api.put("/client-dashboard/config", { client_id: saveClientId, config });
       invalidateCache("client-dashboard");
       setBuilderOpen(false);
-      setReportingMonthFrom(draftReportingFrom);
-      setReportingMonthTo(draftReportingTo);
-      await load({
-        reporting_month_from: draftReportingFrom,
-        reporting_month_to: draftReportingTo,
-      });
+      await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -649,10 +587,6 @@ export function ClientDashboard() {
     } else if (activeClientName) {
       parts.push(activeClientName);
     }
-    if (pipelinePeriod) {
-      parts.push(pipelineGranularity === "quarter" ? pipelinePeriod : pipelinePeriod.slice(0, 7));
-    }
-    if (reportingMonthFrom || reportingMonthTo) parts.push("SLA range");
     if (activePipelineFilterCount > 0) {
       parts.push(`${activePipelineFilterCount} pipeline filter${activePipelineFilterCount > 1 ? "s" : ""}`);
     }
@@ -662,10 +596,6 @@ export function ClientDashboard() {
     scopeClientId,
     orgPickerClients,
     activeClientName,
-    pipelinePeriod,
-    pipelineGranularity,
-    reportingMonthFrom,
-    reportingMonthTo,
     activePipelineFilterCount,
   ]);
 
@@ -776,99 +706,7 @@ export function ClientDashboard() {
 
         {filtersExpanded ? (
           <div id="client-dash-filter-panel" className="client-dash-tremor__toolbar-body">
-            <div className="flex flex-wrap items-end justify-start gap-3">
-          <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
-            <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">SLA from</Text>
-            <input
-              type="month"
-              className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
-              value={reportingMonthFrom}
-              onChange={(e) => setReportingMonthFrom(e.target.value)}
-              list="client-dash-month-options"
-            />
-          </div>
-          <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
-            <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-orange-600">SLA through</Text>
-            <input
-              type="month"
-              className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
-              value={reportingMonthTo}
-              onChange={(e) => setReportingMonthTo(e.target.value)}
-              list="client-dash-month-options"
-            />
-          </div>
-          {(reportingMonthFrom || reportingMonthTo) ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="secondary"
-              onClick={() => {
-                setReportingMonthFrom("");
-                setReportingMonthTo("");
-              }}
-            >
-              Clear dates
-            </Button>
-          ) : null}
-          <datalist id="client-dash-month-options">
-            {(data?.reporting_month_options ?? []).map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
-
-          <div className="w-full border-t border-tremor-border/60 pt-3 mt-1 flex flex-wrap items-end gap-3">
-            <Text className="w-full text-[10px] font-semibold uppercase tracking-wide text-orange-600">Requisition period</Text>
-            <div className="min-w-[9rem] max-w-full flex-1 sm:max-w-[11rem]">
-              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Period</Text>
-              {pipelineGranularity === "month" ? (
-                <input
-                  type="month"
-                  className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
-                  value={pipelinePeriod.length >= 7 ? pipelinePeriod.slice(0, 7) : pipelinePeriod}
-                  onChange={(e) => setPipelinePeriod(e.target.value)}
-                  list="client-dash-pipeline-month-options"
-                />
-              ) : (
-                <input
-                  type="text"
-                  placeholder="2026-Q1"
-                  className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs font-mono text-tremor-content-strong"
-                  value={pipelinePeriod}
-                  onChange={(e) => setPipelinePeriod(e.target.value.toUpperCase())}
-                />
-              )}
-            </div>
-            <div className="min-w-[7rem]">
-              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Granularity</Text>
-              <select
-                className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs text-tremor-content-strong"
-                value={pipelineGranularity}
-                onChange={(e) => setPipelineGranularity(e.target.value as "month" | "quarter")}
-              >
-                <option value="month">Month</option>
-                <option value="quarter">Quarter</option>
-              </select>
-            </div>
-            <div className="min-w-[7rem]">
-              <Text className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">Compare</Text>
-              <select
-                className="w-full rounded-md border border-tremor-border bg-white px-2 py-1.5 text-xs text-tremor-content-strong"
-                value={pipelineCompare}
-                onChange={(e) => setPipelineCompare(e.target.value as "mom" | "qoq" | "none")}
-              >
-                <option value="mom">Month on month</option>
-                <option value="qoq">Quarter on quarter</option>
-                <option value="none">No compare</option>
-              </select>
-            </div>
-            <datalist id="client-dash-pipeline-month-options">
-              {(data?.pipeline_metrics?.period_month_options ?? []).map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-          </div>
-
-          <div className="w-full border-t border-tremor-border/60 pt-3 mt-1 flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-3">
             <Text className="w-full text-[10px] font-semibold uppercase tracking-wide text-orange-600">Pipeline filters</Text>
             {(
               [
@@ -959,7 +797,6 @@ export function ClientDashboard() {
               </Button>
             ) : null}
           </div>
-            </div>
           </div>
         ) : null}
       </div>
@@ -1153,7 +990,7 @@ export function ClientDashboard() {
             <div className="cd-editor-section">
               <Text className="cd-builder-label">SLA reporting window (client default)</Text>
               <Text className="mb-2 text-[10px] text-tremor-content-subtle">
-                Optional default month range shown when this client opens the dashboard. Users can override in the toolbar.
+                Optional default month range for SLA blocks when this client opens the dashboard.
               </Text>
               <div className="flex flex-wrap items-end gap-3">
                 <div>

@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import {
   Badge,
@@ -24,16 +23,8 @@ import {
   Title,
 } from "@tremor/react";
 import { Search } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { QuarterlyGroupedBarChart } from "@/components/charts/components/QuarterlyGroupedBarChart";
+import { ACTUAL_COLOR, BUDGET_COLOR } from "@/components/charts/chartTokens";
 import type { Project } from "@/lib/api";
 import type { QuarterPoint } from "@/components/platform/ExecutiveFinanceHero";
 import type { FinanceRowVm } from "@/lib/view-models/finance";
@@ -174,14 +165,6 @@ function buildProjectCollectionRows(rows: FinanceRowVm[], projects: Project[]): 
     })
     .sort((a, b) => b.unbilledInr - a.unbilledInr);
 }
-
-const chartTooltipStyle: CSSProperties = {
-  backgroundColor: "rgb(255 255 255)",
-  border: "1px solid rgb(229 229 229)",
-  borderRadius: 8,
-  fontSize: 12,
-  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
-};
 
 /** Collection + unbilled drill-down: matches revenue / CM modal chrome; highlights unbilled by account. */
 export function ExecCollectionDrilldownModal({
@@ -354,26 +337,14 @@ export function ExecCollectionDrilldownModal({
                     <Text className="font-medium text-tremor-content-emphasis">No quarterly collection in range</Text>
                   </Flex>
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={quarterChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgb(229 229 229)" vertical={false} />
-                      <XAxis dataKey="quarter" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <YAxis
-                        tick={{ fontSize: 11 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={44}
-                        tickFormatter={(v) => `${Number(v).toFixed(0)}`}
-                      />
-                      <Tooltip
-                        contentStyle={chartTooltipStyle}
-                        formatter={(v: number | string) => [`₹${Number(v).toFixed(2)} Cr`, ""]}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="Target" fill="rgb(148 163 184)" name="Target" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="Collected" fill="rgb(234 88 12)" name="Collected" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <QuarterlyGroupedBarChart
+                    categories={quarterChartData.map((d) => d.quarter)}
+                    series={[
+                      { name: "Target", data: quarterChartData.map((d) => d.Target), color: BUDGET_COLOR },
+                      { name: "Collected", data: quarterChartData.map((d) => d.Collected), color: ACTUAL_COLOR },
+                    ]}
+                    emptyMessage="No quarterly collection in range"
+                  />
                 )}
               </div>
             </Card>

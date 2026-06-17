@@ -1,0 +1,39 @@
+services:
+  backend:
+    volumes:
+      - ./backend:/app/backend
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./excel_upload_masters:/app/excel_upload_masters
+      - ./excel_files_imp:/app/excel_files_imp
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        set -e
+        cd /app
+        echo "==> Running Alembic migrations..."
+        alembic upgrade head
+        echo "==> Starting API (reload mode)..."
+        exec uvicorn backend.main:app --host 0.0.0.0 --port "${PORT:-8000}" --reload
+
+  frontend:
+    image: node:20-slim
+    working_dir: /app/frontend
+    environment:
+      VITE_DEV_API_TARGET: http://backend:8000
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        set -e
+        if [ ! -d node_modules ] || [ -z "$(ls -A node_modules 2>/dev/null)" ]; then
+          npm ci
+        fi
+        exec npm run dev -- --host 0.0.0.0 --port 80
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+
+volumes:
+  frontend_node_modules:

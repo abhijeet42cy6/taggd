@@ -1,22 +1,23 @@
 import { useMemo } from "react";
+import { Text } from "@tremor/react";
+import { formatLacs, formatNumber, formatPercent } from "@/lib/utils";
+import { wfmFillBand, wfmStatusLabel, type WfmHcBulletCore } from "@/lib/view-models/wfm";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
+import { buildHorizontalGroupedBarOption, buildStackedVerticalBarOption, buildScatterChartOption, buildDonutPieOption } from "@/components/charts/optionBuilders";
+import { CHART_COLORS, PO_COLOR, ACTUAL_COLOR } from "@/components/charts/chartTokens";
+import { colorForSeries } from "@/components/charts/chartColorRules";
 import {
   Badge,
-  BarChart,
-  DonutChart,
   Flex,
   Metric,
   ProgressBar,
-  ScatterChart,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeaderCell,
   TableRow,
-  Text,
 } from "@tremor/react";
-import { formatLacs, formatNumber, formatPercent } from "@/lib/utils";
-import { wfmFillBand, wfmStatusLabel, type WfmHcBulletCore } from "@/lib/view-models/wfm";
 
 function barTone(pct: number, ideal: number): "emerald" | "amber" | "rose" {
   const b = wfmFillBand(pct, ideal);
@@ -31,30 +32,20 @@ function statusBadgeColor(label: "Strong" | "Watch" | "At Risk"): "emerald" | "a
   return "rose";
 }
 
-/** Ideal vs actual HC — horizontal grouped bars (Tremor). */
 export function WfmHcIdealActualTremorBarChart({ items }: { items: WfmHcBulletCore[] }) {
+  const option = useMemo(() => {
+    if (!items.length) return null;
+    const names = items.map((i) => (i.name.length > 24 ? `${i.name.slice(0, 23)}…` : i.name));
+    return buildHorizontalGroupedBarOption(names, [
+      { name: "Ideal HC", data: items.map((i) => i.ideal), color: PO_COLOR },
+      { name: "Actual HC", data: items.map((i) => i.actual), color: ACTUAL_COLOR },
+    ]);
+  }, [items]);
   if (!items.length) return null;
-  const chartData = items.map((item) => ({
-    client: item.name.length > 24 ? `${item.name.slice(0, 23)}…` : item.name,
-    fullName: item.name,
-    "Ideal HC": Math.max(0, Number(item.ideal) || 0),
-    "Actual HC": Math.max(0, Number(item.actual) || 0),
-  }));
   const h = Math.min(440, Math.max(220, 80 + items.length * 40));
   return (
-    <div className="w-full" style={{ height: h }}>
-      <BarChart
-        className="h-full w-full"
-        data={chartData}
-        index="client"
-        categories={["Ideal HC", "Actual HC"]}
-        colors={["teal", "orange"]}
-        layout="vertical"
-        valueFormatter={(v) => formatNumber(Number(v))}
-        yAxisWidth={128}
-        barCategoryGap="18%"
-        enableLegendSlider={false}
-      />
+    <div className="w-full">
+      <EChartsCanvas option={option} height={h} />
       <Text className="mt-2 block text-center text-[10px] text-tremor-content-subtle">
         Teal = ideal target · Orange = actual headcount · Shared numeric scale
       </Text>
@@ -64,33 +55,23 @@ export function WfmHcIdealActualTremorBarChart({ items }: { items: WfmHcBulletCo
 
 export type WfmWlBandDatum = { name: string; wl1: number; wl2: number; wl3: number; wl4: number };
 
-/** WL1–4 stacked mix per client (portfolio view). */
 export function WfmWlDistributionTremorBarChart({ data }: { data: WfmWlBandDatum[] }) {
+  const option = useMemo(() => {
+    if (!data.length) return null;
+    return buildStackedVerticalBarOption(
+      data.map((d) => d.name),
+      [
+        { name: "WL1", data: data.map((d) => d.wl1), color: CHART_COLORS[0] },
+        { name: "WL2", data: data.map((d) => d.wl2), color: CHART_COLORS[1] },
+        { name: "WL3", data: data.map((d) => d.wl3), color: CHART_COLORS[2] },
+        { name: "WL4+", data: data.map((d) => d.wl4), color: CHART_COLORS[3], roundTop: true },
+      ]
+    );
+  }, [data]);
   if (!data.length) return null;
-  const chartData = data.map((d) => ({
-    client: d.name,
-    WL1: d.wl1,
-    WL2: d.wl2,
-    WL3: d.wl3,
-    "WL4+": d.wl4,
-  }));
-  return (
-    <BarChart
-      className="h-[200px]"
-      data={chartData}
-      index="client"
-      categories={["WL1", "WL2", "WL3", "WL4+"]}
-      colors={["orange", "teal", "amber", "rose"]}
-      stack
-      valueFormatter={(v) => formatNumber(Number(v))}
-      yAxisWidth={40}
-      barCategoryGap="12%"
-      rotateLabelX={{ angle: -28, verticalShift: 18, xAxisHeight: 56 }}
-    />
-  );
+  return <EChartsCanvas option={option} height={200} />;
 }
 
-/** Donut to 100% band + label shows true fill % (including over-capacity). */
 export function WfmCapacityTremorBlock({
   fillRate,
   label,
@@ -101,32 +82,25 @@ export function WfmCapacityTremorBlock({
   sublabel: string;
 }) {
   const f = Number.isFinite(fillRate) ? fillRate : 0;
-  const toPlan = Math.min(100, Math.max(0, f));
-  const headroom = Math.max(0.5, 100 - toPlan);
-  const donutData = [
-    { segment: "Fill (to 100% band)", value: toPlan },
-    { segment: "Headroom", value: headroom },
-  ];
+  const option = useMemo(
+    () => buildDonutPieOption(
+      [
+        { name: "Fill (to 100% band)", value: Math.min(100, Math.max(0, f)) },
+        { name: "Headroom", value: Math.max(0.5, 100 - Math.min(100, Math.max(0, f))) },
+      ],
+      [CHART_COLORS[0], CHART_COLORS[8]]
+    ),
+    [f]
+  );
   return (
     <Flex className="items-start gap-4">
-      <DonutChart
-        variant="donut"
-        data={donutData}
-        category="value"
-        index="segment"
-        colors={["orange", "slate"]}
-        className="h-28 w-28 shrink-0"
-        valueFormatter={(v) => `${Number(v).toFixed(1)}%`}
-        label={formatPercent(f)}
-        showLabel
-      />
+      <div className="h-28 w-28 shrink-0">
+        <EChartsCanvas option={option} height={112} />
+      </div>
       <div className="min-w-0 flex-1">
         <Text className="text-[10px] font-semibold uppercase tracking-wide text-tremor-content-subtle">{label}</Text>
         <Metric className="mt-1 text-lg tabular-nums text-tremor-content-strong">{formatPercent(f)}</Metric>
         <Text className="mt-1 text-sm text-tremor-content-emphasis">{sublabel}</Text>
-        <Text className="mt-2 text-[11px] leading-snug text-tremor-content-subtle">
-          Ring shows share up to 100% of the plan band; center shows the true fill rate (can exceed 100%).
-        </Text>
       </div>
     </Flex>
   );
@@ -134,23 +108,20 @@ export function WfmCapacityTremorBlock({
 
 export type WfmProdScatterPoint = { fullName: string; shortLabel: string; fillPct: number; productivity: number };
 
-/** Fill % vs productivity target (lacs) — scatter avoids dual-axis scale clash and extreme bar outliers. */
 export function WfmFillProductivityScatterTremor({ points }: { points: WfmProdScatterPoint[] }) {
-  const chartRows = useMemo(() => {
-    return points.map((p) => {
-      const prod = Number(p.productivity);
-      const prodLacs = Number.isFinite(prod) ? Math.round(prod * 100) / 100 : 0;
-      return {
-        client: p.shortLabel || p.fullName.slice(0, 14),
-        fullName: p.fullName,
-        fill: Math.round(p.fillPct * 10) / 10,
-        prodLacs,
-        size: 28,
-      };
-    });
+  const option = useMemo(() => {
+    const chartRows = points.map((p, i) => ({
+      name: p.shortLabel || p.fullName.slice(0, 14),
+      x: Math.round(p.fillPct * 10) / 10,
+      y: Math.round(p.productivity * 100) / 100,
+      z: 28,
+      color: colorForSeries(i),
+    }));
+    if (!chartRows.length) return null;
+    return buildScatterChartOption(chartRows, "Fill rate %", "Productivity target (lacs)");
   }, [points]);
 
-  if (!chartRows.length) {
+  if (!option) {
     return (
       <div className="flex min-h-[220px] items-center justify-center px-4">
         <Text className="text-center text-sm font-medium text-tremor-content-emphasis">
@@ -159,46 +130,13 @@ export function WfmFillProductivityScatterTremor({ points }: { points: WfmProdSc
       </div>
     );
   }
-
-  const maxFill = chartRows.reduce((m, r) => Math.max(m, r.fill), 100);
-  const maxXValue = Math.min(450, Math.max(115, Math.ceil(maxFill / 10) * 10 + 15));
-  const maxProd = chartRows.reduce((m, r) => Math.max(m, r.prodLacs), 8);
-
   return (
     <div className="w-full space-y-2">
-      <ScatterChart
-        className="h-[320px]"
-        data={chartRows}
-        category="client"
-        x="fill"
-        y="prodLacs"
-        size="size"
-        minXValue={0}
-        maxXValue={maxXValue}
-        minYValue={0}
-        maxYValue={Math.max(8, Math.ceil(maxProd) + 1)}
-        xAxisLabel="Fill rate %"
-        yAxisLabel="Productivity target (lacs)"
-        showLegend={false}
-        showOpacity
-        yAxisWidth={44}
-        valueFormatter={{
-          x: (v) => `${Number(v).toFixed(1)}%`,
-          y: (v) => formatLacs(Number(v)),
-          size: () => "",
-        }}
-        colors={["orange", "amber", "teal", "cyan", "blue", "violet", "rose", "emerald"]}
-      />
-      <Text className="text-[11px] leading-relaxed text-tremor-content-subtle">
-        Each point is a client: horizontal distance from 0% is fill (100% = at ideal HC). Vertical axis is lateral
-        productivity target (lacs). Dense clusters near 100% fill × low lacs are easier to read than dual-axis bars when
-        one client has a very large fill %.
-      </Text>
+      <EChartsCanvas option={option} height={320} />
     </div>
   );
 }
 
-/** Full-list modal: scan-friendly table with Tremor progress + badges. */
 export function WfmHcModalComparisonTable({ items }: { items: WfmHcBulletCore[] }) {
   if (!items.length) return null;
   return (
@@ -237,9 +175,6 @@ export function WfmHcModalComparisonTable({ items }: { items: WfmHcBulletCore[] 
           })}
         </TableBody>
       </Table>
-      <Text className="mt-3 text-[10px] text-tremor-content-subtle">
-        Bar caps at 100% for layout; read the Fill % column for values over 100% (over-capacity).
-      </Text>
     </div>
   );
 }

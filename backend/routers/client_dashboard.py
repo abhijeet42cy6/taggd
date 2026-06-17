@@ -137,6 +137,8 @@ DEFAULT_CLIENT_DASHBOARD_CONFIG: dict[str, Any] = {
     "sla_reporting_month_from": None,
     "sla_reporting_month_to": None,
     "pipeline_period_anchor": None,
+    "pipeline_period_from": None,
+    "pipeline_period_to": None,
     "pipeline_granularity": "month",
     "pipeline_compare": "mom",
 }
@@ -238,6 +240,8 @@ def _deep_merge_config(stored: Optional[dict[str, Any]]) -> dict[str, Any]:
         "sla_reporting_month_from",
         "sla_reporting_month_to",
         "pipeline_period_anchor",
+        "pipeline_period_from",
+        "pipeline_period_to",
         "pipeline_granularity",
         "pipeline_compare",
     ):
@@ -534,9 +538,11 @@ async def client_dashboard_summary(
     client_id: Optional[int] = None,
     reporting_month_from: Optional[str] = Query(None, description="SLA reporting month from (YYYY-MM)"),
     reporting_month_to: Optional[str] = Query(None, description="SLA reporting month to (YYYY-MM)"),
-    pipeline_period: Optional[str] = Query(None, description="Pipeline anchor period (YYYY-MM or YYYY-Qn)"),
-    pipeline_granularity: Optional[str] = Query(None, description="Pipeline period granularity: month | quarter"),
-    pipeline_compare: Optional[str] = Query(None, description="Pipeline compare: mom | qoq | none"),
+    pipeline_period: Optional[str] = Query(None, description="Pipeline anchor period (YYYY-MM or YYYY-Qn) — legacy"),
+    pipeline_period_from: Optional[str] = Query(None, description="Pipeline period from (YYYY-MM)"),
+    pipeline_period_to: Optional[str] = Query(None, description="Pipeline period to (YYYY-MM)"),
+    pipeline_granularity: Optional[str] = Query(None, description="Pipeline period granularity: month | quarter — legacy"),
+    pipeline_compare: Optional[str] = Query(None, description="Pipeline compare: mom | qoq | none — legacy"),
     pipeline_division: Optional[str] = Query(None),
     pipeline_sbg: Optional[str] = Query(None),
     pipeline_sbu: Optional[str] = Query(None),
@@ -719,11 +725,26 @@ async def client_dashboard_summary(
             join_to=_parse_iso_date(join_to),
         )
         project_labels = {p.id: (p.account_name or p.engagement_name or "Unknown") for p in projects}
+        p_from = (
+            _normalize_month_key(pipeline_period_from)
+            if pipeline_period_from and str(pipeline_period_from).strip()
+            else _normalize_month_key(merged.get("pipeline_period_from"))
+        )
+        p_to = (
+            _normalize_month_key(pipeline_period_to)
+            if pipeline_period_to and str(pipeline_period_to).strip()
+            else _normalize_month_key(merged.get("pipeline_period_to"))
+        )
         p_anchor = (
             pipeline_period.strip()
             if pipeline_period and str(pipeline_period).strip()
             else merged.get("pipeline_period_anchor")
         )
+        if not p_from and not p_to and p_anchor:
+            legacy_month = str(p_anchor).strip()[:7]
+            if len(legacy_month) >= 7 and legacy_month[4] == "-":
+                p_from = legacy_month
+                p_to = legacy_month
         p_gran = (
             pipeline_granularity.strip().lower()
             if pipeline_granularity and str(pipeline_granularity).strip()
@@ -736,7 +757,9 @@ async def client_dashboard_summary(
         )
         pipeline_metrics = compute_pipeline_metrics(
             records_filtered,
-            period_anchor=str(p_anchor) if p_anchor else None,
+            period_from=str(p_from) if p_from else None,
+            period_to=str(p_to) if p_to else None,
+            period_anchor=str(p_anchor) if p_anchor and not (p_from or p_to) else None,
             granularity=str(p_gran),
             compare=str(p_cmp),
             project_labels=project_labels,
@@ -748,7 +771,9 @@ async def client_dashboard_summary(
         for pid in project_ids:
             pipeline_by_project[str(pid)] = compute_pipeline_metrics(
                 by_pid.get(pid, []),
-                period_anchor=str(p_anchor) if p_anchor else None,
+                period_from=str(p_from) if p_from else None,
+                period_to=str(p_to) if p_to else None,
+                period_anchor=str(p_anchor) if p_anchor and not (p_from or p_to) else None,
                 granularity=str(p_gran),
                 compare=str(p_cmp),
                 project_labels=project_labels,

@@ -17,6 +17,9 @@ build/
 # Local SQLite (optional; remove this line if you intentionally track a seed DB)
 revenue_generator.db
 
+# Cloud SQL / Postgres exports (may contain production-like data)
+dumps/
+
 # Uploaded user profile pictures
 user_avatars/
 

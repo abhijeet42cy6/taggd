@@ -30,6 +30,7 @@ services:
     volumes:
       - ./excel_files_imp:/app/excel_files_imp
     environment:
+      PORT: 8000
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tgddata}:${POSTGRES_PASSWORD:-tgddata_dev}@postgres:5432/${POSTGRES_DB:-tgddata}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-long-random-string}
@@ -47,6 +48,15 @@ services:
     depends_on:
       - backend
     restart: always
+
+  adminer:
+    image: adminer:4
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:

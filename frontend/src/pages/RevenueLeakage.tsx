@@ -7,6 +7,9 @@ import {
   type RevenueLeakageCancelReason,
 } from "@/lib/api";
 import { AlertTriangle, ChevronDown, ChevronUp, Filter, RefreshCw, X } from "lucide-react";
+import { ChartCard } from "@/components/charts/ChartCard";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
+import { buildGaugeKpiOption } from "@/components/charts/optionBuilders";
 import "@/styles/revenue-leakage.css";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -59,30 +62,16 @@ function commBadgeClass(cls: string) {
   return cls === "Beneficial" ? "rl-badge rl-badge--beneficial" : "rl-badge rl-badge--loss";
 }
 
-// ─── Ring chart ──────────────────────────────────────────────────────────────
-function SlaRing({ pct }: { pct: number | null }) {
-  const r = 28;
-  const circ = 2 * Math.PI * r;
-  const filled = pct != null ? circ * (pct / 100) : 0;
+// ─── SLA gauge ───────────────────────────────────────────────────────────────
+function SlaGauge({ pct }: { pct: number | null }) {
+  const option = useMemo(
+    () => (pct != null ? buildGaugeKpiOption(pct, "48h SLA") : null),
+    [pct],
+  );
   return (
-    <div className="rl-sla-ring">
-      <svg width={72} height={72} viewBox="0 0 72 72">
-        <circle cx={36} cy={36} r={r} fill="none" stroke="var(--surface-sunken)" strokeWidth={7} />
-        {pct != null && (
-          <circle
-            cx={36} cy={36} r={r}
-            fill="none"
-            stroke="var(--green)"
-            strokeWidth={7}
-            strokeDasharray={`${filled} ${circ}`}
-            strokeLinecap="round"
-          />
-        )}
-      </svg>
-      <div className="rl-sla-ring__pct">
-        {pct != null ? `${pct}%` : "—"}
-      </div>
-    </div>
+    <ChartCard variant="gaugeGradient" height={120} empty={pct == null} emptyMessage="—" className="rl-sla-gauge-card">
+      <EChartsCanvas option={option} height={120} />
+    </ChartCard>
   );
 }
 
@@ -482,7 +471,7 @@ export function RevenueLeakage() {
                 <div className="rl-skeleton-row" style={{ height: 72 }} />
               ) : (
                 <div className="rl-sla-visual">
-                  <SlaRing pct={s?.sla_48h_pct ?? null} />
+                  <SlaGauge pct={s?.sla_48h_pct ?? null} />
                   <div className="rl-sla-legend">
                     <div className="rl-sla-legend-row">
                       <span className="rl-sla-legend-dot" style={{ background: "var(--green)" }} />

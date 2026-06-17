@@ -1,0 +1,31 @@
+# Local dev: backend + frontend; Cloud SQL Auth Proxy runs on the HOST (not in Docker).
+# Start with: ./scripts/start-dev-cloudsql.sh
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./excel_files_imp:/app/excel_files_imp
+    environment:
+      PORT: 8000
+      DATABASE_URL: ${DATABASE_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-long-random-string}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
+      AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-}
+      AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD:-}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -67,7 +67,19 @@ This document describes the **visual and interaction language** for the Executiv
 3. **Financial KPI row**: `ExecutiveMetricHeroCard` — Tremor `Card` with `decoration="left"` + `decorationColor`, `Metric`, `Badge`, `ProgressBar`, mini quarter bars.
 4. **Operational snapshot**: `OperationalPulseCard` / `OperationalPulseGrid` — Tremor `Card` + `Metric` + `Badge`, with `**tone`** (`sky` | `teal` | `violet` | `orange`) for left-border and label color.
 5. **Deeper sections**: `TremorDashboardSection` — shared header (optional `tag`, `title`, `titleAccessory`, action `Button`) + body slot.
-6. **Charts**: Recharts compositions may remain inside Tremor `Card` / section bodies until migrated to Tremor charts.
+6. **Charts**: Use **Apache ECharts 5** option builders inside **`ChartCard`** (`frontend/src/components/charts/ChartCard.tsx`) within Tremor `Card` / section bodies. Legacy Recharts compositions (e.g. `RevenueTrackers`, `CeoBoardSlides`) remain until migrated.
+
+### 3.6 Charts — ECharts + ChartCard
+
+| Concern | Convention |
+| ------- | ---------- |
+| **Library** | `echarts` 5.x via `EChartsCanvas` — not Recharts for new work |
+| **Tokens** | `frontend/src/components/charts/chartTokens.ts` — colors, grid, bar/line radii, heights |
+| **Options** | `frontend/src/components/charts/optionBuilders/` — reuse builders; avoid one-off chart config |
+| **Shell** | `ChartCard` for title, caption, loading skeleton, empty state, zoom hint |
+| **Static HTML** | `dashboard_exp/shared/chart-tokens.js` + `echarts-theme.js` mirror tokens for CDN dashboards |
+
+Agent guidance: `.cursor/skills/echarts-dashboard/SKILL.md`.
 
 ---
 

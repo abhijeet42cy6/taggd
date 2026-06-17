@@ -1,6 +1,15 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { adminApi, queries, type Project } from "@/lib/api";
+import { adminApi, queries, type Project, type TrackerConfig } from "@/lib/api";
+import {
+  buildTrackerConfigPayload,
+  COLUMN_ALIAS_FIELDS,
+  columnAliasesFromConfig,
+  emptyColumnAliasesDraft,
+  emptyFeeModelDraft,
+  feeModelFromConfig,
+  statusVocabularyToText,
+} from "@/lib/trackerConfigDraft";
 import type { ClientVm } from "@/lib/view-models/clients";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { UserPickerDropdown, type PlatformUserLite } from "@/components/platform/NewContractOrgFlow";
@@ -22,7 +31,68 @@ const CLIENT_TABS = [
   { icon: "👤", label: "Leadership" },
   { icon: "🔗", label: "Hierarchy" },
   { icon: "📋", label: "Tracker" },
+  { icon: "⚙", label: "Config" },
 ] as const;
+
+const SOURCE_JOINER_OPTIONS = [
+  { value: "taggd_rpo", label: "Taggd RPO" },
+  { value: "taggd_direct", label: "Taggd Direct" },
+  { value: "nontaggd_employee_referral", label: "ER – Employee Referral" },
+  { value: "nontaggd_internal_job_portal", label: "IJP – Internal Job Posting" },
+  { value: "nontaggd_campus", label: "Campus" },
+  { value: "nontaggd_transferred", label: "Internal Transfer" },
+] as const;
+
+const REQUIRED_FIELD_OPTIONS = [
+  "joining_date",
+  "offered_ctc",
+  "status",
+  "position_title",
+  "candidate_name",
+  "department",
+  "location",
+] as const;
+
+function parseTagList(raw: string): string[] {
+  return raw
+    .split(/[,;\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function tagListToString(items?: string[]): string {
+  return (items ?? []).join(", ");
+}
+
+function TagListField({
+  label,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+      <div className="ncp-prop-label" style={{ paddingTop: 10 }}>
+        {label}
+      </div>
+      <textarea
+        className="ncp-prop-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        placeholder={placeholder ?? "Comma-separated values"}
+        style={{ minHeight: 56, fontSize: 12 }}
+      />
+    </div>
+  );
+}
 
 export type ClientFormDrawerProps = {
   open: boolean;
@@ -69,6 +139,17 @@ type ProjectDraft = {
   filename: string;
   source_filename: string;
   org: ReturnType<typeof emptyWfmOrgMetadataDraft>;
+  trackerConfig: {
+    valid_bands: string;
+    valid_departments: string;
+    valid_locations: string;
+    valid_source_joiner_types: string[];
+    ctc_unit: "lakhs" | "inr";
+    required_fields: string[];
+    status_vocabulary_text: string;
+    column_aliases: ReturnType<typeof emptyColumnAliasesDraft>;
+    fee_model: ReturnType<typeof emptyFeeModelDraft>;
+  };
 };
 
 function s(v: unknown): string {
@@ -85,6 +166,21 @@ function clientDraftFromVm(clientVm: ClientVm): ClientDraft {
     hierarchy_tag_sbu: s(clientVm.hierarchyTagSbu),
     hierarchy_tag_sbg: s(clientVm.hierarchyTagSbg),
     hierarchy_tag_sbe: s(clientVm.hierarchyTagSbe),
+  };
+}
+
+function trackerConfigFromProject(project: Project): ProjectDraft["trackerConfig"] {
+  const cfg = (project.tracker_config ?? {}) as TrackerConfig;
+  return {
+    valid_bands: tagListToString(cfg.valid_bands),
+    valid_departments: tagListToString(cfg.valid_departments),
+    valid_locations: tagListToString(cfg.valid_locations),
+    valid_source_joiner_types: cfg.valid_source_joiner_types ?? [],
+    ctc_unit: cfg.ctc_unit === "inr" ? "inr" : "lakhs",
+    required_fields: cfg.required_fields ?? [],
+    status_vocabulary_text: statusVocabularyToText(cfg.status_vocabulary),
+    column_aliases: columnAliasesFromConfig(cfg.column_aliases),
+    fee_model: feeModelFromConfig(cfg.fee_model),
   };
 }
 
@@ -115,6 +211,7 @@ function projectDraftFromProject(project: Project, orgUsers: RegionalHeadCandida
     filename: s(project.filename),
     source_filename: s(project.source_filename),
     org: wfmOrgDraftFromSources(project, orgUsers),
+    trackerConfig: trackerConfigFromProject(project),
   };
 }
 
@@ -374,6 +471,7 @@ export function ClientFormDrawer({
         tracker_sheet: projectDraft.tracker_sheet.trim() || undefined,
         contract_sheet: projectDraft.contract_sheet.trim() || undefined,
         pos_id_column: projectDraft.pos_id_column.trim() || undefined,
+        tracker_config: buildTrackerConfigPayload(projectDraft.trackerConfig),
         ...orgPatch,
       });
 
@@ -955,6 +1053,291 @@ export function ClientFormDrawer({
                               disabled={saving}
                               style={{ minHeight: 72 }}
                             />
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">Client template</div>
+                            <button
+                              type="button"
+                              className="ncp-btn ncp-btn-secondary"
+                              disabled={saving || !selectedProject}
+                              onClick={() => {
+                                if (!selectedProject) return;
+                                void queries.downloadProjectTrackerTemplate(selectedProject.id);
+                              }}
+                            >
+                              Download client template
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="ncp-hint">Select a project on the Project tab.</p>
+                      ),
+                    )}
+                  </div>
+
+                  <div className={cn("ncp-panel", tab === 6 && "ncp-panel-active")}>
+                    {section(
+                      "⚙",
+                      "ncp-teal",
+                      "Tracker upload config",
+                      "Allowed values for validation and client-specific Excel dropdowns.",
+                      selectedProject ? (
+                        <>
+                          <TagListField
+                            label="Valid bands"
+                            value={projectDraft.trackerConfig.valid_bands}
+                            onChange={(v) =>
+                              setProjectDraft((d) => ({
+                                ...d,
+                                trackerConfig: { ...d.trackerConfig, valid_bands: v },
+                              }))
+                            }
+                            disabled={saving}
+                          />
+                          <TagListField
+                            label="Valid departments"
+                            value={projectDraft.trackerConfig.valid_departments}
+                            onChange={(v) =>
+                              setProjectDraft((d) => ({
+                                ...d,
+                                trackerConfig: { ...d.trackerConfig, valid_departments: v },
+                              }))
+                            }
+                            disabled={saving}
+                          />
+                          <TagListField
+                            label="Valid locations"
+                            value={projectDraft.trackerConfig.valid_locations}
+                            onChange={(v) =>
+                              setProjectDraft((d) => ({
+                                ...d,
+                                trackerConfig: { ...d.trackerConfig, valid_locations: v },
+                              }))
+                            }
+                            disabled={saving}
+                          />
+                          <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                            <div className="ncp-prop-label" style={{ paddingTop: 8 }}>
+                              Source joiner types
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+                              {SOURCE_JOINER_OPTIONS.map(({ value, label }) => {
+                                const checked = projectDraft.trackerConfig.valid_source_joiner_types.includes(value);
+                                return (
+                                  <label key={value} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={saving}
+                                      onChange={(e) =>
+                                        setProjectDraft((d) => {
+                                          const cur = d.trackerConfig.valid_source_joiner_types;
+                                          const next = e.target.checked
+                                            ? [...cur, value]
+                                            : cur.filter((x) => x !== value);
+                                          return {
+                                            ...d,
+                                            trackerConfig: { ...d.trackerConfig, valid_source_joiner_types: next },
+                                          };
+                                        })
+                                      }
+                                    />
+                                    {label}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="ncp-prop-row">
+                            <div className="ncp-prop-label">CTC unit</div>
+                            <select
+                              className="ncp-prop-input"
+                              value={projectDraft.trackerConfig.ctc_unit}
+                              onChange={(e) =>
+                                setProjectDraft((d) => ({
+                                  ...d,
+                                  trackerConfig: {
+                                    ...d.trackerConfig,
+                                    ctc_unit: e.target.value as "lakhs" | "inr",
+                                  },
+                                }))
+                              }
+                              disabled={saving}
+                            >
+                              <option value="lakhs">Lakhs (default)</option>
+                              <option value="inr">INR (absolute)</option>
+                            </select>
+                          </div>
+                          <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                            <div className="ncp-prop-label" style={{ paddingTop: 8 }}>
+                              Required fields
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+                              {REQUIRED_FIELD_OPTIONS.map((field) => {
+                                const checked = projectDraft.trackerConfig.required_fields.includes(field);
+                                return (
+                                  <label key={field} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={saving}
+                                      onChange={(e) =>
+                                        setProjectDraft((d) => {
+                                          const cur = d.trackerConfig.required_fields;
+                                          const next = e.target.checked
+                                            ? [...cur, field]
+                                            : cur.filter((x) => x !== field);
+                                          return {
+                                            ...d,
+                                            trackerConfig: { ...d.trackerConfig, required_fields: next },
+                                          };
+                                        })
+                                      }
+                                    />
+                                    {field}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <TagListField
+                            label="Status vocabulary"
+                            value={projectDraft.trackerConfig.status_vocabulary_text}
+                            onChange={(v) =>
+                              setProjectDraft((d) => ({
+                                ...d,
+                                trackerConfig: { ...d.trackerConfig, status_vocabulary_text: v },
+                              }))
+                            }
+                            disabled={saving}
+                            placeholder={"WIP → Open\nTBO → Offered"}
+                          />
+                          <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                            <div className="ncp-prop-label" style={{ paddingTop: 8 }}>
+                              Column aliases
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+                              {COLUMN_ALIAS_FIELDS.map(({ key, label }) => (
+                                <div key={key} className="ncp-prop-row">
+                                  <div className="ncp-prop-label">{label}</div>
+                                  <input
+                                    className="ncp-prop-input"
+                                    value={projectDraft.trackerConfig.column_aliases[key]}
+                                    onChange={(e) =>
+                                      setProjectDraft((d) => ({
+                                        ...d,
+                                        trackerConfig: {
+                                          ...d.trackerConfig,
+                                          column_aliases: {
+                                            ...d.trackerConfig.column_aliases,
+                                            [key]: e.target.value,
+                                          },
+                                        },
+                                      }))
+                                    }
+                                    disabled={saving}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="ncp-prop-row" style={{ alignItems: "flex-start" }}>
+                            <div className="ncp-prop-label" style={{ paddingTop: 8 }}>
+                              Fee model
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+                              <select
+                                className="ncp-prop-input"
+                                value={projectDraft.trackerConfig.fee_model.type}
+                                onChange={(e) =>
+                                  setProjectDraft((d) => ({
+                                    ...d,
+                                    trackerConfig: {
+                                      ...d.trackerConfig,
+                                      fee_model: {
+                                        ...d.trackerConfig.fee_model,
+                                        type: e.target.value as "percentage" | "flat_fee",
+                                      },
+                                    },
+                                  }))
+                                }
+                                disabled={saving}
+                              >
+                                <option value="percentage">Percentage of CTC</option>
+                                <option value="flat_fee">Flat fee per joiner</option>
+                              </select>
+                              {projectDraft.trackerConfig.fee_model.type === "percentage" ? (
+                                <>
+                                  <div className="ncp-prop-row">
+                                    <div className="ncp-prop-label">Opening fee %</div>
+                                    <input
+                                      className="ncp-prop-input"
+                                      type="number"
+                                      step="any"
+                                      value={projectDraft.trackerConfig.fee_model.opening_fee_pct}
+                                      onChange={(e) =>
+                                        setProjectDraft((d) => ({
+                                          ...d,
+                                          trackerConfig: {
+                                            ...d.trackerConfig,
+                                            fee_model: {
+                                              ...d.trackerConfig.fee_model,
+                                              opening_fee_pct: e.target.value,
+                                            },
+                                          },
+                                        }))
+                                      }
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                  <div className="ncp-prop-row">
+                                    <div className="ncp-prop-label">Closing fee %</div>
+                                    <input
+                                      className="ncp-prop-input"
+                                      type="number"
+                                      step="any"
+                                      value={projectDraft.trackerConfig.fee_model.closing_fee_pct}
+                                      onChange={(e) =>
+                                        setProjectDraft((d) => ({
+                                          ...d,
+                                          trackerConfig: {
+                                            ...d.trackerConfig,
+                                            fee_model: {
+                                              ...d.trackerConfig.fee_model,
+                                              closing_fee_pct: e.target.value,
+                                            },
+                                          },
+                                        }))
+                                      }
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="ncp-prop-row">
+                                  <div className="ncp-prop-label">Flat fee (INR)</div>
+                                  <input
+                                    className="ncp-prop-input"
+                                    type="number"
+                                    step="any"
+                                    value={projectDraft.trackerConfig.fee_model.flat_fee_per_joiner}
+                                    onChange={(e) =>
+                                      setProjectDraft((d) => ({
+                                        ...d,
+                                        trackerConfig: {
+                                          ...d.trackerConfig,
+                                          fee_model: {
+                                            ...d.trackerConfig.fee_model,
+                                            flat_fee_per_joiner: e.target.value,
+                                          },
+                                        },
+                                      }))
+                                    }
+                                    disabled={saving}
+                                  />
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </>
                       ) : (

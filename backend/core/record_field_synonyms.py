@@ -45,6 +45,10 @@ INGESTABLE_RECORD_COLUMNS: Set[str] = frozenset(
         "selection_date_req",
         "loi_date_req",
         "closure_date_req",
+        "req_offered_date",
+        "offered_accept_date",
+        "req_cancelled_date",
+        "source_joiner_type",
         "rpo_stage",
         "ageing_days",
         "ageing_bracket",
@@ -80,8 +84,62 @@ _DATE_FIELDS = frozenset(
         "selection_date_req",
         "loi_date_req",
         "closure_date_req",
+        "req_offered_date",
+        "offered_accept_date",
+        "req_cancelled_date",
     }
 )
+
+# Template dropdown labels → canonical `source_joiner_type` (see excel_upload_masters template).
+_SOURCE_JOINER_ALIASES: Dict[str, str] = {
+    "taggd rpo": "taggd_rpo",
+    "taggd direct": "taggd_direct",
+    "er employee referral": "nontaggd_employee_referral",
+    "er – employee referral": "nontaggd_employee_referral",
+    "er - employee referral": "nontaggd_employee_referral",
+    "employee referral": "nontaggd_employee_referral",
+    "ijp internal job posting": "nontaggd_internal_job_portal",
+    "ijp – internal job posting": "nontaggd_internal_job_portal",
+    "ijp - internal job posting": "nontaggd_internal_job_portal",
+    "internal job posting": "nontaggd_internal_job_portal",
+    "campus": "nontaggd_campus",
+    "internal transfer": "nontaggd_transferred",
+    "er": "nontaggd_employee_referral",
+    "ijp": "nontaggd_internal_job_portal",
+}
+
+_AGEING_BRACKET_ALIASES: Dict[str, str] = {
+    "0-2 weeks": "0-2",
+    "3-5 weeks": "3-5",
+    "6-9 weeks": "6-9",
+    "over 10 weeks": ">10",
+    ">10 weeks": ">10",
+}
+
+
+def normalize_source_joiner_type(raw: str) -> str | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    low = re.sub(r"\s+", " ", s.lower())
+    if low in _SOURCE_JOINER_ALIASES:
+        return _SOURCE_JOINER_ALIASES[low]
+    if low in {
+        "taggd_rpo", "taggd_direct", "nontaggd_employee_referral",
+        "nontaggd_internal_job_portal", "nontaggd_campus", "nontaggd_transferred",
+    }:
+        return low
+    return s
+
+
+def normalize_ageing_bracket(raw: str) -> str | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    low = re.sub(r"\s+", " ", s.lower())
+    if low in _AGEING_BRACKET_ALIASES:
+        return _AGEING_BRACKET_ALIASES[low]
+    return s
 
 # (field_name, normalized_alias, weight) — weight higher = more specific; matched if alias == nh or (len>=6 and alias in nh)
 _FIELD_ALIAS_WEIGHTS: List[Tuple[str, str, int]] = [
@@ -95,6 +153,12 @@ _FIELD_ALIAS_WEIGHTS: List[Tuple[str, str, int]] = [
     ("client_req_id", "req no", 85),
     ("client_req_id", "req number", 85),
     ("client_req_id", "req id", 80),
+    ("source_joiner_type", "source joiner type", 90),
+    ("source_joiner_type", "source joiner", 85),
+    ("req_offered_date", "offered date", 88),
+    ("offered_accept_date", "offer accepted date", 88),
+    ("req_cancelled_date", "req cancelled date", 86),
+    ("req_cancelled_date", "cancelled date", 82),
     ("rpo_client_name", "client name", 70),
     ("rpo_client_name", "customer name", 68),
     ("positions_open", "positions open", 75),

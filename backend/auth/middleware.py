@@ -1,4 +1,5 @@
 import logging
+import os
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -9,11 +10,11 @@ from backend.core.debug_agent_log import debug_agent_log
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_PREFIXES = (
-    "/docs",
-    "/openapi.json",
-    "/redoc",
-)
+def _public_prefixes() -> tuple[str, ...]:
+    app_env = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower()
+    if app_env in ("production", "prod"):
+        return ()
+    return ("/docs", "/openapi.json", "/redoc")
 PUBLIC_PATHS = frozenset(
     {
         "/",
@@ -36,7 +37,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        if path in PUBLIC_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES):
+        if path in PUBLIC_PATHS or any(path.startswith(p) for p in _public_prefixes()):
             return await call_next(request)
 
         auth = request.headers.get("authorization") or ""

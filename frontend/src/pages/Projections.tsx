@@ -2,18 +2,23 @@
  * Projection playground — scenarios by time, project clubbing, project head, and side-by-side compare.
  */
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import {
-  ComposedChart,
-  Area,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
 import { Search } from "lucide-react";
+import type { EChartsOption } from "echarts";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
+import { echarts } from "@/components/charts/echartsSetup";
+import { buildMultiLineTimeseriesOption } from "@/components/charts/optionBuilders";
+import {
+  ACTUAL_COLOR,
+  AREA_GRADIENT,
+  BUDGET_COLOR,
+  GRID,
+  LINE,
+  PO_COLOR,
+  PRIOR_FY_COLOR,
+} from "@/components/charts/chartTokens";
+import { categoryXAxis, valueYAxis } from "@/components/charts/chartAxis";
+import { legendBottom } from "@/components/charts/chartLegend";
+import { mergeTooltipBase, seriesEmphasisCartesian } from "@/components/charts/chartUtils";
 import {
   Badge,
   Button,
@@ -64,6 +69,102 @@ import {
   type ChartTimeRange,
 } from "@/lib/projections-forecast";
 const HORIZONS = [3, 6, 9] as const;
+
+type ProjectionPoint = { name: string; revActual?: number | null; revPred?: number | null; officialFcst?: number | null };
+type CmCollPoint = { name: string; cm?: number | null; collected?: number | null };
+type DualComparePoint = {
+  name: string;
+  revA?: number | null;
+  revB?: number | null;
+  predA?: number | null;
+  predB?: number | null;
+};
+
+function buildProjectionRevenueOption(data: ProjectionPoint[]): EChartsOption | null {
+  if (!data.length) return null;
+  const labels = data.map((d) => d.name);
+  const opt = buildMultiLineTimeseriesOption(
+    labels,
+    [
+      { name: "Rev actual", data: data.map((d) => d.revActual ?? null), color: ACTUAL_COLOR },
+      { name: "Projected", data: data.map((d) => d.revPred ?? null), color: PO_COLOR },
+      { name: "Official fcst (hist.)", data: data.map((d) => d.officialFcst ?? null), color: BUDGET_COLOR },
+    ],
+    "₹ Cr",
+  );
+  if (Array.isArray(opt.series) && opt.series[1]) {
+    opt.series[1] = {
+      ...opt.series[1],
+      lineStyle: { width: LINE.width, color: PO_COLOR, type: "dashed" },
+    };
+  }
+  return opt;
+}
+
+function buildProjectionCmCollOption(data: CmCollPoint[]): EChartsOption | null {
+  if (!data.length) return null;
+  const labels = data.map((d) => d.name);
+  return {
+    color: [PO_COLOR, PRIOR_FY_COLOR],
+    grid: GRID.vBar,
+    legend: legendBottom,
+    tooltip: mergeTooltipBase({
+      trigger: "axis",
+      formatter: (params) => {
+        const items = Array.isArray(params) ? params : [params];
+        const rows = items
+          .map((p) => `${p.marker} ${p.seriesName}: <b>${Number(p.value).toFixed(2)}</b>`)
+          .join("<br/>");
+        return `<b>${items[0]?.name ?? ""}</b><br/>${rows}`;
+      },
+    }),
+    xAxis: categoryXAxis(labels, { boundaryGap: false }),
+    yAxis: valueYAxis((v) => Number(v).toFixed(2), { name: "₹ Cr" }),
+    series: [
+      {
+        name: "Implied CM",
+        type: "line",
+        smooth: LINE.smooth,
+        data: data.map((d) => d.cm ?? null),
+        lineStyle: { width: LINE.width, color: PO_COLOR },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [...AREA_GRADIENT.po]),
+        },
+        ...seriesEmphasisCartesian(),
+      },
+      {
+        name: "Implied collections",
+        type: "line",
+        smooth: LINE.smooth,
+        showSymbol: true,
+        symbolSize: LINE.symbolSize,
+        data: data.map((d) => d.collected ?? null),
+        lineStyle: { width: LINE.width, color: PRIOR_FY_COLOR },
+        ...seriesEmphasisCartesian(),
+      },
+    ],
+  };
+}
+
+function buildDualCompareOption(data: DualComparePoint[]): EChartsOption | null {
+  if (!data.length) return null;
+  const labels = data.map((d) => d.name);
+  const opt = buildMultiLineTimeseriesOption(
+    labels,
+    [
+      { name: "A · actual", data: data.map((d) => d.revA ?? null), color: ACTUAL_COLOR },
+      { name: "B · actual", data: data.map((d) => d.revB ?? null), color: "#7c3aed" },
+      { name: "A · projected", data: data.map((d) => d.predA ?? null), color: PO_COLOR },
+      { name: "B · projected", data: data.map((d) => d.predB ?? null), color: "#d97706" },
+    ],
+    "₹ Cr",
+  );
+  if (Array.isArray(opt.series)) {
+    opt.series[2] = { ...opt.series[2], lineStyle: { width: LINE.width, color: PO_COLOR, type: "dashed" } };
+    opt.series[3] = { ...opt.series[3], lineStyle: { width: LINE.width, color: "#d97706", type: "dashed" } };
+  }
+  return opt;
+}
 
 const CHART_TIME_RANGES: { value: ChartTimeRange; label: string; hint: string }[] = [
   { value: "6m", label: "6M", hint: "Last 6 months of actuals" },
@@ -366,6 +467,10 @@ export function Projections() {
     [monthlyA, forwardA, chartTimeRange],
   );
 
+  const revenueChartOption = useMemo(() => buildProjectionRevenueOption(chartDataSingle), [chartDataSingle]);
+  const cmCollChartOption = useMemo(() => buildProjectionCmCollOption(cmCollA), [cmCollA]);
+  const dualCompareOption = useMemo(() => buildDualCompareOption(dualChartFiltered), [dualChartFiltered]);
+
   const fyRowCount = countRowsInFy(scopedRows, selectedFyStart);
   const canProjectA = monthlyA.length >= 4;
   const canProjectB = monthlyB.length >= 4;
@@ -577,18 +682,7 @@ export function Projections() {
                     </Text>
                   </div>
                   <div className="h-[260px] w-full px-1.5 pb-2 pt-1 md:h-[280px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={chartDataSingle} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} label={{ value: "₹ Cr", angle: -90, position: "insideLeft", fontSize: 10 }} />
-                        <Tooltip formatter={(v: number) => (typeof v === "number" ? v.toFixed(2) : v)} contentStyle={{ fontSize: 12 }} />
-                        <Legend />
-                        <Line type="monotone" dataKey="revActual" name="Rev actual" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls />
-                        <Line type="monotone" dataKey="revPred" name="Projected" stroke="var(--accent2)" strokeWidth={2} strokeDasharray="6 4" dot={false} connectNulls />
-                        <Line type="monotone" dataKey="officialFcst" name="Official fcst (hist.)" stroke="var(--text-subtle)" strokeWidth={1} dot={false} connectNulls />
-                      </ComposedChart>
-                    </ResponsiveContainer>
+                    <EChartsCanvas option={revenueChartOption} height={280} />
                   </div>
                 </Card>
                 <Card className="overflow-hidden ring-1 ring-tremor-ring dark:ring-dark-tremor-ring">
@@ -601,17 +695,7 @@ export function Projections() {
                     </Text>
                   </div>
                   <div className="h-[220px] w-full px-1.5 pb-2 pt-1 md:h-[240px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={cmCollA} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} label={{ value: "₹ Cr", angle: -90, position: "insideLeft", fontSize: 10 }} />
-                        <Tooltip formatter={(v: number) => (typeof v === "number" ? v.toFixed(2) : v)} />
-                        <Legend />
-                        <Area type="monotone" dataKey="cm" name="Implied CM" fill="rgba(20, 184, 166, 0.12)" stroke="var(--green)" />
-                        <Line type="monotone" dataKey="collected" name="Implied collections" stroke="var(--blue)" strokeWidth={2} dot />
-                      </ComposedChart>
-                    </ResponsiveContainer>
+                    <EChartsCanvas option={cmCollChartOption} height={240} />
                   </div>
                 </Card>
               </Grid>
@@ -694,22 +778,7 @@ export function Projections() {
                   </Text>
                 </div>
                 <div className="h-[300px] w-full px-1.5 pb-2 pt-1 md:h-[320px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={dualChartFiltered} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} label={{ value: "₹ Cr", angle: -90, position: "insideLeft", fontSize: 10 }} />
-                      <Tooltip
-                        contentStyle={{ fontSize: 12 }}
-                        formatter={(v: number) => (typeof v === "number" && v != null ? v.toFixed(2) : "—")}
-                      />
-                      <Legend />
-                      <Line type="monotone" dataKey="revA" name="A · actual" stroke="#ea580c" strokeWidth={2} dot={false} connectNulls />
-                      <Line type="monotone" dataKey="revB" name="B · actual" stroke="#7c3aed" strokeWidth={2} dot={false} connectNulls />
-                      <Line type="monotone" dataKey="predA" name="A · projected" stroke="#0d9488" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-                      <Line type="monotone" dataKey="predB" name="B · projected" stroke="#d97706" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  <EChartsCanvas option={dualCompareOption} height={320} />
                 </div>
               </Card>
               <Grid numItems={1} numItemsMd={2} className="gap-3">

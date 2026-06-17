@@ -1,18 +1,19 @@
 import React, { useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ComposedChart,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import type { EChartsOption } from "echarts";
 import { Text } from "@tremor/react";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
+import {
+  buildHorizontalRankingBarOption,
+  buildMultiLineTimeseriesOption,
+  buildPercentVerticalBarOption,
+  buildSingleVerticalBarOption,
+  buildStackedCategoryOverTimeOption,
+  buildVerticalGroupedBarOption,
+} from "@/components/charts/optionBuilders";
+import { percentYAxis } from "@/components/charts/chartAxis";
+import { GRID, LINE } from "@/components/charts/chartTokens";
+import { legendBottom } from "@/components/charts/chartLegend";
+import { mergeTooltipBase, seriesEmphasisCartesian } from "@/components/charts/chartUtils";
 import { LevelDonutChart } from "@/components/platform/Charts";
 import { AccountMetricCard, ClientMetricGrid } from "@/components/tremor-dashboard/AccountMetricCard";
 import {
@@ -21,6 +22,8 @@ import {
   formatPipelineDelta,
   monthLabel,
   quarterLabel,
+  shortSourceChannelLabel,
+  sourceDonutRows,
   type ClientPipelineMetrics,
 } from "@/lib/client-pipeline-metrics";
 import { cn, formatPercent } from "@/lib/utils";
@@ -45,12 +48,6 @@ const SRC_PALETTE = [CHART_COLORS.navy, CHART_COLORS.teal, CHART_COLORS.orange, 
 function fmtDays(v: number | null | undefined): string {
   if (v == null) return "—";
   return `${Math.round(v)}d`;
-}
-
-function truncateChannelLabel(name: string, max = 28): string {
-  const t = name.trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}…`;
 }
 
 function PeriodToggle({ value, onChange }: { value: PeriodMode; onChange: (v: PeriodMode) => void }) {
@@ -155,12 +152,12 @@ function PipelineKpiGrid({ metrics }: { metrics: ClientPipelineMetrics }) {
     { label: "Open reqs", value: String(snap.open), sub: `${period.open} created in period`, decoration: "blue" as const, delta: d.open_pct, deltaIsPct: true },
     { label: "Cancelled reqs", value: String(snap.cancelled), sub: `${period.cancelled} in period`, decoration: "rose" as const, delta: d.cancelled_pct, deltaIsPct: true },
     { label: "Hold reqs", value: String(snap.hold), sub: "On hold (current)", decoration: "amber" as const, delta: d.hold_pct, deltaIsPct: true },
-    { label: "Total offers", value: String(snap.offered), sub: `${period.offered} in ${metrics.period_label}`, decoration: "teal" as const, delta: d.offered_pct, deltaIsPct: true },
-    { label: "Total joiners", value: String(snap.joiners), sub: `${period.joiners} in period`, decoration: "emerald" as const, delta: d.joiners_pct, deltaIsPct: true },
+    { label: "Active offers", value: String(snap.offered), sub: `${snap.offered_total ?? snap.offered} lifetime · ${period.offered} in ${metrics.period_label}`, decoration: "teal" as const, delta: d.offered_pct, deltaIsPct: true },
+    { label: "Total joiners", value: String(snap.joiners), sub: `${period.joiners} joined in ${metrics.period_label}`, decoration: "emerald" as const, delta: d.joiners_pct, deltaIsPct: true },
     { label: "Offer drop ratio", value: snap.offer_drop_pct == null ? "—" : formatPercent(snap.offer_drop_pct), sub: `${snap.offer_drops} drops`, decoration: "rose" as const, delta: d.offer_drop_pct_delta, deltaIsPts: true },
-    { label: "Avg time to fill", value: fmtDays(snap.median_ttf_days ?? snap.avg_ttf_days), sub: "Target 45d", decoration: "blue" as const, delta: d.avg_ttf_days_delta, deltaIsPts: true, suffix: "d" },
-    { label: "Avg time to offer", value: fmtDays(snap.median_tto_days ?? snap.avg_tto_days), sub: "Target 30d", decoration: "teal" as const, delta: d.avg_tto_days_delta, deltaIsPts: true, suffix: "d" },
-    { label: "Join confirmation", value: snap.oar_pct == null ? "—" : formatPercent(snap.oar_pct), sub: "Joiners ÷ offers", decoration: "emerald" as const, delta: d.oar_pct_delta, deltaIsPts: true },
+    { label: "Avg time to fill", value: fmtDays(snap.median_ttf_days ?? snap.avg_ttf_days), sub: "Target 45 business days", decoration: "blue" as const, delta: d.avg_ttf_days_delta, deltaIsPts: true, suffix: "d" },
+    { label: "Avg time to offer", value: fmtDays(snap.median_tto_days ?? snap.avg_tto_days), sub: "Target 30 business days", decoration: "teal" as const, delta: d.avg_tto_days_delta, deltaIsPts: true, suffix: "d" },
+    { label: "Join confirmation", value: snap.oar_pct == null ? "—" : formatPercent(snap.oar_pct), sub: `${snap.joiners} joiners ÷ ${snap.offered_total ?? snap.offered} offers`, decoration: "emerald" as const, delta: d.oar_pct_delta, deltaIsPts: true },
     { label: "Diversity %", value: snap.diversity_pct == null ? "—" : formatPercent(snap.diversity_pct), sub: "Female joiners / total", decoration: "rose" as const, delta: d.diversity_pct_delta, deltaIsPts: true },
   ];
 
@@ -168,7 +165,7 @@ function PipelineKpiGrid({ metrics }: { metrics: ClientPipelineMetrics }) {
     <div className="cd-pipeline-panel">
       <SectionTitle>Pipeline snapshot</SectionTitle>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span className="cd-compare-badge">Period {metrics.period_label} · compare {cmp.toUpperCase()}</span>
+        <span className="cd-compare-badge">Period {metrics.period_label}</span>
         {metrics.updated_at ? (
           <Text className="text-[10px] text-tremor-content-subtle">Updated {metrics.updated_at}</Text>
         ) : null}
@@ -193,13 +190,115 @@ function PipelineKpiGrid({ metrics }: { metrics: ClientPipelineMetrics }) {
   );
 }
 
+function CdChart({ option, height = 240, className = "cd-chart-h-240" }: { option: EChartsOption | null; height?: number; className?: string }) {
+  return (
+    <div className={className}>
+      <EChartsCanvas option={option} height={height} />
+    </div>
+  );
+}
+
+function buildPercentLineOption(labels: string[], series: { name: string; data: (number | null)[]; color: string; dashed?: boolean }[]): EChartsOption {
+  const opt = buildMultiLineTimeseriesOption(labels, series);
+  if (opt.yAxis && Array.isArray(opt.yAxis)) {
+    opt.yAxis[0] = { ...percentYAxis(0, 100), name: "%" };
+  }
+  if (Array.isArray(opt.series)) {
+    const seriesArr = opt.series;
+    series.forEach((s, i) => {
+      if (s.dashed && seriesArr[i]) {
+        seriesArr[i] = {
+          ...seriesArr[i],
+          lineStyle: { width: LINE.width, color: s.color, type: "dashed" },
+        };
+      }
+    });
+  }
+  return opt;
+}
+
+function buildDualAxisBarLineOption(
+  labels: string[],
+  barName: string,
+  barData: number[],
+  barColor: string,
+  lineName: string,
+  lineData: (number | null)[],
+  lineColor: string,
+): EChartsOption {
+  return {
+    color: [barColor, lineColor],
+    grid: GRID.vBar,
+    legend: legendBottom,
+    tooltip: mergeTooltipBase({ trigger: "axis" }),
+    xAxis: { type: "category", data: labels, axisLabel: { fontSize: 10, color: "#94a3b8" } },
+    yAxis: [
+      { type: "value", min: 0, axisLabel: { fontSize: 10, color: "#94a3b8" }, splitLine: { lineStyle: { color: "#f0f0f0" } } },
+      { type: "value", min: 0, axisLabel: { fontSize: 10, color: "#94a3b8", formatter: "{value}%" }, splitLine: { show: false } },
+    ],
+    series: [
+      { name: barName, type: "bar", yAxisIndex: 0, data: barData, itemStyle: { color: barColor, borderRadius: [3, 3, 0, 0] }, ...seriesEmphasisCartesian() },
+      { name: lineName, type: "line", yAxisIndex: 1, data: lineData, smooth: 0.2, lineStyle: { width: LINE.width, color: lineColor, type: "dashed" }, ...seriesEmphasisCartesian() },
+    ],
+  };
+}
+
 function OverviewTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipelineMetrics; flowMode: PeriodMode; setFlowMode: (m: PeriodMode) => void }) {
   const flow = useFlowData(metrics, flowMode);
   const qData = (metrics.quarterly_series ?? []).map((r) => ({
     label: quarterLabel(r.quarter),
-    OAR: r.oar_pct ?? 0,
-    JCR: r.joiners && r.offered ? Math.round((r.joiners / Math.max(r.offered, 1)) * 100) : 0,
+    OAR: r.oar_stock_pct ?? r.oar_pct,
+    JCR: r.jcr_stock_pct ?? null,
   }));
+
+  const flowBarOption = useMemo(
+    () =>
+      buildVerticalGroupedBarOption(
+        flow.map((f) => f.label),
+        [
+          { name: "Open", data: flow.map((f) => f.Open), color: CHART_COLORS.navy },
+          { name: "Cancelled", data: flow.map((f) => f.Cancelled), color: CHART_COLORS.orange },
+          { name: "Hold", data: flow.map((f) => f.Hold), color: CHART_COLORS.amber },
+        ],
+      ),
+    [flow],
+  );
+
+  const offerJoinerOption = useMemo(
+    () =>
+      buildMultiLineTimeseriesOption(
+        flow.map((f) => f.label),
+        [
+          { name: "Offers", data: flow.map((f) => f.Offers), color: CHART_COLORS.teal },
+          { name: "Joiners", data: flow.map((f) => f.Joiners), color: CHART_COLORS.orange },
+        ],
+      ),
+    [flow],
+  );
+
+  const oarOption = useMemo(
+    () => buildPercentVerticalBarOption(qData.map((d) => d.label), qData.map((d) => d.OAR), "OAR", CHART_COLORS.navy),
+    [qData],
+  );
+
+  const jcrOption = useMemo(
+    () => buildPercentVerticalBarOption(qData.map((d) => d.label), qData.map((d) => d.JCR), "JCR", CHART_COLORS.teal),
+    [qData],
+  );
+
+  const odrOption = useMemo(
+    () =>
+      buildDualAxisBarLineOption(
+        flow.map((f) => f.label),
+        "Drops",
+        flow.map((f) => f.Drops),
+        CHART_COLORS.red,
+        "ODR",
+        flow.map((f) => f.ODR),
+        CHART_COLORS.amber,
+      ),
+    [flow],
+  );
 
   return (
     <>
@@ -218,17 +317,7 @@ function OverviewTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipeli
           }
         >
           <div className="cd-chart-h-240">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={flow}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} width={32} />
-                <Tooltip />
-                <Bar dataKey="Open" fill={CHART_COLORS.navy} radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Cancelled" fill={CHART_COLORS.orange} radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Hold" fill={CHART_COLORS.amber} radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <CdChart option={flowBarOption} height={240} />
           </div>
         </ChartCard>
 
@@ -238,62 +327,26 @@ function OverviewTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipeli
           toolbar={<PeriodToggle value={flowMode} onChange={setFlowMode} />}
         >
           <div className="cd-chart-h-240">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={flow}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} width={32} />
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Line type="monotone" dataKey="Offers" stroke={CHART_COLORS.teal} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="Joiners" stroke={CHART_COLORS.orange} strokeWidth={2} strokeDasharray="6 3" dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <CdChart option={offerJoinerOption} height={240} />
           </div>
         </ChartCard>
       </div>
 
       <SectionTitle>Offer &amp; joiner detail — quarterly view</SectionTitle>
       <div className="cd-chart-grid-3">
-        <ChartCard title="Offer acceptance rate" subtitle="% joiners of total offers">
+        <ChartCard title="Offer acceptance rate" subtitle="Cumulative joiners ÷ offers at quarter end">
           <div className="cd-chart-h-220">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={qData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={36} />
-                <Tooltip formatter={(v: number) => [`${v}%`, "OAR"]} />
-                <Bar dataKey="OAR" fill={CHART_COLORS.navy} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <CdChart option={oarOption} height={220} className="cd-chart-h-220" />
           </div>
         </ChartCard>
-        <ChartCard title="Joining confirmation rate" subtitle="Joiners as % of offers (period)">
+        <ChartCard title="Joining confirmation rate" subtitle="Cumulative joiners ÷ accepted offers at quarter end">
           <div className="cd-chart-h-220">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={qData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={36} />
-                <Tooltip formatter={(v: number) => [`${v}%`, "JCR"]} />
-                <Bar dataKey="JCR" fill={CHART_COLORS.teal} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <CdChart option={jcrOption} height={220} className="cd-chart-h-220" />
           </div>
         </ChartCard>
         <ChartCard title="Offer drop ratio" subtitle="Drops ÷ offers × 100" toolbar={<PeriodToggle value={flowMode} onChange={setFlowMode} />}>
           <div className="cd-chart-h-220">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={flow}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis yAxisId="left" tick={{ fontSize: 10 }} width={28} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} domain={[0, "auto"]} tickFormatter={(v) => `${v}%`} width={36} />
-                <Tooltip />
-                <Bar yAxisId="left" dataKey="Drops" fill={CHART_COLORS.red} radius={[3, 3, 0, 0]} />
-                <Line yAxisId="right" type="monotone" dataKey="ODR" stroke={CHART_COLORS.amber} strokeDasharray="5 4" dot={false} strokeWidth={2} />
-              </ComposedChart>
-            </ResponsiveContainer>
+            <CdChart option={odrOption} height={220} className="cd-chart-h-220" />
           </div>
         </ChartCard>
       </div>
@@ -322,36 +375,54 @@ function TimingsTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipelin
     return row;
   });
 
+  const ttfOption = useMemo(
+    () =>
+      buildMultiLineTimeseriesOption(
+        flow.map((f) => f.label),
+        [
+          { name: "TTF", data: flow.map((f) => f.TTF), color: CHART_COLORS.navy },
+          { name: "Target (45d)", data: flow.map((f) => f.TTFTarget), color: CHART_COLORS.orange },
+        ],
+      ),
+    [flow],
+  );
+
+  const ttoOption = useMemo(
+    () =>
+      buildMultiLineTimeseriesOption(
+        flow.map((f) => f.label),
+        [
+          { name: "TTO", data: flow.map((f) => f.TTO), color: CHART_COLORS.teal },
+          { name: "Target (30d)", data: flow.map((f) => f.TTOTarget), color: CHART_COLORS.amber },
+        ],
+      ),
+    [flow],
+  );
+
+  const funnelOption = useMemo(() => {
+    if (!funnelChart.length || !quarters.length) return null;
+    return buildVerticalGroupedBarOption(
+      funnelChart.map((r) => String(r.stage)),
+      quarters.map((q, i) => ({
+        name: q,
+        data: funnelChart.map((r) => Number(r[q] ?? 0)),
+        color: SRC_PALETTE[i % SRC_PALETTE.length],
+      })),
+    );
+  }, [funnelChart, quarters]);
+
   return (
     <>
       <SectionTitle>Time to fill &amp; time to offer</SectionTitle>
       <div className="cd-chart-grid-2">
         <ChartCard title="Time to fill (days)" subtitle="Avg days from req open to joining" toolbar={<PeriodToggle value={flowMode} onChange={setFlowMode} />}>
           <div className="cd-chart-h-240">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={flow}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} width={32} />
-                <Tooltip />
-                <Line type="monotone" dataKey="TTF" stroke={CHART_COLORS.navy} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="TTFTarget" stroke={CHART_COLORS.orange} strokeDasharray="6 4" dot={false} name="Target (45d)" />
-              </LineChart>
-            </ResponsiveContainer>
+            <CdChart option={ttfOption} height={240} />
           </div>
         </ChartCard>
         <ChartCard title="Time to offer (days)" subtitle="Avg days from req open to offer" toolbar={<PeriodToggle value={flowMode} onChange={setFlowMode} />}>
           <div className="cd-chart-h-240">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={flow}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} width={32} />
-                <Tooltip />
-                <Line type="monotone" dataKey="TTO" stroke={CHART_COLORS.teal} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="TTOTarget" stroke={CHART_COLORS.amber} strokeDasharray="6 4" dot={false} name="Target (30d)" />
-              </LineChart>
-            </ResponsiveContainer>
+            <CdChart option={ttoOption} height={240} />
           </div>
         </ChartCard>
       </div>
@@ -361,18 +432,7 @@ function TimingsTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipelin
           <SectionTitle>Stage-wise funnel breakdown — quarterly</SectionTitle>
           <ChartCard title="Hiring funnel — stage conversion" subtitle="Profile counts aggregated by quarter">
             <div className="cd-chart-h-260">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={funnelChart}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                  <XAxis dataKey="stage" tick={{ fontSize: 10 }} />
-                  <YAxis tick={{ fontSize: 10 }} width={40} />
-                  <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 10 }} />
-                  {quarters.map((q, i) => (
-                    <Bar key={q} dataKey={q} fill={SRC_PALETTE[i % SRC_PALETTE.length]} radius={[3, 3, 0, 0]} />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
+              <CdChart option={funnelOption} height={260} className="cd-chart-h-260" />
             </div>
           </ChartCard>
         </>
@@ -388,34 +448,32 @@ function AgeingTab({ metrics }: { metrics: ClientPipelineMetrics }) {
   const trend = metrics.series.map((r) => ({ label: monthLabel(r.month), Aged30: r.aged_over_30 }));
   const rows = metrics.account_ageing_rows ?? [];
 
+  const bucketOption = useMemo(
+    () => buildSingleVerticalBarOption(fine.map((b) => b.label), fine.map((b) => b.count), "Count", CHART_COLORS.teal),
+    [fine],
+  );
+
+  const trendOption = useMemo(
+    () =>
+      buildMultiLineTimeseriesOption(
+        trend.map((t) => t.label),
+        [{ name: "Aged >30d", data: trend.map((t) => t.Aged30), color: CHART_COLORS.red }],
+      ),
+    [trend],
+  );
+
   return (
     <>
       <SectionTitle>WIP requisition ageing</SectionTitle>
       <div className="cd-chart-grid-2">
         <ChartCard title="Ageing bucket distribution" subtitle="Open WIP reqs by days in pipeline">
           <div className="cd-chart-h-240">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={fine.map((b) => ({ label: b.label, count: b.count }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} width={32} />
-                <Tooltip />
-                <Bar dataKey="count" fill={CHART_COLORS.teal} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <CdChart option={bucketOption} height={240} />
           </div>
         </ChartCard>
         <ChartCard title="Ageing trend — monthly" subtitle="Reqs aging &gt;30 days over time">
           <div className="cd-chart-h-240">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} width={32} />
-                <Tooltip />
-                <Line type="monotone" dataKey="Aged30" stroke={CHART_COLORS.red} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <CdChart option={trendOption} height={240} />
           </div>
         </ChartCard>
       </div>
@@ -428,25 +486,27 @@ function AgeingTab({ metrics }: { metrics: ClientPipelineMetrics }) {
               <tr>
                 <th>Account / SBU</th>
                 <th>Open reqs</th>
-                <th>0–15 days</th>
-                <th>16–30 days</th>
-                <th>31–45 days</th>
-                <th>&gt;45 days</th>
+                <th>0–30 days</th>
+                <th>30–45 days</th>
+                <th>45–60 days</th>
+                <th>60–90 days</th>
+                <th>&gt;90 days</th>
                 <th>Oldest (days)</th>
                 <th>Risk</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={8} className="text-center text-tremor-content-subtle">No open requisitions with ageing data.</td></tr>
+                <tr><td colSpan={10} className="text-center text-tremor-content-subtle">No open requisitions with ageing data.</td></tr>
               ) : rows.map((r) => (
                 <tr key={r.account}>
                   <td>{r.account}</td>
                   <td>{r.open}</td>
-                  <td>{r.b_0_15}</td>
-                  <td>{r.b_16_30}</td>
+                  <td>{r.b_0_30}</td>
                   <td>{r.b_31_45}</td>
-                  <td>{r.b_45_plus}</td>
+                  <td>{r.b_46_60}</td>
+                  <td>{r.b_61_90}</td>
+                  <td>{r.b_90_plus}</td>
                   <td>{r.oldest_days}</td>
                   <td><RiskPill risk={r.risk} /></td>
                 </tr>
@@ -468,7 +528,7 @@ function DiversityTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipel
       : srcView === "pipeline"
         ? metrics.source_breakdown_pipeline
         : metrics.source_breakdown;
-  const srcDonut = srcMap.filter((d) => d.count > 0).map((d) => ({ name: d.label, value: d.count }));
+  const srcDonut = sourceDonutRows(srcMap);
   const eff = metrics.source_effectiveness ?? [];
   const flow = useFlowData(metrics, flowMode);
 
@@ -502,6 +562,38 @@ function DiversityTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipel
 
   const channels = srcMonthly.length > 0 ? Object.keys(srcMonthly[0]).filter((k) => k !== "label") : [];
 
+  const femalePctOption = useMemo(
+    () =>
+      buildPercentLineOption(
+        flow.map((f) => f.label),
+        [{ name: "Female %", data: flow.map((f) => f.FemalePct), color: CHART_COLORS.orange }],
+      ),
+    [flow],
+  );
+
+  const srcMonthlyOption = useMemo(() => {
+    if (!srcMonthly.length || !channels.length) return null;
+    return buildStackedCategoryOverTimeOption(
+      srcMonthly.map((r) => String(r.label)),
+      channels.map((ch, i) => ({
+        name: shortSourceChannelLabel(ch),
+        data: srcMonthly.map((r) => Number((r as Record<string, string | number>)[ch] ?? 0)),
+        color: SRC_PALETTE[i % SRC_PALETTE.length],
+        fullName: ch,
+      })),
+    );
+  }, [srcMonthly, channels]);
+
+  const effOption = useMemo(
+    () =>
+      buildHorizontalRankingBarOption(
+        eff.map((e) => shortSourceChannelLabel(e.label)),
+        eff.map((e) => e.otj_pct ?? 0),
+        eff.map(() => CHART_COLORS.teal),
+      ),
+    [eff],
+  );
+
   return (
     <>
       <SectionTitle>Diversity hiring</SectionTitle>
@@ -534,15 +626,7 @@ function DiversityTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipel
         </ChartCard>
         <ChartCard title="Diversity trend — monthly" subtitle="Female hire % over time">
           <div className="cd-chart-h-200">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={flow}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={36} />
-                <Tooltip formatter={(v: number) => [`${v ?? "—"}%`, "Female %"]} />
-                <Line type="monotone" dataKey="FemalePct" stroke={CHART_COLORS.orange} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <CdChart option={femalePctOption} height={200} className="cd-chart-h-200" />
           </div>
         </ChartCard>
       </div>
@@ -568,30 +652,8 @@ function DiversityTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipel
           {srcMonthly.length === 0 ? (
             <Text className="text-xs text-tremor-content-subtle">No monthly source breakdown available.</Text>
           ) : (
-            <div className="cd-chart-stacked-bar">
-              <div className="cd-chart-stacked-bar__plot">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={srcMonthly} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} width={32} />
-                    <Tooltip />
-                    {channels.map((ch, i) => (
-                      <Bar key={ch} dataKey={ch} stackId="a" fill={SRC_PALETTE[i % SRC_PALETTE.length]} name={ch} />
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              {channels.length > 0 ? (
-                <div className="cd-legend-row cd-chart-stacked-bar__legend">
-                  {channels.map((ch, i) => (
-                    <span key={ch} className="cd-leg" title={ch}>
-                      <span className="cd-leg-sq" style={{ background: SRC_PALETTE[i % SRC_PALETTE.length] }} />
-                      {truncateChannelLabel(ch)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+            <div className="cd-chart-h-260">
+              <CdChart option={srcMonthlyOption} height={260} />
             </div>
           )}
         </ChartCard>
@@ -602,9 +664,7 @@ function DiversityTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipel
             <div className="cd-chart-h-260">
               <LevelDonutChart
                 maxLegendItems={10}
-                data={(metrics.source_breakdown_offers ?? [])
-                  .filter((d) => d.count > 0)
-                  .map((d) => ({ name: d.label, value: d.count }))}
+                data={sourceDonutRows(metrics.source_breakdown_offers ?? [])}
               />
             </div>
           )}
@@ -614,15 +674,7 @@ function DiversityTab({ metrics, flowMode, setFlowMode }: { metrics: ClientPipel
             <Text className="text-xs text-tremor-content-subtle">Not enough source linkage for effectiveness.</Text>
           ) : (
             <div className="cd-chart-h-240">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={eff} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-                  <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10 }} />
-                  <YAxis type="category" dataKey="label" width={100} tick={{ fontSize: 10 }} />
-                  <Tooltip formatter={(v: number) => [`${v ?? "—"}%`, "OTJ"]} />
-                  <Bar dataKey="otj_pct" fill={CHART_COLORS.teal} radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <CdChart option={effOption} height={240} />
             </div>
           )}
         </ChartCard>

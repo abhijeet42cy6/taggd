@@ -1,15 +1,8 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Card, Grid, Metric, Text, Title } from "@tremor/react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
+import { buildMultiLineTimeseriesOption } from "@/components/charts/optionBuilders";
+import { CHART_COLORS } from "@/components/charts/chartTokens";
 import { AgeingBars, LevelDonutChart } from "@/components/platform/Charts";
 import { ClientMetricGrid, AccountMetricCard } from "@/components/tremor-dashboard/AccountMetricCard";
 import { TremorDashboardSection } from "@/components/tremor-dashboard/TremorDashboardSection";
@@ -125,7 +118,7 @@ export function PipelineKpiStrip({ metrics, variant = "card" }: PipelineBlocksPr
       title="Requisition pipeline"
       toolbar={
         <Text className="text-[11px] text-tremor-content-subtle">
-          Period {metrics.period_label} · compare {cmp.toUpperCase()}
+          Period {metrics.period_label}
         </Text>
       }
     >
@@ -215,22 +208,24 @@ export function PipelineActivityChart({ metrics }: PipelineBlocksProps) {
     Drops: r.offer_drops,
   }));
 
+  const option = useMemo(
+    () =>
+      buildMultiLineTimeseriesOption(
+        data.map((d) => d.month),
+        [
+          { name: "Opens", data: data.map((d) => d.Opens), color: CHART_COLORS[5] },
+          { name: "Offered", data: data.map((d) => d.Offered), color: CHART_COLORS[2] },
+          { name: "Joiners", data: data.map((d) => d.Joiners), color: CHART_COLORS[1] },
+          { name: "Drops", data: data.map((d) => d.Drops), color: CHART_COLORS[3] },
+        ],
+      ),
+    [data],
+  );
+
   return (
     <TremorDashboardSection tag="Trend" title="Pipeline activity (12 months)">
       <div className="h-52 w-full min-w-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" />
-            <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} width={32} />
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: 10 }} />
-            <Line type="monotone" dataKey="Opens" stroke="#3b82f6" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="Offered" stroke="#f59e0b" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="Joiners" stroke="#10b981" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="Drops" stroke="#f43f5e" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
+        <EChartsCanvas option={option} height={208} />
       </div>
     </TremorDashboardSection>
   );

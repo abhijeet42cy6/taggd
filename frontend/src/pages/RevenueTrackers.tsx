@@ -24,18 +24,24 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import "@/styles/new-contract-panel.css";
 import { cn } from "@/lib/utils";
+import { EChartsCanvas } from "@/components/charts/EChartsCanvas";
 import {
-  ResponsiveContainer,
-  ComposedChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  BarChart,
-} from "recharts";
+  buildStackedVerticalBarOption,
+  buildVerticalGroupedBarOption,
+} from "@/components/charts/optionBuilders";
+import {
+  ACTUAL_COLOR,
+  BAR,
+  FORECAST_COLOR,
+  GRID,
+  LINE,
+  PO_COLOR,
+  REQ_STATUS_COLORS,
+} from "@/components/charts/chartTokens";
+import { categoryXAxis, valueYAxis } from "@/components/charts/chartAxis";
+import { legendBottom } from "@/components/charts/chartLegend";
+import { mergeTooltipBase, seriesEmphasisCartesian } from "@/components/charts/chartUtils";
+import type { EChartsOption } from "echarts";
 import { Calendar, ChevronLeft, ChevronRight, RefreshCw, Plus, PencilLine, Trash2 } from "lucide-react";
 import { WeeklyPackNcpSheet } from "@/components/platform/WeeklyPackNcpSheet";
 
@@ -256,14 +262,6 @@ function statusDisplay(status: string | null | undefined): React.ReactNode {
   );
 }
 
-const CHART_TOOLTIP = {
-  backgroundColor: "var(--surface-raised)",
-  border: "1px solid color-mix(in srgb, var(--accent) 15%, transparent)",
-  borderRadius: 8,
-  fontSize: 11,
-  color: "var(--text)",
-  fontFamily: "'DM Mono',monospace",
-};
 
 type KpiProps = {
   icon: string;
@@ -672,15 +670,6 @@ export function RevenueTrackers() {
       }));
   }, [visibilityForCut, mmfChartProjectIds]);
 
-  const mmfChartYMax = useMemo(() => {
-    let m = 0;
-    for (const d of chartVisibilityMmF) {
-      m = Math.max(m, d.mmf, d.gap);
-    }
-    if (m <= 0) return 1;
-    return m * 1.12;
-  }, [chartVisibilityMmF]);
-
   const chartVisibilityPipeline = useMemo(() => {
     const selected = new Set(pipelineChartProjectIds);
     return visibilityForCut
@@ -691,15 +680,6 @@ export function RevenueTrackers() {
         ytj: r.yet_to_join || 0,
       }));
   }, [visibilityForCut, pipelineChartProjectIds]);
-
-  const pipelineChartYMax = useMemo(() => {
-    let m = 0;
-    for (const d of chartVisibilityPipeline) {
-      m = Math.max(m, d.joiners + d.ytj);
-    }
-    if (m <= 0) return 1;
-    return m * 1.12;
-  }, [chartVisibilityPipeline]);
 
   const forecastAmjContext = useMemo(() => {
     const fyStart = indianFyStartYearFromYmd(governanceWeekMon);
@@ -756,6 +736,68 @@ export function RevenueTrackers() {
     };
     return [pick(k1), pick(k2), pick(k3)];
   }, [forecastMonthly, forecastAmjContext.fyStart]);
+
+  const mmfChartOption = useMemo((): EChartsOption | null => {
+    if (!chartVisibilityMmF.length) return null;
+    return buildVerticalGroupedBarOption(
+      chartVisibilityMmF.map((d) => d.name),
+      [
+        { name: "MMF", data: chartVisibilityMmF.map((d) => d.mmf), color: ACTUAL_COLOR },
+        { name: "Gap", data: chartVisibilityMmF.map((d) => d.gap), color: FORECAST_COLOR },
+      ],
+    );
+  }, [chartVisibilityMmF]);
+
+  const pipelineChartOption = useMemo((): EChartsOption | null => {
+    if (!chartVisibilityPipeline.length) return null;
+    return buildStackedVerticalBarOption(
+      chartVisibilityPipeline.map((d) => d.name),
+      [
+        { name: "Joiners", data: chartVisibilityPipeline.map((d) => d.joiners), color: REQ_STATUS_COLORS.joined },
+        { name: "YTJ", data: chartVisibilityPipeline.map((d) => d.ytj), color: PO_COLOR, roundTop: true },
+      ],
+    );
+  }, [chartVisibilityPipeline]);
+
+  const forecastTrendOption = useMemo((): EChartsOption | null => {
+    if (!chartForecastTrend.length) return null;
+    return {
+      color: [ACTUAL_COLOR, PO_COLOR],
+      grid: GRID.vBar,
+      legend: legendBottom,
+      tooltip: mergeTooltipBase({
+        trigger: "axis",
+        formatter: (params) => {
+          const items = Array.isArray(params) ? params : [params];
+          const rows = items
+            .map((p) => `${p.marker} ${p.seriesName}: <b>${Number(p.value).toFixed(2)} L</b>`)
+            .join("<br/>");
+          return `<b>${items[0]?.name ?? ""}</b><br/>${rows}`;
+        },
+      }),
+      xAxis: categoryXAxis(chartForecastTrend.map((d) => d.month)),
+      yAxis: valueYAxis((v) => Number(v).toFixed(0)),
+      series: [
+        {
+          name: "Revenue forecast",
+          type: "bar",
+          data: chartForecastTrend.map((d) => d.forecast),
+          barMaxWidth: BAR.maxWidthV,
+          itemStyle: { borderRadius: BAR.radiusV, color: ACTUAL_COLOR, opacity: 0.65 },
+          ...seriesEmphasisCartesian(),
+        },
+        {
+          name: "MMF",
+          type: "line",
+          data: chartForecastTrend.map((d) => d.mmf),
+          smooth: LINE.smooth,
+          symbolSize: LINE.symbolSize,
+          lineStyle: { width: LINE.width, color: PO_COLOR },
+          ...seriesEmphasisCartesian(),
+        },
+      ],
+    };
+  }, [chartForecastTrend]);
 
   const projectLabel = useCallback(
     (id: number) => {
@@ -1293,48 +1335,7 @@ export function RevenueTrackers() {
               </div>
               <div style={{ width: "100%", height: 200 }}>
               {chartVisibilityMmF.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartVisibilityMmF} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="18%">
-                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
-                      <XAxis
-                        dataKey="name"
-                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
-                        axisLine={false}
-                        tickLine={false}
-                        interval={0}
-                        angle={chartVisibilityMmF.length <= 5 ? 0 : -20}
-                        textAnchor={chartVisibilityMmF.length <= 5 ? "middle" : "end"}
-                        height={chartVisibilityMmF.length <= 5 ? 36 : 48}
-                        tickFormatter={(s: string) => (s.length > 16 ? `${s.slice(0, 15)}…` : s)}
-                      />
-                      <YAxis
-                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={40}
-                        domain={[0, mmfChartYMax]}
-                        allowDecimals
-                      />
-                    <Tooltip
-                      contentStyle={CHART_TOOLTIP}
-                      formatter={(v: number | string, name: string) => [`${Number(v).toFixed(2)} L`, name === "mmf" ? "MMF" : "Gap"]}
-                    />
-                      <Bar
-                        dataKey="mmf"
-                        name="MMF"
-                        fill="color-mix(in srgb, var(--accent) 70%, transparent)"
-                        radius={[3, 3, 0, 0]}
-                        maxBarSize={56}
-                      />
-                      <Bar
-                        dataKey="gap"
-                        name="Gap"
-                        fill="color-mix(in srgb, var(--amber) 55%, transparent)"
-                        radius={[3, 3, 0, 0]}
-                        maxBarSize={56}
-                      />
-                  </BarChart>
-                </ResponsiveContainer>
+                <EChartsCanvas option={mmfChartOption} height={200} />
               ) : (
                   <div style={{ height: 200, display: "grid", placeItems: "center", color: "var(--text-subtle)", fontSize: 11, textAlign: "center", padding: "0 8px" }}>
                     {visibilityForCut.length ? "No projects match the current selection — pick at least one in the list above." : "No data"}
@@ -1375,38 +1376,7 @@ export function RevenueTrackers() {
               </div>
               <div style={{ width: "100%", height: 200 }}>
                 {chartVisibilityPipeline.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                      data={chartVisibilityPipeline}
-                      margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-                      barCategoryGap="18%"
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" vertical={false} />
-                      <XAxis
-                        dataKey="name"
-                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
-                        axisLine={false}
-                        tickLine={false}
-                        interval={0}
-                        angle={chartVisibilityPipeline.length <= 5 ? 0 : -20}
-                        textAnchor={chartVisibilityPipeline.length <= 5 ? "middle" : "end"}
-                        height={chartVisibilityPipeline.length <= 5 ? 36 : 48}
-                        tickFormatter={(s: string) => (s.length > 16 ? `${s.slice(0, 15)}…` : s)}
-                      />
-                      <YAxis
-                        tick={{ fill: "var(--text-subtle)", fontSize: 9 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={40}
-                        domain={[0, pipelineChartYMax]}
-                        allowDecimals
-                      />
-                    <Tooltip contentStyle={CHART_TOOLTIP} />
-                      <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
-                    <Bar dataKey="joiners" name="Joiners" stackId="a" fill="color-mix(in srgb, var(--green) 65%, transparent)" />
-                    <Bar dataKey="ytj" name="YTJ" stackId="a" fill="color-mix(in srgb, var(--accent2) 55%, transparent)" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <EChartsCanvas option={pipelineChartOption} height={200} />
               ) : (
                   <div
                     style={{
@@ -1589,17 +1559,7 @@ export function RevenueTrackers() {
           </div>
             </div>
             <div style={{ width: "100%", height: 240 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartForecastTrend} margin={{ top: 12, right: 12, left: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--accent) 12%, transparent)" />
-                  <XAxis dataKey="month" tick={{ fill: "var(--text-subtle)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "var(--text-subtle)", fontSize: 9 }} axisLine={false} tickLine={false} width={40} />
-                  <Tooltip contentStyle={CHART_TOOLTIP} />
-                  <Legend wrapperStyle={{ fontSize: 10, fontFamily: "var(--mono)" }} />
-                  <Bar dataKey="forecast" name="Revenue forecast" fill="color-mix(in srgb, var(--accent) 45%, transparent)" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="mmf" name="MMF" stroke="var(--accent2)" strokeWidth={2} dot={{ r: 3 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
+              <EChartsCanvas option={forecastTrendOption} height={240} />
             </div>
         </div>
 

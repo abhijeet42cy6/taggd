@@ -461,10 +461,77 @@ export type Project = {
   /** After corporate finance master ingest: appears on Taggd_Source_Joiner sheet (CEO KPI cohort). */
   has_taggd_joiner_sheet?: boolean | null;
   pos_id_column?: string;
+  /** Per-project upload validation lists and CTC unit preference. */
+  tracker_config?: TrackerConfig | null;
   /** Legacy: flat universal map. v2: `{ version, universal, record_fields }`. */
   column_mapping?: Record<string, unknown> | Record<string, string> | null;
   revenue_logic_code?: string | null;
   logic_explanation?: string | null;
+};
+
+export type TrackerConfig = {
+  valid_bands?: string[];
+  valid_departments?: string[];
+  valid_locations?: string[];
+  valid_source_joiner_types?: string[];
+  ctc_unit?: "lakhs" | "inr";
+  required_fields?: string[];
+  /** Client-native status label → canonical system status (Open, Offered, Joined, …). */
+  status_vocabulary?: Record<string, string>;
+  /** Universal field key → exact Excel header in the client workbook. */
+  column_aliases?: Record<string, string>;
+  fee_model?: {
+    type: "percentage" | "flat_fee";
+    closing_fee_pct?: number;
+    opening_fee_pct?: number;
+    flat_fee_per_joiner?: number;
+    ctc_unit?: "lakhs" | "inr";
+  };
+};
+
+export type UploadValidationReport = {
+  status: string;
+  project_id?: number | null;
+  project_will_be_created?: boolean;
+  rows_total?: number;
+  rows_valid?: number;
+  rows_skipped?: number;
+  records_upserted?: number;
+  records_processed?: number;
+  warnings?: Array<{
+    row: number;
+    field: string;
+    raw?: string;
+    resolved?: string;
+    issue?: string;
+    fix?: string;
+  }>;
+  errors?: Array<{ row: number; field: string; field_label?: string; issue?: string; raw?: string; fix?: string }>;
+  skipped_rows?: Array<{
+    row: number;
+    reason?: string;
+    issue?: string;
+    fix?: string;
+    req_id?: string | null;
+    position_title?: string | null;
+    candidate_name?: string | null;
+    kept_row?: number;
+    kept_req_id?: string | null;
+  }>;
+  valid_rows?: Array<{
+    row: number;
+    req_id?: string | null;
+    position_title?: string | null;
+    candidate_name?: string | null;
+    status?: string | null;
+    global_status?: string | null;
+  }>;
+  global_status_preview?: Record<string, number>;
+  pipeline_status_preview?: Record<string, number>;
+  field_coverage?: Record<string, number>;
+  position_id_column?: string | null;
+  mapping?: Record<string, unknown>;
+  sheets?: { tracker?: string; contract?: string };
 };
 
 /** `project_transitions` — client onboarding / transition tracker (GET /transitions, …). */
@@ -1239,7 +1306,10 @@ export type ClientDashboardConfig = {
   /** Default SLA reporting window (YYYY-MM) saved per client. */
   sla_reporting_month_from?: string | null;
   sla_reporting_month_to?: string | null;
-  /** Default pipeline period anchor (YYYY-MM or YYYY-Qn). */
+  /** Default pipeline period range (YYYY-MM) saved per client. */
+  pipeline_period_from?: string | null;
+  pipeline_period_to?: string | null;
+  /** @deprecated Use pipeline_period_from / pipeline_period_to */
   pipeline_period_anchor?: string | null;
   pipeline_granularity?: "month" | "quarter" | string;
   pipeline_compare?: "mom" | "qoq" | "none" | string;
@@ -1403,6 +1473,7 @@ export const queries = {
         | "tracker_sheet"
         | "contract_sheet"
         | "pos_id_column"
+        | "tracker_config"
       >
     >
   ) =>
@@ -1413,6 +1484,34 @@ export const queries = {
       if ("regional_head" in body) invalidateCache("wfm/");
       return r.data;
     }),
+
+  downloadProjectTrackerTemplate: (projectId: number, filename?: string) =>
+    api
+      .get(`/projects/${projectId}/template`, { responseType: "blob" })
+      .then((r) => {
+        const url = URL.createObjectURL(r.data);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename || `project_${projectId}_tracker_template.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }),
+
+  validateTrackerUpload: (file: File, projectId?: number) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (projectId != null) fd.append("project_id", String(projectId));
+    return api.post<UploadValidationReport>("/upload/validate", fd).then((r) => r.data);
+  },
+
+  commitTrackerUpload: (file: File, projectId?: number) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (projectId != null) fd.append("project_id", String(projectId));
+    return api.post<UploadValidationReport>("/upload/commit", fd).then((r) => r.data);
+  },
 
   contractsByProject: (projectId: number) =>
     api.get<ProjectContractRow[]>(`/contracts/by-project/${projectId}`).then((r) => r.data),
@@ -2287,6 +2386,8 @@ export const queries = {
     client_id?: number;
     reporting_month_from?: string;
     reporting_month_to?: string;
+    pipeline_period_from?: string;
+    pipeline_period_to?: string;
     pipeline_period?: string;
     pipeline_granularity?: string;
     pipeline_compare?: string;
@@ -2306,6 +2407,8 @@ export const queries = {
     if (params?.client_id != null) qs.set("client_id", String(params.client_id));
     if (params?.reporting_month_from?.trim()) qs.set("reporting_month_from", params.reporting_month_from.trim());
     if (params?.reporting_month_to?.trim()) qs.set("reporting_month_to", params.reporting_month_to.trim());
+    if (params?.pipeline_period_from?.trim()) qs.set("pipeline_period_from", params.pipeline_period_from.trim());
+    if (params?.pipeline_period_to?.trim()) qs.set("pipeline_period_to", params.pipeline_period_to.trim());
     if (params?.pipeline_period?.trim()) qs.set("pipeline_period", params.pipeline_period.trim());
     if (params?.pipeline_granularity?.trim()) qs.set("pipeline_granularity", params.pipeline_granularity.trim());
     if (params?.pipeline_compare?.trim()) qs.set("pipeline_compare", params.pipeline_compare.trim());

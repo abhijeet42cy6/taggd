@@ -213,6 +213,7 @@ class Project(Base, AuditMixin):
     revenue_logic_code = Column(Text) # The synthesized Python function
     logic_explanation = Column(Text)  # Natural language explanation of the revenue logic
     pos_id_column = Column(String) # The header used for deduplication (Req ID, etc.)
+    tracker_config = Column(JSON, nullable=True)  # Per-project upload validation + template overrides
     
     records = relationship("Record", back_populates="project")
     metrics = relationship("MetricDefinition", back_populates="project")
@@ -1474,11 +1475,33 @@ def _ensure_user_rbac_and_attribution_columns():
     addcol("users", "phone", "VARCHAR(64)")
     addcol("users", "avatar_filename", "VARCHAR(255)")
     addcol("projects", "project_head_user_id", "INTEGER")
+    addcol("projects", "tracker_config", "TEXT")
     addcol("records", "hiring_manager_user_id", "INTEGER")
     addcol("records", "assigned_recruiter_user_id", "INTEGER")
     addcol("records", "source_joiner_type", "VARCHAR(64)")
     addcol("candidates", "hiring_manager_user_id", "INTEGER")
     addcol("candidates", "assigned_recruiter_user_id", "INTEGER")
+
+
+def _ensure_projects_tracker_config_column():
+    """Add projects.tracker_config when missing (Postgres safety net if Alembic lagged)."""
+    from sqlalchemy import inspect, text
+
+    try:
+        insp = inspect(engine)
+        if "projects" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("projects")}
+        if "tracker_config" in cols:
+            return
+        ddl = "TEXT" if is_sqlite_url() else "JSONB"
+        with engine.connect() as conn:
+            conn.execute(text(f"ALTER TABLE projects ADD COLUMN tracker_config {ddl}"))
+            conn.commit()
+    except Exception as e:
+        import logging
+
+        logging.warning("projects.tracker_config migration: %s", e)
 
 
 def _ensure_finance_ledger_cash_metrics_audit_columns():
@@ -1883,6 +1906,7 @@ def _run_sqlite_legacy_migrations() -> None:
     _ensure_projects_project_head_column()
     _ensure_projects_taggd_joiner_sheet_column()
     _ensure_user_rbac_and_attribution_columns()
+    _ensure_projects_tracker_config_column()
     _ensure_finance_ledger_cash_metrics_audit_columns()
     _ensure_finance_efficiency_scorecard_columns()
     _ensure_project_enterprise_columns()
@@ -1913,6 +1937,7 @@ def init_db():
         # PostgreSQL: schema from Alembic (deploy / migrate script). create_all as safety net for dev.
         if os.getenv("DB_CREATE_ALL_ON_INIT", "").strip().lower() in ("1", "true", "yes"):
             Base.metadata.create_all(bind=engine)
+        _ensure_projects_tracker_config_column()
         _ensure_record_pipeline_date_columns()
         try:
             from backend.core.budget_forecast_ledger import migrate_legacy_project_budget_forecast_tables
@@ -1921,37 +1946,39 @@ def init_db():
         except Exception as e:
             logging.warning("legacy project_budgets/project_forecasts migration: %s", e)
 
-    db = SessionLocal()
-    try:
-        from .finance_dedupe import dedupe_finance_tables
+    skip_backfills = os.getenv("SKIP_INIT_BACKFILLS", "").strip().lower() in ("1", "true", "yes")
+    if not skip_backfills:
+        db = SessionLocal()
+        try:
+            from .finance_dedupe import dedupe_finance_tables
 
-        dedupe_finance_tables(db)
-        n = backfill_sla_period_starts(db)
-        if n:
+            dedupe_finance_tables(db)
+            n = backfill_sla_period_starts(db)
+            if n:
+                import logging
+
+                logging.info("backfilled sla period_start on %s rows", n)
+            n_c = backfill_client_project_links(db)
+            if n_c:
+                import logging
+
+                logging.info("backfilled client_id on %s projects", n_c)
+            if os.getenv("CANDIDATE_MASTER_BACKFILL_ON_INIT", "").strip().lower() in ("1", "true", "yes"):
+                from backend.core.candidate_master_mgmt import backfill_candidate_masters
+
+                tag = (os.getenv("CANDIDATE_MASTER_BACKFILL_TAG") or "initdb").strip()
+                stats = backfill_candidate_masters(db, migration_batch_tag=tag, dry_run=False)
+                import logging
+
+                logging.info("candidate master backfill on init: %s", stats)
+            db.commit()
+        except Exception as e:
+            db.rollback()
             import logging
 
-            logging.info("backfilled sla period_start on %s rows", n)
-        n_c = backfill_client_project_links(db)
-        if n_c:
-            import logging
-
-            logging.info("backfilled client_id on %s projects", n_c)
-        if os.getenv("CANDIDATE_MASTER_BACKFILL_ON_INIT", "").strip().lower() in ("1", "true", "yes"):
-            from backend.core.candidate_master_mgmt import backfill_candidate_masters
-
-            tag = (os.getenv("CANDIDATE_MASTER_BACKFILL_TAG") or "initdb").strip()
-            stats = backfill_candidate_masters(db, migration_batch_tag=tag, dry_run=False)
-            import logging
-
-            logging.info("candidate master backfill on init: %s", stats)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        import logging
-
-        logging.warning("finance dedupe / sla backfill on init: %s", e)
-    finally:
-        db.close()
+            logging.warning("finance dedupe / sla backfill on init: %s", e)
+        finally:
+            db.close()
     if is_sqlite_url():
         _ensure_finance_unique_indexes()
         _ensure_revenue_tracker_indexes()

@@ -63,7 +63,8 @@ class ColumnMapperAgent:
         Requirements:
         1. creation_date may be 'Req Date', 'Date Created', 'Opened Date', 'Requisition Created', etc.
         2. joining_date may be 'DOJ', 'Date of Joining', 'Actual DOJ', 'Joining Date'.
-        3. offered_ctc may be 'CTC Offered', 'Offered CTC', 'CTC (LPA)', etc.
+        3. offered_ctc may be 'CTC Offered', 'Offered CTC', 'CTC (LPA)', 'Offered CTC (Lakhs)', etc.
+        4. status may be 'Current Status', 'Pipeline Status', 'Final Status', 'Req Status', etc.
         4. SYNONYMS across sheets: prefer the header that best matches the majority of rows; note variance in reasoning.
         5. IDENTITY: If Requisition ID / Reference ID exists with empty candidate names (open reqs), still map candidate_name if present; the engine uses Req ID separately — map client_req_id to that ID column when it is the client requisition id.
         6. unmapped_columns: headers with no good target in EITHER mapping or record_field_mapping (they will be stored only in JSON extras on the row).

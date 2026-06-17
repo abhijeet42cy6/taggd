@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
+from .tracker_sheet_io import read_tracker_sheet_dataframe
+
 logger = logging.getLogger(__name__)
 
 BLANK_KEY = "__blank__"
@@ -157,9 +159,12 @@ def _rule_map_key(key: str) -> Optional[Dict[str, str]]:
 
     if any(t in key for t in _CLOSED_TERMS) or key in ("joined", "closed"):
         return {"global_status": "CLOSED", "canonical_status": "Joined", "source": "rule"}
-    if any(t in key for t in _HOLD_TERMS) or key in ("cancelled", "canceled", "on hold"):
-        gs = "ON HOLD"
-        return {"global_status": gs, "canonical_status": "Cancelled", "source": "rule"}
+    if key in ("cancelled", "canceled") or ("cancel" in key and "hold" not in key):
+        return {"global_status": "CANCELLED", "canonical_status": "Cancelled", "source": "rule"}
+    if key == "on hold" or key.startswith("on hold") or (key != "cancelled" and "hold" in key):
+        return {"global_status": "ON HOLD", "canonical_status": "On Hold", "source": "rule"}
+    if any(t in key for t in ("reject", "void", "withdraw", "drop", "inactive")):
+        return {"global_status": "CANCELLED", "canonical_status": "Cancelled", "source": "rule"}
     if "offer" in key:
         return {"global_status": "PIPELINE", "canonical_status": "Offered", "source": "rule"}
     if "interview" in key or "l1" in key or "l2" in key:
@@ -235,8 +240,6 @@ Rules:
         out: Dict[str, Dict[str, str]] = {}
         for k, entry in (result.mappings or {}).items():
             gs = (entry.global_status or "PIPELINE").strip().upper()
-            if gs == "CANCELLED":
-                gs = "ON HOLD"
             if gs not in GLOBAL_STATUS_VALUES:
                 gs = "PIPELINE"
             out[k] = {
@@ -293,7 +296,7 @@ def build_status_lexicon_from_workbook(
     all_headers: List[str] = []
     for s in sheet_names:
         try:
-            df = pd.read_excel(file_path, sheet_name=s, dtype=object)
+            df, _data_start = read_tracker_sheet_dataframe(file_path, s)
             frames.append(df)
             all_headers.extend([str(c) for c in df.columns])
         except Exception as e:
@@ -311,8 +314,9 @@ def build_status_lexicon_from_workbook(
     mapped_status_header = (universal_map.get("status") or "").strip()
     if mapped_status_header and mapped_status_header in combined.columns:
         detection["primary_column"] = mapped_status_header
-        if not detection.get("candidate_status_column"):
-            detection["candidate_status_column"] = mapped_status_header
+        detection["candidate_status_column"] = mapped_status_header
+        detection["mandate_status_column"] = mapped_status_header
+        detection["row_selection_rule"] = "primary_only"
 
     primary = detection.get("primary_column")
     if not primary or primary not in combined.columns:
@@ -376,6 +380,8 @@ def pick_status_column_for_row(
             return candidate_col
         if not has_candidate and mandate_col:
             return mandate_col
+    if rule == "primary_only" and primary:
+        return primary
     return primary
 
 
@@ -399,8 +405,8 @@ def resolve_row_status(
             "canonical_status": "Open",
         }
     gs = (entry.get("global_status") or "PIPELINE").strip().upper()
-    if gs == "CANCELLED":
-        gs = "ON HOLD"
+    if gs not in GLOBAL_STATUS_VALUES:
+        gs = "PIPELINE"
     canonical = (entry.get("canonical_status") or "Open").strip()
     return raw_display, canonical, gs
 
@@ -425,8 +431,6 @@ def merge_global_status_with_revenue(
     if closing > 0:
         return "CLOSED"
     gs = (lexicon_global or "PIPELINE").strip().upper()
-    if gs == "CANCELLED":
-        return "ON HOLD"
-    if gs in GLOBAL_STATUS_VALUES and gs != "UNPROCESSED":
-        return gs
-    return "PIPELINE"
+    if gs not in GLOBAL_STATUS_VALUES or gs == "UNPROCESSED":
+        return "PIPELINE"
+    return gs

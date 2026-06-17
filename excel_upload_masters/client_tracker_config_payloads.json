@@ -1,0 +1,112 @@
+{
+  "Bridgestone": {
+    "ctc_unit": "inr",
+    "required_fields": ["status", "position_title"],
+    "column_aliases": {
+      "req_id": "Position Title",
+      "status": "Status",
+      "offered_ctc": "CTC offered",
+      "position_title": "Position Title"
+    },
+    "status_vocabulary": {
+      "WIP": "Open",
+      "L1 Interview": "Interview",
+      "L2 Interview": "Interview",
+      "Offer to be released": "Offered",
+      "Documentation": "Offered",
+      "Selection": "Offered"
+    },
+    "fee_model": {
+      "type": "percentage",
+      "closing_fee_pct": 0.05,
+      "opening_fee_pct": 0.0,
+      "ctc_unit": "inr"
+    }
+  },
+  "Honeywell": {
+    "ctc_unit": "inr",
+    "required_fields": ["status", "position_title"],
+    "column_aliases": {
+      "req_id": "Job Requisition Number",
+      "position_title": "Job Requisition Title",
+      "status": "Requisition Status",
+      "candidate_name": "Candidate"
+    },
+    "status_vocabulary": {
+      "Open": "Open",
+      "ANS": "Interview",
+      "Offer": "Offered",
+      "Filled": "Joined",
+      "Formatting": "Open",
+      "Status update pending - Filled": "Joined"
+    },
+    "fee_model": {
+      "type": "percentage",
+      "closing_fee_pct": 0.0,
+      "opening_fee_pct": 0.0,
+      "ctc_unit": "inr"
+    }
+  },
+  "Hyundai": {
+    "ctc_unit": "inr",
+    "required_fields": ["status", "position_title"],
+    "column_aliases": {
+      "req_id": "TARA ID",
+      "status": "Current Stage",
+      "position_title": "Position Title",
+      "offered_ctc": "Current CTC"
+    },
+    "status_vocabulary": {
+      "Sourcing": "Open",
+      "Intake": "Open",
+      "1st Round": "Interview",
+      "Docket Making": "Interview",
+      "User Screening": "Interview",
+      "TBO": "Offered",
+      "WIP": "Open"
+    },
+    "fee_model": {
+      "type": "flat_fee",
+      "flat_fee_per_joiner": 19800
+    }
+  },
+  "SKF India": {
+    "ctc_unit": "inr",
+    "required_fields": ["status", "position_title"],
+    "column_aliases": {
+      "req_id": "Req No.",
+      "position_title": "Position Name",
+      "status": "Status",
+      "offered_ctc": "Offered Gross CTC",
+      "joining_date": "Candidate DOJ",
+      "candidate_name": "Active Candidate name"
+    },
+    "status_vocabulary": {
+      "WIP": "Open",
+      "WIP-P": "Open",
+      "Offered": "Offered",
+      "TBO": "Offered",
+      "YTJ": "Offered",
+      "Joined": "Joined",
+      "Hold/Cancelled": "On Hold"
+    },
+    "fee_model": {
+      "type": "percentage",
+      "closing_fee_pct": 0.0,
+      "opening_fee_pct": 0.0,
+      "ctc_unit": "inr"
+    }
+  },
+  "Maruti Suzuki": {
+    "ctc_unit": "lakhs",
+    "required_fields": ["joining_date", "offered_ctc", "status", "candidate_name"],
+    "column_aliases": {},
+    "status_vocabulary": {},
+    "fee_model": {
+      "type": "percentage",
+      "closing_fee_pct": 0.024,
+      "opening_fee_pct": 0.011,
+      "ctc_unit": "lakhs"
+    }
+  }
+}

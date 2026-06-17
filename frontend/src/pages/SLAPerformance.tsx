@@ -2516,7 +2516,7 @@ export function SLAPerformance() {
                         <div className="sla-empty">No SLA time-series yet.</div>
                       ) : (
                         <div style={{ height: 260 }}>
-                          <SlaTimeSeriesChart data={portfolioTrendAllMonths} accounts={["Portfolio"]} />
+                          <SlaTimeSeriesChart data={portfolioTrendAllMonths} accounts={["Portfolio"]} syncDataZoomGroup="slaPortfolioTrend" />
                         </div>
                       )}
                     </div>
@@ -2609,7 +2609,7 @@ export function SLAPerformance() {
             </div>
           ) : (
             <div style={{ height: 240 }}>
-              <SlaTimeSeriesChart data={portfolioMetPctForFilteredMonths} accounts={["Portfolio"]} />
+              <SlaTimeSeriesChart data={portfolioMetPctForFilteredMonths} accounts={["Portfolio"]} syncDataZoomGroup="slaPortfolioTrend" />
             </div>
           )}
         </div>
@@ -2688,7 +2688,7 @@ export function SLAPerformance() {
             </div>
           </div>
         ) : (
-          <SlaTimeSeriesChart data={trendChartData} accounts={chartAccountNames} />
+          <SlaTimeSeriesChart data={trendChartData} accounts={chartAccountNames} syncDataZoomGroup="slaAccountTrend" />
         )}
         </div>
       </div>

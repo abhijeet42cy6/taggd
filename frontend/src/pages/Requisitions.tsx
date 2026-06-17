@@ -32,6 +32,7 @@ import { LevelDonutChart, AgeingBars } from "@/components/platform/Charts";
 import { SkeletonTable, SkeletonKpiRow, Skeleton } from "@/components/platform/Skeleton";
 import { DataEmptyPanel } from "@/components/platform/DataEmptyPanel";
 import { REQUISITION_FUNNEL_UNPROCESSED_LABEL, requisitionFunnelVm } from "@/lib/view-models/requisitions";
+import { exportScopedRequisitions } from "@/lib/requisitions-export";
 import { displayRecordReqId, formatCurrency, formatOfferedCtc } from "@/lib/utils";
 
 const PER_PAGE = 50;
@@ -48,13 +49,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 function statusBreakdownToFunnel(sb: Record<string, number>) {
+  const pipeline = sb["PIPELINE"] ?? 0;
   return {
     [REQUISITION_FUNNEL_UNPROCESSED_LABEL]: sb["UNPROCESSED"] ?? 0,
     Open: sb["ACTIVE"] ?? 0,
-    Screening: sb["PIPELINE"] ?? 0,
-    Offer: 0,
+    Screening: 0,
+    Offer: pipeline,
     Joined: sb["CLOSED"] ?? 0,
-    Cancelled: sb["ON HOLD"] ?? 0,
+    "On Hold": sb["ON HOLD"] ?? 0,
+    Cancelled: sb["CANCELLED"] ?? 0,
   };
 }
 
@@ -95,6 +98,7 @@ const funnelBarColor: Record<string, React.ComponentProps<typeof ProgressBar>["c
   Screening: "teal",
   Offer: "amber",
   Joined: "emerald",
+  "On Hold": "yellow",
   Cancelled: "rose",
 };
 
@@ -126,6 +130,8 @@ export function Requisitions() {
   const [deptBreakdown, setDeptBreakdown] = useState<Array<{ name: string; value: number }>>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [addReqOpen, setAddReqOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     queries.projects().then(setProjects).catch(() => setProjects([]));
@@ -323,6 +329,17 @@ export function Requisitions() {
     queries.requisitionDepartments().then((d) => setDeptBreakdown(d.items ?? [])).catch(() => setDeptBreakdown([]));
   }, []);
 
+  const handleExport = useCallback(async () => {
+    setExportError(null);
+    setExporting(true);
+    try {
+      const result = await exportScopedRequisitions(debouncedSearch || undefined);
+      if (!result.ok) setExportError(result.message);
+    } finally {
+      setExporting(false);
+    }
+  }, [debouncedSearch]);
+
   return (
     <div className="req-dash-tremor space-y-3 pb-8 md:space-y-4">
       <div>
@@ -452,11 +469,30 @@ export function Requisitions() {
                 Add requisition
               </Button>
             ) : null}
-            <Button type="button" size="xs" variant="secondary" disabled title="Export is not wired for this view yet">
-              Export
+            <Button
+              type="button"
+              size="xs"
+              variant="secondary"
+              disabled={exporting || totalRecords === 0}
+              onClick={() => void handleExport()}
+              title={
+                totalRecords === 0
+                  ? "No records to export"
+                  : debouncedSearch
+                    ? `Export ${totalRecords.toLocaleString()} filtered requisitions as CSV`
+                    : `Export all ${totalRecords.toLocaleString()} requisitions as CSV`
+              }
+            >
+              {exporting ? "Exporting…" : "Export"}
             </Button>
           </div>
         </div>
+
+        {exportError ? (
+          <div className="border-b border-tremor-border px-4 py-2 dark:border-dark-tremor-border">
+            <Text className="text-xs text-rose-600 dark:text-rose-400">{exportError}</Text>
+          </div>
+        ) : null}
 
         <div className="flex w-full min-w-0 flex-col gap-2 border-b border-tremor-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 dark:border-dark-tremor-border">
           <div className="w-full min-w-0 sm:max-w-md sm:flex-1">
